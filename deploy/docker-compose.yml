@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data
+      - ../models:/app/models
+      - ../uploads:/app/uploads
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=sqlite:///./data/opennotebook.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - opennotebook
+
+  # Frontend will be added later
+  # frontend:
+  #   build:
+  #     context: ..
+  #     dockerfile: deploy/Dockerfile.web
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - api
+  #   environment:
+  #     - NEXT_PUBLIC_API_URL=http://api:8000
+  #   networks:
+  #     - opennotebook
+
+networks:
+  opennotebook:
+    driver: bridge
+
+volumes:
+  data:
+  models:
+  uploads:
