@@ -9,6 +9,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.db.database import init_db
 from app.routers import projects, ingest, query, export, health
+from app.api import cache
 from app.utils.logging import setup_logging
 
 # Setup logging
@@ -63,6 +64,7 @@ app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(ingest.router, prefix="/api", tags=["ingest"])
 app.include_router(query.router, prefix="/api", tags=["query"])
 app.include_router(export.router, prefix="/api", tags=["export"])
+app.include_router(cache.router)  # Cache management endpoints
 
 
 @app.get("/")

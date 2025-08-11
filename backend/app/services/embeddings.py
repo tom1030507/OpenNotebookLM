@@ -2,6 +2,7 @@
 import json
 import uuid
 import pickle
+import hashlib
 from typing import List, Dict, Any, Optional, Union
 import numpy as np
 import structlog
@@ -11,6 +12,12 @@ import torch
 
 from app.config import get_settings
 from app.db.models import Document, Chunk, Embedding
+
+# Try to import cache service
+try:
+    from app.services.cache import cache_service
+except ImportError:
+    cache_service = None
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -68,35 +75,100 @@ class EmbeddingService:
     def generate_embedding(
         self,
         text: Union[str, List[str]],
-        normalize: bool = True
+        normalize: bool = True,
+        use_cache: bool = True
     ) -> Union[np.ndarray, List[np.ndarray]]:
         """Generate embedding for text.
         
         Args:
             text: Text or list of texts to embed
             normalize: Whether to normalize the embeddings
+            use_cache: Whether to use cache for embeddings
             
         Returns:
             Embedding vector(s)
         """
         try:
             if isinstance(text, str):
+                # Check cache for single text
+                if use_cache and cache_service:
+                    # Generate cache key for the text
+                    cache_key = hashlib.sha256(f"{text}_{normalize}".encode()).hexdigest()
+                    cached_embedding = cache_service.get_cached_embedding(
+                        document_id="text_embed",
+                        chunk_id=cache_key
+                    )
+                    if cached_embedding is not None:
+                        logger.debug(f"Cache hit for text embedding")
+                        return cached_embedding
+                
                 # Single text
                 embedding = EmbeddingService._model.encode(
                     text,
                     normalize_embeddings=normalize,
                     show_progress_bar=False
                 )
+                
+                # Cache the result
+                if use_cache and cache_service:
+                    cache_service.cache_embedding(
+                        document_id="text_embed",
+                        chunk_id=cache_key,
+                        embedding=embedding,
+                        ttl=7200  # Cache for 2 hours
+                    )
+                
                 return embedding
             else:
-                # Batch processing
-                embeddings = EmbeddingService._model.encode(
-                    text,
-                    normalize_embeddings=normalize,
-                    show_progress_bar=len(text) > 100,
-                    batch_size=32
-                )
-                return embeddings
+                # Batch processing with cache check
+                embeddings = []
+                texts_to_process = []
+                indices_to_process = []
+                
+                if use_cache and cache_service:
+                    # Check cache for each text
+                    for i, t in enumerate(text):
+                        cache_key = hashlib.sha256(f"{t}_{normalize}".encode()).hexdigest()
+                        cached_embedding = cache_service.get_cached_embedding(
+                            document_id="text_embed",
+                            chunk_id=cache_key
+                        )
+                        if cached_embedding is not None:
+                            embeddings.append((i, cached_embedding))
+                        else:
+                            texts_to_process.append(t)
+                            indices_to_process.append(i)
+                else:
+                    texts_to_process = text
+                    indices_to_process = list(range(len(text)))
+                
+                # Process uncached texts
+                if texts_to_process:
+                    new_embeddings = EmbeddingService._model.encode(
+                        texts_to_process,
+                        normalize_embeddings=normalize,
+                        show_progress_bar=len(texts_to_process) > 100,
+                        batch_size=32
+                    )
+                    
+                    # Cache new embeddings
+                    if use_cache and cache_service:
+                        for t, emb in zip(texts_to_process, new_embeddings):
+                            cache_key = hashlib.sha256(f"{t}_{normalize}".encode()).hexdigest()
+                            cache_service.cache_embedding(
+                                document_id="text_embed",
+                                chunk_id=cache_key,
+                                embedding=emb,
+                                ttl=7200  # Cache for 2 hours
+                            )
+                    
+                    # Combine with cached embeddings
+                    for idx, emb in zip(indices_to_process, new_embeddings):
+                        embeddings.append((idx, emb))
+                
+                # Sort by original index and extract embeddings
+                embeddings.sort(key=lambda x: x[0])
+                return np.array([emb for _, emb in embeddings])
                 
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
@@ -182,8 +254,8 @@ class EmbeddingService:
                     Embedding.chunk_id.in_([c.id for c in chunks])
                 ).all()
             
-            # Generate embeddings in batch
-            embeddings = self.generate_embedding(texts_to_embed, normalize=True)
+            # Generate embeddings in batch (with caching)
+            embeddings = self.generate_embedding(texts_to_embed, normalize=True, use_cache=True)
             
             # Save to database
             embedding_records = []

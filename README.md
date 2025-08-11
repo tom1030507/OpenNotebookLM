@@ -92,6 +92,7 @@ Key environment variables:
 - `EMB_BACKEND`: `sqlitevec` or `faiss`
 - `OPENAI_API_KEY`: For cloud LLM (optional)
 - `MAX_FILE_SIZE_MB`: Maximum upload size
+- `REDIS_URL`: Redis connection URL (optional, for caching)
 
 See `deploy/.env.example` for all options.
 
@@ -133,6 +134,8 @@ MIT License - see LICENSE file for details
 - [x] Conversation management (with history tracking)
 - [x] Advanced reranking (vector + keyword + length)
 - [x] LLM integration (OpenAI API + local Ollama)
+- [x] High-performance caching layer (Redis + in-memory fallback)
+- [x] Cache integration for queries, embeddings, and chunks
 
 ### 🚧 In Progress
 - [x] Export functionality (Markdown, JSON, Text)

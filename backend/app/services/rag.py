@@ -1,5 +1,6 @@
 """RAG (Retrieval-Augmented Generation) query service."""
 import json
+import hashlib
 from typing import List, Dict, Any, Optional, Tuple
 import structlog
 from sqlalchemy.orm import Session
@@ -8,6 +9,12 @@ from app.config import get_settings
 from app.db.models import Document, Chunk, Project, ProjectDocument
 from app.services.embeddings import EmbeddingService
 from app.services.llm import LLMService
+
+# Try to import cache service
+try:
+    from app.services.cache import cache_service
+except ImportError:
+    cache_service = None
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -29,7 +36,8 @@ class RAGService:
         top_k: int = 5,
         temperature: float = 0.7,
         max_tokens: int = 512,
-        include_sources: bool = True
+        include_sources: bool = True,
+        use_cache: bool = True
     ) -> Dict[str, Any]:
         """Process a query using RAG.
         
@@ -41,11 +49,33 @@ class RAGService:
             temperature: LLM temperature
             max_tokens: Maximum tokens in response
             include_sources: Whether to include source citations
+            use_cache: Whether to use cache for query results
             
         Returns:
             Query response with answer and sources
         """
         try:
+            # Check cache first if enabled
+            if use_cache and cache_service:
+                # Create a cache key from query parameters
+                cache_key = self._generate_cache_key(
+                    query=query,
+                    project_id=project_id,
+                    top_k=top_k,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    include_sources=include_sources
+                )
+                
+                cached_result = cache_service.get_cached_query(
+                    project_id=project_id or "global",
+                    query=cache_key
+                )
+                
+                if cached_result:
+                    logger.info(f"Cache hit for query: {query[:50]}...")
+                    return cached_result
+            
             # 1. Retrieve relevant chunks
             logger.info(f"Processing RAG query: {query[:100]}...")
             
@@ -91,11 +121,66 @@ class RAGService:
                 model=answer["model"]
             )
             
+            # Cache the result if enabled
+            if use_cache and cache_service:
+                cache_key = self._generate_cache_key(
+                    query=query,
+                    project_id=project_id,
+                    top_k=top_k,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    include_sources=include_sources
+                )
+                
+                cache_service.cache_query_result(
+                    project_id=project_id or "global",
+                    query=cache_key,
+                    result=response,
+                    ttl=3600  # Cache for 1 hour
+                )
+                logger.info(f"Cached query result for: {query[:50]}...")
+            
             return response
             
         except Exception as e:
             logger.error(f"RAG query failed: {e}")
             raise
+    
+    def _generate_cache_key(
+        self,
+        query: str,
+        project_id: Optional[str] = None,
+        top_k: int = 5,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        include_sources: bool = True
+    ) -> str:
+        """Generate a unique cache key for the query.
+        
+        Args:
+            query: User query
+            project_id: Optional project ID
+            top_k: Number of chunks to retrieve
+            temperature: LLM temperature
+            max_tokens: Maximum tokens in response
+            include_sources: Whether to include source citations
+            
+        Returns:
+            Unique cache key
+        """
+        # Create a string representation of all parameters
+        key_parts = [
+            query,
+            str(project_id),
+            str(top_k),
+            str(temperature),
+            str(max_tokens),
+            str(include_sources)
+        ]
+        key_string = "|".join(key_parts)
+        
+        # Generate a hash for the key
+        return hashlib.sha256(key_string.encode()).hexdigest()
     
     def _retrieve_chunks(
         self,
@@ -345,7 +430,8 @@ Answer:"""
         project_id: Optional[str] = None,
         top_k: int = 5,
         temperature: float = 0.7,
-        max_tokens: int = 512
+        max_tokens: int = 512,
+        use_cache: bool = True
     ) -> Dict[str, Any]:
         """Process a query with conversation context.
         
@@ -380,7 +466,8 @@ Current question: {query}"""
             project_id=project_id,
             top_k=top_k,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            use_cache=use_cache
         )
         
         # Save to conversation
