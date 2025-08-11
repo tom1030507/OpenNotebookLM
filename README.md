@@ -118,12 +118,26 @@ MIT License - see LICENSE file for details
 
 ## Roadmap
 
-- [x] Basic RAG pipeline
-- [x] PDF text extraction
-- [ ] URL content extraction
-- [ ] YouTube transcript integration
-- [ ] Frontend UI
+### ✅ Completed
+- [x] Project Management API (CRUD operations)
+- [x] Document Ingestion System
+- [x] PDF text extraction (PyMuPDF, pdfminer)
+- [x] URL content extraction (BeautifulSoup, readability)
+- [x] YouTube transcript extraction (youtube-transcript-api)
+- [x] Asynchronous document processing
+- [x] Database models with SQLAlchemy
+
+### 🚧 In Progress
+- [ ] Document chunking system
+- [ ] Embedding generation with sentence-transformers
+- [ ] Vector search (FAISS/SQLite-vec)
+- [ ] RAG query pipeline
+- [ ] Frontend UI (React/Next.js)
+
+### 📋 Planned
 - [ ] Advanced reranking
+- [ ] Conversation management
+- [ ] Export functionality (Markdown, PDF)
 - [ ] Multi-user support
 - [ ] Cloud deployment guides
 
