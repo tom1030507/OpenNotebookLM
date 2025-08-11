@@ -6,16 +6,10 @@ import {
   Paperclip,
   Sparkles,
   Upload,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
-
-interface Message {
-  id: string;
-  content: string;
-  role: 'user' | 'assistant';
-  timestamp: Date;
-  citations?: Citation[];
-}
+import useStore from '@/store/useStore';
 
 interface Citation {
   source: string;
@@ -24,10 +18,18 @@ interface Citation {
 }
 
 export default function ChatArea() {
-  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const {
+    currentProject,
+    currentConversation,
+    messages,
+    documents,
+    sendQuery,
+    createConversation,
+  } = useStore();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -37,39 +39,35 @@ export default function ChatArea() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
-
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      content: inputValue,
-      role: 'user',
-      timestamp: new Date()
-    };
-
-    setMessages([...messages, newMessage]);
+  const handleSend = async () => {
+    if (!inputValue.trim() || !currentProject) return;
+    
+    const query = inputValue.trim();
     setInputValue('');
-    setIsLoading(true);
-
-    // Simulate AI response
-    setTimeout(() => {
-      const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        content: '這是一個模擬的 AI 回應。我會根據你上傳的文件來回答你的問題。',
-        role: 'assistant',
-        timestamp: new Date(),
-        citations: [
-          {
-            source: 'Document.pdf',
-            page: 12,
-            text: '這是引用的文字內容...'
-          }
-        ]
-      };
-      setMessages(prev => [...prev, aiResponse]);
-      setIsLoading(false);
-    }, 1500);
+    setIsStreaming(true);
+    
+    try {
+      await sendQuery(query, true); // Use streaming
+    } catch (error) {
+      console.error('Failed to send query:', error);
+    } finally {
+      setIsStreaming(false);
+    }
   };
+  
+  const handleNewConversation = async () => {
+    if (!currentProject) return;
+    
+    try {
+      await createConversation(currentProject.id, 'New Conversation');
+    } catch (error) {
+      console.error('Failed to create conversation:', error);
+    }
+  };
+  
+  // Check if ready to chat
+  const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'completed');
+  const canChat = currentProject && hasDocuments;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[var(--background)]">
@@ -168,7 +166,7 @@ export default function ChatArea() {
                 </div>
               ))}
               
-              {isLoading && (
+              {isStreaming && (
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
                     <Sparkles className="w-4 h-4 text-white" />
@@ -206,32 +204,37 @@ export default function ChatArea() {
                     handleSend();
                   }
                 }}
-                placeholder="上傳來源即可開始使用"
+                placeholder={canChat ? "Ask anything about your sources..." : "Add sources to start chatting"}
                 className="w-full px-4 py-3 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
                 rows={1}
-                disabled={messages.length === 0}
+                disabled={!canChat || isStreaming}
               />
               
-              {inputValue && (
+              {inputValue && hasDocuments && (
                 <span className="absolute right-3 bottom-2 text-xs text-[var(--muted-foreground)]">
-                  0 個來源
+                  {documents.filter(d => d.status === 'completed').length} sources
                 </span>
               )}
             </div>
             
             <button
               onClick={handleSend}
-              disabled={!inputValue.trim() || messages.length === 0}
-              className="p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base"
-            >
-              <Send className="w-5 h-5" />
+              disabled={!inputValue.trim() || !canChat || isStreaming}
+              className="p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base">
+              {isStreaming ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Send className="w-5 h-5" />
+              )}
             </button>
           </div>
           
           {/* New Chat Button */}
           {messages.length > 0 && (
-            <button className="mt-3 flex items-center gap-1 text-xs text-[var(--primary)] hover:underline">
-              <span>新增記事</span>
+            <button 
+              onClick={handleNewConversation}
+              className="mt-3 flex items-center gap-1 text-xs text-[var(--primary)] hover:underline">
+              <span>New Conversation</span>
               <ChevronRight className="w-3 h-3" />
             </button>
           )}
