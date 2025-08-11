@@ -74,3 +74,15 @@ coverage/
 export_test_summary_*.md
 test_output_*.md
 *.test.json
+
+# PyInstaller
+*.spec
+build/
+dist/
+*.manifest
+*.exe
+*.dll
+*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
