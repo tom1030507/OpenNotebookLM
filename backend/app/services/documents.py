@@ -13,6 +13,7 @@ from app.db.models import Document, Project, ProjectDocument
 from app.schemas import DocumentCreate
 from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
+from app.services.chunking import ChunkingService
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -31,6 +32,7 @@ class DocumentService:
         self.url_adapter = URLAdapter()
         self.youtube_adapter = None  # Initialize only if needed
         self.executor = ThreadPoolExecutor(max_workers=4)
+        self.chunking_service = ChunkingService()
     
     async def process_pdf_upload(
         self,
@@ -139,6 +141,13 @@ class DocumentService:
                     "processed_at": datetime.utcnow().isoformat(),
                 })
                 db.commit()
+                
+                # Create chunks
+                try:
+                    chunks = self.chunking_service.chunk_document(db, doc_id)
+                    logger.info(f"Created {len(chunks)} chunks for PDF document {doc_id}")
+                except Exception as e:
+                    logger.error(f"Failed to chunk PDF document: {e}")
                 
                 logger.info("PDF processing completed",
                            doc_id=doc_id,
@@ -255,6 +264,13 @@ class DocumentService:
                     "processed_at": datetime.utcnow().isoformat(),
                 })
                 db.commit()
+                
+                # Create chunks
+                try:
+                    chunks = self.chunking_service.chunk_document(db, doc_id)
+                    logger.info(f"Created {len(chunks)} chunks for URL document {doc_id}")
+                except Exception as e:
+                    logger.error(f"Failed to chunk URL document: {e}")
                 
                 logger.info("URL processing completed",
                            doc_id=doc_id,
@@ -378,6 +394,13 @@ class DocumentService:
                     "processed_at": datetime.utcnow().isoformat(),
                 })
                 db.commit()
+                
+                # Create chunks
+                try:
+                    chunks = self.chunking_service.chunk_document(db, doc_id)
+                    logger.info(f"Created {len(chunks)} chunks for YouTube document {doc_id}")
+                except Exception as e:
+                    logger.error(f"Failed to chunk YouTube document: {e}")
                 
                 logger.info("YouTube processing completed",
                            doc_id=doc_id,
