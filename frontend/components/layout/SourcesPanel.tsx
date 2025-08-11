@@ -10,15 +10,19 @@ import {
   File,
   X,
   Loader2,
-  FolderOpen
+  FolderOpen,
+  Eye
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
+import DocumentPreview from '../DocumentPreview';
 import useStore from '@/store/useStore';
+import { Document } from '@/lib/api';
 
 export default function SourcesPanel() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
+  const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   
   const {
     projects,
@@ -211,6 +215,7 @@ export default function SourcesPanel() {
               <div
                 key={doc.id}
                 className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
+                onClick={() => setPreviewDocument(doc)}
               >
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-[var(--muted)] rounded">
@@ -225,12 +230,28 @@ export default function SourcesPanel() {
                        doc.status === 'completed' ? 'Ready' : doc.status}
                     </p>
                   </div>
-                  <button 
-                    onClick={() => handleDeleteDocument(doc.id)}
-                    className="p-1 opacity-0 group-hover:opacity-100 hover:bg-[var(--muted)] rounded transition-all"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewDocument(doc);
+                      }}
+                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      title="Preview"
+                    >
+                      <Eye className="w-3 h-3" />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteDocument(doc.id);
+                      }}
+                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      title="Delete"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -254,6 +275,14 @@ export default function SourcesPanel() {
             <FileUpload onUpload={handleUpload} />
           </div>
         </div>
+      )}
+
+      {/* Document Preview Modal */}
+      {previewDocument && (
+        <DocumentPreview
+          document={previewDocument}
+          onClose={() => setPreviewDocument(null)}
+        />
       )}
     </aside>
   );

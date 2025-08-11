@@ -4,6 +4,7 @@ import TopNav from '@/components/layout/TopNav';
 import SourcesPanel from '@/components/layout/SourcesPanel';
 import ChatArea from '@/components/chat/ChatArea';
 import StudioPanel from '@/components/layout/StudioPanel';
+import ConversationList from '@/components/ConversationList';
 
 export default function Home() {
   return (
@@ -18,6 +19,9 @@ export default function Home() {
         
         {/* Center - Chat Area */}
         <ChatArea />
+        
+        {/* Conversation List */}
+        <ConversationList />
         
         {/* Right Sidebar - Studio */}
         <StudioPanel />
