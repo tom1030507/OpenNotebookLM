@@ -75,6 +75,10 @@ export_test_summary_*.md
 test_output_*.md
 *.test.json
 
+# Project specifications (confidential)
+SPECIFICATION.md
+SPEC*.md
+
 # PyInstaller
 *.spec
 build/

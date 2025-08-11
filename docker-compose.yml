@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: opennotebook-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - APP_PORT=8000
+      - DB_PATH=/app/data/opennotebook.db
+      - EMB_BACKEND=sqlitevec
+      - LLM_MODE=${LLM_MODE:-local}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ENABLE_YT_TRANSCRIPTION=true
+      - MAX_FILE_SIZE_MB=50
+      - CHUNK_SIZE=512
+      - CHUNK_OVERLAP=50
+      - RETRIEVAL_TOP_K=5
+      - RERANK_ENABLED=true
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./uploads:/app/uploads
+    networks:
+      - opennotebook
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: opennotebook-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000/api
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    networks:
+      - opennotebook
+    restart: unless-stopped
+
+  # Optional: Ollama for local LLM
+  ollama:
+    image: ollama/ollama:latest
+    container_name: opennotebook-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./models/ollama:/root/.ollama
+    networks:
+      - opennotebook
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles:
+      - with-ollama
+
+  # Optional: Redis for caching (future enhancement)
+  redis:
+    image: redis:7-alpine
+    container_name: opennotebook-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - opennotebook
+    restart: unless-stopped
+    profiles:
+      - with-cache
+
+networks:
+  opennotebook:
+    driver: bridge
+
+volumes:
+  data:
+  models:
+  uploads:
