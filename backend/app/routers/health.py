@@ -1,6 +1,7 @@
 """Health check router."""
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from datetime import datetime
 import os
 import psutil
@@ -17,7 +18,7 @@ async def health_check(db: Session = Depends(get_db)):
     """Health check endpoint."""
     try:
         # Check database connection
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db_status = "healthy"
     except Exception as e:
         db_status = f"unhealthy: {str(e)}"
@@ -50,7 +51,7 @@ async def readiness_check(db: Session = Depends(get_db)):
     """Readiness check endpoint."""
     try:
         # Check database
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         
         # Check required directories
         required_dirs = ["./data", "./models", "./uploads"]
