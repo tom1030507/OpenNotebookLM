@@ -45,7 +45,7 @@ class Document(Base):
     
     # Relationships
     chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
-    projects = relationship("ProjectDocument", back_populates="document")
+    projects = relationship("ProjectDocument", back_populates="document", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index("idx_documents_status", "status"),
@@ -57,8 +57,8 @@ class ProjectDocument(Base):
     """Many-to-many relationship between projects and documents."""
     __tablename__ = "project_documents"
     
-    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
-    document_id = Column(String, ForeignKey("documents.id"), primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
     added_at = Column(DateTime, default=func.now())
     
     # Relationships

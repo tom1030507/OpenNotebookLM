@@ -43,7 +43,8 @@ class YouTubeAdapter:
                 raise ValueError(f"Could not extract video ID from URL: {url}")
             
             # Get transcript
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            api = YouTubeTranscriptApi()
+            transcript_list = api.list(video_id)
             
             # Try to get transcript in preferred language
             transcript = None
@@ -143,7 +144,7 @@ class YouTubeAdapter:
         
         return None
     
-    def _process_transcript(self, transcript_data: List[Dict]) -> Dict[str, any]:
+    def _process_transcript(self, transcript_data) -> Dict[str, any]:
         """Process raw transcript data.
         
         Args:
@@ -157,9 +158,16 @@ class YouTubeAdapter:
         total_duration = 0
         
         for entry in transcript_data:
-            start = entry.get('start', 0)
-            duration = entry.get('duration', 0)
-            text = entry.get('text', '').strip()
+            # Handle FetchedTranscriptSnippet objects
+            if hasattr(entry, 'start'):
+                start = entry.start
+                duration = entry.duration
+                text = entry.text.strip()
+            else:
+                # Handle dict format (fallback)
+                start = entry.get('start', 0)
+                duration = entry.get('duration', 0)
+                text = entry.get('text', '').strip()
             
             # Clean text
             text = self._clean_transcript_text(text)

@@ -58,7 +58,7 @@ class DocumentService:
             
             # Save file to disk
             file_path = UPLOAD_DIR / f"{doc_id}_{filename}"
-            content = await file.read()
+            content = file.read()  # BinaryIO is not async
             
             with open(file_path, "wb") as f:
                 f.write(content)

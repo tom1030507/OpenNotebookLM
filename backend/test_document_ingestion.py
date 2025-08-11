@@ -8,8 +8,13 @@ BASE_URL = "http://localhost:8000/api"
 
 def create_sample_pdf():
     """Create a sample PDF file for testing."""
-    # For testing, we'll create a simple text file with .pdf extension
-    # In production, this would be a real PDF
+    # Check if we already have a real PDF test file
+    real_pdf = Path("real_test.pdf")
+    if real_pdf.exists():
+        return real_pdf
+    
+    # Otherwise create a simple text file as fallback
+    # (though this won't work properly with PDF processors)
     sample_file = Path("sample_test.pdf")
     sample_file.write_text("This is a sample PDF content for testing.")
     return sample_file
@@ -127,8 +132,8 @@ def test_document_ingestion():
                 print(f"✗ PDF upload failed: {response.status_code}")
                 print(response.text)
     finally:
-        # Clean up sample file
-        if sample_pdf.exists():
+        # Clean up sample file (but keep real_test.pdf for future tests)
+        if sample_pdf.exists() and sample_pdf.name != "real_test.pdf":
             sample_pdf.unlink()
     
     # List project documents
