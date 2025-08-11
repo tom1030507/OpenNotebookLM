@@ -126,20 +126,24 @@ MIT License - see LICENSE file for details
 - [x] YouTube transcript extraction (youtube-transcript-api)
 - [x] Asynchronous document processing
 - [x] Database models with SQLAlchemy
+- [x] Document chunking system (recursive text splitter)
+- [x] Embedding generation with sentence-transformers
+- [x] Vector similarity search
+- [x] RAG query pipeline with citations
+- [x] Conversation management (with history tracking)
+- [x] Advanced reranking (vector + keyword + length)
+- [x] LLM integration (OpenAI API + local Ollama)
 
 ### 🚧 In Progress
-- [ ] Document chunking system
-- [ ] Embedding generation with sentence-transformers
-- [ ] Vector search (FAISS/SQLite-vec)
-- [ ] RAG query pipeline
+- [x] Export functionality (Markdown, JSON, Text)
 - [ ] Frontend UI (React/Next.js)
 
 ### 📋 Planned
-- [ ] Advanced reranking
-- [ ] Conversation management
-- [ ] Export functionality (Markdown, PDF)
-- [ ] Multi-user support
-- [ ] Cloud deployment guides
+- [ ] Multi-user support with authentication
+- [ ] Cloud deployment guides (AWS, GCP, Azure)
+- [ ] Webhook integrations
+- [ ] Advanced analytics dashboard
+- [ ] Batch processing for large documents
 
 ## Support
 
