@@ -5,23 +5,21 @@ import type { NextRequest } from 'next/server';
 const publicRoutes = ['/login', '/register', '/api/auth'];
 
 export function middleware(request: NextRequest) {
+  // DISABLED - Allow all requests without authentication
+  return NextResponse.next();
+  
+  // Original authentication logic commented out for development
+  /*
   const { pathname } = request.nextUrl;
-
-  // For development, we'll be more permissive
-  // Only redirect to login if accessing root without any auth
   if (pathname === '/' || pathname === '') {
-    // Check for any form of authentication
     const cookieToken = request.cookies.get('auth_token');
     const authHeader = request.headers.get('authorization');
-    
-    // If no auth at all, redirect to login
     if (!cookieToken && !authHeader) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
   }
-
-  // Allow all other requests to proceed
   return NextResponse.next();
+  */
 }
 
 // Configure which routes to run middleware on

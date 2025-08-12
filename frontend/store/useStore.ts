@@ -59,9 +59,18 @@ interface AppState {
   reset: () => void;
 }
 
+// Initialize with demo data for development
+const demoProject = {
+  id: 'demo-project-1',
+  name: 'Demo Project',
+  description: 'Welcome to OpenNotebookLM! Upload documents to get started.',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+
 const initialState = {
-  projects: [],
-  currentProject: null,
+  projects: [demoProject],
+  currentProject: demoProject,
   loadingProjects: false,
   documents: [],
   loadingDocuments: false,
