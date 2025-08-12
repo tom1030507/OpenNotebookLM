@@ -7,9 +7,13 @@ import {
   Sparkles,
   Upload,
   ChevronRight,
-  Loader2
+  Loader2,
+  Bot,
+  User
 } from 'lucide-react';
 import useStore from '@/store/useStore';
+import MarkdownRenderer from '../MarkdownRenderer';
+import wsService from '@/lib/websocket';
 
 interface Citation {
   source: string;
@@ -38,6 +42,17 @@ export default function ChatArea() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    // Connect WebSocket when project is selected
+    if (currentProject) {
+      wsService.connect(currentProject.id);
+    }
+
+    return () => {
+      wsService.disconnect();
+    };
+  }, [currentProject]);
 
   const handleSend = async () => {
     if (!inputValue.trim() || !currentProject) return;
@@ -135,9 +150,13 @@ export default function ChatArea() {
                         : 'bg-[var(--card)] border border-[var(--border)]'
                     } rounded-lg px-4 py-3`}
                   >
-                    <p className="text-sm whitespace-pre-wrap">
-                      {message.content}
-                    </p>
+                    {message.role === 'assistant' ? (
+                      <MarkdownRenderer content={message.content} />
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap">
+                        {message.content}
+                      </p>
+                    )}
                     
                     {/* Citations */}
                     {message.citations && message.citations.length > 0 && (
