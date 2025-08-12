@@ -326,14 +326,8 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={async () => {
-                  setFormData({ ...formData, username: 'admin', password: 'admin123' });
-                  // Auto-submit after setting demo credentials
-                  setTimeout(() => {
-                    const form = document.querySelector('form');
-                    if (form) {
-                      form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                    }
-                  }, 100);
+                  // Directly call demo login
+                  await handleDemoLogin();
                 }}
                 className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
               >

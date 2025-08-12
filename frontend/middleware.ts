@@ -5,29 +5,22 @@ import type { NextRequest } from 'next/server';
 const publicRoutes = ['/login', '/register', '/api/auth'];
 
 export function middleware(request: NextRequest) {
-  const token = request.cookies.get('auth_token');
   const { pathname } = request.nextUrl;
 
-  // Check if the route is public
-  const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
-
-  // Development mode - skip auth check if NEXT_PUBLIC_SKIP_AUTH is set
-  if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_SKIP_AUTH === 'true') {
-    return NextResponse.next();
+  // For development, we'll be more permissive
+  // Only redirect to login if accessing root without any auth
+  if (pathname === '/' || pathname === '') {
+    // Check for any form of authentication
+    const cookieToken = request.cookies.get('auth_token');
+    const authHeader = request.headers.get('authorization');
+    
+    // If no auth at all, redirect to login
+    if (!cookieToken && !authHeader) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
   }
 
-  // If no token and trying to access protected route, redirect to login
-  if (!token && !isPublicRoute) {
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('from', pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // If token exists and trying to access login page, redirect to home
-  if (token && pathname === '/login') {
-    return NextResponse.redirect(new URL('/', request.url));
-  }
-
+  // Allow all other requests to proceed
   return NextResponse.next();
 }
 
