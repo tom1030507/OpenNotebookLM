@@ -4,14 +4,22 @@ import React, { useState } from 'react';
 import { 
   FileText, 
   Lock,
-  Settings,
+  Settings as SettingsIcon,
   Grid3X3,
   ChevronDown,
   Download,
   Moon,
-  Sun
+  Sun,
+  User,
+  FolderPlus,
+  LogOut,
+  Bell,
+  HelpCircle,
+  Search
 } from 'lucide-react';
 import ExportDialog from '../ExportDialog';
+import ProjectDialog from '../ProjectDialog';
+import Settings from '../Settings';
 import useStore from '@/store/useStore';
 
 interface TopNavProps {
@@ -20,6 +28,9 @@ interface TopNavProps {
 
 export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps) {
   const [showExport, setShowExport] = useState(false);
+  const [showProjectDialog, setShowProjectDialog] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   
   const { currentProject, currentConversation } = useStore();
@@ -51,6 +62,15 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
 
         {/* Right Actions */}
         <div className="flex items-center gap-2">
+          {/* New Project Button */}
+          <button
+            onClick={() => setShowProjectDialog(true)}
+            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+            title="New Project"
+          >
+            <FolderPlus className="w-4 h-4" />
+          </button>
+          
           {/* Export Button */}
           {(currentProject || currentConversation) && (
             <button
@@ -75,30 +95,64 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             )}
           </button>
           
-          {/* Share Button */}
-          <button className="flex items-center gap-2 px-3 py-1.5 text-sm text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
-            <Lock className="w-4 h-4" />
-            <span>Share</span>
+          {/* Notifications */}
+          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
+            <Bell className="w-4 h-4" />
+          </button>
+          
+          {/* Help */}
+          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
+            <HelpCircle className="w-4 h-4" />
           </button>
 
           {/* Settings */}
-          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
-            <Settings className="w-4 h-4" />
+          <button 
+            onClick={() => setShowSettings(true)}
+            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+          >
+            <SettingsIcon className="w-4 h-4" />
           </button>
 
-          {/* Grid Menu */}
-          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
-            <Grid3X3 className="w-4 h-4" />
-          </button>
-
-          {/* User Avatar */}
-          <button className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium">
-            U
-          </button>
+          {/* User Menu */}
+          <div className="relative">
+            <button 
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"
+            >
+              <User className="w-5 h-5" />
+            </button>
+            
+            {showUserMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50">
+                <div className="px-4 py-2 border-b border-[var(--border)]">
+                  <p className="text-sm font-medium">User</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">user@example.com</p>
+                </div>
+                <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base">
+                  Profile
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    setShowSettings(true);
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base"
+                >
+                  Settings
+                </button>
+                <div className="border-t border-[var(--border)] mt-2 pt-2">
+                  <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base flex items-center gap-2">
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
       
-      {/* Export Dialog */}
+      {/* Dialogs */}
       {showExport && (currentConversation || currentProject) && (
         <ExportDialog
           type={currentConversation ? 'conversation' : 'project'}
@@ -107,6 +161,17 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           onClose={() => setShowExport(false)}
         />
       )}
+      
+      <ProjectDialog 
+        isOpen={showProjectDialog} 
+        onClose={() => setShowProjectDialog(false)}
+        onSuccess={() => setShowProjectDialog(false)}
+      />
+      
+      <Settings 
+        isOpen={showSettings} 
+        onClose={() => setShowSettings(false)} 
+      />
     </>
   );
 }
