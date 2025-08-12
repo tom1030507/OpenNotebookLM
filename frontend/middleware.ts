@@ -11,6 +11,11 @@ export function middleware(request: NextRequest) {
   // Check if the route is public
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
 
+  // Development mode - skip auth check if NEXT_PUBLIC_SKIP_AUTH is set
+  if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_SKIP_AUTH === 'true') {
+    return NextResponse.next();
+  }
+
   // If no token and trying to access protected route, redirect to login
   if (!token && !isPublicRoute) {
     const loginUrl = new URL('/login', request.url);

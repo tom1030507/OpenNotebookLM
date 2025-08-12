@@ -30,10 +30,31 @@ export default function LoginPage() {
     confirmPassword: ''
   });
 
+  // Demo login function for development
+  const handleDemoLogin = async () => {
+    setLoading(true);
+    // Simulate login delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Store demo tokens
+    localStorage.setItem('access_token', 'demo_token_' + Date.now());
+    localStorage.setItem('auth_token', 'demo_token_' + Date.now());
+    localStorage.setItem('user', JSON.stringify({ username: 'demo', email: 'demo@example.com' }));
+    
+    // Redirect to main app
+    router.push('/');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    
+    // Demo mode - bypass authentication
+    if (formData.username === 'admin' && formData.password === 'admin123') {
+      await handleDemoLogin();
+      return;
+    }
 
     try {
       if (isLogin) {
@@ -291,13 +312,33 @@ export default function LoginPage() {
 
           {/* Demo Credentials */}
           {isLogin && (
-            <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-              <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                Demo credentials:
-              </p>
-              <p className="text-xs font-mono text-gray-700 dark:text-gray-300">
-                Username: admin | Password: admin123
-              </p>
+            <div className="mt-4 space-y-2">
+              <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
+                  Demo credentials:
+                </p>
+                <p className="text-xs font-mono text-gray-700 dark:text-gray-300">
+                  Username: admin | Password: admin123
+                </p>
+              </div>
+              
+              {/* Quick Demo Access Button */}
+              <button
+                type="button"
+                onClick={async () => {
+                  setFormData({ ...formData, username: 'admin', password: 'admin123' });
+                  // Auto-submit after setting demo credentials
+                  setTimeout(() => {
+                    const form = document.querySelector('form');
+                    if (form) {
+                      form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                    }
+                  }, 100);
+                }}
+                className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
+              >
+                Quick Demo Access →
+              </button>
             </div>
           )}
         </div>
