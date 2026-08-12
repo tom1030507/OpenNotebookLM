@@ -23,16 +23,13 @@ export function reduceWorkspacePanel(
 }
 
 export function getResponsiveLayoutContract(
-  isDesktop: boolean,
   activePanel: WorkspacePanelId | null,
 ) {
   return {
-    drawerControls: isDesktop ? [] : [...WORKSPACE_PANELS],
-    drawerPanelId: isDesktop ? null : activePanel,
+    drawerControls: [...WORKSPACE_PANELS],
+    drawerPanelId: activePanel,
     drawerWidth: 'min(20rem, 90vw)',
-    inlinePanelIds: isDesktop ? WORKSPACE_PANELS.map(({ id }) => id) : [],
-    contentOrder: isDesktop
-      ? (['sources', 'main', 'conversations', 'studio'] as WorkspaceContentId[])
-      : (['main'] as WorkspaceContentId[]),
+    inlinePanelIds: WORKSPACE_PANELS.map(({ id }) => id),
+    contentOrder: ['sources', 'main', 'conversations', 'studio'] as WorkspaceContentId[],
   };
 }

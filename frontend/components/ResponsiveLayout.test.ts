@@ -5,15 +5,15 @@ import {
 } from './responsiveLayoutContract';
 
 describe('ResponsiveLayout layout contract', () => {
-  it('provides three labeled drawer controls on compact screens and opens only the requested panel', () => {
-    const layout = getResponsiveLayoutContract(false, 'conversations');
+  it('provides three labeled drawer controls while CSS decides their visibility', () => {
+    const layout = getResponsiveLayoutContract('conversations');
 
     expect(layout.drawerControls).toEqual([
       { id: 'sources', label: '來源' },
       { id: 'conversations', label: '對話' },
       { id: 'studio', label: '工作室' },
     ]);
-    expect(layout.inlinePanelIds).toEqual([]);
+    expect(layout.inlinePanelIds).toEqual(['sources', 'conversations', 'studio']);
     expect(layout.drawerPanelId).toBe('conversations');
     expect(layout.drawerWidth).toBe('min(20rem, 90vw)');
   });
@@ -24,11 +24,15 @@ describe('ResponsiveLayout layout contract', () => {
     expect(reduceWorkspacePanel('studio', { type: 'toggle', panel: 'studio' })).toBeNull();
   });
 
-  it('keeps every supporting panel inline in the established desktop order', () => {
-    const layout = getResponsiveLayoutContract(true, 'studio');
+  it('keeps every supporting panel in the established desktop order', () => {
+    const layout = getResponsiveLayoutContract('studio');
 
-    expect(layout.drawerControls).toEqual([]);
-    expect(layout.drawerPanelId).toBeNull();
+    expect(layout.drawerControls).toEqual([
+      { id: 'sources', label: '來源' },
+      { id: 'conversations', label: '對話' },
+      { id: 'studio', label: '工作室' },
+    ]);
+    expect(layout.drawerPanelId).toBe('studio');
     expect(layout.inlinePanelIds).toEqual(['sources', 'conversations', 'studio']);
     expect(layout.contentOrder).toEqual(['sources', 'main', 'conversations', 'studio']);
   });

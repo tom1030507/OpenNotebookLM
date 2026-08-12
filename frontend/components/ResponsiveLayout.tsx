@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useReducer, useRef } from 'react';
-import { useMediaQuery } from '@/hooks/useMediaQuery';
 import {
   getResponsiveLayoutContract,
   reduceWorkspacePanel,
@@ -39,16 +38,18 @@ export default function ResponsiveLayout({
   conversationPanel,
   rightPanel,
 }: ResponsiveLayoutProps) {
-  const isCompact = useMediaQuery('(max-width: 1023px)');
   const [activePanel, dispatch] = useReducer(reduceWorkspacePanel, null);
   const drawerRef = useRef<HTMLElement>(null);
   const drawerFocusControllerRef = useRef<DrawerFocusController | null>(null);
-  const layout = getResponsiveLayoutContract(!isCompact, activePanel);
+  const layout = getResponsiveLayoutContract(activePanel);
   const panels: Record<WorkspacePanelId, React.ReactNode> = {
     sources: sidebar,
     conversations: conversationPanel,
     studio: rightPanel,
   };
+  const activePanelLabel = layout.drawerControls.find(
+    ({ id }) => id === layout.drawerPanelId,
+  )?.label;
 
   if (!drawerFocusControllerRef.current) {
     drawerFocusControllerRef.current = new DrawerFocusController(
@@ -62,12 +63,6 @@ export default function ResponsiveLayout({
     drawerFocusController.restoreTriggerFocus();
     dispatch({ type: 'dismiss' });
   }, [drawerFocusController]);
-
-  useEffect(() => {
-    if (!isCompact && activePanel) {
-      dismissDrawer();
-    }
-  }, [activePanel, dismissDrawer, isCompact]);
 
   useEffect(() => {
     if (!activePanel) return;
@@ -89,8 +84,11 @@ export default function ResponsiveLayout({
   }, [activePanel, drawerFocusController]);
 
   return (
-    <div className="relative flex min-w-0 flex-1 overflow-hidden">
-      <div className="absolute left-3 top-3 z-30 flex gap-2 lg:hidden">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <nav
+        aria-label="工作區面板"
+        className="flex shrink-0 gap-2 border-b border-[var(--border)] bg-[var(--card)] p-3 lg:hidden"
+      >
         {layout.drawerControls.map(({ id, label }) => {
           const isOpen = layout.drawerPanelId === id;
 
@@ -115,56 +113,66 @@ export default function ResponsiveLayout({
             </button>
           );
         })}
-      </div>
+      </nav>
 
-      {layout.drawerPanelId && (
-        <>
-          <button
-            type="button"
-            aria-label="關閉面板"
-            tabIndex={-1}
-            className="absolute inset-0 z-40 bg-black/50 lg:hidden"
-            onClick={dismissDrawer}
-          />
-          <aside
-            ref={drawerRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${layout.drawerControls.find(({ id }) => id === layout.drawerPanelId)?.label}面板`}
-            onKeyDown={(event) => drawerFocusController.trapTab(event)}
-            className={`absolute inset-y-0 z-50 overflow-hidden bg-[var(--background)] shadow-xl lg:hidden ${
-              layout.drawerPanelId === 'studio' ? 'right-0' : 'left-0'
-            }`}
-            style={{ width: layout.drawerWidth }}
-          >
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        {layout.drawerPanelId && (
+          <>
             <button
               type="button"
-              aria-label={`關閉${layout.drawerControls.find(({ id }) => id === layout.drawerPanelId)?.label}面板`}
+              aria-label="關閉面板"
+              tabIndex={-1}
+              className="absolute inset-0 z-40 bg-black/50 lg:hidden"
               onClick={dismissDrawer}
-              className="absolute right-3 top-3 z-10 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
+            />
+            <aside
+              ref={drawerRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${activePanelLabel}面板`}
+              onKeyDown={(event) => drawerFocusController.trapTab(event)}
+              className={`absolute inset-y-0 z-50 flex flex-col overflow-hidden bg-[var(--background)] shadow-xl lg:hidden ${
+                layout.drawerPanelId === 'studio' ? 'right-0' : 'left-0'
+              }`}
+              style={{ width: layout.drawerWidth }}
             >
-              關閉
-            </button>
-            {panels[layout.drawerPanelId]}
-          </aside>
-        </>
-      )}
+              <header className="flex shrink-0 items-center justify-end border-b border-[var(--border)] p-3">
+                <button
+                  type="button"
+                  aria-label={`關閉${activePanelLabel}面板`}
+                  onClick={dismissDrawer}
+                  className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
+                >
+                  關閉
+                </button>
+              </header>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {panels[layout.drawerPanelId]}
+              </div>
+            </aside>
+          </>
+        )}
 
-      {layout.contentOrder.map((item) => {
-        if (item === 'main') {
+        {layout.contentOrder.map((item) => {
+          if (item === 'main') {
+            return (
+              <main key={item} className="flex min-w-0 flex-1 flex-col">
+                {children}
+              </main>
+            );
+          }
+
           return (
-            <main key={item} className="flex min-w-0 flex-1 flex-col">
-              {children}
-            </main>
+            <div
+              key={item}
+              data-workspace-region={item}
+              className="hidden shrink-0 lg:block"
+            >
+              {panels[item]}
+            </div>
           );
-        }
-
-        return (
-          <div key={item} className="hidden shrink-0 lg:block">
-            {panels[item]}
-          </div>
-        );
-      })}
+        })}
+      </div>
     </div>
   );
 }
