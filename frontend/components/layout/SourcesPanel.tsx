@@ -7,7 +7,7 @@ import {
   FileText,
   Globe,
   Youtube,
-  File,
+  File as FileIcon,
   X,
   Loader2,
   FolderOpen,
@@ -107,7 +107,7 @@ export default function SourcesPanel() {
       case 'youtube':
         return <Youtube className="w-4 h-4" />;
       default:
-        return <File className="w-4 h-4" />;
+        return <FileIcon className="w-4 h-4" />;
     }
   };
 
@@ -205,7 +205,7 @@ export default function SourcesPanel() {
             </p>
             {!searchQuery && (
               <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                Click "Add Source" to upload PDFs, URLs, or YouTube videos
+                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
               </p>
             )}
           </div>

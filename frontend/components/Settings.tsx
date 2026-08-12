@@ -6,7 +6,6 @@ import {
   Settings as SettingsIcon,
   Moon,
   Sun,
-  Globe,
   Key,
   Database,
   Bell,

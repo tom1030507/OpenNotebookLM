@@ -7,19 +7,10 @@ import {
   Sparkles,
   Upload,
   ChevronRight,
-  Loader2,
-  Bot,
-  User
+  Loader2
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import MarkdownRenderer from '../MarkdownRenderer';
-import wsService from '@/lib/websocket';
-
-interface Citation {
-  source: string;
-  page?: number;
-  text: string;
-}
 
 export default function ChatArea() {
   const [inputValue, setInputValue] = useState('');
@@ -28,7 +19,6 @@ export default function ChatArea() {
   
   const {
     currentProject,
-    currentConversation,
     messages,
     documents,
     sendQuery,
@@ -42,17 +32,6 @@ export default function ChatArea() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  useEffect(() => {
-    // Connect WebSocket when project is selected
-    if (currentProject) {
-      wsService.connect(currentProject.id);
-    }
-
-    return () => {
-      wsService.disconnect();
-    };
-  }, [currentProject]);
 
   const handleSend = async () => {
     if (!inputValue.trim() || !currentProject) return;

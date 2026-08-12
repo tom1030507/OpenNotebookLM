@@ -13,7 +13,6 @@ import {
   Loader2,
   AlertCircle
 } from 'lucide-react';
-import api from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -131,8 +130,8 @@ export default function LoginPage() {
           setError('Registration successful! Please login.');
         }
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }

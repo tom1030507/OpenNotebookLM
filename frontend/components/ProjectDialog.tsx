@@ -49,8 +49,8 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
         setDescription('');
         setSuccess(false);
       }, 1500);
-    } catch (error: any) {
-      setError(error.message || 'Failed to create project');
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : 'Failed to create project');
     } finally {
       setIsCreating(false);
     }

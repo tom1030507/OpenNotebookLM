@@ -11,7 +11,10 @@ import {
   Check
 } from 'lucide-react';
 import api from '@/lib/api';
-import useStore from '@/store/useStore';
+import type {
+  ConversationExportFormat,
+  ProjectExportFormat,
+} from '@/lib/api';
 
 interface ExportDialogProps {
   type: 'conversation' | 'project';
@@ -21,9 +24,12 @@ interface ExportDialogProps {
 }
 
 export default function ExportDialog({ type, id, name, onClose }: ExportDialogProps) {
-  const [format, setFormat] = useState<'json' | 'markdown' | 'txt'>('markdown');
+  const [format, setFormat] = useState<ConversationExportFormat>('markdown');
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const formats: ConversationExportFormat[] = type === 'project'
+    ? ['markdown', 'json']
+    : ['markdown', 'json', 'txt'];
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -33,7 +39,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
       if (type === 'conversation') {
         blob = await api.exportConversation(id, format);
       } else {
-        blob = await api.exportProject(id, format);
+        blob = await api.exportProject(id, format as ProjectExportFormat);
       }
       
       // Create download link
@@ -96,7 +102,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
             </button>
           </div>
           <p className="text-sm text-[var(--muted-foreground)] mt-2">
-            Export "{name}" to your preferred format
+            Export &ldquo;{name}&rdquo; to your preferred format
           </p>
         </div>
 
@@ -105,7 +111,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
           <h3 className="text-sm font-medium mb-3">Choose export format:</h3>
           
           <div className="space-y-3">
-            {(['markdown', 'json', 'txt'] as const).map((fmt) => (
+            {formats.map((fmt) => (
               <label
                 key={fmt}
                 className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-all ${

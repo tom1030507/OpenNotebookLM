@@ -200,6 +200,26 @@ describe('API client', () => {
     }]);
   });
 
+  it('normalizes a missing conversation title for string-only UI controls', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{
+      id: 'conversation-1',
+      project_id: 'project-1',
+      title: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      message_count: 0,
+    }])));
+
+    await expect(api.getConversations('project-1')).resolves.toEqual([{
+      id: 'conversation-1',
+      project_id: 'project-1',
+      title: 'Untitled Conversation',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      message_count: 0,
+    }]);
+  });
+
   it('sends a non-streaming query to the active backend route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       answer: 'Answer',

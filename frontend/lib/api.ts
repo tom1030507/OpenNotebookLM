@@ -29,7 +29,7 @@ export interface Document {
 export interface Conversation {
   id: string;
   project_id: string;
-  title: string | null;
+  title: string;
   created_at: string;
   updated_at: string;
   message_count: number;
@@ -220,7 +220,7 @@ const normalizeConversation = (
 ): Conversation => ({
   id: conversation.id,
   project_id: conversation.project_id,
-  title: conversation.title,
+  title: conversation.title || 'Untitled Conversation',
   created_at: conversation.created_at,
   updated_at: conversation.updated_at,
   message_count: conversation.message_count ?? conversation.messages?.length ?? 0,

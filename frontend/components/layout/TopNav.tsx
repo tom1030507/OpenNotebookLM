@@ -3,9 +3,7 @@
 import React, { useState } from 'react';
 import { 
   FileText, 
-  Lock,
   Settings as SettingsIcon,
-  Grid3X3,
   ChevronDown,
   Download,
   Moon,
@@ -14,8 +12,7 @@ import {
   FolderPlus,
   LogOut,
   Bell,
-  HelpCircle,
-  Search
+  HelpCircle
 } from 'lucide-react';
 import ExportDialog from '../ExportDialog';
 import ProjectDialog from '../ProjectDialog';

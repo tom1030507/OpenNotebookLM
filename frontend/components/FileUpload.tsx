@@ -33,14 +33,6 @@ export default function FileUpload({
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    validateAndAddFiles(droppedFiles);
-  }, []);
-
   const validateAndAddFiles = (newFiles: File[]) => {
     const errors: string[] = [];
     const validFiles: File[] = [];
@@ -66,6 +58,14 @@ export default function FileUpload({
       const newFileList = multiple ? [...files, ...validFiles] : validFiles;
       setFiles(newFileList);
     }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    validateAndAddFiles(droppedFiles);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,7 +112,7 @@ export default function FileUpload({
         setUrlInput('');
       }
       setErrors([]);
-    } catch (error) {
+    } catch {
       setErrors(['Upload failed. Please try again.']);
     } finally {
       setIsUploading(false);
