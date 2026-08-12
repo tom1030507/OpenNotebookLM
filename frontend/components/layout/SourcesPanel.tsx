@@ -7,7 +7,7 @@ import {
   FileText,
   Globe,
   Youtube,
-  File,
+  File as FileIcon,
   X,
   Loader2,
   FolderOpen,
@@ -64,20 +64,16 @@ export default function SourcesPanel() {
     }
 
     for (const item of items) {
-      try {
-        if (item instanceof File) {
-          await uploadDocument(currentProject.id, item);
-        } else {
-          // Handle URL or YouTube link
-          const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
-          await createDocument(currentProject.id, {
-            name: item,
-            type: isYouTube ? 'youtube' : 'url',
-            url: item,
-          });
-        }
-      } catch (error) {
-        console.error('Failed to upload:', error);
+      if (item instanceof File) {
+        await uploadDocument(currentProject.id, item);
+      } else {
+        // Handle URL or YouTube link
+        const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
+        await createDocument(currentProject.id, {
+          name: item,
+          type: isYouTube ? 'youtube' : 'url',
+          url: item,
+        });
       }
     }
     
@@ -107,7 +103,7 @@ export default function SourcesPanel() {
       case 'youtube':
         return <Youtube className="w-4 h-4" />;
       default:
-        return <File className="w-4 h-4" />;
+        return <FileIcon className="w-4 h-4" />;
     }
   };
 
@@ -205,7 +201,7 @@ export default function SourcesPanel() {
             </p>
             {!searchQuery && (
               <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                Click "Add Source" to upload PDFs, URLs, or YouTube videos
+                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
               </p>
             )}
           </div>
@@ -227,7 +223,7 @@ export default function SourcesPanel() {
                     </h3>
                     <p className="text-xs text-[var(--muted-foreground)] mt-1">
                       {doc.status === 'processing' ? 'Processing...' : 
-                       doc.status === 'completed' ? 'Ready' : doc.status}
+                       doc.status === 'ready' ? 'Ready' : doc.status}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">

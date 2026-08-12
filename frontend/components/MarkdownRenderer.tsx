@@ -7,6 +7,9 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check } from 'lucide-react';
 
+
+const syntaxTheme = vscDarkPlus as { [selector: string]: React.CSSProperties };
+
 interface MarkdownRendererProps {
   content: string;
   className?: string;
@@ -22,17 +25,18 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
   };
 
   return (
-    <ReactMarkdown
-      className={`prose prose-sm dark:prose-invert max-w-none ${className}`}
-      remarkPlugins={[remarkGfm]}
-      components={{
+    <div className={`prose prose-sm dark:prose-invert max-w-none ${className}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
         // Custom code block rendering
-        code({ node, inline, className, children, ...props }) {
+        code({ node, className, children, ...props }) {
+          void node;
           const match = /language-(\w+)/.exec(className || '');
           const language = match ? match[1] : '';
           const codeString = String(children).replace(/\n$/, '');
 
-          if (!inline && language) {
+          if (language) {
             return (
               <div className="relative group">
                 <button
@@ -47,7 +51,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
                   )}
                 </button>
                 <SyntaxHighlighter
-                  style={vscDarkPlus}
+                  style={syntaxTheme}
                   language={language}
                   PreTag="div"
                   customStyle={{
@@ -55,7 +59,6 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
                     borderRadius: '0.375rem',
                     fontSize: '0.875rem',
                   }}
-                  {...props}
                 >
                   {codeString}
                 </SyntaxHighlighter>
@@ -158,9 +161,10 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             </h3>
           );
         },
-      }}
-    >
-      {content}
-    </ReactMarkdown>
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   );
 }

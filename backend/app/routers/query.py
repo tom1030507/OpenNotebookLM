@@ -2,7 +2,7 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 import structlog
 import uuid
 
@@ -10,6 +10,7 @@ from app.db.database import get_db
 from app.services.rag import RAGService
 from app.services.projects import ProjectService
 from app.db.models import Conversation, Project
+from app.schemas import ConversationResponse
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -37,6 +38,27 @@ class QueryResponse(BaseModel):
     model_used: Optional[str]
     usage: dict
     conversation_id: Optional[str] = None
+
+
+class ConversationCreateRequest(BaseModel):
+    """Request model for creating an empty conversation."""
+
+    title: Optional[str] = None
+
+
+class ConversationUpdateRequest(BaseModel):
+    """Request model for renaming a conversation."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, title: str) -> str:
+        """Normalize the title before enforcing the non-empty contract."""
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise ValueError("Title must not be blank")
+        return normalized_title
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -69,6 +91,15 @@ async def query(
             ).first()
             if not conversation:
                 raise HTTPException(status_code=404, detail="Conversation not found")
+
+            if (
+                request.project_id
+                and conversation.project_id != request.project_id
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Conversation does not belong to the selected project",
+                )
             
             # Use conversation's project if not specified
             if not request.project_id and conversation.project_id:
@@ -127,9 +158,44 @@ async def query(
             conversation_id=conversation_id
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/projects/{project_id}/conversations",
+    response_model=ConversationResponse,
+)
+async def create_conversation(
+    project_id: str,
+    request: ConversationCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """Create an empty conversation for a project."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    conversation = Conversation(
+        id=str(uuid.uuid4()),
+        project_id=project_id,
+        title=request.title,
+    )
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    return ConversationResponse(
+        id=conversation.id,
+        project_id=conversation.project_id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        message_count=0,
+    )
 
 
 @router.get("/conversations/{conversation_id}")
@@ -166,7 +232,40 @@ async def get_conversation(
     }
 
 
-@router.get("/projects/{project_id}/conversations")
+@router.put(
+    "/conversations/{conversation_id}",
+    response_model=ConversationResponse,
+)
+async def update_conversation(
+    conversation_id: str,
+    request: ConversationUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Rename an existing conversation."""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+    ).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    conversation.title = request.title
+    db.commit()
+    db.refresh(conversation)
+
+    return ConversationResponse(
+        id=conversation.id,
+        project_id=conversation.project_id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        message_count=len(conversation.messages),
+    )
+
+
+@router.get(
+    "/projects/{project_id}/conversations",
+    response_model=list[ConversationResponse],
+)
 async def list_project_conversations(
     project_id: str,
     db: Session = Depends(get_db)
@@ -183,6 +282,7 @@ async def list_project_conversations(
     return [
         {
             "id": conv.id,
+            "project_id": conv.project_id,
             "title": conv.title,
             "message_count": len(conv.messages),
             "created_at": conv.created_at,
