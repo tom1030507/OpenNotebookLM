@@ -28,11 +28,19 @@ export function initializeTheme(): Theme {
     // Theme selection still follows the system preference when storage is unavailable.
   }
 
-  const theme = storedTheme === 'light' || storedTheme === 'dark'
-    ? storedTheme
-    : window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light';
+  let theme: Theme = 'light';
+
+  if (storedTheme === 'light' || storedTheme === 'dark') {
+    theme = storedTheme;
+  } else {
+    try {
+      if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        theme = 'dark';
+      }
+    } catch {
+      // Light remains the safe default when system preference is unavailable.
+    }
+  }
 
   root.dataset.theme = theme;
   root.style.colorScheme = theme;

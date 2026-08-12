@@ -71,6 +71,27 @@ describe('initializeTheme', () => {
     expect(document.documentElement.style.colorScheme).toBe('dark');
   });
 
+  it('falls back to light when matchMedia is unavailable', () => {
+    vi.stubGlobal('matchMedia', undefined);
+
+    initializeTheme();
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.style.colorScheme).toBe('light');
+  });
+
+  it('uses a stored preference even when matchMedia throws', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+    vi.stubGlobal('matchMedia', () => {
+      throw new Error('unavailable');
+    });
+
+    initializeTheme();
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+  });
+
   it('runs the layout pre-paint script against the real document root', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
     setSystemPreference(false);
@@ -86,6 +107,23 @@ describe('initializeTheme', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(document.documentElement.style.colorScheme).toBe('dark');
   });
+
+  it('lets the layout pre-paint script fall back to light when matchMedia throws', () => {
+    vi.stubGlobal('matchMedia', () => {
+      throw new Error('unavailable');
+    });
+
+    const markup = renderToStaticMarkup(React.createElement(RootLayout, null, null));
+    const script = new DOMParser()
+      .parseFromString(markup, 'text/html')
+      .querySelector('script');
+
+    expect(script).not.toBeNull();
+    new Function(script?.textContent ?? '')();
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.style.colorScheme).toBe('light');
+  });
 });
 
 describe('TopNav theme toggle', () => {
@@ -97,6 +135,7 @@ describe('TopNav theme toggle', () => {
     render(React.createElement(TopNav));
 
     const toggle = screen.getByTitle('Toggle theme');
+    expect(screen.getByRole('button', { name: '切換主題' })).toBe(toggle);
     expect(toggle.querySelector('[data-theme-icon="sun"]')).not.toBeNull();
     expect(toggle.querySelector('[data-theme-icon="moon"]')).not.toBeNull();
 
