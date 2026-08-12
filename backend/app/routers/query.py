@@ -10,6 +10,7 @@ from app.db.database import get_db
 from app.services.rag import RAGService
 from app.services.projects import ProjectService
 from app.db.models import Conversation, Project
+from app.schemas import ConversationResponse
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -37,6 +38,12 @@ class QueryResponse(BaseModel):
     model_used: Optional[str]
     usage: dict
     conversation_id: Optional[str] = None
+
+
+class ConversationCreateRequest(BaseModel):
+    """Request model for creating an empty conversation."""
+
+    title: Optional[str] = None
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -132,6 +139,39 @@ async def query(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post(
+    "/projects/{project_id}/conversations",
+    response_model=ConversationResponse,
+)
+async def create_conversation(
+    project_id: str,
+    request: ConversationCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """Create an empty conversation for a project."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    conversation = Conversation(
+        id=str(uuid.uuid4()),
+        project_id=project_id,
+        title=request.title,
+    )
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    return ConversationResponse(
+        id=conversation.id,
+        project_id=conversation.project_id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        message_count=0,
+    )
+
+
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
@@ -166,7 +206,10 @@ async def get_conversation(
     }
 
 
-@router.get("/projects/{project_id}/conversations")
+@router.get(
+    "/projects/{project_id}/conversations",
+    response_model=list[ConversationResponse],
+)
 async def list_project_conversations(
     project_id: str,
     db: Session = Depends(get_db)
@@ -183,6 +226,7 @@ async def list_project_conversations(
     return [
         {
             "id": conv.id,
+            "project_id": conv.project_id,
             "title": conv.title,
             "message_count": len(conv.messages),
             "created_at": conv.created_at,

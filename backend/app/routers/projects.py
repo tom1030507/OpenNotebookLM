@@ -7,7 +7,7 @@ import structlog
 from app.db.database import get_db
 from app.schemas import (
     ProjectCreate, ProjectUpdate, ProjectResponse, 
-    ProjectListResponse, DocumentResponse, ConversationResponse
+    ProjectListResponse, DocumentResponse
 )
 from app.services.projects import ProjectService
 
@@ -163,33 +163,6 @@ async def get_project_documents(
             updated_at=doc.updated_at,
             chunk_count=getattr(doc, 'chunk_count', 0)
         ) for doc in documents
-    ]
-
-
-@router.get("/projects/{project_id}/conversations", response_model=list[ConversationResponse])
-async def get_project_conversations(
-    project_id: str,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db)
-):
-    """Get conversations associated with a project."""
-    # First check if project exists
-    project = ProjectService.get_project(db, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    conversations = ProjectService.get_project_conversations(db, project_id, skip=skip, limit=limit)
-    
-    return [
-        ConversationResponse(
-            id=conv.id,
-            project_id=conv.project_id,
-            title=conv.title,
-            created_at=conv.created_at,
-            updated_at=conv.updated_at,
-            message_count=getattr(conv, 'message_count', 0)
-        ) for conv in conversations
     ]
 
 
