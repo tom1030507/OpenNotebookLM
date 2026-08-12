@@ -43,8 +43,6 @@ const deferred = <T,>() => {
   return { promise, reject, resolve };
 };
 
-let consoleError: ReturnType<typeof vi.spyOn>;
-
 const renderProjectCreationTriggers = () => render(
   React.createElement(
     ProjectDialogProvider,
@@ -56,7 +54,7 @@ const renderProjectCreationTriggers = () => render(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
   apiMock.getProjects.mockResolvedValue([]);
   apiMock.getDocuments.mockResolvedValue([]);
   apiMock.getConversations.mockResolvedValue([]);
@@ -79,18 +77,27 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  consoleError.mockRestore();
+  vi.restoreAllMocks();
 });
 
 describe('ProjectDialogProvider', () => {
-  it('opens one named dialog from either project creation trigger', async () => {
+  it('opens one named dialog from each project creation trigger without browser prompts', async () => {
     const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, 'prompt');
+    const alertSpy = vi.spyOn(window, 'alert');
     renderProjectCreationTriggers();
 
     await user.click(screen.getByTitle('New Project'));
+    expect(screen.getAllByRole('dialog', { name: '建立新專案' })).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: '關閉建立專案對話框' }));
+    expect(screen.queryByRole('dialog', { name: '建立新專案' })).toBeNull();
+
     await user.click(screen.getByRole('button', { name: 'New Project' }));
 
     expect(screen.getAllByRole('dialog', { name: '建立新專案' })).toHaveLength(1);
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
   });
 
   it('selects the created project and closes the dialog as soon as creation succeeds', async () => {

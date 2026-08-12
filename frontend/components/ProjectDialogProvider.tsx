@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import ProjectDialog from './ProjectDialog';
 
 interface ProjectDialogContextValue {
@@ -12,14 +12,20 @@ const ProjectDialogContext = createContext<ProjectDialogContextValue | null>(nul
 export default function ProjectDialogProvider({ children }: React.PropsWithChildren) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const openProjectDialog = () => {
+  const openProjectDialog = useCallback(() => {
     setIsOpen(true);
-  };
+  }, []);
+
+  const closeProjectDialog = useCallback(() => {
+    setIsOpen(false);
+  }, []);
+
+  const contextValue = useMemo(() => ({ openProjectDialog }), [openProjectDialog]);
 
   return (
-    <ProjectDialogContext.Provider value={{ openProjectDialog }}>
+    <ProjectDialogContext.Provider value={contextValue}>
       {children}
-      <ProjectDialog isOpen={isOpen} onClose={() => setIsOpen(false)} />
+      <ProjectDialog isOpen={isOpen} onClose={closeProjectDialog} />
     </ProjectDialogContext.Provider>
   );
 }
