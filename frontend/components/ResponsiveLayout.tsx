@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useReducer, useRef } from 'react';
 import {
+  DESKTOP_MEDIA_QUERY,
   getResponsiveLayoutContract,
   reduceWorkspacePanel,
   type WorkspacePanelId,
@@ -39,7 +40,7 @@ export default function ResponsiveLayout({
   rightPanel,
 }: ResponsiveLayoutProps) {
   const [activePanel, dispatch] = useReducer(reduceWorkspacePanel, null);
-  const drawerRef = useRef<HTMLElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const drawerFocusControllerRef = useRef<DrawerFocusController | null>(null);
   const layout = getResponsiveLayoutContract(activePanel);
   const panels: Record<WorkspacePanelId, React.ReactNode> = {
@@ -83,6 +84,24 @@ export default function ResponsiveLayout({
     }
   }, [activePanel, drawerFocusController]);
 
+  // CSS owns the breakpoint, so a drawer opened while compact would otherwise
+  // survive into the desktop layout as hidden-but-focusable dialog markup.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+
+    const desktopQuery = window.matchMedia(DESKTOP_MEDIA_QUERY);
+    const clearDrawerOnDesktop = () => {
+      if (!desktopQuery.matches) return;
+
+      drawerFocusController.forgetTrigger();
+      dispatch({ type: 'dismiss' });
+    };
+
+    clearDrawerOnDesktop();
+    desktopQuery.addEventListener('change', clearDrawerOnDesktop);
+    return () => desktopQuery.removeEventListener('change', clearDrawerOnDesktop);
+  }, [drawerFocusController]);
+
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <nav
@@ -117,40 +136,13 @@ export default function ResponsiveLayout({
 
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {layout.drawerPanelId && (
-          <>
-            <button
-              type="button"
-              aria-label="關閉面板"
-              tabIndex={-1}
-              className="absolute inset-0 z-40 bg-black/50 lg:hidden"
-              onClick={dismissDrawer}
-            />
-            <aside
-              ref={drawerRef}
-              role="dialog"
-              aria-modal="true"
-              aria-label={`${activePanelLabel}面板`}
-              onKeyDown={(event) => drawerFocusController.trapTab(event)}
-              className={`absolute inset-y-0 z-50 flex flex-col overflow-hidden bg-[var(--background)] shadow-xl lg:hidden ${
-                layout.drawerPanelId === 'studio' ? 'right-0' : 'left-0'
-              }`}
-              style={{ width: layout.drawerWidth }}
-            >
-              <header className="flex shrink-0 items-center justify-end border-b border-[var(--border)] p-3">
-                <button
-                  type="button"
-                  aria-label={`關閉${activePanelLabel}面板`}
-                  onClick={dismissDrawer}
-                  className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
-                >
-                  關閉
-                </button>
-              </header>
-              <div className="min-h-0 flex-1 overflow-hidden">
-                {panels[layout.drawerPanelId]}
-              </div>
-            </aside>
-          </>
+          <button
+            type="button"
+            aria-label="關閉面板"
+            tabIndex={-1}
+            className="absolute inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={dismissDrawer}
+          />
         )}
 
         {layout.contentOrder.map((item) => {
@@ -162,13 +154,47 @@ export default function ResponsiveLayout({
             );
           }
 
+          // One mount per panel: the active one is promoted to a drawer in
+          // place, so opening it never duplicates its state or its fetches.
+          const isDrawer = layout.drawerPanelId === item;
+
           return (
             <div
               key={item}
+              ref={isDrawer ? drawerRef : undefined}
               data-workspace-region={item}
-              className="hidden shrink-0 lg:block"
+              role={isDrawer ? 'dialog' : undefined}
+              aria-modal={isDrawer ? 'true' : undefined}
+              aria-label={isDrawer ? `${activePanelLabel}面板` : undefined}
+              onKeyDown={isDrawer ? (event) => drawerFocusController.trapTab(event) : undefined}
+              style={
+                isDrawer
+                  ? ({ '--workspace-drawer-width': layout.drawerWidth } as React.CSSProperties)
+                  : undefined
+              }
+              className={
+                isDrawer
+                  ? `absolute inset-y-0 z-50 flex w-[var(--workspace-drawer-width)] flex-col overflow-hidden bg-[var(--background)] shadow-xl lg:static lg:z-auto lg:block lg:w-auto lg:shrink-0 lg:overflow-visible lg:shadow-none ${
+                      item === 'studio' ? 'right-0' : 'left-0'
+                    }`
+                  : 'hidden shrink-0 lg:block'
+              }
             >
-              {panels[item]}
+              {isDrawer && (
+                <header className="flex shrink-0 items-center justify-end border-b border-[var(--border)] p-3 lg:hidden">
+                  <button
+                    type="button"
+                    aria-label={`關閉${activePanelLabel}面板`}
+                    onClick={dismissDrawer}
+                    className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
+                  >
+                    關閉
+                  </button>
+                </header>
+              )}
+              <div className={isDrawer ? 'min-h-0 flex-1 overflow-hidden' : 'contents'}>
+                {panels[item]}
+              </div>
             </div>
           );
         })}

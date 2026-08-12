@@ -20,6 +20,10 @@ export class DrawerFocusController {
     this.trigger = trigger;
   }
 
+  forgetTrigger() {
+    this.trigger = null;
+  }
+
   focusInitialElement() {
     this.getFocusableElements()[0]?.focus();
   }

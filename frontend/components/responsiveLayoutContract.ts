@@ -1,3 +1,6 @@
+// Mirrors the Tailwind `lg` breakpoint that decides drawer versus inline layout.
+export const DESKTOP_MEDIA_QUERY = '(min-width: 64rem)';
+
 export const WORKSPACE_PANELS = [
   { id: 'sources', label: '來源' },
   { id: 'conversations', label: '對話' },

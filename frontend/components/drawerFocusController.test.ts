@@ -35,6 +35,24 @@ describe('DrawerFocusController', () => {
     expect(scope.activeElement).toBe(trigger);
   });
 
+  it('forgets a remembered trigger so a hidden control never receives focus back', () => {
+    const scope = new FocusScope([]);
+    const trigger = new FocusTarget(scope);
+    const elsewhere = new FocusTarget(scope);
+    const controller = new DrawerFocusController(
+      () => scope.focusableElements,
+      () => scope.activeElement,
+    );
+
+    controller.rememberTrigger(trigger);
+    controller.forgetTrigger();
+    scope.activeElement = elsewhere;
+
+    controller.restoreTriggerFocus();
+
+    expect(scope.activeElement).toBe(elsewhere);
+  });
+
   it('wraps Tab and Shift+Tab within the drawer focusable elements', () => {
     const scope = new FocusScope([]);
     const first = new FocusTarget(scope);
