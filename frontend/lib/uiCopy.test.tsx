@@ -153,6 +153,18 @@ describe('Traditional Chinese workspace copy', () => {
     expect(markup).not.toContain('PDF · Processing');
   });
 
+  it.each([
+    ['queued', '等待處理中', 'Queued'],
+    ['error', '處理失敗', 'Error'],
+  ] as const)('renders the %s document status in Traditional Chinese', (status, label, englishLabel) => {
+    const markup = renderToStaticMarkup(
+      <DocumentPreview document={document('pdf', status)} onClose={() => undefined} />,
+    );
+
+    expect(markup).toContain(`PDF · ${label}`);
+    expect(markup).not.toContain(`PDF · ${englishLabel}`);
+  });
+
   it('renders the code-copy control in Traditional Chinese', () => {
     const codeMarkup = renderToStaticMarkup(<MarkdownRenderer content={'```ts\nconst answer = 42;\n```'} />);
 

@@ -27,7 +27,7 @@ type SettingsTab = 'general' | 'api' | 'data' | 'notifications' | 'security' | '
 export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [language, setLanguage] = useState('zh-TW');
+  const [language, setLanguage] = useState('en');
   const [openaiKey, setOpenaiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
@@ -141,7 +141,11 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         onChange={(e) => setLanguage(e.target.value)}
                         className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                       >
-                        <option value="zh-TW">繁體中文</option>
+                        <option value="en">英文</option>
+                        <option value="zh">中文</option>
+                        <option value="ja">日文</option>
+                        <option value="es">西班牙文</option>
+                        <option value="fr">法文</option>
                       </select>
                     </div>
                   </div>
