@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { 
   X, 
   FolderPlus, 
@@ -24,6 +24,8 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   
   const { createProject, selectProject } = useStore();
 
@@ -31,6 +33,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
     isOpen,
     onClose,
     dismissible: !isCreating && !success,
+    dialogRef,
     initialFocusRef: nameInputRef,
   });
 
@@ -70,9 +73,10 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="project-dialog-title"
+        aria-labelledby={titleId}
         className="bg-[var(--background)] rounded-lg w-full max-w-md"
       >
         {/* Header */}
@@ -81,7 +85,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
             <div className="w-10 h-10 rounded-lg bg-[var(--primary)] bg-opacity-10 flex items-center justify-center">
               <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
             </div>
-            <h2 id="project-dialog-title" className="text-lg font-semibold">Create New Project</h2>
+            <h2 id={titleId} className="text-lg font-semibold">Create New Project</h2>
           </div>
           <button
             onClick={onClose}

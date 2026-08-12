@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { 
   X, 
   Download, 
@@ -25,10 +25,13 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useDialogFocus({
     isOpen: true,
     onClose,
+    dialogRef,
     initialFocusRef: closeButtonRef,
   });
 
@@ -202,9 +205,10 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
       }`}
     >
       <div 
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="document-preview-dialog-title"
+        aria-labelledby={titleId}
         className={`bg-[var(--background)] rounded-lg flex flex-col ${
           isFullscreen ? 'w-full h-full' : 'w-full max-w-5xl h-[90vh]'
         }`}
@@ -216,7 +220,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               {getIcon()}
             </div>
             <div>
-              <h3 id="document-preview-dialog-title" className="font-medium">{document.name}</h3>
+              <h3 id={titleId} className="font-medium">{document.name}</h3>
               <p className="text-xs text-[var(--muted-foreground)]">
                 {document.type.toUpperCase()} • {document.status}
               </p>

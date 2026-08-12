@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { 
   Plus, 
   Search,
@@ -26,13 +26,19 @@ export default function SourcesPanel() {
   const [creatingProject, setCreatingProject] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   const uploadCloseRef = useRef<HTMLButtonElement>(null);
+  const uploadDialogRef = useRef<HTMLDivElement>(null);
+  const uploadTitleId = useId();
 
-  const closeUpload = useCallback(() => setShowUpload(false), []);
+  const closeUpload = useCallback(() => {
+    setIsUploading(false);
+    setShowUpload(false);
+  }, []);
 
   useDialogFocus({
     isOpen: showUpload,
     onClose: closeUpload,
     dismissible: !isUploading,
+    dialogRef: uploadDialogRef,
     initialFocusRef: uploadCloseRef,
   });
   
@@ -89,7 +95,7 @@ export default function SourcesPanel() {
       }
     }
     
-    setShowUpload(false);
+    closeUpload();
   };
 
   const handleDeleteDocument = async (docId: string) => {
@@ -273,13 +279,14 @@ export default function SourcesPanel() {
       {showUpload && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div
+            ref={uploadDialogRef}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="sources-upload-dialog-title"
+            aria-labelledby={uploadTitleId}
             className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
           >
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
-              <h3 id="sources-upload-dialog-title" className="text-lg font-semibold">Add Sources</h3>
+              <h3 id={uploadTitleId} className="text-lg font-semibold">Add Sources</h3>
               <button
                 ref={uploadCloseRef}
                 onClick={closeUpload}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { 
   Download, 
   X, 
@@ -29,6 +29,8 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const initialFocusRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   const formats: ConversationExportFormat[] = type === 'project'
     ? ['markdown', 'json']
     : ['markdown', 'json', 'txt'];
@@ -37,6 +39,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
     isOpen: true,
     onClose,
     dismissible: !isExporting,
+    dialogRef,
     initialFocusRef,
   });
 
@@ -99,15 +102,16 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="export-dialog-title"
+        aria-labelledby={titleId}
         className="bg-[var(--background)] rounded-lg w-full max-w-md"
       >
         {/* Header */}
         <div className="p-6 border-b border-[var(--border)]">
           <div className="flex items-center justify-between">
-            <h2 id="export-dialog-title" className="text-lg font-semibold">Export {type === 'conversation' ? 'Conversation' : 'Project'}</h2>
+            <h2 id={titleId} className="text-lg font-semibold">Export {type === 'conversation' ? 'Conversation' : 'Project'}</h2>
             <button
               onClick={onClose}
               type="button"

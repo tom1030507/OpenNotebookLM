@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { 
   X, 
   Settings as SettingsIcon,
@@ -34,11 +34,14 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [notifications, setNotifications] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useDialogFocus({
     isOpen,
     onClose,
     dismissible: !isSaving,
+    dialogRef,
     initialFocusRef: closeButtonRef,
   });
 
@@ -64,15 +67,16 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="settings-dialog-title"
+        aria-labelledby={titleId}
         className="bg-[var(--background)] rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"
       >
         {/* Sidebar */}
         <div className="w-64 border-r border-[var(--border)] bg-[var(--sidebar-bg)]">
           <div className="p-6 border-b border-[var(--border)]">
-            <h2 id="settings-dialog-title" className="text-lg font-semibold">Settings</h2>
+            <h2 id={titleId} className="text-lg font-semibold">Settings</h2>
           </div>
           <nav className="p-4">
             {tabs.map((tab) => {
