@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   X, 
   Settings as SettingsIcon,
@@ -15,6 +15,7 @@ import {
   Save,
   Loader2
 } from 'lucide-react';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -32,6 +33,14 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [autoSave, setAutoSave] = useState(true);
   const [notifications, setNotifications] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useDialogFocus({
+    isOpen,
+    onClose,
+    dismissible: !isSaving,
+    initialFocusRef: closeButtonRef,
+  });
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -54,11 +63,16 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[var(--background)] rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+        className="bg-[var(--background)] rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"
+      >
         {/* Sidebar */}
         <div className="w-64 border-r border-[var(--border)] bg-[var(--sidebar-bg)]">
           <div className="p-6 border-b border-[var(--border)]">
-            <h2 className="text-lg font-semibold">Settings</h2>
+            <h2 id="settings-dialog-title" className="text-lg font-semibold">Settings</h2>
           </div>
           <nav className="p-4">
             {tabs.map((tab) => {
@@ -92,7 +106,12 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               {tabs.find(t => t.id === activeTab)?.label}
             </h3>
             <button
+              ref={closeButtonRef}
               onClick={onClose}
+              type="button"
+              aria-label={'\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846'}
+              title={'\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846'}
+              disabled={isSaving}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
             >
               <X className="w-5 h-5" />

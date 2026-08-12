@@ -63,7 +63,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <button
             onClick={() => setShowProjectDialog(true)}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            title="New Project"
+            aria-label={'\u65b0\u589e\u5c08\u6848'}
+            title={'\u65b0\u589e\u5c08\u6848'}
           >
             <FolderPlus className="w-4 h-4" />
           </button>
@@ -73,7 +74,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             <button
               onClick={() => setShowExport(true)}
               className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-              title="Export"
+              aria-label={'\u532f\u51fa\u5167\u5bb9'}
+              title={'\u532f\u51fa\u5167\u5bb9'}
             >
               <Download className="w-4 h-4" />
             </button>
@@ -83,7 +85,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <button 
             onClick={() => setIsDarkMode(!isDarkMode)}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            aria-label="Toggle theme"
+            aria-label={'\u5207\u63db\u4e3b\u984c'}
+            title={'\u5207\u63db\u4e3b\u984c'}
           >
             {isDarkMode ? (
               <Sun className="w-4 h-4" />
@@ -93,18 +96,28 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           </button>
           
           {/* Notifications */}
-          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
+          <button
+            aria-label={'\u901a\u77e5'}
+            title={'\u901a\u77e5'}
+            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+          >
             <Bell className="w-4 h-4" />
           </button>
           
           {/* Help */}
-          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
+          <button
+            aria-label={'\u8aaa\u660e'}
+            title={'\u8aaa\u660e'}
+            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+          >
             <HelpCircle className="w-4 h-4" />
           </button>
 
           {/* Settings */}
           <button 
             onClick={() => setShowSettings(true)}
+            aria-label={'\u8a2d\u5b9a'}
+            title={'\u8a2d\u5b9a'}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
           >
             <SettingsIcon className="w-4 h-4" />
@@ -114,6 +127,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <div className="relative">
             <button 
               onClick={() => setShowUserMenu(!showUserMenu)}
+              aria-label={'\u4f7f\u7528\u8005\u9078\u55ae'}
+              title={'\u4f7f\u7528\u8005\u9078\u55ae'}
               className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"
             >
               <User className="w-5 h-5" />

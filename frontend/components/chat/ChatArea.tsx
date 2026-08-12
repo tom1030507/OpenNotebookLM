@@ -188,7 +188,11 @@ export default function ChatArea() {
       <div className="border-t border-[var(--border)] bg-[var(--card)] p-4">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-end gap-3">
-            <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base">
+            <button
+              aria-label={'\u9644\u52a0\u6a94\u6848'}
+              title={'\u9644\u52a0\u6a94\u6848'}
+              className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base"
+            >
               <Paperclip className="w-5 h-5" />
             </button>
             
@@ -217,6 +221,8 @@ export default function ChatArea() {
             
             <button
               onClick={handleSend}
+              aria-label={'\u50b3\u9001\u8a0a\u606f'}
+              title={'\u50b3\u9001\u8a0a\u606f'}
               disabled={!inputValue.trim() || !canChat || isStreaming}
               className="p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base">
               {isStreaming ? (

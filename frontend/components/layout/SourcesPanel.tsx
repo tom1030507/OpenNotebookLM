@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { 
   Plus, 
   Search,
@@ -17,12 +17,24 @@ import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import useStore from '@/store/useStore';
 import { Document } from '@/lib/api';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 export default function SourcesPanel() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUpload, setShowUpload] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
+  const uploadCloseRef = useRef<HTMLButtonElement>(null);
+
+  const closeUpload = useCallback(() => setShowUpload(false), []);
+
+  useDialogFocus({
+    isOpen: showUpload,
+    onClose: closeUpload,
+    dismissible: !isUploading,
+    initialFocusRef: uploadCloseRef,
+  });
   
   const {
     projects,
@@ -136,7 +148,7 @@ export default function SourcesPanel() {
             ))}
           </select>
           
-          <button
+            <button
             onClick={handleCreateProject}
             disabled={creatingProject}
             className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
@@ -233,7 +245,8 @@ export default function SourcesPanel() {
                         setPreviewDocument(doc);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Preview"
+                      aria-label={'\u9810\u89bd\u6587\u4ef6'}
+                      title={'\u9810\u89bd\u6587\u4ef6'}
                     >
                       <Eye className="w-3 h-3" />
                     </button>
@@ -243,7 +256,8 @@ export default function SourcesPanel() {
                         handleDeleteDocument(doc.id);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Delete"
+                      aria-label={'\u522a\u9664\u6587\u4ef6'}
+                      title={'\u522a\u9664\u6587\u4ef6'}
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -258,17 +272,27 @@ export default function SourcesPanel() {
       {/* Upload Modal */}
       {showUpload && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sources-upload-dialog-title"
+            className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+          >
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Add Sources</h3>
+              <h3 id="sources-upload-dialog-title" className="text-lg font-semibold">Add Sources</h3>
               <button
-                onClick={() => setShowUpload(false)}
+                ref={uploadCloseRef}
+                onClick={closeUpload}
+                type="button"
+                aria-label={'\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846'}
+                title={'\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846'}
+                disabled={isUploading}
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <FileUpload onUpload={handleUpload} />
+            <FileUpload onUpload={handleUpload} onUploadingChange={setIsUploading} />
           </div>
         </div>
       )}

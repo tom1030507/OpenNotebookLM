@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Upload, X, File, Link, Youtube, FileText, Loader2 } from 'lucide-react';
 import { getUploadFileError } from '@/lib/uploadValidation';
 
@@ -9,13 +9,15 @@ interface FileUploadProps {
   accept?: string;
   multiple?: boolean;
   maxSize?: number; // in MB
+  onUploadingChange?: (isUploading: boolean) => void;
 }
 
 export default function FileUpload({ 
   onUpload, 
   accept = '.pdf',
   multiple = false,
-  maxSize = 10 
+  maxSize = 10,
+  onUploadingChange,
 }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -23,6 +25,10 @@ export default function FileUpload({
   const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube'>('file');
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+
+  useEffect(() => {
+    onUploadingChange?.(isUploading);
+  }, [isUploading, onUploadingChange]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -265,6 +271,8 @@ export default function FileUpload({
               </div>
               <button
                 onClick={() => removeFile(index)}
+                aria-label={'\u79fb\u9664\u6a94\u6848'}
+                title={'\u79fb\u9664\u6a94\u6848'}
                 className="text-gray-400 hover:text-red-500"
               >
                 <X className="w-4 h-4" />

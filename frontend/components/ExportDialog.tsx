@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   Download, 
   X, 
@@ -15,6 +15,7 @@ import type {
   ConversationExportFormat,
   ProjectExportFormat,
 } from '@/lib/api';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 interface ExportDialogProps {
   type: 'conversation' | 'project';
@@ -27,9 +28,17 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
   const [format, setFormat] = useState<ConversationExportFormat>('markdown');
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const initialFocusRef = useRef<HTMLInputElement>(null);
   const formats: ConversationExportFormat[] = type === 'project'
     ? ['markdown', 'json']
     : ['markdown', 'json', 'txt'];
+
+  useDialogFocus({
+    isOpen: true,
+    onClose,
+    dismissible: !isExporting,
+    initialFocusRef,
+  });
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -89,13 +98,22 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[var(--background)] rounded-lg w-full max-w-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-dialog-title"
+        className="bg-[var(--background)] rounded-lg w-full max-w-md"
+      >
         {/* Header */}
         <div className="p-6 border-b border-[var(--border)]">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Export {type === 'conversation' ? 'Conversation' : 'Project'}</h2>
+            <h2 id="export-dialog-title" className="text-lg font-semibold">Export {type === 'conversation' ? 'Conversation' : 'Project'}</h2>
             <button
               onClick={onClose}
+              type="button"
+              aria-label={'\u95dc\u9589\u532f\u51fa\u5c0d\u8a71\u6846'}
+              title={'\u95dc\u9589\u532f\u51fa\u5c0d\u8a71\u6846'}
+              disabled={isExporting}
               className="p-1 hover:bg-[var(--muted)] rounded transition-base"
             >
               <X className="w-5 h-5" />
@@ -122,6 +140,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
               >
                 <input
                   type="radio"
+                  ref={fmt === formats[0] ? initialFocusRef : undefined}
                   name="format"
                   value={fmt}
                   checked={format === fmt}

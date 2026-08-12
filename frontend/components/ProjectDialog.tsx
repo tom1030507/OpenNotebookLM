@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   X, 
   FolderPlus, 
@@ -9,6 +9,7 @@ import {
   CheckCircle
 } from 'lucide-react';
 import useStore from '@/store/useStore';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 interface ProjectDialogProps {
   isOpen: boolean;
@@ -22,8 +23,16 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   
   const { createProject, selectProject } = useStore();
+
+  useDialogFocus({
+    isOpen,
+    onClose,
+    dismissible: !isCreating && !success,
+    initialFocusRef: nameInputRef,
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,17 +69,26 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[var(--background)] rounded-lg w-full max-w-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-dialog-title"
+        className="bg-[var(--background)] rounded-lg w-full max-w-md"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-[var(--border)]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-[var(--primary)] bg-opacity-10 flex items-center justify-center">
               <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
             </div>
-            <h2 className="text-lg font-semibold">Create New Project</h2>
+            <h2 id="project-dialog-title" className="text-lg font-semibold">Create New Project</h2>
           </div>
           <button
             onClick={onClose}
+            type="button"
+            aria-label={'\u95dc\u9589\u5efa\u7acb\u65b0\u5c08\u6848\u5c0d\u8a71\u6846'}
+            title={'\u95dc\u9589\u5efa\u7acb\u65b0\u5c08\u6848\u5c0d\u8a71\u6846'}
+            disabled={isCreating || success}
             className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
           >
             <X className="w-5 h-5" />
@@ -103,13 +121,13 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
             </label>
             <input
               id="name"
+              ref={nameInputRef}
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., Research Papers, Meeting Notes"
               className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
               disabled={isCreating || success}
-              autoFocus
             />
           </div>
 
