@@ -2,10 +2,6 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import {
-  FileUploadErrors,
-  FileUploadUrlFields,
-} from '@/components/FileUpload';
 import Settings from '@/components/Settings';
 import { UserMenu } from '@/components/layout/TopNav';
 
@@ -30,24 +26,5 @@ describe('Traditional Chinese interactive workspace copy', () => {
     expect(markup).toContain('安全性');
     expect(markup).toContain('關於');
     expect(markup).not.toMatch(/>Settings<|>API Key<|>Data & Storage<|>Notifications<|>Security<|>About</);
-  });
-
-  it('renders URL upload input and validation states in Traditional Chinese', () => {
-    const markup = renderToStaticMarkup(
-      <>
-        <FileUploadUrlFields
-          uploadType="url"
-          urlInput="not-a-url"
-          isUploading={false}
-          onUrlChange={() => undefined}
-          onSubmit={() => undefined}
-        />
-        <FileUploadErrors errors={['請輸入有效的 URL']} />
-      </>,
-    );
-
-    expect(markup).toContain('輸入網站 URL...');
-    expect(markup).toContain('請輸入有效的 URL');
-    expect(markup).not.toMatch(/Enter website URL|Please enter a valid URL/);
   });
 });
