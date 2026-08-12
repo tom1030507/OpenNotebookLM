@@ -149,7 +149,12 @@ def test_conversation_details_include_message_text_and_citations(client):
                 conversation_id=conversation["id"],
                 role="assistant",
                 text="Answer",
-                citations_json=[{"doc_id": "document-1"}],
+                citations_json=[{
+                    "document_id": "document-1",
+                    "document_title": "Research paper",
+                    "page_num": 4,
+                    "text_preview": "Evidence",
+                }],
             )
         )
         db.commit()
@@ -163,6 +168,102 @@ def test_conversation_details_include_message_text_and_citations(client):
             "role": "assistant",
             "text": "Answer",
             "created_at": response.json()["messages"][0]["created_at"],
-            "citations": [{"doc_id": "document-1"}],
+            "citations": [{
+                "document_id": "document-1",
+                "document_title": "Research paper",
+                "page_num": 4,
+                "text_preview": "Evidence",
+            }],
         }
     ]
+
+
+def test_update_conversation_changes_the_persisted_title(client):
+    """Catch the edit action closing without persisting its new title."""
+    test_client, _ = client
+    project = create_project(test_client)
+    conversation = test_client.post(
+        f"/api/projects/{project['id']}/conversations",
+        json={"title": "First chat"},
+    ).json()
+
+    response = test_client.put(
+        f"/api/conversations/{conversation['id']}",
+        json={"title": "Renamed chat"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == conversation["id"]
+    assert response.json()["project_id"] == project["id"]
+    assert response.json()["title"] == "Renamed chat"
+
+    details = test_client.get(f"/api/conversations/{conversation['id']}")
+    assert details.json()["title"] == "Renamed chat"
+
+
+def test_update_conversation_rejects_missing_conversation(client):
+    """Catch rename requests silently succeeding for a missing record."""
+    test_client, _ = client
+
+    response = test_client.put(
+        "/api/conversations/missing",
+        json={"title": "Renamed chat"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Conversation not found"}
+
+
+def test_update_conversation_rejects_a_whitespace_only_title(client):
+    """Keep direct API clients from persisting an empty display title."""
+    test_client, _ = client
+    project = create_project(test_client)
+    conversation = test_client.post(
+        f"/api/projects/{project['id']}/conversations",
+        json={"title": "First chat"},
+    ).json()
+
+    response = test_client.put(
+        f"/api/conversations/{conversation['id']}",
+        json={"title": "   "},
+    )
+
+    assert response.status_code == 422
+
+
+def test_query_preserves_project_not_found_status(client):
+    """Catch a known 404 being converted into an unrelated 500 response."""
+    test_client, _ = client
+
+    response = test_client.post(
+        "/api/query",
+        json={"project_id": "missing", "query": "Question"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found"}
+
+
+def test_query_rejects_a_conversation_from_another_project(client):
+    """Prevent one project's sources from being written into another's chat."""
+    test_client, _ = client
+    first_project = create_project(test_client, "First")
+    second_project = create_project(test_client, "Second")
+    conversation = test_client.post(
+        f"/api/projects/{first_project['id']}/conversations",
+        json={"title": "First chat"},
+    ).json()
+
+    response = test_client.post(
+        "/api/query",
+        json={
+            "project_id": second_project["id"],
+            "conversation_id": conversation["id"],
+            "query": "Question",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Conversation does not belong to the selected project",
+    }

@@ -2,9 +2,10 @@
 
 import React, { useState, useCallback } from 'react';
 import { Upload, X, File, Link, Youtube, FileText, Loader2 } from 'lucide-react';
+import { getUploadFileError } from '@/lib/uploadValidation';
 
 interface FileUploadProps {
-  onUpload: (files: File[] | string[]) => void;
+  onUpload: (files: File[] | string[]) => Promise<void>;
   accept?: string;
   multiple?: boolean;
   maxSize?: number; // in MB
@@ -12,8 +13,8 @@ interface FileUploadProps {
 
 export default function FileUpload({ 
   onUpload, 
-  accept = '.pdf,.txt,.doc,.docx', 
-  multiple = true,
+  accept = '.pdf',
+  multiple = false,
   maxSize = 10 
 }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -37,16 +38,16 @@ export default function FileUpload({
     const errors: string[] = [];
     const validFiles: File[] = [];
 
-    newFiles.forEach(file => {
-      // Check file size
-      if (file.size > maxSize * 1024 * 1024) {
-        errors.push(`${file.name} exceeds ${maxSize}MB limit`);
-        return;
-      }
+    const candidateFiles = multiple ? newFiles : newFiles.slice(0, 1);
 
-      // Check if file already exists
-      if (files.some(f => f.name === file.name)) {
-        errors.push(`${file.name} already added`);
+    candidateFiles.forEach(file => {
+      const error = getUploadFileError(
+        file,
+        maxSize,
+        files.map(existingFile => existingFile.name),
+      );
+      if (error) {
+        errors.push(error);
         return;
       }
 
@@ -79,20 +80,28 @@ export default function FileUpload({
     setFiles(files.filter((_, i) => i !== index));
   };
 
-  const handleUrlSubmit = () => {
+  const handleUrlSubmit = async () => {
     if (!urlInput.trim()) {
       setErrors(['Please enter a valid URL']);
       return;
     }
 
-    // Basic URL validation
     try {
       new URL(urlInput);
-      onUpload([urlInput]);
+    } catch {
+      setErrors(['Please enter a valid URL']);
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      await onUpload([urlInput]);
       setUrlInput('');
       setErrors([]);
     } catch {
-      setErrors(['Please enter a valid URL']);
+      setErrors(['Upload failed. Please check the URL and try again.']);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -212,13 +221,13 @@ export default function FileUpload({
               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
-                  handleUrlSubmit();
+                  void handleUrlSubmit();
                 }
               }}
             />
             <button
-              onClick={handleUrlSubmit}
-              disabled={!urlInput.trim()}
+              onClick={() => void handleUrlSubmit()}
+              disabled={!urlInput.trim() || isUploading}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               Add

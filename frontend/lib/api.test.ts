@@ -123,6 +123,17 @@ describe('API client', () => {
     );
   });
 
+  it('rejects non-PDF files before sending an unsupported upload', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
+
+    await expect(api.uploadDocument('project-1', file)).rejects.toThrow(
+      'Only PDF files are supported',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       type: 'url' as const,
@@ -179,7 +190,12 @@ describe('API client', () => {
         role: 'assistant',
         text: 'Answer',
         created_at: '2026-01-01T00:00:00Z',
-        citations: [{ doc_id: 'document-1', page_num: 4, text_snippet: 'Evidence' }],
+        citations: [{
+          document_id: 'document-1',
+          document_title: 'Research paper',
+          page_num: 4,
+          text_preview: 'Evidence',
+        }],
       }],
     })));
 
@@ -190,14 +206,29 @@ describe('API client', () => {
       content: 'Answer',
       created_at: '2026-01-01T00:00:00Z',
       citations: [{
-        source: 'document-1',
+        source: 'Research paper',
         page: 4,
         text: 'Evidence',
-        doc_id: 'document-1',
+        document_id: 'document-1',
+        document_title: 'Research paper',
         page_num: 4,
-        text_snippet: 'Evidence',
+        text_preview: 'Evidence',
       }],
     }]);
+  });
+
+  it('removes a document only from the selected project', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      status: 'success',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.deleteDocument('project-1', 'document-1');
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://localhost:8000/api/projects/project-1/documents/document-1',
+    );
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
   });
 
   it('normalizes a missing conversation title for string-only UI controls', async () => {
@@ -218,6 +249,33 @@ describe('API client', () => {
       updated_at: '2026-01-01T00:00:00Z',
       message_count: 0,
     }]);
+  });
+
+  it('updates a conversation through the rename route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      id: 'conversation-1',
+      project_id: 'project-1',
+      title: 'Renamed chat',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+      message_count: 2,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      api.updateConversation('conversation-1', 'Renamed chat'),
+    ).resolves.toEqual(expect.objectContaining({
+      id: 'conversation-1',
+      title: 'Renamed chat',
+      message_count: 2,
+    }));
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://localhost:8000/api/conversations/conversation-1',
+    );
+    expect(fetchMock.mock.calls[0][1].method).toBe('PUT');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+      title: 'Renamed chat',
+    });
   });
 
   it('sends a non-streaming query to the active backend route', async () => {

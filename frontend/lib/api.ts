@@ -109,10 +109,13 @@ interface BackendCitation extends Record<string, unknown> {
   source?: string;
   title?: string;
   doc_id?: string;
+  document_id?: string;
+  document_title?: string;
   page?: number;
   page_num?: number;
   text?: string;
   text_snippet?: string;
+  text_preview?: string;
 }
 
 interface BackendMessage {
@@ -229,12 +232,17 @@ const normalizeConversation = (
 
 const normalizeCitation = (citation: BackendCitation): Citation => ({
   ...citation,
-  source: citation.source || citation.title || citation.doc_id || 'Unknown source',
+  source: citation.source
+    || citation.document_title
+    || citation.title
+    || citation.document_id
+    || citation.doc_id
+    || 'Unknown source',
   ...(citation.page ?? citation.page_num) !== undefined
     ? { page: citation.page ?? citation.page_num }
     : {},
-  ...(citation.text || citation.text_snippet)
-    ? { text: citation.text || citation.text_snippet }
+  ...(citation.text || citation.text_preview || citation.text_snippet)
+    ? { text: citation.text || citation.text_preview || citation.text_snippet }
     : {},
 });
 
@@ -293,6 +301,10 @@ const api = {
   },
 
   uploadDocument(projectId: string, file: File): Promise<Document> {
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      return Promise.reject(new Error('Only PDF files are supported'));
+    }
+
     const formData = new FormData();
     formData.append('file', file);
     return completeDocumentCreation(requestJson<FileUploadResponse>(
@@ -329,8 +341,11 @@ const api = {
     return Promise.reject(new Error('Text sources are not supported by the API'));
   },
 
-  async deleteDocument(documentId: string): Promise<void> {
-    await requestJson(`/docs/${documentId}`, { method: 'DELETE' });
+  async deleteDocument(projectId: string, documentId: string): Promise<void> {
+    await requestJson(
+      `/projects/${projectId}/documents/${documentId}`,
+      { method: 'DELETE' },
+    );
   },
 
   async getConversations(projectId: string): Promise<Conversation[]> {
@@ -349,6 +364,20 @@ const api = {
       {
         method: 'POST',
         body: JSON.stringify({ title: title || null }),
+      },
+    );
+    return normalizeConversation(conversation);
+  },
+
+  async updateConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<Conversation> {
+    const conversation = await requestJson<BackendConversation>(
+      `/conversations/${conversationId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ title }),
       },
     );
     return normalizeConversation(conversation);

@@ -64,20 +64,16 @@ export default function SourcesPanel() {
     }
 
     for (const item of items) {
-      try {
-        if (item instanceof File) {
-          await uploadDocument(currentProject.id, item);
-        } else {
-          // Handle URL or YouTube link
-          const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
-          await createDocument(currentProject.id, {
-            name: item,
-            type: isYouTube ? 'youtube' : 'url',
-            url: item,
-          });
-        }
-      } catch (error) {
-        console.error('Failed to upload:', error);
+      if (item instanceof File) {
+        await uploadDocument(currentProject.id, item);
+      } else {
+        // Handle URL or YouTube link
+        const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
+        await createDocument(currentProject.id, {
+          name: item,
+          type: isYouTube ? 'youtube' : 'url',
+          url: item,
+        });
       }
     }
     

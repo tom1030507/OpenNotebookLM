@@ -1,13 +1,18 @@
 """Tests for project management API."""
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
 from app.db.database import get_db
-from app.db.models import Base
+from app.db.models import Base, Document, ProjectDocument
+from app.routers import projects
+
+
+app = FastAPI()
+app.include_router(projects.router, prefix="/api")
 
 # Create test database
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -52,7 +57,6 @@ def test_create_project():
     assert data["name"] == "Test Project"
     assert data["description"] == "A test project description"
     assert "id" in data
-    return data["id"]
 
 
 def test_list_projects():
@@ -134,6 +138,53 @@ def test_delete_project():
     # Verify it's deleted
     get_response = client.get(f"/api/projects/{project_id}")
     assert get_response.status_code == 404
+
+
+def test_remove_document_from_project_preserves_shared_document():
+    """Removing a source from one project must not globally delete it."""
+    first_project = client.post(
+        "/api/projects",
+        json={"name": "First Shared Project"},
+    ).json()
+    second_project = client.post(
+        "/api/projects",
+        json={"name": "Second Shared Project"},
+    ).json()
+
+    with TestingSessionLocal() as db:
+        db.add(Document(
+            id="shared-document",
+            title="Shared Paper",
+            source_type="pdf",
+            status="ready",
+        ))
+        db.add_all([
+            ProjectDocument(
+                project_id=first_project["id"],
+                document_id="shared-document",
+            ),
+            ProjectDocument(
+                project_id=second_project["id"],
+                document_id="shared-document",
+            ),
+        ])
+        db.commit()
+
+    response = client.delete(
+        f"/api/projects/{first_project['id']}/documents/shared-document",
+    )
+
+    assert response.status_code == 200
+    with TestingSessionLocal() as db:
+        assert db.get(Document, "shared-document") is not None
+        assert db.query(ProjectDocument).filter_by(
+            project_id=first_project["id"],
+            document_id="shared-document",
+        ).first() is None
+        assert db.query(ProjectDocument).filter_by(
+            project_id=second_project["id"],
+            document_id="shared-document",
+        ).first() is not None
 
 
 def test_search_projects():

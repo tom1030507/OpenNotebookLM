@@ -46,6 +46,7 @@ interface AppState {
   fetchConversations: (projectId: string) => Promise<void>;
   selectConversation: (conversation: Conversation) => Promise<void>;
   createConversation: (projectId: string, title?: string) => Promise<Conversation>;
+  updateConversation: (conversationId: string, title: string) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
   
@@ -91,16 +92,20 @@ const useStore = create<AppState>()(
             const currentProject = projects.find(
               (project) => project.id === previousProject?.id,
             ) || projects[0] || null;
+            const projectChanged = currentProject?.id !== previousProject?.id;
 
             set({
               projects,
               currentProject,
               loadingProjects: false,
-              ...(!currentProject ? {
+              ...(!currentProject || projectChanged ? {
                 documents: [],
                 conversations: [],
                 currentConversation: null,
                 messages: [],
+                loadingDocuments: false,
+                loadingConversations: false,
+                loadingMessages: false,
               } : {}),
             });
 
@@ -117,7 +122,16 @@ const useStore = create<AppState>()(
         },
         
         selectProject: (project) => {
-          set({ currentProject: project });
+          set({
+            currentProject: project,
+            documents: [],
+            conversations: [],
+            currentConversation: null,
+            messages: [],
+            loadingDocuments: false,
+            loadingConversations: false,
+            loadingMessages: false,
+          });
           // Fetch documents and conversations for the selected project
           get().fetchDocuments(project.id);
           get().fetchConversations(project.id);
@@ -137,10 +151,22 @@ const useStore = create<AppState>()(
         deleteProject: async (id) => {
           try {
             await api.deleteProject(id);
-            set((state) => ({
-              projects: state.projects.filter(p => p.id !== id),
-              currentProject: state.currentProject?.id === id ? null : state.currentProject,
-            }));
+            set((state) => {
+              const deletedCurrentProject = state.currentProject?.id === id;
+              return {
+                projects: state.projects.filter(p => p.id !== id),
+                currentProject: deletedCurrentProject ? null : state.currentProject,
+                ...(deletedCurrentProject ? {
+                  documents: [],
+                  conversations: [],
+                  currentConversation: null,
+                  messages: [],
+                  loadingDocuments: false,
+                  loadingConversations: false,
+                  loadingMessages: false,
+                } : {}),
+              };
+            });
           } catch (error) {
             console.error('Failed to delete project:', error);
             throw error;
@@ -149,13 +175,18 @@ const useStore = create<AppState>()(
         
         // Documents
         fetchDocuments: async (projectId) => {
+          if (get().currentProject?.id !== projectId) return;
           set({ loadingDocuments: true });
           try {
             const documents = await api.getDocuments(projectId);
-            set({ documents, loadingDocuments: false });
+            if (get().currentProject?.id === projectId) {
+              set({ documents, loadingDocuments: false });
+            }
           } catch (error) {
             console.error('Failed to fetch documents:', error);
-            set({ loadingDocuments: false });
+            if (get().currentProject?.id === projectId) {
+              set({ loadingDocuments: false });
+            }
           }
         },
         
@@ -184,19 +215,27 @@ const useStore = create<AppState>()(
             }, 200);
             
             const document = await api.uploadDocument(projectId, file);
-            
-            set((state) => ({
-              documents: [...state.documents, document],
-              uploadProgress: { ...state.uploadProgress, [uploadId]: 100 },
-            }));
-            
-            // Clean up progress after a delay
-            setTimeout(() => {
+            const isCurrentProject = get().currentProject?.id === projectId;
+
+            if (isCurrentProject) {
+              set((state) => ({
+                documents: [...state.documents, document],
+                uploadProgress: { ...state.uploadProgress, [uploadId]: 100 },
+              }));
+
+              // Clean up progress after a delay
+              setTimeout(() => {
+                set((state) => {
+                  const { [uploadId]: _, ...rest } = state.uploadProgress;
+                  return { uploadProgress: rest };
+                });
+              }, 1000);
+            } else {
               set((state) => {
                 const { [uploadId]: _, ...rest } = state.uploadProgress;
                 return { uploadProgress: rest };
               });
-            }, 1000);
+            }
           } catch (error) {
             console.error('Failed to upload document:', error);
             set((state) => {
@@ -214,7 +253,9 @@ const useStore = create<AppState>()(
         createDocument: async (projectId, data) => {
           try {
             const document = await api.createDocument(projectId, data);
-            set((state) => ({ documents: [...state.documents, document] }));
+            if (get().currentProject?.id === projectId) {
+              set((state) => ({ documents: [...state.documents, document] }));
+            }
           } catch (error) {
             console.error('Failed to create document:', error);
             throw error;
@@ -222,12 +263,13 @@ const useStore = create<AppState>()(
         },
         
         deleteDocument: async (projectId, documentId) => {
-          void projectId;
           try {
-            await api.deleteDocument(documentId);
-            set((state) => ({
-              documents: state.documents.filter(d => d.id !== documentId),
-            }));
+            await api.deleteDocument(projectId, documentId);
+            if (get().currentProject?.id === projectId) {
+              set((state) => ({
+                documents: state.documents.filter(d => d.id !== documentId),
+              }));
+            }
           } catch (error) {
             console.error('Failed to delete document:', error);
             throw error;
@@ -236,31 +278,59 @@ const useStore = create<AppState>()(
         
         // Conversations
         fetchConversations: async (projectId) => {
+          if (get().currentProject?.id !== projectId) return;
           set({ loadingConversations: true });
           try {
             const conversations = await api.getConversations(projectId);
-            set({ conversations, loadingConversations: false });
+            if (get().currentProject?.id === projectId) {
+              set({ conversations, loadingConversations: false });
+            }
           } catch (error) {
             console.error('Failed to fetch conversations:', error);
-            set({ loadingConversations: false });
+            if (get().currentProject?.id === projectId) {
+              set({ loadingConversations: false });
+            }
           }
         },
         
         selectConversation: async (conversation) => {
-          set({ currentConversation: conversation });
+          if (get().currentProject?.id !== conversation.project_id) return;
+          set({ currentConversation: conversation, messages: [] });
           await get().fetchMessages(conversation.id);
         },
         
         createConversation: async (projectId, title) => {
           try {
             const conversation = await api.createConversation(projectId, title);
-            set((state) => ({
-              conversations: [...state.conversations, conversation],
-              currentConversation: conversation,
-            }));
+            if (get().currentProject?.id === projectId) {
+              set((state) => ({
+                conversations: [...state.conversations, conversation],
+                currentConversation: conversation,
+                messages: [],
+              }));
+            }
             return conversation;
           } catch (error) {
             console.error('Failed to create conversation:', error);
+            throw error;
+          }
+        },
+
+        updateConversation: async (conversationId, title) => {
+          try {
+            const conversation = await api.updateConversation(conversationId, title);
+            if (get().currentProject?.id === conversation.project_id) {
+              set((state) => ({
+                conversations: state.conversations.map((item) => (
+                  item.id === conversationId ? conversation : item
+                )),
+                currentConversation: state.currentConversation?.id === conversationId
+                  ? conversation
+                  : state.currentConversation,
+              }));
+            }
+          } catch (error) {
+            console.error('Failed to update conversation:', error);
             throw error;
           }
         },
@@ -284,13 +354,18 @@ const useStore = create<AppState>()(
         },
         
         fetchMessages: async (conversationId) => {
+          if (get().currentConversation?.id !== conversationId) return;
           set({ loadingMessages: true });
           try {
             const messages = await api.getMessages(conversationId);
-            set({ messages, loadingMessages: false });
+            if (get().currentConversation?.id === conversationId) {
+              set({ messages, loadingMessages: false });
+            }
           } catch (error) {
             console.error('Failed to fetch messages:', error);
-            set({ loadingMessages: false });
+            if (get().currentConversation?.id === conversationId) {
+              set({ loadingMessages: false });
+            }
           }
         },
         
@@ -303,7 +378,10 @@ const useStore = create<AppState>()(
           }
           
           // Create or use existing conversation
-          let conversationId = state.currentConversation?.id;
+          let conversationId = state.currentConversation?.project_id
+            === state.currentProject.id
+            ? state.currentConversation.id
+            : undefined;
           if (!conversationId) {
             const conversation = await state.createConversation(
               state.currentProject.id,

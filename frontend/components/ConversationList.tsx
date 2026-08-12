@@ -26,6 +26,7 @@ export default function ConversationList() {
     currentProject,
     selectConversation,
     createConversation,
+    updateConversation,
     deleteConversation,
   } = useStore();
 
@@ -37,10 +38,13 @@ export default function ConversationList() {
   const handleSaveEdit = async () => {
     if (!editingId || !editTitle.trim()) return;
     
-    // TODO: Add update conversation API call
-    console.log('Update conversation:', editingId, editTitle);
-    setEditingId(null);
-    setEditTitle('');
+    try {
+      await updateConversation(editingId, editTitle.trim());
+      setEditingId(null);
+      setEditTitle('');
+    } catch (error) {
+      console.error('Failed to update conversation:', error);
+    }
   };
 
   const handleCancelEdit = () => {

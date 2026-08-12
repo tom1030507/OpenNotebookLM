@@ -2,7 +2,7 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 import structlog
 import uuid
 
@@ -46,6 +46,21 @@ class ConversationCreateRequest(BaseModel):
     title: Optional[str] = None
 
 
+class ConversationUpdateRequest(BaseModel):
+    """Request model for renaming a conversation."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, title: str) -> str:
+        """Normalize the title before enforcing the non-empty contract."""
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise ValueError("Title must not be blank")
+        return normalized_title
+
+
 @router.post("/query", response_model=QueryResponse)
 async def query(
     request: QueryRequest,
@@ -76,6 +91,15 @@ async def query(
             ).first()
             if not conversation:
                 raise HTTPException(status_code=404, detail="Conversation not found")
+
+            if (
+                request.project_id
+                and conversation.project_id != request.project_id
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Conversation does not belong to the selected project",
+                )
             
             # Use conversation's project if not specified
             if not request.project_id and conversation.project_id:
@@ -134,6 +158,8 @@ async def query(
             conversation_id=conversation_id
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -204,6 +230,36 @@ async def get_conversation(
         "updated_at": conversation.updated_at,
         "messages": messages
     }
+
+
+@router.put(
+    "/conversations/{conversation_id}",
+    response_model=ConversationResponse,
+)
+async def update_conversation(
+    conversation_id: str,
+    request: ConversationUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Rename an existing conversation."""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+    ).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    conversation.title = request.title
+    db.commit()
+    db.refresh(conversation)
+
+    return ConversationResponse(
+        id=conversation.id,
+        project_id=conversation.project_id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        message_count=len(conversation.messages),
+    )
 
 
 @router.get(
