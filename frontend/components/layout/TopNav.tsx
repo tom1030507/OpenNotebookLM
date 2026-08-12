@@ -24,6 +24,49 @@ interface TopNavProps {
   notebookTitle?: string;
 }
 
+interface UserMenuProps {
+  isOpen: boolean;
+  onToggle: () => void;
+  onOpenSettings: () => void;
+}
+
+export function UserMenu({ isOpen, onToggle, onOpenSettings }: UserMenuProps) {
+  return (
+    <div className="relative">
+      <button
+        onClick={onToggle}
+        className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"
+      >
+        <User className="w-5 h-5" />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50">
+          <div className="px-4 py-2 border-b border-[var(--border)]">
+            <p className="text-sm font-medium">使用者</p>
+            <p className="text-xs text-[var(--muted-foreground)]">user@example.com</p>
+          </div>
+          <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base">
+            個人資料
+          </button>
+          <button
+            onClick={onOpenSettings}
+            className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base"
+          >
+            {uiCopy.settings.title}
+          </button>
+          <div className="border-t border-[var(--border)] mt-2 pt-2">
+            <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base flex items-center gap-2">
+              <LogOut className="w-4 h-4" />
+              <span>登出</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps) {
   const [showExport, setShowExport] = useState(false);
   const [showProjectDialog, setShowProjectDialog] = useState(false);
@@ -112,41 +155,14 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           </button>
 
           {/* User Menu */}
-          <div className="relative">
-            <button 
-              onClick={() => setShowUserMenu(!showUserMenu)}
-              className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"
-            >
-              <User className="w-5 h-5" />
-            </button>
-            
-            {showUserMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50">
-                <div className="px-4 py-2 border-b border-[var(--border)]">
-                  <p className="text-sm font-medium">使用者</p>
-                  <p className="text-xs text-[var(--muted-foreground)]">user@example.com</p>
-                </div>
-                <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base">
-                  個人資料
-                </button>
-                <button 
-                  onClick={() => {
-                    setShowUserMenu(false);
-                    setShowSettings(true);
-                  }}
-                  className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base"
-                >
-                  {uiCopy.settings.title}
-                </button>
-                <div className="border-t border-[var(--border)] mt-2 pt-2">
-                  <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base flex items-center gap-2">
-                    <LogOut className="w-4 h-4" />
-                    <span>登出</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <UserMenu
+            isOpen={showUserMenu}
+            onToggle={() => setShowUserMenu(!showUserMenu)}
+            onOpenSettings={() => {
+              setShowUserMenu(false);
+              setShowSettings(true);
+            }}
+          />
         </div>
       </header>
       

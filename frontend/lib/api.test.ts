@@ -217,6 +217,29 @@ describe('API client', () => {
     }]);
   });
 
+  it('normalizes a citation without source metadata for the chat UI', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      id: 'conversation-1',
+      project_id: 'project-1',
+      title: '研究',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      messages: [{
+        id: 'message-1',
+        role: 'assistant',
+        text: '摘要',
+        created_at: '2026-01-01T00:00:00Z',
+        citations: [{}],
+      }],
+    })));
+
+    await expect(api.getMessages('conversation-1')).resolves.toEqual([
+      expect.objectContaining({
+        citations: [expect.objectContaining({ source: '未知來源' })],
+      }),
+    ]);
+  });
+
   it('removes a document only from the selected project', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       status: 'success',
@@ -244,7 +267,7 @@ describe('API client', () => {
     await expect(api.getConversations('project-1')).resolves.toEqual([{
       id: 'conversation-1',
       project_id: 'project-1',
-      title: 'Untitled Conversation',
+      title: '未命名對話',
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
       message_count: 0,

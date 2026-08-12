@@ -7,6 +7,13 @@ export const documentStatus = (status: DocumentStatus): string => ({
   error: '處理失敗',
 }[status]);
 
+export const documentTypeLabel = (type: 'pdf' | 'url' | 'youtube' | 'text'): string => ({
+  pdf: 'PDF',
+  url: 'URL',
+  youtube: 'YouTube',
+  text: '文字',
+}[type]);
+
 export const uiCopy = {
   actions: {
     add: '新增',
@@ -110,11 +117,12 @@ export const uiCopy = {
   exportDialog: {
     conversation: '對話',
     project: '專案',
-    description: '匯出「{name}」為偏好的格式',
+    description: '以偏好的格式匯出「{name}」',
     chooseFormat: '選擇匯出格式：',
     exported: '已匯出！',
     exporting: '匯出中...',
     exportFailed: '匯出失敗，請再試一次。',
   },
   documentStatus,
+  documentTypeLabel,
 };

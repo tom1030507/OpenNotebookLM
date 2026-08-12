@@ -208,7 +208,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             <div>
               <h3 className="font-medium">{document.name}</h3>
               <p className="text-xs text-[var(--muted-foreground)]">
-                {document.type.toUpperCase()} · {uiCopy.documentStatus(document.status)}
+                {uiCopy.documentTypeLabel(document.type)} · {uiCopy.documentStatus(document.status)}
               </p>
             </div>
           </div>

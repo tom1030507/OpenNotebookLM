@@ -99,9 +99,9 @@ export default function ChatArea() {
                   </p>
                 </div>
                 <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
-                  <h3 className="font-medium text-sm mb-1">智能問答</h3>
+                  <h3 className="font-medium text-sm mb-1">智慧問答</h3>
                   <p className="text-xs text-[var(--muted-foreground)]">
-                    基於你的文件回答問題
+                    根據你的文件回答問題
                   </p>
                 </div>
               </div>
@@ -141,7 +141,7 @@ export default function ChatArea() {
                     {/* Citations */}
                     {message.citations && message.citations.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-[var(--border)]">
-                        <p className="text-xs opacity-70 mb-2">來源引用：</p>
+                        <p className="text-xs opacity-70 mb-2">資料來源：</p>
                         {message.citations.map((citation, idx) => (
                           <div
                             key={idx}

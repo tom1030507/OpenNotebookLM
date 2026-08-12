@@ -223,7 +223,7 @@ const normalizeConversation = (
 ): Conversation => ({
   id: conversation.id,
   project_id: conversation.project_id,
-  title: conversation.title || 'Untitled Conversation',
+  title: conversation.title || '未命名對話',
   created_at: conversation.created_at,
   updated_at: conversation.updated_at,
   message_count: conversation.message_count ?? conversation.messages?.length ?? 0,
@@ -237,7 +237,7 @@ const normalizeCitation = (citation: BackendCitation): Citation => ({
     || citation.title
     || citation.document_id
     || citation.doc_id
-    || 'Unknown source',
+    || '未知來源',
   ...(citation.page ?? citation.page_num) !== undefined
     ? { page: citation.page ?? citation.page_num }
     : {},

@@ -12,6 +12,72 @@ interface FileUploadProps {
   maxSize?: number; // in MB
 }
 
+type UploadType = 'file' | 'url' | 'youtube';
+
+interface FileUploadUrlFieldsProps {
+  uploadType: Extract<UploadType, 'url' | 'youtube'>;
+  urlInput: string;
+  isUploading: boolean;
+  onUrlChange: (value: string) => void;
+  onSubmit: () => void;
+}
+
+export function FileUploadUrlFields({
+  uploadType,
+  urlInput,
+  isUploading,
+  onUrlChange,
+  onSubmit,
+}: FileUploadUrlFieldsProps) {
+  return (
+    <div className="border border-gray-300 rounded-lg p-4">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={urlInput}
+          onChange={(event) => onUrlChange(event.target.value)}
+          placeholder={
+            uploadType === 'youtube'
+              ? uiCopy.upload.youtubeUrlPlaceholder
+              : uiCopy.upload.urlPlaceholder
+          }
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+          onKeyPress={(event) => {
+            if (event.key === 'Enter') {
+              onSubmit();
+            }
+          }}
+        />
+        <button
+          onClick={onSubmit}
+          disabled={!urlInput.trim() || isUploading}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+        >
+          {uiCopy.upload.add}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface FileUploadErrorsProps {
+  errors: string[];
+}
+
+export function FileUploadErrors({ errors }: FileUploadErrorsProps) {
+  if (errors.length === 0) return null;
+
+  return (
+    <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+      {errors.map((error, index) => (
+        <p key={index} className="text-sm text-red-600">
+          {error}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export default function FileUpload({ 
   onUpload, 
   accept = '.pdf',
@@ -21,7 +87,7 @@ export default function FileUpload({
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [urlInput, setUrlInput] = useState('');
-  const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube'>('file');
+  const [uploadType, setUploadType] = useState<UploadType>('file');
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -208,45 +274,17 @@ export default function FileUpload({
 
       {/* URL Input Area */}
       {(uploadType === 'url' || uploadType === 'youtube') && (
-        <div className="border border-gray-300 rounded-lg p-4">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder={
-                uploadType === 'youtube'
-                  ? uiCopy.upload.youtubeUrlPlaceholder
-                  : uiCopy.upload.urlPlaceholder
-              }
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  void handleUrlSubmit();
-                }
-              }}
-            />
-            <button
-              onClick={() => void handleUrlSubmit()}
-              disabled={!urlInput.trim() || isUploading}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-            >
-              {uiCopy.upload.add}
-            </button>
-          </div>
-        </div>
+        <FileUploadUrlFields
+          uploadType={uploadType}
+          urlInput={urlInput}
+          isUploading={isUploading}
+          onUrlChange={setUrlInput}
+          onSubmit={() => void handleUrlSubmit()}
+        />
       )}
 
       {/* Error Messages */}
-      {errors.length > 0 && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-          {errors.map((error, index) => (
-            <p key={index} className="text-sm text-red-600">
-              {error}
-            </p>
-          ))}
-        </div>
-      )}
+      <FileUploadErrors errors={errors} />
 
       {/* File List */}
       {files.length > 0 && (
