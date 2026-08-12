@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
 import { 
@@ -10,6 +10,7 @@ import {
   Loader2
 } from 'lucide-react';
 import useStore from '@/store/useStore';
+import { getWelcomeHeroStyle } from '@/components/desktopLayout';
 import MarkdownRenderer from '../MarkdownRenderer';
 
 export default function ChatArea() {
@@ -64,22 +65,26 @@ export default function ChatArea() {
   const canChat = currentProject && hasDocuments;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[var(--background)]">
+    <div className="min-w-0 flex-1 flex flex-col h-full bg-[var(--background)]">
       {/* Chat Messages Area */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center px-8">
+          <div className="h-full flex flex-col items-center justify-center px-[clamp(1.25rem,4vw,4rem)] py-8">
             {/* Welcome Screen */}
-            <div className="text-center max-w-2xl">
-              <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
-                <Sparkles className="w-8 h-8 text-white" />
+            <div
+              data-layout="welcome-hero"
+              className="text-center"
+              style={getWelcomeHeroStyle()}
+            >
+              <div className="w-[clamp(4rem,5vw,5.5rem)] h-[clamp(4rem,5vw,5.5rem)] mx-auto mb-[clamp(1.5rem,3vw,2.25rem)] rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
+                <Sparkles className="w-[clamp(2rem,2.5vw,2.75rem)] h-[clamp(2rem,2.5vw,2.75rem)] text-white" />
               </div>
               
-              <h2 className="text-2xl font-normal mb-3">
+              <h2 className="text-[clamp(1.75rem,3vw,2.75rem)] leading-tight font-normal mb-4">
                 新增來源即可開始使用
               </h2>
               
-              <p className="text-[var(--muted-foreground)] mb-8">
+              <p className="max-w-2xl mx-auto text-base text-[var(--muted-foreground)] mb-8">
                 NotebookLM 提供的資訊未必正確。請查證回覆內容。
               </p>
 
@@ -90,16 +95,16 @@ export default function ChatArea() {
               </button>
 
               {/* Quick Actions */}
-              <div className="mt-12 grid grid-cols-2 gap-4 text-left">
-                <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
-                  <h3 className="font-medium text-sm mb-1">快速開始</h3>
-                  <p className="text-xs text-[var(--muted-foreground)]">
+              <div className="mt-[clamp(2.5rem,5vw,4rem)] grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-[clamp(1rem,2vw,1.5rem)] text-left">
+                <div className="p-[clamp(1rem,2vw,1.5rem)] bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
+                  <h3 className="font-medium text-base mb-1.5">快速開始</h3>
+                  <p className="text-sm text-[var(--muted-foreground)]">
                     上傳 PDF、網頁或 YouTube 影片
                   </p>
                 </div>
-                <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
-                  <h3 className="font-medium text-sm mb-1">智能問答</h3>
-                  <p className="text-xs text-[var(--muted-foreground)]">
+                <div className="p-[clamp(1rem,2vw,1.5rem)] bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
+                  <h3 className="font-medium text-base mb-1.5">智能問答</h3>
+                  <p className="text-sm text-[var(--muted-foreground)]">
                     基於你的文件回答問題
                   </p>
                 </div>
@@ -187,12 +192,12 @@ export default function ChatArea() {
       {/* Input Area */}
       <div className="border-t border-[var(--border)] bg-[var(--card)] p-4">
         <div className="max-w-3xl mx-auto">
-          <div className="flex items-end gap-3">
-            <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base">
+          <div className="min-w-0 flex items-end gap-3">
+            <button className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base">
               <Paperclip className="w-5 h-5" />
             </button>
             
-            <div className="flex-1 relative">
+            <div className="min-w-0 flex-1 relative">
               <textarea
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
@@ -218,7 +223,7 @@ export default function ChatArea() {
             <button
               onClick={handleSend}
               disabled={!inputValue.trim() || !canChat || isStreaming}
-              className="p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base">
+              className="flex-shrink-0 p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base">
               {isStreaming ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (

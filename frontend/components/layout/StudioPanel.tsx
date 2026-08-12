@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React from 'react';
 import { 
@@ -6,7 +6,9 @@ import {
   Video,
   FileText,
   Brain,
-  ChevronDown
+  ChevronDown,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react';
 
 interface StudioOption {
@@ -16,7 +18,15 @@ interface StudioOption {
   icon: React.ReactNode;
 }
 
-export default function StudioPanel() {
+interface StudioPanelProps {
+  isCollapsed?: boolean;
+  onCollapsedChange?: (isCollapsed: boolean) => void;
+}
+
+export default function StudioPanel({
+  isCollapsed = false,
+  onCollapsedChange,
+}: StudioPanelProps) {
   const studioOptions: StudioOption[] = [
     {
       id: 'audio',
@@ -45,14 +55,39 @@ export default function StudioPanel() {
   ];
 
   return (
-    <aside className="w-80 border-l border-[var(--border)] bg-[var(--card)] flex flex-col h-full">
+    <aside
+      aria-label="工作室"
+      data-panel-state={isCollapsed ? 'collapsed' : 'expanded'}
+      className="w-full min-w-0 overflow-hidden border-l border-[var(--border)] bg-[var(--card)] flex flex-col h-full"
+    >
       {/* Header */}
-      <div className="p-4 border-b border-[var(--border)]">
-        <h2 className="text-base font-medium">工作室</h2>
+      <div className={`${isCollapsed ? 'p-2' : 'p-4'} border-b border-[var(--border)]`}>
+        <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+          {!isCollapsed && <h2 className="text-base font-medium">工作室</h2>}
+          <button
+            type="button"
+            onClick={() => onCollapsedChange?.(!isCollapsed)}
+            aria-controls="studio-panel-content"
+            aria-expanded={!isCollapsed}
+            aria-label={isCollapsed ? '展開工作室' : '收合工作室'}
+            title={isCollapsed ? '展開工作室' : '收合工作室'}
+            className="p-1.5 hover:bg-[var(--muted)] rounded-lg transition-base"
+          >
+            {isCollapsed ? (
+              <PanelRightOpen className="w-4 h-4" />
+            ) : (
+              <PanelRightClose className="w-4 h-4" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Studio Options */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div
+        id="studio-panel-content"
+        hidden={isCollapsed}
+        className="flex-1 overflow-y-auto p-4"
+      >
         <div className="space-y-3">
           {studioOptions.map((option) => (
             <button

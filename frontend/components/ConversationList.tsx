@@ -125,7 +125,7 @@ export default function ConversationList() {
   }
 
   return (
-    <div className="w-64 bg-[var(--sidebar-bg)] border-l border-[var(--border)] flex flex-col h-full">
+    <div className="w-full min-w-0 overflow-hidden bg-[var(--sidebar-bg)] border-l border-[var(--border)] flex flex-col h-full">
       {/* Header */}
       <div className="p-4 border-b border-[var(--sidebar-border)]">
         <div className="flex items-center justify-between mb-3">

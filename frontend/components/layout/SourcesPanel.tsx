@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState, useEffect } from 'react';
 import { 
@@ -11,14 +11,24 @@ import {
   X,
   Loader2,
   FolderOpen,
-  Eye
+  Eye,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import useStore from '@/store/useStore';
 import { Document } from '@/lib/api';
 
-export default function SourcesPanel() {
+interface SourcesPanelProps {
+  isCollapsed?: boolean;
+  onCollapsedChange?: (isCollapsed: boolean) => void;
+}
+
+export default function SourcesPanel({
+  isCollapsed = false,
+  onCollapsedChange,
+}: SourcesPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -113,28 +123,50 @@ export default function SourcesPanel() {
   );
 
   return (
-    <aside className="w-80 border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full">
+    <aside
+      aria-label="Sources"
+      data-panel-state={isCollapsed ? 'collapsed' : 'expanded'}
+      className="w-full min-w-0 overflow-hidden border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full"
+    >
       {/* Header */}
-      <div className="p-4 border-b border-[var(--sidebar-border)]">
-        <h2 className="text-base font-medium mb-3">Sources</h2>
-        
-        {/* Project Selector */}
-        <div className="space-y-2 mb-3">
-          <select
-            value={currentProject?.id || ''}
-            onChange={(e) => {
-              const project = projects.find(p => p.id === e.target.value);
-              if (project) selectProject(project);
-            }}
-            className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+      <div className={`${isCollapsed ? 'p-2' : 'p-4'} border-b border-[var(--sidebar-border)]`}>
+        <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between mb-3'}`}>
+          {!isCollapsed && <h2 className="text-base font-medium">Sources</h2>}
+          <button
+            type="button"
+            onClick={() => onCollapsedChange?.(!isCollapsed)}
+            aria-controls="sources-panel-content"
+            aria-expanded={!isCollapsed}
+            aria-label={isCollapsed ? '展開來源' : '收合來源'}
+            title={isCollapsed ? '展開來源' : '收合來源'}
+            className="p-1.5 hover:bg-[var(--card)] rounded-lg transition-base"
           >
-            <option value="">Select a project</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+            {isCollapsed ? (
+              <PanelLeftOpen className="w-4 h-4" />
+            ) : (
+              <PanelLeftClose className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+
+        <div hidden={isCollapsed}>
+          {/* Project Selector */}
+          <div className="space-y-2 mb-3">
+            <select
+              value={currentProject?.id || ''}
+              onChange={(e) => {
+                const project = projects.find(p => p.id === e.target.value);
+                if (project) selectProject(project);
+              }}
+              className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+            >
+              <option value="">Select a project</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
           
           <button
             onClick={handleCreateProject}
@@ -148,36 +180,41 @@ export default function SourcesPanel() {
             )}
             <span className="text-sm">New Project</span>
           </button>
-        </div>
-        
-        {/* Add Source Button */}
-        {currentProject && (
-          <button 
-            onClick={() => setShowUpload(!showUpload)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="text-sm">Add Source</span>
-          </button>
-        )}
-
-        {/* Search */}
-        {currentProject && documents.length > 0 && (
-          <div className="mt-3 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
-            <input
-              type="text"
-              placeholder="Search sources"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
-            />
           </div>
-        )}
+        
+          {/* Add Source Button */}
+          {currentProject && (
+            <button
+              onClick={() => setShowUpload(!showUpload)}
+              className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="text-sm">Add Source</span>
+            </button>
+          )}
+
+          {/* Search */}
+          {currentProject && documents.length > 0 && (
+            <div className="mt-3 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
+              <input
+                type="text"
+                placeholder="Search sources"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Sources List */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div
+        id="sources-panel-content"
+        hidden={isCollapsed}
+        className="flex-1 overflow-y-auto p-4"
+      >
         {!currentProject ? (
           <div className="text-center py-8">
             <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
