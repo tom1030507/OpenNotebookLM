@@ -281,6 +281,7 @@ export default function SourcesPanel() {
           <div
             ref={uploadDialogRef}
             role="dialog"
+            tabIndex={-1}
             aria-modal="true"
             aria-labelledby={uploadTitleId}
             className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"

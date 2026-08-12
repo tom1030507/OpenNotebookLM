@@ -69,6 +69,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
       <div
         ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         className="bg-[var(--background)] rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"

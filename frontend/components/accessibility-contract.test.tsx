@@ -46,6 +46,13 @@ const previewDocument: Document = {
   updated_at: '2026-08-12T00:00:00Z',
   chunk_count: 1,
 };
+const externalPreviewDocument: Document = {
+  ...previewDocument,
+  id: 'external-document-1',
+  name: 'External Accessibility Notes',
+  type: 'url',
+  url: 'https://example.com',
+};
 
 afterEach(() => {
   cleanup();
@@ -207,6 +214,38 @@ describe('workspace accessibility contract', () => {
     cancelButton.focus();
     fireEvent.keyDown(cancelButton, { key: 'Tab' });
     expect(document.activeElement).toBe(closeButton);
+  });
+
+  it('keeps focus inside a Project dialog while creation disables every control', async () => {
+    let resolveProject: (value: Project) => void;
+    useStore.setState({
+      createProject: () => new Promise<Project>((resolve) => {
+        resolveProject = resolve;
+      }),
+      selectProject: () => {},
+    });
+    render(
+      <>
+        <button>Background control</button>
+        <ProjectDialogHarness />
+      </>,
+    );
+
+    const trigger = screen.getByRole('button', { name: openProjectDialog });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Project Name *' }), {
+      target: { value: 'Busy project' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Create New Project' });
+    await waitFor(() => expect(screen.getByRole('button', { name: closeProjectDialog }).hasAttribute('disabled')).toBe(true));
+    screen.getByRole('button', { name: 'Background control' }).focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+
+    expect(document.activeElement).toBe(dialog);
+    resolveProject!(project);
   });
 
   it('limits Escape and focus restoration to the topmost nested workspace dialog', () => {
@@ -396,5 +435,17 @@ describe('workspace accessibility contract', () => {
       target: { files: [new File(['pdf'], 'paper.pdf', { type: 'application/pdf' })] },
     });
     expect(screen.getByRole('button', { name: '\u79fb\u9664\u6a94\u6848' })).toBeTruthy();
+  });
+
+  it('names conditional DocumentPreview external-link and Export close icon controls', () => {
+    render(
+      <>
+        <DocumentPreview document={externalPreviewDocument} onClose={() => {}} />
+        <ExportDialog type="conversation" id="conversation-1" name="Conversation" onClose={() => {}} />
+      </>,
+    );
+
+    expect(screen.getByRole('button', { name: '\u5728\u65b0\u5206\u9801\u958b\u555f' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '\u95dc\u9589\u532f\u51fa\u5c0d\u8a71\u6846' })).toBeTruthy();
   });
 });

@@ -75,6 +75,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
       <div
         ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         className="bg-[var(--background)] rounded-lg w-full max-w-md"

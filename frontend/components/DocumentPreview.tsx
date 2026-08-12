@@ -207,6 +207,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
       <div 
         ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         className={`bg-[var(--background)] rounded-lg flex flex-col ${
