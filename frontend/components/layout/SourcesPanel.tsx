@@ -227,7 +227,7 @@ export default function SourcesPanel() {
                     </h3>
                     <p className="text-xs text-[var(--muted-foreground)] mt-1">
                       {doc.status === 'processing' ? 'Processing...' : 
-                       doc.status === 'completed' ? 'Ready' : doc.status}
+                       doc.status === 'ready' ? 'Ready' : doc.status}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">

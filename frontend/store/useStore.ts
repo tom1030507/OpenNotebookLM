@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import api, { Project, Document, Conversation, Message } from '@/lib/api';
+import api from '@/lib/api';
+import type { Conversation, Document, Message, Project } from '@/lib/api';
 
 interface AppState {
   // Projects
@@ -59,18 +60,9 @@ interface AppState {
   reset: () => void;
 }
 
-// Initialize with demo data for development
-const demoProject = {
-  id: 'demo-project-1',
-  name: 'Demo Project',
-  description: 'Welcome to OpenNotebookLM! Upload documents to get started.',
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-};
-
 const initialState = {
-  projects: [demoProject],
-  currentProject: demoProject,
+  projects: [],
+  currentProject: null,
   loadingProjects: false,
   documents: [],
   loadingDocuments: false,
@@ -95,7 +87,29 @@ const useStore = create<AppState>()(
           set({ loadingProjects: true });
           try {
             const projects = await api.getProjects();
-            set({ projects, loadingProjects: false });
+            const previousProject = get().currentProject;
+            const currentProject = projects.find(
+              (project) => project.id === previousProject?.id,
+            ) || projects[0] || null;
+
+            set({
+              projects,
+              currentProject,
+              loadingProjects: false,
+              ...(!currentProject ? {
+                documents: [],
+                conversations: [],
+                currentConversation: null,
+                messages: [],
+              } : {}),
+            });
+
+            if (currentProject) {
+              await Promise.all([
+                get().fetchDocuments(currentProject.id),
+                get().fetchConversations(currentProject.id),
+              ]);
+            }
           } catch (error) {
             console.error('Failed to fetch projects:', error);
             set({ loadingProjects: false });
@@ -147,13 +161,14 @@ const useStore = create<AppState>()(
         
         uploadDocument: async (projectId, file) => {
           const uploadId = `${projectId}-${file.name}-${Date.now()}`;
+          let progressInterval: ReturnType<typeof setInterval> | undefined;
           set((state) => ({
             uploadProgress: { ...state.uploadProgress, [uploadId]: 0 },
           }));
           
           try {
             // Simulate progress updates
-            const progressInterval = setInterval(() => {
+            progressInterval = setInterval(() => {
               set((state) => {
                 const currentProgress = state.uploadProgress[uploadId] || 0;
                 if (currentProgress < 90) {
@@ -169,7 +184,6 @@ const useStore = create<AppState>()(
             }, 200);
             
             const document = await api.uploadDocument(projectId, file);
-            clearInterval(progressInterval);
             
             set((state) => ({
               documents: [...state.documents, document],
@@ -190,6 +204,10 @@ const useStore = create<AppState>()(
               return { uploadProgress: rest };
             });
             throw error;
+          } finally {
+            if (progressInterval) {
+              clearInterval(progressInterval);
+            }
           }
         },
         
@@ -204,8 +222,9 @@ const useStore = create<AppState>()(
         },
         
         deleteDocument: async (projectId, documentId) => {
+          void projectId;
           try {
-            await api.deleteDocument(projectId, documentId);
+            await api.deleteDocument(documentId);
             set((state) => ({
               documents: state.documents.filter(d => d.id !== documentId),
             }));
@@ -277,6 +296,7 @@ const useStore = create<AppState>()(
         
         // Query
         sendQuery: async (query, stream = false) => {
+          void stream;
           const state = get();
           if (!state.currentProject) {
             throw new Error('No project selected');
@@ -292,80 +312,16 @@ const useStore = create<AppState>()(
             conversationId = conversation.id;
           }
           
-          // Add user message
-          const userMessage: Message = {
-            id: `temp-${Date.now()}`,
-            conversation_id: conversationId,
-            role: 'user',
-            content: query,
-            created_at: new Date().toISOString(),
-          };
-          
-          set((state) => ({ messages: [...state.messages, userMessage] }));
-          
-          if (stream) {
-            // Streaming response
-            const assistantMessage: Message = {
-              id: `temp-${Date.now() + 1}`,
+          try {
+            await api.query({
+              project_id: state.currentProject.id,
+              query,
               conversation_id: conversationId,
-              role: 'assistant',
-              content: '',
-              created_at: new Date().toISOString(),
-            };
-            
-            set((state) => ({ messages: [...state.messages, assistantMessage] }));
-            
-            let fullContent = '';
-            await api.streamQuery(
-              {
-                project_id: state.currentProject!.id,
-                query,
-                conversation_id: conversationId,
-                stream: true,
-              },
-              (chunk) => {
-                fullContent += chunk;
-                set((state) => ({
-                  messages: state.messages.map(msg =>
-                    msg.id === assistantMessage.id
-                      ? { ...msg, content: fullContent }
-                      : msg
-                  ),
-                }));
-              },
-              () => {
-                // Refresh messages to get server-side IDs
-                get().fetchMessages(conversationId!);
-              },
-              (error) => {
-                console.error('Stream query failed:', error);
-              }
-            );
-          } else {
-            // Non-streaming response
-            try {
-              const response = await api.query({
-                project_id: state.currentProject.id,
-                query,
-                conversation_id: conversationId,
-              });
-              
-              const assistantMessage: Message = {
-                id: `temp-${Date.now() + 1}`,
-                conversation_id: conversationId,
-                role: 'assistant',
-                content: response.answer,
-                created_at: new Date().toISOString(),
-              };
-              
-              set((state) => ({ messages: [...state.messages, assistantMessage] }));
-              
-              // Refresh messages to get server-side IDs
-              await get().fetchMessages(conversationId);
-            } catch (error) {
-              console.error('Query failed:', error);
-              throw error;
-            }
+            });
+            await get().fetchMessages(conversationId);
+          } catch (error) {
+            console.error('Query failed:', error);
+            throw error;
           }
         },
         

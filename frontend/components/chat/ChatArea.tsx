@@ -62,7 +62,7 @@ export default function ChatArea() {
     setIsStreaming(true);
     
     try {
-      await sendQuery(query, true); // Use streaming
+      await sendQuery(query);
     } catch (error) {
       console.error('Failed to send query:', error);
     } finally {
@@ -81,7 +81,7 @@ export default function ChatArea() {
   };
   
   // Check if ready to chat
-  const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'completed');
+  const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'ready');
   const canChat = currentProject && hasDocuments;
 
   return (
@@ -231,7 +231,7 @@ export default function ChatArea() {
               
               {inputValue && hasDocuments && (
                 <span className="absolute right-3 bottom-2 text-xs text-[var(--muted-foreground)]">
-                  {documents.filter(d => d.status === 'completed').length} sources
+                  {documents.filter(d => d.status === 'ready').length} sources
                 </span>
               )}
             </div>
