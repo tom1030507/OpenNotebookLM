@@ -280,6 +280,7 @@ export default function SourcesPanel({
               <h3 className="text-lg font-semibold">Add Sources</h3>
               <button
                 onClick={() => onAddSourcesOpenChange(false)}
+                aria-label="關閉新增來源"
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"
               >
                 <X className="w-5 h-5" />
