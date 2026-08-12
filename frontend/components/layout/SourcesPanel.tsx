@@ -113,7 +113,7 @@ export default function SourcesPanel() {
   );
 
   return (
-    <aside className="w-80 border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full">
+    <aside className="flex h-full w-full flex-col border-r border-[var(--border)] bg-[var(--sidebar-bg)] lg:w-64 xl:w-80">
       {/* Header */}
       <div className="p-4 border-b border-[var(--sidebar-border)]">
         <h2 className="text-base font-medium mb-3">Sources</h2>

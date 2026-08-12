@@ -5,6 +5,7 @@ import SourcesPanel from '@/components/layout/SourcesPanel';
 import ChatArea from '@/components/chat/ChatArea';
 import StudioPanel from '@/components/layout/StudioPanel';
 import ConversationList from '@/components/ConversationList';
+import ResponsiveLayout from '@/components/ResponsiveLayout';
 
 export default function Home() {
   return (
@@ -13,19 +14,13 @@ export default function Home() {
       <TopNav />
       
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - Sources */}
-        <SourcesPanel />
-        
-        {/* Center - Chat Area */}
+      <ResponsiveLayout
+        sidebar={<SourcesPanel />}
+        conversationPanel={<ConversationList />}
+        rightPanel={<StudioPanel />}
+      >
         <ChatArea />
-        
-        {/* Conversation List */}
-        <ConversationList />
-        
-        {/* Right Sidebar - Studio */}
-        <StudioPanel />
-      </div>
+      </ResponsiveLayout>
     </div>
   );
 }

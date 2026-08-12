@@ -1,136 +1,109 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Menu, X } from 'lucide-react';
-import { useIsMobile, useIsTablet } from '@/hooks/useMediaQuery';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useReducer } from 'react';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import {
+  getResponsiveLayoutContract,
+  reduceWorkspacePanel,
+  type WorkspacePanelId,
+} from './responsiveLayoutContract';
 
 interface ResponsiveLayoutProps {
   children: React.ReactNode;
   sidebar?: React.ReactNode;
+  conversationPanel?: React.ReactNode;
   rightPanel?: React.ReactNode;
 }
 
-export default function ResponsiveLayout({ 
-  children, 
-  sidebar, 
-  rightPanel 
+export default function ResponsiveLayout({
+  children,
+  sidebar,
+  conversationPanel,
+  rightPanel,
 }: ResponsiveLayoutProps) {
-  const isMobile = useIsMobile();
-  const isTablet = useIsTablet();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const isCompact = useMediaQuery('(max-width: 1023px)');
+  const [activePanel, dispatch] = useReducer(reduceWorkspacePanel, null);
+  const layout = getResponsiveLayoutContract(!isCompact, activePanel);
+  const panels: Record<WorkspacePanelId, React.ReactNode> = {
+    sources: sidebar,
+    conversations: conversationPanel,
+    studio: rightPanel,
+  };
 
-  // Close sidebars when switching to desktop
   useEffect(() => {
-    if (!isMobile && !isTablet) {
-      setSidebarOpen(false);
-      setRightPanelOpen(false);
+    if (!isCompact && activePanel) {
+      dispatch({ type: 'dismiss' });
     }
-  }, [isMobile, isTablet]);
+  }, [activePanel, isCompact]);
 
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-    if (rightPanelOpen) setRightPanelOpen(false);
-  };
+  useEffect(() => {
+    if (!activePanel) return;
 
-  const toggleRightPanel = () => {
-    setRightPanelOpen(!rightPanelOpen);
-    if (sidebarOpen) setSidebarOpen(false);
-  };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        dispatch({ type: 'dismiss' });
+      }
+    };
+
+    window.addEventListener('keydown', dismissOnEscape);
+    return () => window.removeEventListener('keydown', dismissOnEscape);
+  }, [activePanel]);
 
   return (
-    <div className="relative h-full flex">
-      {/* Mobile Menu Button */}
-      {(isMobile || isTablet) && (
-        <button
-          onClick={toggleSidebar}
-          className="fixed top-4 left-4 z-50 p-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg lg:hidden"
-        >
-          {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-      )}
+    <div className="relative flex min-w-0 flex-1 overflow-hidden">
+      <div className="absolute left-3 top-3 z-30 flex gap-2 lg:hidden">
+        {layout.drawerControls.map(({ id, label }) => {
+          const isOpen = layout.drawerPanelId === id;
 
-      {/* Overlay for mobile */}
-      <AnimatePresence>
-        {(isMobile || isTablet) && (sidebarOpen || rightPanelOpen) && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-            onClick={() => {
-              setSidebarOpen(false);
-              setRightPanelOpen(false);
-            }}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar */}
-      {sidebar && (
-        <>
-          {/* Desktop Sidebar */}
-          <div className="hidden lg:block w-80 border-r border-[var(--border)]">
-            {sidebar}
-          </div>
-
-          {/* Mobile/Tablet Sidebar */}
-          <AnimatePresence>
-            {(isMobile || isTablet) && sidebarOpen && (
-              <motion.div
-                initial={{ x: '-100%' }}
-                animate={{ x: 0 }}
-                exit={{ x: '-100%' }}
-                transition={{ type: 'tween', duration: 0.3 }}
-                className="fixed left-0 top-0 h-full w-80 bg-[var(--background)] z-50 lg:hidden"
-              >
-                {sidebar}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </>
-      )}
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {children}
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => dispatch({ type: 'toggle', panel: id })}
+              aria-pressed={isOpen}
+              aria-label={isOpen ? `關閉${label}面板` : `開啟${label}面板`}
+              className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Right Panel */}
-      {rightPanel && (
+      {layout.drawerPanelId && (
         <>
-          {/* Desktop Right Panel */}
-          <div className="hidden lg:block w-72 border-l border-[var(--border)]">
-            {rightPanel}
-          </div>
-
-          {/* Mobile/Tablet Right Panel Button */}
-          {(isMobile || isTablet) && (
-            <button
-              onClick={toggleRightPanel}
-              className="fixed top-4 right-4 z-50 p-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg lg:hidden"
-            >
-              {rightPanelOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
-          )}
-
-          {/* Mobile/Tablet Right Panel */}
-          <AnimatePresence>
-            {(isMobile || isTablet) && rightPanelOpen && (
-              <motion.div
-                initial={{ x: '100%' }}
-                animate={{ x: 0 }}
-                exit={{ x: '100%' }}
-                transition={{ type: 'tween', duration: 0.3 }}
-                className="fixed right-0 top-0 h-full w-72 bg-[var(--background)] z-50 lg:hidden"
-              >
-                {rightPanel}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <button
+            type="button"
+            aria-label="關閉面板"
+            className="absolute inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={() => dispatch({ type: 'dismiss' })}
+          />
+          <aside
+            className={`absolute inset-y-0 z-50 overflow-hidden bg-[var(--background)] shadow-xl lg:hidden ${
+              layout.drawerPanelId === 'studio' ? 'right-0' : 'left-0'
+            }`}
+            style={{ width: layout.drawerWidth }}
+          >
+            {panels[layout.drawerPanelId]}
+          </aside>
         </>
       )}
+
+      {layout.contentOrder.map((item) => {
+        if (item === 'main') {
+          return (
+            <main key={item} className="flex min-w-0 flex-1 flex-col">
+              {children}
+            </main>
+          );
+        }
+
+        return (
+          <div key={item} className="hidden shrink-0 lg:block">
+            {panels[item]}
+          </div>
+        );
+      })}
     </div>
   );
 }

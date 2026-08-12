@@ -187,12 +187,12 @@ export default function ChatArea() {
       {/* Input Area */}
       <div className="border-t border-[var(--border)] bg-[var(--card)] p-4">
         <div className="max-w-3xl mx-auto">
-          <div className="flex items-end gap-3">
+          <div className="flex min-w-0 items-end gap-3">
             <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base">
               <Paperclip className="w-5 h-5" />
             </button>
             
-            <div className="flex-1 relative">
+            <div className="relative min-w-0 flex-1">
               <textarea
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
