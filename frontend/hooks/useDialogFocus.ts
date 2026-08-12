@@ -15,8 +15,13 @@ const focusableSelector = [
   'input',
   'select',
   'textarea',
+  'iframe',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
+
+const isRadio = (element: HTMLElement): element is HTMLInputElement => (
+  element instanceof HTMLInputElement && element.type === 'radio'
+);
 
 const isVisible = (element: HTMLElement) => {
   for (let current: HTMLElement | null = element; current; current = current.parentElement) {
@@ -29,9 +34,23 @@ const isVisible = (element: HTMLElement) => {
   return true;
 };
 
-const getTabbableElements = (dialog: HTMLElement) => Array
-  .from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
-  .filter((element) => !element.matches(':disabled') && isVisible(element));
+export const getTabbableElements = (dialog: HTMLElement) => {
+  const candidates = Array
+    .from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+    .filter((element) => !element.matches(':disabled') && isVisible(element));
+
+  // A radio group occupies a single tab stop: the checked radio, or the first
+  // one when the group has no selection yet.
+  return candidates.filter((element) => {
+    if (!isRadio(element)) return true;
+
+    const group = candidates.filter((candidate) => (
+      isRadio(candidate) && candidate.name === element.name
+    )) as HTMLInputElement[];
+
+    return (group.find((radio) => radio.checked) ?? group[0]) === element;
+  });
+};
 
 export default function useDialogFocus({
   isOpen,

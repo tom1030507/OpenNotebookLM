@@ -4,15 +4,22 @@ import React, { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ChatArea from './chat/ChatArea';
+import ConversationList from './ConversationList';
 import DocumentPreview from './DocumentPreview';
 import ExportDialog from './ExportDialog';
 import FileUpload from './FileUpload';
+import MarkdownRenderer from './MarkdownRenderer';
 import TopNav from './layout/TopNav';
 import SourcesPanel from './layout/SourcesPanel';
 import ProjectDialog from './ProjectDialog';
 import Settings from './Settings';
 import useStore from '@/store/useStore';
-import type { Document, Project } from '@/lib/api';
+import LoginPage from '@/app/login/page';
+import type { Conversation, Document, Project } from '@/lib/api';
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 const workspaceIconButtonNames = [
   '\u901a\u77e5',
@@ -53,12 +60,21 @@ const externalPreviewDocument: Document = {
   type: 'url',
   url: 'https://example.com',
 };
+const conversation: Conversation = {
+  id: 'conversation-1',
+  project_id: project.id,
+  title: 'Accessibility Conversation',
+  created_at: '2026-08-12T00:00:00Z',
+  updated_at: '2026-08-12T00:00:00Z',
+  message_count: 1,
+};
 
 afterEach(() => {
   cleanup();
   useStore.setState(initialStoreState, true);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function ProjectDialogHarness() {
@@ -200,6 +216,20 @@ describe('workspace accessibility contract', () => {
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy();
   });
 
+  it('blocks the settings cancel action while saving', () => {
+    render(<SettingsHarness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    expect(cancelButton.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.click(cancelButton);
+
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy();
+  });
+
   it('traps Tab and Shift+Tab between the first and last enabled controls in a dialog', () => {
     render(<ProjectDialogHarness />);
 
@@ -269,6 +299,31 @@ describe('workspace accessibility contract', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
     expect(document.activeElement).toBe(settingsTrigger);
+  });
+
+  it('hands the Tab trap to the nested dialog and back to the outer dialog on close', () => {
+    render(<TopNav />);
+
+    fireEvent.click(screen.getByRole('button', { name: '設定' }));
+    const settingsClose = screen.getByRole('button', { name: '關閉設定對話框' });
+
+    fireEvent.click(screen.getByRole('button', { name: '新增專案' }));
+    const projectDialog = screen.getByRole('dialog', { name: 'Create New Project' });
+
+    // Focus parked on an outer-dialog control must be pulled back into the nested dialog.
+    settingsClose.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(projectDialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const settingsDialog = screen.getByRole('dialog', { name: 'Settings' });
+
+    // With the nested dialog gone, the outer dialog owns the trap again.
+    screen.getByRole('button', { name: 'Save Changes' }).focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+
+    expect(settingsDialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'General' }));
   });
 
   it('uses distinct heading ids for every Project, DocumentPreview, Export, and Settings instance', () => {
@@ -359,6 +414,43 @@ describe('workspace accessibility contract', () => {
     });
   });
 
+  it('restores focus to the real sources trigger that opens the document preview', () => {
+    configureSourcesStore([previewDocument]);
+    render(<SourcesPanel />);
+
+    const previewTrigger = screen.getByRole('button', { name: '預覽文件' });
+    previewTrigger.focus();
+    fireEvent.click(previewTrigger);
+
+    expect(screen.getByRole('dialog', { name: 'Accessibility Notes' })).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: 'Accessibility Notes' })).toBeNull();
+    expect(document.activeElement).toBe(previewTrigger);
+  });
+
+  it('restores focus to the real top navigation trigger that opens the export dialog', () => {
+    useStore.setState({
+      currentProject: project,
+      projects: [project],
+      currentConversation: conversation,
+      conversations: [conversation],
+    });
+    render(<TopNav />);
+
+    const exportTrigger = screen.getByRole('button', { name: '匯出內容' });
+    exportTrigger.focus();
+    fireEvent.click(exportTrigger);
+
+    expect(screen.getByRole('dialog', { name: 'Export Conversation' })).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: 'Export Conversation' })).toBeNull();
+    expect(document.activeElement).toBe(exportTrigger);
+  });
+
   it('restores sources upload state after a successful real URL upload so reopening is dismissible', async () => {
     const fetchResponse = (body: unknown) => new Response(JSON.stringify(body), {
       status: 200,
@@ -414,6 +506,36 @@ describe('workspace accessibility contract', () => {
     await waitFor(() => expect(document.activeElement).toBe(closeButton));
   });
 
+  it('reports the upload busy state before delegating to the parent upload handler', async () => {
+    const events: string[] = [];
+    let resolveUpload: () => void;
+    const inFlight = new Promise<void>((resolve) => {
+      resolveUpload = resolve;
+    });
+
+    render(
+      <FileUpload
+        onUpload={async () => {
+          events.push('onUpload');
+          await inFlight;
+        }}
+        onUploadingChange={(isUploading) => events.push(`busy:${isUploading}`)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'URL' }));
+    fireEvent.change(screen.getByPlaceholderText('Enter website URL...'), {
+      target: { value: 'https://example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    expect(events).toEqual(['busy:true', 'onUpload']);
+
+    resolveUpload!();
+
+    await waitFor(() => expect(events).toEqual(['busy:true', 'onUpload', 'busy:false']));
+  });
+
   it('covers the accessible names of every active icon control added to the workspace', () => {
     configureSourcesStore([previewDocument]);
     render(
@@ -435,6 +557,59 @@ describe('workspace accessibility contract', () => {
       target: { files: [new File(['pdf'], 'paper.pdf', { type: 'application/pdf' })] },
     });
     expect(screen.getByRole('button', { name: '\u79fb\u9664\u6a94\u6848' })).toBeTruthy();
+  });
+
+  it('names the conversation list icon controls, including the rename lifecycle', () => {
+    useStore.setState({
+      currentProject: project,
+      projects: [project],
+      conversations: [conversation],
+    });
+    render(<ConversationList />);
+
+    [
+      '摺疊對話清單',
+      '新增對話',
+      '重新命名對話',
+      '刪除對話',
+    ].forEach((name) => expect(screen.getByRole('button', { name })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: '摺疊對話清單' }));
+    expect(screen.getByRole('button', { name: '展開對話清單' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '展開對話清單' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新命名對話' }));
+
+    expect(screen.getByRole('button', { name: '儲存對話名稱' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '取消重新命名' })).toBeTruthy();
+  });
+
+  it('names the markdown code copy control', () => {
+    render(<MarkdownRenderer content={'```ts\nconst answer = 42;\n```'} />);
+
+    expect(screen.getByRole('button', { name: '複製程式碼' })).toBeTruthy();
+  });
+
+  it('names the login password visibility control in both states', () => {
+    render(<LoginPage />);
+
+    const reveal = screen.getByRole('button', { name: '顯示密碼' });
+    fireEvent.click(reveal);
+
+    expect(screen.getByRole('button', { name: '隱藏密碼' })).toBeTruthy();
+  });
+
+  it('keeps the document preview frame inside the dialog tab cycle', () => {
+    render(<DocumentPreview document={externalPreviewDocument} onClose={() => {}} />);
+
+    const dialog = screen.getByRole('dialog', { name: 'External Accessibility Notes' });
+    const frame = dialog.querySelector('iframe');
+    const copyButton = screen.getByRole('button', { name: '複製內容' });
+
+    copyButton.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+
+    expect(document.activeElement).toBe(frame);
   });
 
   it('names conditional DocumentPreview external-link and Export close icon controls', () => {

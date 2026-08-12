@@ -356,7 +356,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
           <div className="flex justify-end gap-3 p-6 border-t border-[var(--border)]">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
+              disabled={isSaving}
+              className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-50"
             >
               Cancel
             </button>

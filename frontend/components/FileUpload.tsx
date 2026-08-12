@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Upload, X, File, Link, Youtube, FileText, Loader2 } from 'lucide-react';
 import { getUploadFileError } from '@/lib/uploadValidation';
 
@@ -26,9 +26,20 @@ export default function FileUpload({
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
-  useEffect(() => {
-    onUploadingChange?.(isUploading);
-  }, [isUploading, onUploadingChange]);
+  // Report the transition synchronously: an effect would leave the parent
+  // dismissible for the whole first pass of the upload it delegated.
+  const onUploadingChangeRef = useRef(onUploadingChange);
+  onUploadingChangeRef.current = onUploadingChange;
+
+  const beginUpload = useCallback(() => {
+    setIsUploading(true);
+    onUploadingChangeRef.current?.(true);
+  }, []);
+
+  const endUpload = useCallback(() => {
+    setIsUploading(false);
+    onUploadingChangeRef.current?.(false);
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -100,14 +111,14 @@ export default function FileUpload({
     }
 
     try {
-      setIsUploading(true);
+      beginUpload();
       await onUpload([urlInput]);
       setUrlInput('');
       setErrors([]);
     } catch {
       setErrors(['Upload failed. Please check the URL and try again.']);
     } finally {
-      setIsUploading(false);
+      endUpload();
     }
   };
 
@@ -117,7 +128,7 @@ export default function FileUpload({
       return;
     }
 
-    setIsUploading(true);
+    beginUpload();
     try {
       if (uploadType === 'file' && files.length > 0) {
         await onUpload(files);
@@ -130,7 +141,7 @@ export default function FileUpload({
     } catch {
       setErrors(['Upload failed. Please try again.']);
     } finally {
-      setIsUploading(false);
+      endUpload();
     }
   };
 
