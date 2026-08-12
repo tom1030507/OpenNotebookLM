@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   FileText, 
   Settings as SettingsIcon,
@@ -18,6 +18,7 @@ import ExportDialog from '../ExportDialog';
 import ProjectDialog from '../ProjectDialog';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
+import { applyTheme, resolveInitialTheme, THEME_STORAGE_KEY, type Theme } from '@/lib/theme';
 
 interface TopNavProps {
   notebookTitle?: string;
@@ -28,9 +29,37 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [theme, setTheme] = useState<Theme>('light');
   
   const { currentProject, currentConversation } = useStore();
+
+  useEffect(() => {
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    let storedTheme: string | null = null;
+
+    try {
+      storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    } catch {
+      // Theme selection still follows the system preference when storage is unavailable.
+    }
+
+    const initialTheme = resolveInitialTheme(storedTheme, systemPrefersDark);
+    applyTheme(initialTheme, document.documentElement);
+    setTheme(initialTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme: Theme = theme === 'dark' ? 'light' : 'dark';
+
+    applyTheme(nextTheme, document.documentElement);
+    setTheme(nextTheme);
+
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    } catch {
+      // The current-session choice still applies if persistence is unavailable.
+    }
+  };
   
   return (
     <>
@@ -81,11 +110,11 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           
           {/* Theme Toggle */}
           <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
+            onClick={toggleTheme}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            aria-label="Toggle theme"
+            aria-label="切換主題"
           >
-            {isDarkMode ? (
+            {theme === 'dark' ? (
               <Sun className="w-4 h-4" />
             ) : (
               <Moon className="w-4 h-4" />
