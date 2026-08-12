@@ -69,6 +69,7 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
           <button
             onClick={handleClose}
             aria-label={'\u95DC\u9589\u5EFA\u7ACB\u5C08\u6848\u5C0D\u8A71\u6846'}
+            disabled={isCreating}
             className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
           >
             <X className="w-5 h-5" />

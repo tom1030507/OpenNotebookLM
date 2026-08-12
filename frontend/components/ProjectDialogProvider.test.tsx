@@ -32,6 +32,17 @@ const createdProject: Project = {
   conversation_count: 0,
 };
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, reject, resolve };
+};
+
 let consoleError: ReturnType<typeof vi.spyOn>;
 
 const renderProjectCreationTriggers = () => render(
@@ -124,5 +135,59 @@ describe('ProjectDialogProvider', () => {
     await user.click(screen.getByRole('button', { name: 'New Project' }));
 
     expect(screen.queryByText('伺服器暫時無法建立專案')).toBeNull();
+  });
+
+  it('keeps the dialog open when its close control is pressed during a pending successful creation', async () => {
+    const user = userEvent.setup();
+    const creation = deferred<Project>();
+    apiMock.createProject.mockReturnValue(creation.promise);
+    renderProjectCreationTriggers();
+
+    await user.click(screen.getByTitle('New Project'));
+    await user.type(screen.getByRole('textbox', { name: /專案名稱/ }), createdProject.name);
+    await user.click(screen.getByRole('button', { name: '建立專案' }));
+
+    const closeButton = screen.getByRole('button', {
+      name: '關閉建立專案對話框',
+    }) as HTMLButtonElement;
+    const cancelButton = screen.getByRole('button', { name: '取消' }) as HTMLButtonElement;
+
+    expect(closeButton.disabled).toBe(true);
+    expect(cancelButton.disabled).toBe(true);
+    await user.click(closeButton);
+    expect(screen.getByRole('dialog', { name: '建立新專案' })).not.toBeNull();
+
+    creation.resolve(createdProject);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '建立新專案' })).toBeNull();
+    });
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(createdProject.id);
+  });
+
+  it('keeps an API error in the pending creation dialog until the request fails', async () => {
+    const user = userEvent.setup();
+    const creation = deferred<Project>();
+    apiMock.createProject.mockReturnValue(creation.promise);
+    renderProjectCreationTriggers();
+
+    await user.click(screen.getByTitle('New Project'));
+    await user.type(screen.getByRole('textbox', { name: /專案名稱/ }), createdProject.name);
+    await user.click(screen.getByRole('button', { name: '建立專案' }));
+
+    const closeButton = screen.getByRole('button', {
+      name: '關閉建立專案對話框',
+    }) as HTMLButtonElement;
+    expect(closeButton.disabled).toBe(true);
+    await user.click(closeButton);
+    expect(screen.getByRole('dialog', { name: '建立新專案' })).not.toBeNull();
+
+    creation.reject(new Error('伺服器暫時無法建立專案'));
+
+    expect(await screen.findByText('伺服器暫時無法建立專案')).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: '建立新專案' })).not.toBeNull();
+    expect((screen.getByRole('button', {
+      name: '關閉建立專案對話框',
+    }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
