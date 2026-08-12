@@ -124,32 +124,37 @@ export default function SourcesPanel({
 
   return (
     <aside
-      aria-label="Sources"
+      aria-label="來源"
       data-panel-state={isCollapsed ? 'collapsed' : 'expanded'}
-      className="w-full min-w-0 overflow-hidden border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full"
+      className="relative w-full min-w-0 overflow-hidden border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full"
     >
-      {/* Header */}
-      <div className={`${isCollapsed ? 'p-2' : 'p-4'} border-b border-[var(--sidebar-border)]`}>
-        <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between mb-3'}`}>
-          {!isCollapsed && <h2 className="text-base font-medium">Sources</h2>}
-          <button
-            type="button"
-            onClick={() => onCollapsedChange?.(!isCollapsed)}
-            aria-controls="sources-panel-content"
-            aria-expanded={!isCollapsed}
-            aria-label={isCollapsed ? '展開來源' : '收合來源'}
-            title={isCollapsed ? '展開來源' : '收合來源'}
-            className="p-1.5 hover:bg-[var(--card)] rounded-lg transition-base"
-          >
-            {isCollapsed ? (
-              <PanelLeftOpen className="w-4 h-4" />
-            ) : (
-              <PanelLeftClose className="w-4 h-4" />
-            )}
-          </button>
-        </div>
+      <button
+        type="button"
+        onClick={() => onCollapsedChange?.(!isCollapsed)}
+        aria-controls="sources-panel-content"
+        aria-expanded={!isCollapsed}
+        aria-label={isCollapsed ? '展開來源' : '收合來源'}
+        title={isCollapsed ? '展開來源' : '收合來源'}
+        className="absolute top-2 right-2 z-10 p-1.5 hover:bg-[var(--card)] rounded-lg transition-base"
+      >
+        {isCollapsed ? (
+          <PanelLeftOpen className="w-4 h-4" />
+        ) : (
+          <PanelLeftClose className="w-4 h-4" />
+        )}
+      </button>
 
-        <div hidden={isCollapsed}>
+      <div
+        id="sources-panel-content"
+        role="region"
+        aria-label="來源面板內容"
+        hidden={isCollapsed}
+        className="min-h-0 flex-1 flex flex-col"
+      >
+        {/* Header */}
+        <div className="p-4 border-b border-[var(--sidebar-border)]">
+          <h2 className="pr-10 text-base font-medium mb-3">來源</h2>
+
           {/* Project Selector */}
           <div className="space-y-2 mb-3">
             <select
@@ -168,18 +173,18 @@ export default function SourcesPanel({
               ))}
             </select>
           
-          <button
-            onClick={handleCreateProject}
-            disabled={creatingProject}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
-          >
-            {creatingProject ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <FolderOpen className="w-4 h-4" />
-            )}
-            <span className="text-sm">New Project</span>
-          </button>
+            <button
+              onClick={handleCreateProject}
+              disabled={creatingProject}
+              className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
+            >
+              {creatingProject ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FolderOpen className="w-4 h-4" />
+              )}
+              <span className="text-sm">New Project</span>
+            </button>
           </div>
         
           {/* Add Source Button */}
@@ -199,7 +204,8 @@ export default function SourcesPanel({
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
               <input
                 type="text"
-                placeholder="Search sources"
+                aria-label="搜尋來源"
+                placeholder="搜尋來源"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
@@ -207,89 +213,85 @@ export default function SourcesPanel({
             </div>
           )}
         </div>
-      </div>
 
-      {/* Sources List */}
-      <div
-        id="sources-panel-content"
-        hidden={isCollapsed}
-        className="flex-1 overflow-y-auto p-4"
-      >
-        {!currentProject ? (
-          <div className="text-center py-8">
-            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
-              <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
-            </div>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              Select or create a project to get started
-            </p>
-          </div>
-        ) : loadingDocuments ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
-          </div>
-        ) : filteredDocuments.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
-              <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
-            </div>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              {searchQuery ? 'No sources found' : 'No sources yet'}
-            </p>
-            {!searchQuery && (
-              <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
+        {/* Sources List */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {!currentProject ? (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
+                <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
+              </div>
+              <p className="text-sm text-[var(--muted-foreground)]">
+                Select or create a project to get started
               </p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredDocuments.map((doc) => (
-              <div
-                key={doc.id}
-                className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
-                onClick={() => setPreviewDocument(doc)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-[var(--muted)] rounded">
-                    {getSourceIcon(doc.type)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium truncate">
-                      {doc.name}
-                    </h3>
-                    <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                      {doc.status === 'processing' ? 'Processing...' : 
-                       doc.status === 'ready' ? 'Ready' : doc.status}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPreviewDocument(doc);
-                      }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Preview"
-                    >
-                      <Eye className="w-3 h-3" />
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteDocument(doc.id);
-                      }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Delete"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+            </div>
+          ) : loadingDocuments ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
+            </div>
+          ) : filteredDocuments.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
+                <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
+              </div>
+              <p className="text-sm text-[var(--muted-foreground)]">
+                {searchQuery ? 'No sources found' : 'No sources yet'}
+              </p>
+              {!searchQuery && (
+                <p className="text-xs text-[var(--muted-foreground)] mt-2">
+                  Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredDocuments.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
+                  onClick={() => setPreviewDocument(doc)}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-[var(--muted)] rounded">
+                      {getSourceIcon(doc.type)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-medium truncate">
+                        {doc.name}
+                      </h3>
+                      <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                        {doc.status === 'processing' ? 'Processing...' :
+                         doc.status === 'ready' ? 'Ready' : doc.status}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewDocument(doc);
+                        }}
+                        className="p-1 hover:bg-[var(--muted)] rounded"
+                        title="Preview"
+                      >
+                        <Eye className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDocument(doc.id);
+                        }}
+                        className="p-1 hover:bg-[var(--muted)] rounded"
+                        title="Delete"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Upload Modal */}

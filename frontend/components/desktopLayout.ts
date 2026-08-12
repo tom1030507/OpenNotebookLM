@@ -20,11 +20,6 @@ export interface DesktopWorkspaceMetrics {
   total: number;
 }
 
-export interface WelcomeHeroMetrics {
-  contentWidth: number;
-  titleSize: number;
-}
-
 interface FluidTrack {
   min: number;
   preferredViewportRatio: number;
@@ -38,9 +33,9 @@ const SOURCES_TRACK: FluidTrack = {
   max: 272,
 };
 const CONVERSATIONS_TRACK: FluidTrack = {
-  min: 144,
-  preferredViewportRatio: 0.11,
-  max: 192,
+  min: 184,
+  preferredViewportRatio: 0.13,
+  max: 224,
 };
 const STUDIO_TRACK: FluidTrack = {
   min: 192,
@@ -121,20 +116,40 @@ export function getDesktopWorkspaceStyle(
   };
 }
 
-export function resolveWelcomeHeroMetrics(
-  centerWidth: number,
-): WelcomeHeroMetrics {
-  const horizontalPadding = clamp(centerWidth * 0.06, 20, 64);
+export const chatWorkspaceStyle: CSSProperties = {
+  containerName: 'chat-workspace',
+  containerType: 'inline-size',
+};
 
-  return {
-    contentWidth: Math.min(960, Math.max(0, centerWidth - horizontalPadding * 2)),
-    titleSize: clamp(centerWidth * 0.03, 28, 44),
-  };
-}
-
-export function getWelcomeHeroStyle(): CSSProperties {
-  return {
+export const welcomeHeroStyles: Record<
+  'frame' | 'content' | 'icon' | 'glyph' | 'title' | 'actions' | 'card',
+  CSSProperties
+> = {
+  frame: {
+    paddingInline: 'clamp(1.25rem, 6cqw, 4rem)',
+  },
+  content: {
     width: '100%',
     maxWidth: '60rem',
-  };
-}
+  },
+  icon: {
+    width: 'clamp(4rem, 10cqw, 5.5rem)',
+    height: 'clamp(4rem, 10cqw, 5.5rem)',
+    marginBottom: 'clamp(1.5rem, 5cqw, 2.25rem)',
+  },
+  glyph: {
+    width: 'clamp(2rem, 5cqw, 2.75rem)',
+    height: 'clamp(2rem, 5cqw, 2.75rem)',
+  },
+  title: {
+    fontSize: 'clamp(1.75rem, 5cqw, 2.75rem)',
+  },
+  actions: {
+    marginTop: 'clamp(2.5rem, 8cqw, 4rem)',
+    gap: 'clamp(1rem, 3cqw, 1.5rem)',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 15rem), 1fr))',
+  },
+  card: {
+    padding: 'clamp(1rem, 3cqw, 1.5rem)',
+  },
+};

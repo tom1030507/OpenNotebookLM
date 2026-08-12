@@ -1,95 +1,243 @@
+// @vitest-environment jsdom
+
 import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, test } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import Home from '@/app/page';
-import SourcesPanel from '@/components/layout/SourcesPanel';
-import StudioPanel from '@/components/layout/StudioPanel';
 import {
   desktopWorkspaceReducer,
   getDesktopWorkspaceStyle,
-  getWelcomeHeroStyle,
   initialDesktopWorkspaceState,
   resolveDesktopWorkspaceMetrics,
-  resolveWelcomeHeroMetrics,
 } from '@/components/desktopLayout';
+import type { Conversation, Document, Project } from '@/lib/api';
+import useStore from '@/store/useStore';
+
+const originalStoreState = useStore.getState();
+const project: Project = {
+  id: 'project-1',
+  name: '版面測試專案',
+  description: null,
+  meta_json: {},
+  created_at: '2026-08-12T00:00:00Z',
+  updated_at: '2026-08-12T00:00:00Z',
+  document_count: 2,
+  conversation_count: 1,
+};
+const documents: Document[] = [
+  {
+    id: 'document-1',
+    name: '第一份資料',
+    type: 'text',
+    content: '第一份內容',
+    meta: {},
+    status: 'ready',
+    created_at: '2026-08-12T00:00:00Z',
+    updated_at: '2026-08-12T00:00:00Z',
+    chunk_count: 1,
+  },
+  {
+    id: 'document-2',
+    name: '第二份資料',
+    type: 'text',
+    content: '第二份內容',
+    meta: {},
+    status: 'ready',
+    created_at: '2026-08-12T00:00:00Z',
+    updated_at: '2026-08-12T00:00:00Z',
+    chunk_count: 1,
+  },
+];
+const conversation: Conversation = {
+  id: 'conversation-1',
+  project_id: project.id,
+  title: '版面測試對話',
+  created_at: '2026-08-12T00:00:00Z',
+  updated_at: '2026-08-12T00:00:00Z',
+  message_count: 0,
+};
+
+function configureWorkspaceStore() {
+  useStore.setState({
+    ...originalStoreState,
+    projects: [project],
+    currentProject: project,
+    loadingProjects: false,
+    documents,
+    loadingDocuments: false,
+    uploadProgress: {},
+    conversations: [conversation],
+    currentConversation: conversation,
+    messages: [],
+    loadingConversations: false,
+    loadingMessages: false,
+    fetchProjects: vi.fn(async () => undefined),
+    selectProject: vi.fn(),
+    createProject: vi.fn(async () => project),
+    deleteProject: vi.fn(async () => undefined),
+    fetchDocuments: vi.fn(async () => undefined),
+    uploadDocument: vi.fn(async () => undefined),
+    createDocument: vi.fn(async () => undefined),
+    deleteDocument: vi.fn(async () => undefined),
+    fetchConversations: vi.fn(async () => undefined),
+    selectConversation: vi.fn(async () => undefined),
+    createConversation: vi.fn(async () => conversation),
+    updateConversation: vi.fn(async () => undefined),
+    deleteConversation: vi.fn(async () => undefined),
+    fetchMessages: vi.fn(async () => undefined),
+    sendQuery: vi.fn(async () => undefined),
+    toggleSidebar: vi.fn(),
+    toggleStudio: vi.fn(),
+    reset: vi.fn(),
+  }, true);
+}
+
+beforeEach(() => {
+  configureWorkspaceStore();
+});
+
+afterEach(() => {
+  cleanup();
+  useStore.setState(originalStoreState, true);
+  vi.restoreAllMocks();
+});
 
 describe('desktop workspace layout', () => {
-  test.each([1024, 1440, 1920])(
-    'keeps the center dominant without horizontal overflow at %ipx',
-    (viewportWidth) => {
+  test.each([
+    [1024, 192, 456, 184, 192],
+    [1440, 216, 820.8, 187.2, 216],
+    [1920, 272, 1152, 224, 272],
+  ])(
+    'keeps a usable dominant center and bounded conversation track at %ipx',
+    (viewportWidth, sources, center, conversations, studio) => {
       const metrics = resolveDesktopWorkspaceMetrics(
         viewportWidth,
         initialDesktopWorkspaceState,
       );
-      const supportingWidths = [
-        metrics.sources,
-        metrics.conversations,
-        metrics.studio,
-      ];
 
-      expect(metrics.total).toBe(viewportWidth);
-      expect(metrics.center).toBeGreaterThan(Math.max(...supportingWidths));
-      expect(metrics.center).toBeGreaterThanOrEqual(400);
-      expect(metrics.sources).toBeGreaterThanOrEqual(192);
-      expect(metrics.sources).toBeLessThanOrEqual(272);
-      expect(metrics.conversations).toBeGreaterThanOrEqual(144);
-      expect(metrics.conversations).toBeLessThanOrEqual(192);
-      expect(metrics.studio).toBeGreaterThanOrEqual(192);
-      expect(metrics.studio).toBeLessThanOrEqual(272);
+      expect(metrics.sources).toBeCloseTo(sources);
+      expect(metrics.center).toBeCloseTo(center);
+      expect(metrics.conversations).toBeCloseTo(conversations);
+      expect(metrics.studio).toBeCloseTo(studio);
+      expect(metrics.total).toBeCloseTo(viewportWidth);
+      expect(metrics.center).toBeGreaterThan(
+        Math.max(metrics.sources, metrics.conversations, metrics.studio),
+      );
+      expect(metrics.center).toBeGreaterThanOrEqual(448);
+      expect(metrics.conversations).toBeGreaterThanOrEqual(184);
+      expect(metrics.conversations).toBeLessThanOrEqual(224);
     },
   );
 
-  test('renders the production workspace with the bounded fluid track contract', () => {
-    const style = getDesktopWorkspaceStyle(initialDesktopWorkspaceState);
-    const markup = renderToStaticMarkup(createElement(Home));
+  test('renders center-relative welcome sizing through the production DOM contract', () => {
+    const { container } = render(createElement(Home));
+    const workspace = container.querySelector<HTMLElement>(
+      '[data-layout="desktop-workspace"]',
+    );
+    const chat = container.querySelector<HTMLElement>(
+      '[data-layout="chat-workspace"]',
+    );
+    const hero = container.querySelector<HTMLElement>(
+      '[data-layout="welcome-hero"]',
+    );
+    const icon = container.querySelector<HTMLElement>(
+      '[data-layout="welcome-icon"]',
+    );
+    const actions = container.querySelector<HTMLElement>(
+      '[data-layout="welcome-actions"]',
+    );
+    const title = screen.getByRole('heading', {
+      name: '新增來源即可開始使用',
+    });
 
-    expect(style.gridTemplateColumns).toContain('minmax(0, 1fr)');
-    expect(markup).toContain(`grid-template-columns:${style.gridTemplateColumns}`);
-    expect(markup).toContain('data-layout="desktop-workspace"');
+    expect(workspace?.style.gridTemplateColumns).toBe(
+      getDesktopWorkspaceStyle(initialDesktopWorkspaceState).gridTemplateColumns,
+    );
+    expect(chat?.style.containerType).toBe('inline-size');
+    expect(hero?.style.maxWidth).toBe('60rem');
+    expect(icon?.style.width).toContain('cqw');
+    expect(title.style.fontSize).toContain('cqw');
+    expect(actions?.style.gap).toContain('cqw');
   });
 
-  test.each([
-    ['sources', SourcesPanel],
-    ['studio', StudioPanel],
-  ] as const)(
-    'toggles and restores the %s panel while its content stays mounted',
-    (panel, Panel) => {
-      const collapsedState = desktopWorkspaceReducer(initialDesktopWorkspaceState, {
-        type: 'toggle-panel',
-        panel,
-      });
-      const collapsedMarkup = renderToStaticMarkup(
-        createElement(Panel, {
-          isCollapsed: collapsedState[panel],
-          onCollapsedChange: () => undefined,
-        }),
-      );
+  test('collapses and restores Sources through Home without losing local state or focus', () => {
+    const { container } = render(createElement(Home));
+    const workspace = container.querySelector<HTMLElement>(
+      '[data-layout="desktop-workspace"]',
+    );
+    const sources = screen.getByRole('complementary', { name: '來源' });
+    const content = screen.getByRole('region', {
+      name: '來源面板內容',
+      hidden: true,
+    });
+    const search = screen.getByRole('textbox', {
+      name: '搜尋來源',
+    }) as HTMLInputElement;
+    const toggle = screen.getByRole('button', { name: '收合來源' });
+    const expandedColumns = workspace?.style.gridTemplateColumns;
 
-      expect(collapsedMarkup).toContain('aria-expanded="false"');
-      expect(collapsedMarkup).toContain(`id="${panel}-panel-content"`);
-      expect(collapsedMarkup).toContain('hidden=""');
-      expect(collapsedMarkup).toContain(`data-panel-state="collapsed"`);
+    fireEvent.change(search, { target: { value: '第二' } });
+    expect(screen.queryByText('第一份資料')).toBeNull();
+    expect(screen.getByText('第二份資料')).toBeTruthy();
 
-      const restoredState = desktopWorkspaceReducer(collapsedState, {
-        type: 'toggle-panel',
-        panel,
-      });
-      const restoredMarkup = renderToStaticMarkup(
-        createElement(Panel, {
-          isCollapsed: restoredState[panel],
-          onCollapsedChange: () => undefined,
-        }),
-      );
+    toggle.focus();
+    fireEvent.click(toggle);
 
-      expect(restoredState[panel]).toBe(false);
-      expect(restoredMarkup).toContain('aria-expanded="true"');
-      expect(restoredMarkup).not.toContain('hidden=""');
-      expect(restoredMarkup).toContain(`data-panel-state="expanded"`);
-    },
-  );
+    expect(sources.getAttribute('data-panel-state')).toBe('collapsed');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBe(content.id);
+    expect(content.hidden).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    expect(workspace?.style.gridTemplateColumns).not.toBe(expandedColumns);
+    expect(search.value).toBe('第二');
 
-  test('keeps collapsed panels mounted in the production grid and releases space to chat', () => {
+    fireEvent.click(toggle);
+
+    expect(sources.getAttribute('data-panel-state')).toBe('expanded');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(content.hidden).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+    expect(workspace?.style.gridTemplateColumns).toBe(expandedColumns);
+    expect(screen.getByRole('textbox', { name: '搜尋來源' })).toBe(search);
+    expect(search.value).toBe('第二');
+  });
+
+  test('drives the Studio collapse callback and restores the same focused control', () => {
+    render(createElement(Home));
+    const studio = screen.getByRole('complementary', { name: '工作室' });
+    const content = screen.getByRole('region', {
+      name: '工作室面板內容',
+      hidden: true,
+    });
+    const toggle = screen.getByRole('button', { name: '收合工作室' });
+
+    toggle.focus();
+    fireEvent.click(toggle);
+
+    expect(studio.getAttribute('data-panel-state')).toBe('collapsed');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBe(content.id);
+    expect(content.hidden).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+
+    fireEvent.click(toggle);
+
+    expect(studio.getAttribute('data-panel-state')).toBe('expanded');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(content.hidden).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  test('uses a compact Traditional Chinese conversation header contract', () => {
+    render(createElement(Home));
+
+    expect(screen.getByRole('heading', { name: '對話' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '收合對話' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '新增對話' })).toHaveLength(2);
+  });
+
+  test('releases center width when supporting panels collapse', () => {
     const collapsedState = desktopWorkspaceReducer(
       desktopWorkspaceReducer(initialDesktopWorkspaceState, {
         type: 'toggle-panel',
@@ -105,20 +253,8 @@ describe('desktop workspace layout', () => {
 
     expect(collapsed.sources).toBe(48);
     expect(collapsed.studio).toBe(48);
+    expect(collapsed.center).toBe(744);
     expect(collapsed.center).toBeGreaterThan(expanded.center);
     expect(collapsed.total).toBe(1024);
-  });
-
-  test('scales the welcome hierarchy with the available center width', () => {
-    const compact = resolveWelcomeHeroMetrics(496);
-    const wide = resolveWelcomeHeroMetrics(1184);
-    const style = getWelcomeHeroStyle();
-
-    expect(compact.contentWidth).toBeGreaterThanOrEqual(400);
-    expect(wide.contentWidth).toBeGreaterThan(compact.contentWidth);
-    expect(wide.titleSize).toBeGreaterThan(compact.titleSize);
-    expect(wide.contentWidth).toBeLessThanOrEqual(960);
-    expect(style.width).toBe('100%');
-    expect(style.maxWidth).toBe('60rem');
   });
 });

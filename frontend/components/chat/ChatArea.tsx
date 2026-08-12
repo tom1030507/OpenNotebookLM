@@ -10,7 +10,10 @@ import {
   Loader2
 } from 'lucide-react';
 import useStore from '@/store/useStore';
-import { getWelcomeHeroStyle } from '@/components/desktopLayout';
+import {
+  chatWorkspaceStyle,
+  welcomeHeroStyles,
+} from '@/components/desktopLayout';
 import MarkdownRenderer from '../MarkdownRenderer';
 
 export default function ChatArea() {
@@ -65,22 +68,39 @@ export default function ChatArea() {
   const canChat = currentProject && hasDocuments;
 
   return (
-    <div className="min-w-0 flex-1 flex flex-col h-full bg-[var(--background)]">
+    <div
+      data-layout="chat-workspace"
+      className="min-w-0 flex-1 flex flex-col h-full bg-[var(--background)]"
+      style={chatWorkspaceStyle}
+    >
       {/* Chat Messages Area */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center px-[clamp(1.25rem,4vw,4rem)] py-8">
+          <div
+            className="h-full flex flex-col items-center justify-center py-8"
+            style={welcomeHeroStyles.frame}
+          >
             {/* Welcome Screen */}
             <div
               data-layout="welcome-hero"
               className="text-center"
-              style={getWelcomeHeroStyle()}
+              style={welcomeHeroStyles.content}
             >
-              <div className="w-[clamp(4rem,5vw,5.5rem)] h-[clamp(4rem,5vw,5.5rem)] mx-auto mb-[clamp(1.5rem,3vw,2.25rem)] rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
-                <Sparkles className="w-[clamp(2rem,2.5vw,2.75rem)] h-[clamp(2rem,2.5vw,2.75rem)] text-white" />
+              <div
+                data-layout="welcome-icon"
+                className="mx-auto rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center"
+                style={welcomeHeroStyles.icon}
+              >
+                <Sparkles
+                  className="text-white"
+                  style={welcomeHeroStyles.glyph}
+                />
               </div>
               
-              <h2 className="text-[clamp(1.75rem,3vw,2.75rem)] leading-tight font-normal mb-4">
+              <h2
+                className="leading-tight font-normal mb-4"
+                style={welcomeHeroStyles.title}
+              >
                 新增來源即可開始使用
               </h2>
               
@@ -95,14 +115,24 @@ export default function ChatArea() {
               </button>
 
               {/* Quick Actions */}
-              <div className="mt-[clamp(2.5rem,5vw,4rem)] grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-[clamp(1rem,2vw,1.5rem)] text-left">
-                <div className="p-[clamp(1rem,2vw,1.5rem)] bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
+              <div
+                data-layout="welcome-actions"
+                className="grid text-left"
+                style={welcomeHeroStyles.actions}
+              >
+                <div
+                  className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
+                  style={welcomeHeroStyles.card}
+                >
                   <h3 className="font-medium text-base mb-1.5">快速開始</h3>
                   <p className="text-sm text-[var(--muted-foreground)]">
                     上傳 PDF、網頁或 YouTube 影片
                   </p>
                 </div>
-                <div className="p-[clamp(1rem,2vw,1.5rem)] bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
+                <div
+                  className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
+                  style={welcomeHeroStyles.card}
+                >
                   <h3 className="font-medium text-base mb-1.5">智能問答</h3>
                   <p className="text-sm text-[var(--muted-foreground)]">
                     基於你的文件回答問題
