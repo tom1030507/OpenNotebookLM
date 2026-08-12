@@ -36,6 +36,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const languageSelectId = useId();
+  const modelSelectId = useId();
 
   useDialogFocus({
     isOpen,
@@ -158,8 +160,9 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                     </div>
 
                     <div>
-                      <label className="block text-sm mb-2">Language</label>
+                      <label htmlFor={languageSelectId} className="block text-sm mb-2">Language</label>
                       <select
+                        id={languageSelectId}
                         value={language}
                         onChange={(e) => setLanguage(e.target.value)}
                         className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
@@ -219,8 +222,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                     </div>
 
                     <div>
-                      <label className="block text-sm mb-2">Model</label>
-                      <select className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+                      <label htmlFor={modelSelectId} className="block text-sm mb-2">Model</label>
+                      <select id={modelSelectId} className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
                         <option value="gpt-4">GPT-4</option>
                         <option value="gpt-4-turbo">GPT-4 Turbo</option>
                         <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>

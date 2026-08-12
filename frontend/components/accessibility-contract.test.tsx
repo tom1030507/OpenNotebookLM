@@ -559,6 +559,23 @@ describe('workspace accessibility contract', () => {
     expect(screen.getByRole('button', { name: '\u79fb\u9664\u6a94\u6848' })).toBeTruthy();
   });
 
+  it('names the sources project selector', () => {
+    configureSourcesStore();
+    render(<SourcesPanel />);
+
+    expect(screen.getByRole('combobox', { name: '選擇專案' })).toBeTruthy();
+  });
+
+  it('associates every settings select with its visible label', () => {
+    render(<Settings isOpen onClose={() => {}} />);
+
+    expect(screen.getByRole('combobox', { name: 'Language' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'API Keys' }));
+
+    expect(screen.getByRole('combobox', { name: 'Model' })).toBeTruthy();
+  });
+
   it('names the conversation list icon controls, including the rename lifecycle', () => {
     useStore.setState({
       currentProject: project,

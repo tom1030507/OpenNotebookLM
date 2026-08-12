@@ -139,6 +139,7 @@ export default function SourcesPanel() {
         {/* Project Selector */}
         <div className="space-y-2 mb-3">
           <select
+            aria-label={'選擇專案'}
             value={currentProject?.id || ''}
             onChange={(e) => {
               const project = projects.find(p => p.id === e.target.value);
