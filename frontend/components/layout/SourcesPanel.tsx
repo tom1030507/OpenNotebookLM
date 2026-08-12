@@ -17,6 +17,7 @@ import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import useStore from '@/store/useStore';
 import { Document } from '@/lib/api';
+import { uiCopy } from '@/lib/uiCopy';
 
 export default function SourcesPanel() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,7 +43,7 @@ export default function SourcesPanel() {
   }, [fetchProjects]);
 
   const handleCreateProject = async () => {
-    const name = prompt('Enter project name:');
+    const name = prompt(uiCopy.sourcesPanel.projectNamePrompt);
     if (!name) return;
     
     setCreatingProject(true);
@@ -51,7 +52,7 @@ export default function SourcesPanel() {
       selectProject(project);
     } catch (error) {
       console.error('Failed to create project:', error);
-      alert('Failed to create project');
+      alert(uiCopy.sourcesPanel.createProjectFailed);
     } finally {
       setCreatingProject(false);
     }
@@ -59,7 +60,7 @@ export default function SourcesPanel() {
 
   const handleUpload = async (items: File[] | string[]) => {
     if (!currentProject) {
-      alert('Please select or create a project first');
+      alert(uiCopy.sourcesPanel.selectProjectFirst);
       return;
     }
 
@@ -83,12 +84,12 @@ export default function SourcesPanel() {
   const handleDeleteDocument = async (docId: string) => {
     if (!currentProject) return;
     
-    if (confirm('Are you sure you want to delete this document?')) {
+    if (confirm(uiCopy.sourcesPanel.deleteDocumentConfirmation)) {
       try {
         await deleteDocument(currentProject.id, docId);
       } catch (error) {
         console.error('Failed to delete document:', error);
-        alert('Failed to delete document');
+        alert(uiCopy.sourcesPanel.deleteDocumentFailed);
       }
     }
   };
@@ -116,7 +117,7 @@ export default function SourcesPanel() {
     <aside className="w-80 border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full">
       {/* Header */}
       <div className="p-4 border-b border-[var(--sidebar-border)]">
-        <h2 className="text-base font-medium mb-3">Sources</h2>
+        <h2 className="text-base font-medium mb-3">{uiCopy.sourcesPanel.title}</h2>
         
         {/* Project Selector */}
         <div className="space-y-2 mb-3">
@@ -128,7 +129,7 @@ export default function SourcesPanel() {
             }}
             className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
           >
-            <option value="">Select a project</option>
+            <option value="">{uiCopy.sourcesPanel.selectProject}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -146,7 +147,7 @@ export default function SourcesPanel() {
             ) : (
               <FolderOpen className="w-4 h-4" />
             )}
-            <span className="text-sm">New Project</span>
+            <span className="text-sm">{uiCopy.sourcesPanel.newProject}</span>
           </button>
         </div>
         
@@ -157,7 +158,7 @@ export default function SourcesPanel() {
             className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
           >
             <Plus className="w-4 h-4" />
-            <span className="text-sm">Add Source</span>
+            <span className="text-sm">{uiCopy.sourcesPanel.addSource}</span>
           </button>
         )}
 
@@ -167,7 +168,7 @@ export default function SourcesPanel() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
             <input
               type="text"
-              placeholder="Search sources"
+              placeholder={uiCopy.sourcesPanel.search}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
@@ -184,7 +185,7 @@ export default function SourcesPanel() {
               <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
             </div>
             <p className="text-sm text-[var(--muted-foreground)]">
-              Select or create a project to get started
+              {uiCopy.sourcesPanel.selectProjectToStart}
             </p>
           </div>
         ) : loadingDocuments ? (
@@ -197,11 +198,11 @@ export default function SourcesPanel() {
               <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
             </div>
             <p className="text-sm text-[var(--muted-foreground)]">
-              {searchQuery ? 'No sources found' : 'No sources yet'}
+              {searchQuery ? uiCopy.sourcesPanel.noResults : uiCopy.sourcesPanel.empty}
             </p>
             {!searchQuery && (
               <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
+                {uiCopy.sourcesPanel.uploadHint}
               </p>
             )}
           </div>
@@ -222,8 +223,7 @@ export default function SourcesPanel() {
                       {doc.name}
                     </h3>
                     <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                      {doc.status === 'processing' ? 'Processing...' : 
-                       doc.status === 'ready' ? 'Ready' : doc.status}
+                      {uiCopy.documentStatus(doc.status)}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
@@ -233,7 +233,7 @@ export default function SourcesPanel() {
                         setPreviewDocument(doc);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Preview"
+                      title={uiCopy.actions.preview}
                     >
                       <Eye className="w-3 h-3" />
                     </button>
@@ -243,7 +243,7 @@ export default function SourcesPanel() {
                         handleDeleteDocument(doc.id);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Delete"
+                      title={uiCopy.actions.delete}
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -260,7 +260,7 @@ export default function SourcesPanel() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Add Sources</h3>
+              <h3 className="text-lg font-semibold">{uiCopy.sourcesPanel.addSources}</h3>
               <button
                 onClick={() => setShowUpload(false)}
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"

@@ -15,6 +15,7 @@ import type {
   ConversationExportFormat,
   ProjectExportFormat,
 } from '@/lib/api';
+import { uiCopy } from '@/lib/uiCopy';
 
 interface ExportDialogProps {
   type: 'conversation' | 'project';
@@ -59,7 +60,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
       }, 2000);
     } catch (error) {
       console.error('Export failed:', error);
-      alert('Export failed. Please try again.');
+      alert(uiCopy.exportDialog.exportFailed);
     } finally {
       setIsExporting(false);
     }
@@ -79,11 +80,11 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
   const getFormatDescription = (fmt: typeof format) => {
     switch (fmt) {
       case 'json':
-        return 'Structured data format, ideal for developers and data processing';
+        return '結構化資料格式，適合開發與資料處理';
       case 'markdown':
-        return 'Formatted text with styling, perfect for documentation';
+        return '含格式的文字，適合保存為文件';
       case 'txt':
-        return 'Plain text format, compatible with all text editors';
+        return '純文字格式，與各種文字編輯器相容';
     }
   };
 
@@ -93,7 +94,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
         {/* Header */}
         <div className="p-6 border-b border-[var(--border)]">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Export {type === 'conversation' ? 'Conversation' : 'Project'}</h2>
+            <h2 className="text-lg font-semibold">{uiCopy.actions.export}{type === 'conversation' ? uiCopy.exportDialog.conversation : uiCopy.exportDialog.project}</h2>
             <button
               onClick={onClose}
               className="p-1 hover:bg-[var(--muted)] rounded transition-base"
@@ -102,13 +103,13 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
             </button>
           </div>
           <p className="text-sm text-[var(--muted-foreground)] mt-2">
-            Export &ldquo;{name}&rdquo; to your preferred format
+            {uiCopy.exportDialog.description.replace('{name}', name)}
           </p>
         </div>
 
         {/* Format Selection */}
         <div className="p-6 space-y-4">
-          <h3 className="text-sm font-medium mb-3">Choose export format:</h3>
+          <h3 className="text-sm font-medium mb-3">{uiCopy.exportDialog.chooseFormat}</h3>
           
           <div className="space-y-3">
             {formats.map((fmt) => (
@@ -149,7 +150,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
             disabled={isExporting}
             className="flex-1 px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-50"
           >
-            Cancel
+            {uiCopy.actions.cancel}
           </button>
           <button
             onClick={handleExport}
@@ -159,17 +160,17 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
             {exportSuccess ? (
               <>
                 <Check className="w-4 h-4" />
-                <span>Exported!</span>
+                <span>{uiCopy.exportDialog.exported}</span>
               </>
             ) : isExporting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Exporting...</span>
+                <span>{uiCopy.exportDialog.exporting}</span>
               </>
             ) : (
               <>
                 <Download className="w-4 h-4" />
-                <span>Export</span>
+                <span>{uiCopy.actions.export}</span>
               </>
             )}
           </button>

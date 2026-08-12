@@ -9,6 +9,7 @@ import {
   CheckCircle
 } from 'lucide-react';
 import useStore from '@/store/useStore';
+import { uiCopy } from '@/lib/uiCopy';
 
 interface ProjectDialogProps {
   isOpen: boolean;
@@ -29,7 +30,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
     e.preventDefault();
     
     if (!name.trim()) {
-      setError('Project name is required');
+      setError(uiCopy.projectDialog.nameRequired);
       return;
     }
     
@@ -50,7 +51,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
         setSuccess(false);
       }, 1500);
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'Failed to create project');
+      setError(error instanceof Error ? error.message : uiCopy.projectDialog.createFailed);
     } finally {
       setIsCreating(false);
     }
@@ -67,7 +68,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
             <div className="w-10 h-10 rounded-lg bg-[var(--primary)] bg-opacity-10 flex items-center justify-center">
               <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
             </div>
-            <h2 className="text-lg font-semibold">Create New Project</h2>
+            <h2 className="text-lg font-semibold">{uiCopy.projectDialog.title}</h2>
           </div>
           <button
             onClick={onClose}
@@ -84,7 +85,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
             <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-3">
               <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
               <p className="text-sm text-green-800 dark:text-green-200">
-                Project created successfully!
+                {uiCopy.projectDialog.success}
               </p>
             </div>
           )}
@@ -99,14 +100,14 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
 
           <div>
             <label htmlFor="name" className="block text-sm font-medium mb-2">
-              Project Name <span className="text-red-500">*</span>
+              {uiCopy.projectDialog.name} <span className="text-red-500">*</span>
             </label>
             <input
               id="name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., Research Papers, Meeting Notes"
+              placeholder={uiCopy.projectDialog.namePlaceholder}
               className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
               disabled={isCreating || success}
               autoFocus
@@ -115,13 +116,13 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
 
           <div>
             <label htmlFor="description" className="block text-sm font-medium mb-2">
-              Description
+              {uiCopy.projectDialog.description}
             </label>
             <textarea
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description for your project"
+              placeholder={uiCopy.projectDialog.descriptionPlaceholder}
               rows={3}
               className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base resize-none"
               disabled={isCreating || success}
@@ -129,8 +130,8 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
           </div>
 
           <div className="text-xs text-[var(--muted-foreground)]">
-            <p>A project helps you organize your documents and conversations.</p>
-            <p className="mt-1">You can add PDFs, URLs, YouTube videos, and more to your project.</p>
+            <p>{uiCopy.projectDialog.help}</p>
+            <p className="mt-1">{uiCopy.projectDialog.sourceHelp}</p>
           </div>
         </form>
 
@@ -142,7 +143,7 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
             disabled={isCreating || success}
             className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-50"
           >
-            Cancel
+            {uiCopy.actions.cancel}
           </button>
           <button
             onClick={handleSubmit}
@@ -152,15 +153,15 @@ export default function ProjectDialog({ isOpen, onClose, onSuccess }: ProjectDia
             {isCreating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Creating...</span>
+                <span>{uiCopy.projectDialog.creating}</span>
               </>
             ) : success ? (
               <>
                 <CheckCircle className="w-4 h-4" />
-                <span>Created!</span>
+                <span>{uiCopy.projectDialog.created}</span>
               </>
             ) : (
-              <span>Create Project</span>
+              <span>{uiCopy.projectDialog.create}</span>
             )}
           </button>
         </div>

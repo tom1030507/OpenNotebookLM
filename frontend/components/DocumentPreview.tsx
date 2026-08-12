@@ -14,6 +14,7 @@ import {
   Check
 } from 'lucide-react';
 import { Document } from '@/lib/api';
+import { uiCopy } from '@/lib/uiCopy';
 
 interface DocumentPreviewProps {
   document: Document;
@@ -81,11 +82,11 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
           <div className="p-8 text-center">
             <FileText className="w-16 h-16 mx-auto mb-4 text-[var(--muted-foreground)]" />
             <p className="text-[var(--muted-foreground)]">
-              PDF preview not available
+              {uiCopy.documentPreview.pdfUnavailable}
             </p>
             {document.content && (
               <div className="mt-4 text-left max-w-3xl mx-auto">
-                <h4 className="font-medium mb-2">Extracted Text:</h4>
+                <h4 className="font-medium mb-2">{uiCopy.documentPreview.extractedText}</h4>
                 <pre className="whitespace-pre-wrap text-sm bg-[var(--muted)] p-4 rounded-lg">
                   {document.content}
                 </pre>
@@ -152,7 +153,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
                 </div>
                 {document.content && (
                   <div className="p-4 bg-[var(--card)] border-t border-[var(--border)]">
-                    <h4 className="font-medium mb-2 text-sm">Transcript:</h4>
+                    <h4 className="font-medium mb-2 text-sm">{uiCopy.documentPreview.transcript}</h4>
                     <pre className="whitespace-pre-wrap text-xs text-[var(--muted-foreground)] max-h-32 overflow-y-auto">
                       {document.content}
                     </pre>
@@ -181,7 +182,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     return (
       <div className="p-8 text-center">
         <p className="text-[var(--muted-foreground)]">
-          Content preview not available
+          {uiCopy.documentPreview.contentUnavailable}
         </p>
       </div>
     );
@@ -207,7 +208,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             <div>
               <h3 className="font-medium">{document.name}</h3>
               <p className="text-xs text-[var(--muted-foreground)]">
-                {document.type.toUpperCase()} • {document.status}
+                {document.type.toUpperCase()} · {uiCopy.documentStatus(document.status)}
               </p>
             </div>
           </div>
@@ -217,7 +218,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               <button
                 onClick={handleCopy}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title="Copy content"
+                title={uiCopy.documentPreview.copyContent}
               >
                 {copied ? (
                   <Check className="w-4 h-4 text-green-600" />
@@ -231,7 +232,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               <button
                 onClick={handleOpenExternal}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title="Open in new tab"
+                title={uiCopy.documentPreview.openInNewTab}
               >
                 <ExternalLink className="w-4 h-4" />
               </button>
@@ -241,7 +242,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               <button
                 onClick={handleDownload}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title="Download"
+                title={uiCopy.actions.download}
               >
                 <Download className="w-4 h-4" />
               </button>
@@ -250,7 +251,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              title={isFullscreen ? uiCopy.documentPreview.exitFullscreen : uiCopy.documentPreview.fullscreen}
             >
               {isFullscreen ? (
                 <Minimize2 className="w-4 h-4" />
@@ -262,7 +263,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             <button
               onClick={onClose}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-              title="Close"
+              title={uiCopy.actions.close}
             >
               <X className="w-4 h-4" />
             </button>
@@ -278,7 +279,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         {document.status === 'processing' && (
           <div className="p-4 border-t border-[var(--border)] bg-yellow-50 dark:bg-yellow-900/20">
             <p className="text-sm text-yellow-800 dark:text-yellow-200">
-              This document is still being processed. Some features may not be available yet.
+              {uiCopy.documentPreview.processingNotice}
             </p>
           </div>
         )}

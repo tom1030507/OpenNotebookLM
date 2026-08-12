@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { Upload, X, File, Link, Youtube, FileText, Loader2 } from 'lucide-react';
 import { getUploadFileError } from '@/lib/uploadValidation';
+import { uiCopy } from '@/lib/uiCopy';
 
 interface FileUploadProps {
   onUpload: (files: File[] | string[]) => Promise<void>;
@@ -82,14 +83,14 @@ export default function FileUpload({
 
   const handleUrlSubmit = async () => {
     if (!urlInput.trim()) {
-      setErrors(['Please enter a valid URL']);
+      setErrors([uiCopy.upload.validUrl]);
       return;
     }
 
     try {
       new URL(urlInput);
     } catch {
-      setErrors(['Please enter a valid URL']);
+      setErrors([uiCopy.upload.validUrl]);
       return;
     }
 
@@ -99,7 +100,7 @@ export default function FileUpload({
       setUrlInput('');
       setErrors([]);
     } catch {
-      setErrors(['Upload failed. Please check the URL and try again.']);
+      setErrors([uiCopy.upload.uploadUrlFailed]);
     } finally {
       setIsUploading(false);
     }
@@ -107,7 +108,7 @@ export default function FileUpload({
 
   const handleUploadFiles = async () => {
     if (files.length === 0 && !urlInput) {
-      setErrors(['Please select files or enter a URL']);
+      setErrors([uiCopy.upload.selectFilesOrUrl]);
       return;
     }
 
@@ -122,7 +123,7 @@ export default function FileUpload({
       }
       setErrors([]);
     } catch {
-      setErrors(['Upload failed. Please try again.']);
+      setErrors([uiCopy.upload.uploadFailed]);
     } finally {
       setIsUploading(false);
     }
@@ -147,7 +148,7 @@ export default function FileUpload({
           }`}
         >
           <File className="inline w-4 h-4 mr-2" />
-          File
+          {uiCopy.upload.file}
         </button>
         <button
           onClick={() => setUploadType('url')}
@@ -187,9 +188,9 @@ export default function FileUpload({
         >
           <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
           <p className="text-gray-600 mb-2">
-            Drag and drop files here, or{' '}
+            {uiCopy.upload.dragAndDrop}{' '}
             <label className="text-purple-600 hover:text-purple-700 cursor-pointer">
-              browse
+              {uiCopy.upload.browse}
               <input
                 type="file"
                 className="hidden"
@@ -200,7 +201,7 @@ export default function FileUpload({
             </label>
           </p>
           <p className="text-sm text-gray-500">
-            Maximum file size: {maxSize}MB
+            {uiCopy.upload.maxFileSize}{maxSize}MB
           </p>
         </div>
       )}
@@ -215,8 +216,8 @@ export default function FileUpload({
               onChange={(e) => setUrlInput(e.target.value)}
               placeholder={
                 uploadType === 'youtube'
-                  ? 'Enter YouTube URL...'
-                  : 'Enter website URL...'
+                  ? uiCopy.upload.youtubeUrlPlaceholder
+                  : uiCopy.upload.urlPlaceholder
               }
               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
               onKeyPress={(e) => {
@@ -230,7 +231,7 @@ export default function FileUpload({
               disabled={!urlInput.trim() || isUploading}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              Add
+              {uiCopy.upload.add}
             </button>
           </div>
         </div>
@@ -250,7 +251,7 @@ export default function FileUpload({
       {/* File List */}
       {files.length > 0 && (
         <div className="mt-4 space-y-2">
-          <h4 className="text-sm font-medium text-gray-700">Selected Files:</h4>
+          <h4 className="text-sm font-medium text-gray-700">{uiCopy.upload.selectedFiles}</h4>
           {files.map((file, index) => (
             <div
               key={index}
@@ -284,12 +285,12 @@ export default function FileUpload({
           {isUploading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Uploading...
+              {uiCopy.upload.uploading}
             </>
           ) : (
             <>
               <Upload className="w-4 h-4" />
-              Upload {uploadType === 'file' ? `${files.length} file(s)` : 'URL'}
+              {uiCopy.upload.upload} {uploadType === 'file' ? `${files.length} 個檔案` : 'URL'}
             </>
           )}
         </button>

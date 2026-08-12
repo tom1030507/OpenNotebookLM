@@ -18,6 +18,7 @@ import ExportDialog from '../ExportDialog';
 import ProjectDialog from '../ProjectDialog';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
+import { uiCopy } from '@/lib/uiCopy';
 
 interface TopNavProps {
   notebookTitle?: string;
@@ -63,7 +64,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <button
             onClick={() => setShowProjectDialog(true)}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            title="New Project"
+            title={uiCopy.sourcesPanel.newProject}
           >
             <FolderPlus className="w-4 h-4" />
           </button>
@@ -73,7 +74,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             <button
               onClick={() => setShowExport(true)}
               className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-              title="Export"
+              title={uiCopy.actions.export}
             >
               <Download className="w-4 h-4" />
             </button>
@@ -83,7 +84,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <button 
             onClick={() => setIsDarkMode(!isDarkMode)}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            aria-label="Toggle theme"
+            aria-label="切換主題"
           >
             {isDarkMode ? (
               <Sun className="w-4 h-4" />
@@ -122,11 +123,11 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             {showUserMenu && (
               <div className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50">
                 <div className="px-4 py-2 border-b border-[var(--border)]">
-                  <p className="text-sm font-medium">User</p>
+                  <p className="text-sm font-medium">使用者</p>
                   <p className="text-xs text-[var(--muted-foreground)]">user@example.com</p>
                 </div>
                 <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base">
-                  Profile
+                  個人資料
                 </button>
                 <button 
                   onClick={() => {
@@ -135,12 +136,12 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                   }}
                   className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base"
                 >
-                  Settings
+                  {uiCopy.settings.title}
                 </button>
                 <div className="border-t border-[var(--border)] mt-2 pt-2">
                   <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base flex items-center gap-2">
                     <LogOut className="w-4 h-4" />
-                    <span>Sign Out</span>
+                    <span>登出</span>
                   </button>
                 </div>
               </div>

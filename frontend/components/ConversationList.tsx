@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import { formatDistanceToNow } from 'date-fns';
+import { zhTW } from 'date-fns/locale';
+import { uiCopy } from '@/lib/uiCopy';
 
 export default function ConversationList() {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export default function ConversationList() {
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Are you sure you want to delete this conversation?')) {
+    if (confirm(uiCopy.conversation.deleteConfirmation)) {
       try {
         await deleteConversation(id);
       } catch (error) {
@@ -64,12 +66,12 @@ export default function ConversationList() {
 
   const handleNewConversation = async () => {
     if (!currentProject) {
-      alert('Please select a project first');
+      alert(uiCopy.conversation.selectProjectFirst);
       return;
     }
     
     try {
-      await createConversation(currentProject.id, 'New Conversation');
+      await createConversation(currentProject.id, uiCopy.chat.newConversation);
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
@@ -78,11 +80,11 @@ export default function ConversationList() {
   // Group conversations by date
   const groupedConversations = React.useMemo(() => {
     const groups: { [key: string]: typeof conversations } = {
-      Today: [],
-      Yesterday: [],
-      'This Week': [],
-      'This Month': [],
-      Older: [],
+      [uiCopy.conversation.today]: [],
+      [uiCopy.conversation.yesterday]: [],
+      [uiCopy.conversation.thisWeek]: [],
+      [uiCopy.conversation.thisMonth]: [],
+      [uiCopy.conversation.older]: [],
     };
 
     const now = new Date();
@@ -98,15 +100,15 @@ export default function ConversationList() {
       const convDate = new Date(conv.created_at);
       
       if (convDate >= today) {
-        groups.Today.push(conv);
+        groups[uiCopy.conversation.today].push(conv);
       } else if (convDate >= yesterday) {
-        groups.Yesterday.push(conv);
+        groups[uiCopy.conversation.yesterday].push(conv);
       } else if (convDate >= weekAgo) {
-        groups['This Week'].push(conv);
+        groups[uiCopy.conversation.thisWeek].push(conv);
       } else if (convDate >= monthAgo) {
-        groups['This Month'].push(conv);
+        groups[uiCopy.conversation.thisMonth].push(conv);
       } else {
-        groups.Older.push(conv);
+        groups[uiCopy.conversation.older].push(conv);
       }
     });
 
@@ -140,12 +142,12 @@ export default function ConversationList() {
                 <ChevronDown className="w-4 h-4" />
               )}
             </button>
-            <h3 className="text-sm font-medium">Conversations</h3>
+            <h3 className="text-sm font-medium">{uiCopy.conversation.title}</h3>
           </div>
           <button
             onClick={handleNewConversation}
             className="p-1 hover:bg-[var(--muted)] rounded transition-base"
-            title="New Conversation"
+            title={uiCopy.chat.newConversation}
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -157,7 +159,7 @@ export default function ConversationList() {
             className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base text-sm"
           >
             <Plus className="w-4 h-4" />
-            <span>New Chat</span>
+            <span>{uiCopy.chat.newChat}</span>
           </button>
         )}
       </div>
@@ -169,10 +171,10 @@ export default function ConversationList() {
             <div className="text-center py-8">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 text-[var(--muted-foreground)]" />
               <p className="text-xs text-[var(--muted-foreground)]">
-                No conversations yet
+                {uiCopy.conversation.noConversations}
               </p>
               <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                Start a new chat to begin
+                {uiCopy.conversation.startNewChat}
               </p>
             </div>
           ) : (
@@ -230,7 +232,7 @@ export default function ConversationList() {
                               </p>
                               <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1 mt-0.5">
                                 <Clock className="w-3 h-3" />
-                                {formatDistanceToNow(new Date(conv.created_at), { addSuffix: true })}
+                                {formatDistanceToNow(new Date(conv.created_at), { addSuffix: true, locale: zhTW })}
                               </p>
                             </div>
                             
@@ -242,7 +244,7 @@ export default function ConversationList() {
                                   handleEdit(conv.id, conv.title);
                                 }}
                                 className="p-1 hover:bg-[var(--muted)] rounded"
-                                title="Edit"
+                                title={uiCopy.actions.edit}
                               >
                                 <Edit2 className="w-3 h-3" />
                               </button>
@@ -252,7 +254,7 @@ export default function ConversationList() {
                                   handleDelete(conv.id);
                                 }}
                                 className="p-1 hover:bg-red-100 text-red-600 rounded"
-                                title="Delete"
+                                title={uiCopy.actions.delete}
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>

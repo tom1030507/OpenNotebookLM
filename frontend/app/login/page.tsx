@@ -71,7 +71,7 @@ export default function LoginPage() {
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.detail || 'Login failed');
+          throw new Error(data.detail || '登入失敗');
         }
 
         const tokens = await response.json();
@@ -86,7 +86,7 @@ export default function LoginPage() {
       } else {
         // Register
         if (formData.password !== formData.confirmPassword) {
-          throw new Error('Passwords do not match');
+          throw new Error('兩次輸入的密碼不一致');
         }
 
         const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`, {
@@ -103,7 +103,7 @@ export default function LoginPage() {
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.detail || 'Registration failed');
+          throw new Error(data.detail || '註冊失敗');
         }
 
         // Auto-login after registration
@@ -127,11 +127,11 @@ export default function LoginPage() {
         } else {
           // Registration successful but login failed
           setIsLogin(true);
-          setError('Registration successful! Please login.');
+          setError('註冊成功！請登入。');
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err instanceof Error ? err.message : '發生錯誤');
     } finally {
       setLoading(false);
     }
@@ -157,7 +157,7 @@ export default function LoginPage() {
             OpenNotebookLM
           </h1>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-            {isLogin ? 'Welcome back!' : 'Create your account'}
+            {isLogin ? '歡迎回來！' : '建立你的帳號'}
           </p>
         </div>
 
@@ -167,7 +167,7 @@ export default function LoginPage() {
             {/* Username */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Username
+                使用者名稱
               </label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -178,7 +178,7 @@ export default function LoginPage() {
                   onChange={handleInputChange}
                   required
                   className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:border-gray-600"
-                  placeholder="Enter username"
+                  placeholder="輸入使用者名稱"
                 />
               </div>
             </div>
@@ -187,7 +187,7 @@ export default function LoginPage() {
             {!isLogin && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email
+                  電子郵件
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -198,7 +198,7 @@ export default function LoginPage() {
                     onChange={handleInputChange}
                     required={!isLogin}
                     className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:border-gray-600"
-                    placeholder="Enter email"
+                    placeholder="輸入電子郵件"
                   />
                 </div>
               </div>
@@ -207,7 +207,7 @@ export default function LoginPage() {
             {/* Password */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Password
+                密碼
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -218,7 +218,7 @@ export default function LoginPage() {
                   onChange={handleInputChange}
                   required
                   className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:border-gray-600"
-                  placeholder="Enter password"
+                  placeholder="輸入密碼"
                 />
                 <button
                   type="button"
@@ -238,7 +238,7 @@ export default function LoginPage() {
             {!isLogin && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Confirm Password
+                  確認密碼
                 </label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -249,7 +249,7 @@ export default function LoginPage() {
                     onChange={handleInputChange}
                     required={!isLogin}
                     className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:border-gray-600"
-                    placeholder="Confirm password"
+                    placeholder="再次輸入密碼"
                   />
                 </div>
               </div>
@@ -272,7 +272,7 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>{isLogin ? 'Logging in...' : 'Creating account...'}</span>
+                  <span>{isLogin ? '登入中...' : '建立帳號中...'}</span>
                 </>
               ) : (
                 <>
@@ -281,7 +281,7 @@ export default function LoginPage() {
                   ) : (
                     <UserPlus className="w-5 h-5" />
                   )}
-                  <span>{isLogin ? 'Login' : 'Register'}</span>
+                  <span>{isLogin ? '登入' : '註冊'}</span>
                 </>
               )}
             </button>
@@ -290,7 +290,7 @@ export default function LoginPage() {
           {/* Toggle Login/Register */}
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              {isLogin ? "Don't have an account?" : 'Already have an account?'}
+              {isLogin ? '還沒有帳號嗎？' : '已經有帳號了嗎？'}
               <button
                 onClick={() => {
                   setIsLogin(!isLogin);
@@ -304,7 +304,7 @@ export default function LoginPage() {
                 }}
                 className="ml-2 text-purple-600 hover:text-purple-700 font-medium"
               >
-                {isLogin ? 'Register' : 'Login'}
+                {isLogin ? '註冊' : '登入'}
               </button>
             </p>
           </div>
@@ -314,10 +314,10 @@ export default function LoginPage() {
             <div className="mt-4 space-y-2">
               <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                 <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                  Demo credentials:
+                  示範帳號：
                 </p>
                 <p className="text-xs font-mono text-gray-700 dark:text-gray-300">
-                  Username: admin | Password: admin123
+                  使用者名稱：admin｜密碼：admin123
                 </p>
               </div>
               
@@ -330,7 +330,7 @@ export default function LoginPage() {
                 }}
                 className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
               >
-                Quick Demo Access →
+                快速體驗
               </button>
             </div>
           )}

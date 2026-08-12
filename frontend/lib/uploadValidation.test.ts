@@ -8,7 +8,7 @@ describe('file upload validation', () => {
     const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
 
     expect(getUploadFileError(file, 10, [])).toBe(
-      'notes.txt is not a supported PDF file',
+      'notes.txt 不是支援的 PDF 檔案',
     );
   });
 });

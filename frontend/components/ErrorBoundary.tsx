@@ -55,17 +55,17 @@ function DefaultErrorFallback({ error, reset }: { error: Error; reset: () => voi
           </div>
           
           <h1 className="mt-4 text-xl font-semibold text-center text-gray-900 dark:text-white">
-            Something went wrong
+            發生錯誤
           </h1>
           
           <p className="mt-2 text-sm text-center text-gray-600 dark:text-gray-400">
-            An unexpected error occurred. Please try again or contact support if the problem persists.
+            發生未預期的錯誤。請再試一次；若問題持續發生，請聯絡支援人員。
           </p>
 
           {process.env.NODE_ENV === 'development' && (
             <details className="mt-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
               <summary className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
-                Error details
+                錯誤詳細資訊
               </summary>
               <pre className="mt-2 text-xs text-gray-600 dark:text-gray-400 overflow-auto">
                 {error.stack || error.message}
@@ -78,14 +78,14 @@ function DefaultErrorFallback({ error, reset }: { error: Error; reset: () => voi
               onClick={() => window.location.href = '/'}
               className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
             >
-              Go Home
+              返回首頁
             </button>
             <button
               onClick={reset}
               className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
             >
               <RefreshCw className="w-4 h-4" />
-              Try Again
+              再試一次
             </button>
           </div>
         </div>

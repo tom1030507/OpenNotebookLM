@@ -15,6 +15,7 @@ import {
   Save,
   Loader2
 } from 'lucide-react';
+import { uiCopy } from '@/lib/uiCopy';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -26,7 +27,7 @@ type SettingsTab = 'general' | 'api' | 'data' | 'notifications' | 'security' | '
 export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguage] = useState('zh-TW');
   const [openaiKey, setOpenaiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
@@ -44,12 +45,12 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   if (!isOpen) return null;
 
   const tabs = [
-    { id: 'general', label: 'General', icon: SettingsIcon },
-    { id: 'api', label: 'API Keys', icon: Key },
-    { id: 'data', label: 'Data & Storage', icon: Database },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'security', label: 'Security', icon: Shield },
-    { id: 'about', label: 'About', icon: HelpCircle },
+    { id: 'general', label: uiCopy.settings.general, icon: SettingsIcon },
+    { id: 'api', label: uiCopy.settings.apiKeys, icon: Key },
+    { id: 'data', label: uiCopy.settings.dataStorage, icon: Database },
+    { id: 'notifications', label: uiCopy.settings.notifications, icon: Bell },
+    { id: 'security', label: uiCopy.settings.security, icon: Shield },
+    { id: 'about', label: uiCopy.settings.about, icon: HelpCircle },
   ];
 
   return (
@@ -58,7 +59,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         {/* Sidebar */}
         <div className="w-64 border-r border-[var(--border)] bg-[var(--sidebar-bg)]">
           <div className="p-6 border-b border-[var(--border)]">
-            <h2 className="text-lg font-semibold">Settings</h2>
+            <h2 className="text-lg font-semibold">{uiCopy.settings.title}</h2>
           </div>
           <nav className="p-4">
             {tabs.map((tab) => {
@@ -104,15 +105,15 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             {activeTab === 'general' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-medium mb-4">Appearance</h4>
+                  <h4 className="text-sm font-medium mb-4">外觀</h4>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm mb-2">Theme</label>
+                      <label className="block text-sm mb-2">主題</label>
                       <div className="flex gap-2">
                         {[
-                          { value: 'light', icon: Sun, label: 'Light' },
-                          { value: 'dark', icon: Moon, label: 'Dark' },
-                          { value: 'system', icon: SettingsIcon, label: 'System' },
+                          { value: 'light', icon: Sun, label: '淺色' },
+                          { value: 'dark', icon: Moon, label: '深色' },
+                          { value: 'system', icon: SettingsIcon, label: '跟隨系統' },
                         ].map((option) => {
                           const Icon = option.icon;
                           return (
@@ -134,24 +135,20 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                     </div>
 
                     <div>
-                      <label className="block text-sm mb-2">Language</label>
+                      <label className="block text-sm mb-2">語言</label>
                       <select
                         value={language}
                         onChange={(e) => setLanguage(e.target.value)}
                         className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                       >
-                        <option value="en">English</option>
-                        <option value="zh">中文</option>
-                        <option value="ja">日本語</option>
-                        <option value="es">Español</option>
-                        <option value="fr">Français</option>
+                        <option value="zh-TW">繁體中文</option>
                       </select>
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-medium mb-4">Behavior</h4>
+                  <h4 className="text-sm font-medium mb-4">使用方式</h4>
                   <div className="space-y-3">
                     <label className="flex items-center gap-3">
                       <input
@@ -160,7 +157,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         onChange={(e) => setAutoSave(e.target.checked)}
                         className="w-4 h-4 rounded border-[var(--border)]"
                       />
-                      <span className="text-sm">Auto-save conversations</span>
+                      <span className="text-sm">自動儲存對話</span>
                     </label>
                   </div>
                 </div>
@@ -170,10 +167,10 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             {activeTab === 'api' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-medium mb-4">OpenAI Configuration</h4>
+                  <h4 className="text-sm font-medium mb-4">OpenAI 設定</h4>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm mb-2">API Key</label>
+                      <label className="block text-sm mb-2">API 金鑰</label>
                       <div className="flex gap-2">
                         <input
                           type={showApiKey ? 'text' : 'password'}
@@ -186,16 +183,16 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                           onClick={() => setShowApiKey(!showApiKey)}
                           className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
                         >
-                          {showApiKey ? 'Hide' : 'Show'}
+                          {showApiKey ? '隱藏' : '顯示'}
                         </button>
                       </div>
                       <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                        Your API key is stored securely and never shared.
+                        你的 API 金鑰會安全儲存，絕不會分享給他人。
                       </p>
                     </div>
 
                     <div>
-                      <label className="block text-sm mb-2">Model</label>
+                      <label className="block text-sm mb-2">模型</label>
                       <select className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
                         <option value="gpt-4">GPT-4</option>
                         <option value="gpt-4-turbo">GPT-4 Turbo</option>
@@ -206,10 +203,10 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-medium mb-4">Local Model Configuration</h4>
+                  <h4 className="text-sm font-medium mb-4">本機模型設定</h4>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm mb-2">Endpoint URL</label>
+                      <label className="block text-sm mb-2">端點 URL</label>
                       <input
                         type="text"
                         placeholder="http://localhost:11434"
@@ -224,24 +221,24 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             {activeTab === 'data' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-medium mb-4">Storage</h4>
+                  <h4 className="text-sm font-medium mb-4">儲存空間</h4>
                   <div className="space-y-4">
                     <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm">Documents</span>
+                        <span className="text-sm">文件</span>
                         <span className="text-sm font-medium">124 MB</span>
                       </div>
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm">Embeddings</span>
+                        <span className="text-sm">嵌入向量</span>
                         <span className="text-sm font-medium">56 MB</span>
                       </div>
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm">Conversations</span>
+                        <span className="text-sm">對話</span>
                         <span className="text-sm font-medium">12 MB</span>
                       </div>
                       <div className="border-t border-[var(--border)] mt-3 pt-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">Total</span>
+                          <span className="text-sm font-medium">合計</span>
                           <span className="text-sm font-medium">192 MB</span>
                         </div>
                       </div>
@@ -249,10 +246,10 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
                     <div className="flex gap-2">
                       <button className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base">
-                        Clear Cache
+                        清除快取
                       </button>
                       <button className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base">
-                        Export Data
+                        匯出資料
                       </button>
                     </div>
                   </div>
@@ -263,7 +260,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             {activeTab === 'notifications' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-medium mb-4">Notification Preferences</h4>
+                  <h4 className="text-sm font-medium mb-4">通知偏好設定</h4>
                   <div className="space-y-3">
                     <label className="flex items-center gap-3">
                       <input
@@ -273,9 +270,9 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         className="w-4 h-4 rounded border-[var(--border)]"
                       />
                       <div>
-                        <p className="text-sm">Processing complete</p>
+                        <p className="text-sm">處理完成</p>
                         <p className="text-xs text-[var(--muted-foreground)]">
-                          Notify when document processing is finished
+                          文件處理完成時通知我
                         </p>
                       </div>
                     </label>
@@ -287,12 +284,12 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             {activeTab === 'security' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-medium mb-4">Privacy & Security</h4>
+                  <h4 className="text-sm font-medium mb-4">隱私與安全性</h4>
                   <div className="space-y-4">
                     <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
-                      <p className="text-sm mb-2">Your data is encrypted and stored locally.</p>
+                      <p className="text-sm mb-2">你的資料會加密後儲存在本機。</p>
                       <p className="text-xs text-[var(--muted-foreground)]">
-                        We never share your documents or conversations with third parties.
+                        我們不會將你的文件或對話分享給第三方。
                       </p>
                     </div>
                   </div>
@@ -303,23 +300,23 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             {activeTab === 'about' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-medium mb-4">About OpenNotebookLM</h4>
+                  <h4 className="text-sm font-medium mb-4">關於 OpenNotebookLM</h4>
                   <div className="space-y-4">
                     <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
-                      <p className="text-sm mb-2">Version 0.1.0</p>
+                      <p className="text-sm mb-2">版本 0.1.0</p>
                       <p className="text-xs text-[var(--muted-foreground)]">
-                        An open-source implementation of Google NotebookLM
+                        Google NotebookLM 的開源實作
                       </p>
                     </div>
                     <div className="space-y-2">
                       <a href="#" className="block text-sm text-[var(--primary)] hover:underline">
-                        Documentation
+                        使用文件
                       </a>
                       <a href="#" className="block text-sm text-[var(--primary)] hover:underline">
-                        GitHub Repository
+                        GitHub 儲存庫
                       </a>
                       <a href="#" className="block text-sm text-[var(--primary)] hover:underline">
-                        Report an Issue
+                        回報問題
                       </a>
                     </div>
                   </div>
@@ -334,7 +331,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               onClick={onClose}
               className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
             >
-              Cancel
+              {uiCopy.actions.cancel}
             </button>
             <button
               onClick={handleSave}
@@ -344,12 +341,12 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               {isSaving ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving...</span>
+                  <span>儲存中...</span>
                 </>
               ) : (
                 <>
                   <Save className="w-4 h-4" />
-                  <span>Save Changes</span>
+                  <span>儲存變更</span>
                 </>
               )}
             </button>

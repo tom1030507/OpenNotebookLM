@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import MarkdownRenderer from '../MarkdownRenderer';
+import { uiCopy } from '@/lib/uiCopy';
 
 export default function ChatArea() {
   const [inputValue, setInputValue] = useState('');
@@ -53,7 +54,7 @@ export default function ChatArea() {
     if (!currentProject) return;
     
     try {
-      await createConversation(currentProject.id, 'New Conversation');
+      await createConversation(currentProject.id, uiCopy.chat.newConversation);
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
@@ -202,7 +203,7 @@ export default function ChatArea() {
                     handleSend();
                   }
                 }}
-                placeholder={canChat ? "Ask anything about your sources..." : "Add sources to start chatting"}
+                placeholder={canChat ? uiCopy.chat.askAnything : uiCopy.chat.addSourcesToStart}
                 className="w-full px-4 py-3 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
                 rows={1}
                 disabled={!canChat || isStreaming}
@@ -210,7 +211,7 @@ export default function ChatArea() {
               
               {inputValue && hasDocuments && (
                 <span className="absolute right-3 bottom-2 text-xs text-[var(--muted-foreground)]">
-                  {documents.filter(d => d.status === 'ready').length} sources
+                  {documents.filter(d => d.status === 'ready').length} {uiCopy.chat.sourcesReady}
                 </span>
               )}
             </div>
@@ -232,7 +233,7 @@ export default function ChatArea() {
             <button 
               onClick={handleNewConversation}
               className="mt-3 flex items-center gap-1 text-xs text-[var(--primary)] hover:underline">
-              <span>New Conversation</span>
+              <span>{uiCopy.chat.newConversation}</span>
               <ChevronRight className="w-3 h-3" />
             </button>
           )}
