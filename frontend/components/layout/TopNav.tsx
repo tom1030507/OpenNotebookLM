@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Download,
   Moon,
-  Sun,
   User,
   FolderPlus,
   LogOut,
@@ -29,7 +28,6 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   
   const { currentProject, currentConversation } = useStore();
   
@@ -81,16 +79,13 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           )}
           
           {/* Theme Toggle */}
-          <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            aria-label="Toggle theme"
+          <button
+            disabled
+            title="主題切換（即將推出）"
+            aria-label="主題切換（即將推出）"
+            className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
           >
-            {isDarkMode ? (
-              <Sun className="w-4 h-4" />
-            ) : (
-              <Moon className="w-4 h-4" />
-            )}
+            <Moon className="w-4 h-4" />
           </button>
           
           {/* Notifications */}
@@ -123,13 +118,19 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <div className="relative">
             <button 
               onClick={() => setShowUserMenu(!showUserMenu)}
+              aria-label="使用者選單"
+              aria-haspopup="menu"
+              aria-expanded={showUserMenu}
               className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"
             >
               <User className="w-5 h-5" />
             </button>
             
             {showUserMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50">
+              <div
+                role="menu"
+                className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50"
+              >
                 <div className="px-4 py-2 border-b border-[var(--border)]">
                   <p className="text-sm font-medium">User</p>
                   <p className="text-xs text-[var(--muted-foreground)]">user@example.com</p>

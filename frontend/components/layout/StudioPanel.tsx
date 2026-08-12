@@ -103,10 +103,10 @@ export default function StudioPanel() {
             </div>
             <div>
               <h4 className="text-sm font-medium mb-1">
-                工作室輸出內容儲存在這裡。
+                工作室功能即將推出
               </h4>
               <p className="text-xs text-[var(--muted-foreground)]">
-                加入來源後，點選即可新增語音摘要、研讀指南、心智圖等內容！
+                音訊、影片、心智圖與報告功能仍在準備中。
               </p>
             </div>
           </div>

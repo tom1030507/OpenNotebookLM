@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Plus, 
   Search,
@@ -34,6 +34,15 @@ export default function SourcesPanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [modalSession, setModalSession] = useState(0);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const isAddSourcesOpenRef = useRef(isAddSourcesOpen);
+  const modalSessionRef = useRef(0);
+  const wasAddSourcesOpenRef = useRef(false);
+  const previousFocusedElementRef = useRef<HTMLElement | null>(null);
+
+  isAddSourcesOpenRef.current = isAddSourcesOpen;
   
   const {
     projects,
@@ -51,6 +60,39 @@ export default function SourcesPanel({
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  useEffect(() => {
+    if (isAddSourcesOpen && !wasAddSourcesOpenRef.current) {
+      const nextSession = modalSessionRef.current + 1;
+      modalSessionRef.current = nextSession;
+      setModalSession(nextSession);
+      previousFocusedElementRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      closeButtonRef.current?.focus();
+    }
+
+    if (!isAddSourcesOpen && wasAddSourcesOpenRef.current) {
+      setIsUploading(false);
+      previousFocusedElementRef.current?.focus();
+      previousFocusedElementRef.current = null;
+    }
+
+    wasAddSourcesOpenRef.current = isAddSourcesOpen;
+  }, [isAddSourcesOpen]);
+
+  useEffect(() => {
+    if (!isAddSourcesOpen || isUploading) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onAddSourcesOpenChange(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isAddSourcesOpen, isUploading, onAddSourcesOpenChange]);
 
   const handleCreateProject = async () => {
     const name = prompt('Enter project name:');
@@ -75,6 +117,7 @@ export default function SourcesPanel({
     }
 
     const projectId = currentProject.id;
+    const uploadSession = modalSession;
     await closeAddSourcesAfterSuccessfulUpload(async () => {
       for (const item of items) {
         if (item instanceof File) {
@@ -89,7 +132,29 @@ export default function SourcesPanel({
           });
         }
       }
-    }, onAddSourcesOpenChange);
+    }, () => {
+      if (
+        modalSessionRef.current === uploadSession
+        && isAddSourcesOpenRef.current
+      ) {
+        onAddSourcesOpenChange(false);
+      }
+    });
+  };
+
+  const handleUploadingChange = (uploadSession: number) => (uploading: boolean) => {
+    if (
+      modalSessionRef.current === uploadSession
+      && isAddSourcesOpenRef.current
+    ) {
+      setIsUploading(uploading);
+    }
+  };
+
+  const closeAddSources = () => {
+    if (!isUploading) {
+      onAddSourcesOpenChange(false);
+    }
   };
 
   const handleDeleteDocument = async (docId: string) => {
@@ -273,20 +338,26 @@ export default function SourcesPanel({
           role="dialog"
           aria-modal="true"
           aria-label="新增來源"
+          aria-busy={isUploading}
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
         >
           <div className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
               <h3 className="text-lg font-semibold">Add Sources</h3>
               <button
-                onClick={() => onAddSourcesOpenChange(false)}
+                ref={closeButtonRef}
+                onClick={closeAddSources}
+                disabled={isUploading}
                 aria-label="關閉新增來源"
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <FileUpload onUpload={handleUpload} />
+            <FileUpload
+              onUpload={handleUpload}
+              onUploadingChange={handleUploadingChange(modalSession)}
+            />
           </div>
         </div>
       )}
