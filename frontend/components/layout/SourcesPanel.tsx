@@ -18,9 +18,16 @@ import DocumentPreview from '../DocumentPreview';
 import useStore from '@/store/useStore';
 import { Document } from '@/lib/api';
 
-export default function SourcesPanel() {
+interface SourcesPanelProps {
+  isAddSourcesOpen: boolean;
+  onAddSourcesOpenChange: (isOpen: boolean) => void;
+}
+
+export default function SourcesPanel({
+  isAddSourcesOpen,
+  onAddSourcesOpenChange,
+}: SourcesPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [showUpload, setShowUpload] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   
@@ -77,7 +84,7 @@ export default function SourcesPanel() {
       }
     }
     
-    setShowUpload(false);
+    onAddSourcesOpenChange(false);
   };
 
   const handleDeleteDocument = async (docId: string) => {
@@ -153,7 +160,7 @@ export default function SourcesPanel() {
         {/* Add Source Button */}
         {currentProject && (
           <button 
-            onClick={() => setShowUpload(!showUpload)}
+            onClick={() => onAddSourcesOpenChange(true)}
             className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
           >
             <Plus className="w-4 h-4" />
@@ -256,13 +263,13 @@ export default function SourcesPanel() {
       </div>
 
       {/* Upload Modal */}
-      {showUpload && (
+      {isAddSourcesOpen && currentProject && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
               <h3 className="text-lg font-semibold">Add Sources</h3>
               <button
-                onClick={() => setShowUpload(false)}
+                onClick={() => onAddSourcesOpenChange(false)}
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"
               >
                 <X className="w-5 h-5" />

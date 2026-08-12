@@ -12,7 +12,11 @@ import {
 import useStore from '@/store/useStore';
 import MarkdownRenderer from '../MarkdownRenderer';
 
-export default function ChatArea() {
+interface ChatAreaProps {
+  onRequestAddSources?: () => void;
+}
+
+export default function ChatArea({ onRequestAddSources }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -62,6 +66,14 @@ export default function ChatArea() {
   // Check if ready to chat
   const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'ready');
   const canChat = currentProject && hasDocuments;
+  const canAddSources = Boolean(currentProject);
+  const sourceActionHelperText = '請先選擇或建立專案後再新增來源';
+
+  const handleRequestAddSources = () => {
+    if (canAddSources) {
+      onRequestAddSources?.();
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[var(--background)]">
@@ -84,20 +96,26 @@ export default function ChatArea() {
               </p>
 
               {/* Upload Button */}
-              <button className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] transition-base">
+              <button
+                onClick={handleRequestAddSources}
+                disabled={!canAddSources}
+                aria-label="上傳來源"
+                aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+              >
                 <Upload className="w-5 h-5" />
                 <span>上傳來源</span>
               </button>
 
               {/* Quick Actions */}
               <div className="mt-12 grid grid-cols-2 gap-4 text-left">
-                <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
+                <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
                   <h3 className="font-medium text-sm mb-1">快速開始</h3>
                   <p className="text-xs text-[var(--muted-foreground)]">
                     上傳 PDF、網頁或 YouTube 影片
                   </p>
                 </div>
-                <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer">
+                <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
                   <h3 className="font-medium text-sm mb-1">智能問答</h3>
                   <p className="text-xs text-[var(--muted-foreground)]">
                     基於你的文件回答問題
@@ -188,7 +206,13 @@ export default function ChatArea() {
       <div className="border-t border-[var(--border)] bg-[var(--card)] p-4">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-end gap-3">
-            <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base">
+            <button
+              onClick={handleRequestAddSources}
+              disabled={!canAddSources}
+              aria-label="新增來源"
+              aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
+              className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+            >
               <Paperclip className="w-5 h-5" />
             </button>
             
@@ -226,6 +250,14 @@ export default function ChatArea() {
               )}
             </button>
           </div>
+          {!canAddSources && (
+            <p
+              id="source-action-helper"
+              className="mt-2 text-xs text-[var(--muted-foreground)]"
+            >
+              {sourceActionHelperText}
+            </p>
+          )}
           
           {/* New Chat Button */}
           {messages.length > 0 && (

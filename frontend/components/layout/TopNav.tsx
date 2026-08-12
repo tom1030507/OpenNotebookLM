@@ -24,6 +24,7 @@ interface TopNavProps {
 }
 
 export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps) {
+  const availabilityLabel = '即將推出';
   const [showExport, setShowExport] = useState(false);
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -93,12 +94,20 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           </button>
           
           {/* Notifications */}
-          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
+          <button
+            disabled
+            aria-label={`通知功能${availabilityLabel}`}
+            className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+          >
             <Bell className="w-4 h-4" />
           </button>
           
           {/* Help */}
-          <button className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base">
+          <button
+            disabled
+            aria-label={`說明功能${availabilityLabel}`}
+            className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+          >
             <HelpCircle className="w-4 h-4" />
           </button>
 
@@ -125,8 +134,13 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                   <p className="text-sm font-medium">User</p>
                   <p className="text-xs text-[var(--muted-foreground)]">user@example.com</p>
                 </div>
-                <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base">
-                  Profile
+                <button
+                  disabled
+                  aria-label={`個人資料${availabilityLabel}`}
+                  className="w-full text-left px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-base flex items-center justify-between"
+                >
+                  <span>個人資料</span>
+                  <span className="text-xs">{availabilityLabel}</span>
                 </button>
                 <button 
                   onClick={() => {
@@ -138,9 +152,16 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                   Settings
                 </button>
                 <div className="border-t border-[var(--border)] mt-2 pt-2">
-                  <button className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base flex items-center gap-2">
-                    <LogOut className="w-4 h-4" />
-                    <span>Sign Out</span>
+                  <button
+                    disabled
+                    aria-label={`登出${availabilityLabel}`}
+                    className="w-full text-left px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-base flex items-center justify-between"
+                  >
+                    <span className="flex items-center gap-2">
+                      <LogOut className="w-4 h-4" />
+                      <span>登出</span>
+                    </span>
+                    <span className="text-xs">{availabilityLabel}</span>
                   </button>
                 </div>
               </div>

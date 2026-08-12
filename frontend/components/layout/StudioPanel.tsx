@@ -17,6 +17,7 @@ interface StudioOption {
 }
 
 export default function StudioPanel() {
+  const availabilityLabel = '即將推出';
   const studioOptions: StudioOption[] = [
     {
       id: 'audio',
@@ -57,7 +58,9 @@ export default function StudioPanel() {
           {studioOptions.map((option) => (
             <button
               key={option.id}
-              className="w-full p-4 bg-[var(--secondary)] rounded-lg hover:bg-[var(--muted)] transition-base text-left group"
+              disabled
+              aria-label={`${option.title}${availabilityLabel}`}
+              className="w-full p-4 bg-[var(--secondary)] rounded-lg text-left group disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-[var(--card)] rounded-lg group-hover:bg-[var(--secondary)] transition-base">
@@ -67,6 +70,9 @@ export default function StudioPanel() {
                   <h3 className="text-sm font-medium">
                     {option.title}
                   </h3>
+                  <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                    {availabilityLabel}
+                  </p>
                   {option.description && (
                     <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
                       {option.description}
@@ -79,9 +85,14 @@ export default function StudioPanel() {
         </div>
 
         {/* More Options */}
-        <button className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base flex items-center justify-center gap-2">
+        <button
+          disabled
+          aria-label={`更多選項${availabilityLabel}`}
+          className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
           <span>更多選項</span>
           <ChevronDown className="w-4 h-4" />
+          <span className="text-xs">{availabilityLabel}</span>
         </button>
 
         {/* Tip Section */}
