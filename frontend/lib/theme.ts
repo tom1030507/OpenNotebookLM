@@ -17,3 +17,25 @@ export function applyTheme(theme: Theme, root: HTMLElement): void {
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
 }
+
+export function initializeTheme(): Theme {
+  const root = document.documentElement;
+  let storedTheme: string | null = null;
+
+  try {
+    storedTheme = window.localStorage.getItem('open-notebook-theme');
+  } catch {
+    // Theme selection still follows the system preference when storage is unavailable.
+  }
+
+  const theme = storedTheme === 'light' || storedTheme === 'dark'
+    ? storedTheme
+    : window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
+
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+
+  return theme;
+}

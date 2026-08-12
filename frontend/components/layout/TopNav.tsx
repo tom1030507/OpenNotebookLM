@@ -18,7 +18,7 @@ import ExportDialog from '../ExportDialog';
 import ProjectDialog from '../ProjectDialog';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
-import { applyTheme, resolveInitialTheme, THEME_STORAGE_KEY, type Theme } from '@/lib/theme';
+import { applyTheme, initializeTheme, THEME_STORAGE_KEY, type Theme } from '@/lib/theme';
 
 interface TopNavProps {
   notebookTitle?: string;
@@ -29,30 +29,17 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [theme, setTheme] = useState<Theme>('light');
   
   const { currentProject, currentConversation } = useStore();
 
   useEffect(() => {
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    let storedTheme: string | null = null;
-
-    try {
-      storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-    } catch {
-      // Theme selection still follows the system preference when storage is unavailable.
-    }
-
-    const initialTheme = resolveInitialTheme(storedTheme, systemPrefersDark);
-    applyTheme(initialTheme, document.documentElement);
-    setTheme(initialTheme);
+    initializeTheme();
   }, []);
 
   const toggleTheme = () => {
-    const nextTheme: Theme = theme === 'dark' ? 'light' : 'dark';
+    const nextTheme: Theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
 
     applyTheme(nextTheme, document.documentElement);
-    setTheme(nextTheme);
 
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
@@ -112,13 +99,11 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <button 
             onClick={toggleTheme}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+            title="Toggle theme"
             aria-label="切換主題"
           >
-            {theme === 'dark' ? (
-              <Sun className="w-4 h-4" />
-            ) : (
-              <Moon className="w-4 h-4" />
-            )}
+            <Sun data-theme-icon="sun" className="theme-icon--sun w-4 h-4" />
+            <Moon data-theme-icon="moon" className="theme-icon--moon w-4 h-4" />
           </button>
           
           {/* Notifications */}

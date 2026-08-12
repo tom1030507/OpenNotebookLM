@@ -1,5 +1,40 @@
-import { describe, expect, it } from 'vitest';
-import { applyTheme, resolveInitialTheme } from './theme';
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import RootLayout from '@/app/layout';
+import TopNav from '@/components/layout/TopNav';
+import {
+  applyTheme,
+  initializeTheme,
+  resolveInitialTheme,
+  THEME_STORAGE_KEY,
+} from './theme';
+
+vi.mock('@/app/globals.css', () => ({}));
+
+function setSystemPreference(prefersDark: boolean) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(prefers-color-scheme: dark)' && prefersDark,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }));
+}
+
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+  document.documentElement.removeAttribute('data-theme');
+  document.documentElement.style.removeProperty('color-scheme');
+  vi.unstubAllGlobals();
+});
 
 describe('resolveInitialTheme', () => {
   it('uses a stored light preference when the system prefers dark', () => {
@@ -18,14 +53,64 @@ describe('resolveInitialTheme', () => {
 
 describe('applyTheme', () => {
   it('sets the active theme and browser color scheme on the document root', () => {
-    const root = {
-      dataset: {},
-      style: {},
-    } as HTMLElement;
+    applyTheme('dark', document.documentElement);
 
-    applyTheme('dark', root);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+  });
+});
 
-    expect(root.dataset.theme).toBe('dark');
-    expect(root.style.colorScheme).toBe('dark');
+describe('initializeTheme', () => {
+  it('applies a stored theme to the real document root before React renders', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+    setSystemPreference(false);
+
+    initializeTheme();
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+  });
+
+  it('runs the layout pre-paint script against the real document root', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+    setSystemPreference(false);
+
+    const markup = renderToStaticMarkup(React.createElement(RootLayout, null, null));
+    const script = new DOMParser()
+      .parseFromString(markup, 'text/html')
+      .querySelector('script');
+
+    expect(script).not.toBeNull();
+    new Function(script?.textContent ?? '')();
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+  });
+});
+
+describe('TopNav theme toggle', () => {
+  it('keeps a pre-painted dark icon in sync and persists the next selected theme', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+    setSystemPreference(false);
+    initializeTheme();
+
+    render(React.createElement(TopNav));
+
+    const toggle = screen.getByTitle('Toggle theme');
+    expect(toggle.querySelector('[data-theme-icon="sun"]')).not.toBeNull();
+    expect(toggle.querySelector('[data-theme-icon="moon"]')).not.toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.style.colorScheme).toBe('light');
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.style.removeProperty('color-scheme');
+    initializeTheme();
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.style.colorScheme).toBe('light');
   });
 });
