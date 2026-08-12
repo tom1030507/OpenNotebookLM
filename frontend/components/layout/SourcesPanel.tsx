@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
+import {
+  Plus,
   Search,
   FileText,
   Globe,
@@ -33,7 +33,7 @@ export default function SourcesPanel({
   const [showUpload, setShowUpload] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
-  
+
   const {
     projects,
     currentProject,
@@ -54,7 +54,7 @@ export default function SourcesPanel({
   const handleCreateProject = async () => {
     const name = prompt('Enter project name:');
     if (!name) return;
-    
+
     setCreatingProject(true);
     try {
       const project = await createProject(name);
@@ -86,13 +86,13 @@ export default function SourcesPanel({
         });
       }
     }
-    
+
     setShowUpload(false);
   };
 
   const handleDeleteDocument = async (docId: string) => {
     if (!currentProject) return;
-    
+
     if (confirm('Are you sure you want to delete this document?')) {
       try {
         await deleteDocument(currentProject.id, docId);
@@ -118,7 +118,7 @@ export default function SourcesPanel({
   };
 
   // Filter documents based on search query
-  const filteredDocuments = documents.filter(doc => 
+  const filteredDocuments = documents.filter(doc =>
     doc.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -172,7 +172,7 @@ export default function SourcesPanel({
                 </option>
               ))}
             </select>
-          
+
             <button
               onClick={handleCreateProject}
               disabled={creatingProject}
@@ -186,7 +186,7 @@ export default function SourcesPanel({
               <span className="text-sm">New Project</span>
             </button>
           </div>
-        
+
           {/* Add Source Button */}
           {currentProject && (
             <button

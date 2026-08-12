@@ -81,11 +81,14 @@ export function desktopWorkspaceReducer(
 export function resolveDesktopWorkspaceMetrics(
   viewportWidth: number,
   state: DesktopWorkspaceState,
+  hasConversationPanel = true,
 ): DesktopWorkspaceMetrics {
   const sources = state.sources
     ? COLLAPSED_PANEL_WIDTH
     : resolveFluidTrack(viewportWidth, SOURCES_TRACK);
-  const conversations = resolveFluidTrack(viewportWidth, CONVERSATIONS_TRACK);
+  const conversations = hasConversationPanel
+    ? resolveFluidTrack(viewportWidth, CONVERSATIONS_TRACK)
+    : 0;
   const studio = state.studio
     ? COLLAPSED_PANEL_WIDTH
     : resolveFluidTrack(viewportWidth, STUDIO_TRACK);
@@ -103,6 +106,7 @@ export function resolveDesktopWorkspaceMetrics(
 
 export function getDesktopWorkspaceStyle(
   state: DesktopWorkspaceState,
+  hasConversationPanel = true,
 ): CSSProperties {
   const sources = state.sources
     ? toRem(COLLAPSED_PANEL_WIDTH)
@@ -110,9 +114,12 @@ export function getDesktopWorkspaceStyle(
   const studio = state.studio
     ? toRem(COLLAPSED_PANEL_WIDTH)
     : toFluidTrackCss(STUDIO_TRACK);
+  const conversations = hasConversationPanel
+    ? toFluidTrackCss(CONVERSATIONS_TRACK)
+    : '0';
 
   return {
-    gridTemplateColumns: `${sources} minmax(0, 1fr) ${toFluidTrackCss(CONVERSATIONS_TRACK)} ${studio}`,
+    gridTemplateColumns: `${sources} minmax(0, 1fr) ${conversations} ${studio}`,
   };
 }
 

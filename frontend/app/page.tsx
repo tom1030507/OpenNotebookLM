@@ -12,12 +12,14 @@ import {
   getDesktopWorkspaceStyle,
   initialDesktopWorkspaceState,
 } from '@/components/desktopLayout';
+import useStore from '@/store/useStore';
 
 export default function Home() {
   const [layoutState, dispatchLayout] = useReducer(
     desktopWorkspaceReducer,
     initialDesktopWorkspaceState,
   );
+  const currentProject = useStore((state) => state.currentProject);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -28,7 +30,7 @@ export default function Home() {
       <main
         data-layout="desktop-workspace"
         className="flex-1 grid min-w-0 overflow-hidden"
-        style={getDesktopWorkspaceStyle(layoutState)}
+        style={getDesktopWorkspaceStyle(layoutState, Boolean(currentProject))}
       >
         {/* Left Sidebar - Sources */}
         <SourcesPanel

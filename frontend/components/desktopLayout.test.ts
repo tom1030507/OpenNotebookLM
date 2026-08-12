@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { createElement } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import Home from '@/app/page';
@@ -161,6 +162,53 @@ describe('desktop workspace layout', () => {
     expect(actions?.style.gap).toContain('cqw');
   });
 
+  test('reclaims the conversation track without a project and restores it on selection', () => {
+    useStore.setState({ currentProject: null, currentConversation: null });
+    const { container } = render(createElement(Home));
+    const workspace = container.querySelector<HTMLElement>(
+      '[data-layout="desktop-workspace"]',
+    );
+    const noProjectColumns = getDesktopWorkspaceStyle(
+      initialDesktopWorkspaceState,
+      false,
+    ).gridTemplateColumns;
+
+    expect(workspace?.style.gridTemplateColumns).toBe(noProjectColumns);
+    expect(noProjectColumns).toBe(
+      'clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 clamp(12rem, 15vw, 17rem)',
+    );
+    expect(
+      resolveDesktopWorkspaceMetrics(
+        1024,
+        initialDesktopWorkspaceState,
+        false,
+      ).center,
+    ).toBe(640);
+    expect(screen.queryByRole('heading', { name: '對話' })).toBeNull();
+
+    act(() => {
+      useStore.setState({ currentProject: project });
+    });
+
+    expect(workspace?.style.gridTemplateColumns).toBe(
+      getDesktopWorkspaceStyle(initialDesktopWorkspaceState, true)
+        .gridTemplateColumns,
+    );
+    expect(screen.getByRole('heading', { name: '對話' })).toBeTruthy();
+  });
+
+  test('renders the no-project desktop grid deterministically during SSR', () => {
+    useStore.setState({ currentProject: null, currentConversation: null });
+
+    const firstMarkup = renderToStaticMarkup(createElement(Home));
+    const secondMarkup = renderToStaticMarkup(createElement(Home));
+
+    expect(firstMarkup).toBe(secondMarkup);
+    expect(firstMarkup).toContain(
+      'grid-template-columns:clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 clamp(12rem, 15vw, 17rem)',
+    );
+  });
+
   test('collapses and restores Sources through Home without losing local state or focus', () => {
     const { container } = render(createElement(Home));
     const workspace = container.querySelector<HTMLElement>(
@@ -235,6 +283,25 @@ describe('desktop workspace layout', () => {
     expect(screen.getByRole('heading', { name: '對話' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '收合對話' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: '新增對話' })).toHaveLength(2);
+  });
+
+  test('keeps the controlled conversation content mounted while collapsed', () => {
+    render(createElement(Home));
+    const toggle = screen.getByRole('button', { name: '收合對話' });
+    const content = screen.getByRole('region', {
+      name: '對話內容',
+      hidden: true,
+    });
+
+    expect(toggle.getAttribute('aria-controls')).toBe(content.id);
+    expect(content.hidden).toBe(false);
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBe(content.id);
+    expect(content.hidden).toBe(true);
+    expect(document.getElementById(content.id)).toBe(content);
   });
 
   test('releases center width when supporting panels collapse', () => {
