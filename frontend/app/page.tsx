@@ -24,7 +24,7 @@ export default function Home() {
         />
         
         {/* Center - Chat Area */}
-        <ChatArea onRequestAddSources={() => setIsAddSourcesOpen(true)} />
+        <ChatArea onAddSourcesOpenChange={setIsAddSourcesOpen} />
         
         {/* Conversation List */}
         <ConversationList />

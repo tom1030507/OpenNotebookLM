@@ -17,6 +17,10 @@ import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import useStore from '@/store/useStore';
 import { Document } from '@/lib/api';
+import {
+  closeAddSourcesAfterSuccessfulUpload,
+  requestAddSources,
+} from '../sourceActions';
 
 interface SourcesPanelProps {
   isAddSourcesOpen: boolean;
@@ -70,21 +74,22 @@ export default function SourcesPanel({
       return;
     }
 
-    for (const item of items) {
-      if (item instanceof File) {
-        await uploadDocument(currentProject.id, item);
-      } else {
-        // Handle URL or YouTube link
-        const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
-        await createDocument(currentProject.id, {
-          name: item,
-          type: isYouTube ? 'youtube' : 'url',
-          url: item,
-        });
+    const projectId = currentProject.id;
+    await closeAddSourcesAfterSuccessfulUpload(async () => {
+      for (const item of items) {
+        if (item instanceof File) {
+          await uploadDocument(projectId, item);
+        } else {
+          // Handle URL or YouTube link
+          const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
+          await createDocument(projectId, {
+            name: item,
+            type: isYouTube ? 'youtube' : 'url',
+            url: item,
+          });
+        }
       }
-    }
-    
-    onAddSourcesOpenChange(false);
+    }, onAddSourcesOpenChange);
   };
 
   const handleDeleteDocument = async (docId: string) => {
@@ -160,7 +165,7 @@ export default function SourcesPanel({
         {/* Add Source Button */}
         {currentProject && (
           <button 
-            onClick={() => onAddSourcesOpenChange(true)}
+            onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
             className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
           >
             <Plus className="w-4 h-4" />
@@ -264,7 +269,12 @@ export default function SourcesPanel({
 
       {/* Upload Modal */}
       {isAddSourcesOpen && currentProject && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="新增來源"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        >
           <div className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
               <h3 className="text-lg font-semibold">Add Sources</h3>

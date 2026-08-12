@@ -11,12 +11,13 @@ import {
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import MarkdownRenderer from '../MarkdownRenderer';
+import { requestAddSources } from '../sourceActions';
 
 interface ChatAreaProps {
-  onRequestAddSources?: () => void;
+  onAddSourcesOpenChange: (isOpen: boolean) => void;
 }
 
-export default function ChatArea({ onRequestAddSources }: ChatAreaProps) {
+export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -70,9 +71,7 @@ export default function ChatArea({ onRequestAddSources }: ChatAreaProps) {
   const sourceActionHelperText = '請先選擇或建立專案後再新增來源';
 
   const handleRequestAddSources = () => {
-    if (canAddSources) {
-      onRequestAddSources?.();
-    }
+    requestAddSources(canAddSources, onAddSourcesOpenChange);
   };
 
   return (
