@@ -15,7 +15,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import ExportDialog from '../ExportDialog';
-import ProjectDialog from '../ProjectDialog';
+import { useProjectDialog } from '../ProjectDialogProvider';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
 
@@ -25,12 +25,12 @@ interface TopNavProps {
 
 export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps) {
   const [showExport, setShowExport] = useState(false);
-  const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   
   const { currentProject, currentConversation } = useStore();
+  const { openProjectDialog } = useProjectDialog();
   
   return (
     <>
@@ -61,7 +61,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
         <div className="flex items-center gap-2">
           {/* New Project Button */}
           <button
-            onClick={() => setShowProjectDialog(true)}
+            onClick={openProjectDialog}
+            aria-label={'\u5EFA\u7ACB\u65B0\u5C08\u6848'}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
             title="New Project"
           >
@@ -158,12 +159,6 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           onClose={() => setShowExport(false)}
         />
       )}
-      
-      <ProjectDialog 
-        isOpen={showProjectDialog} 
-        onClose={() => setShowProjectDialog(false)}
-        onSuccess={() => setShowProjectDialog(false)}
-      />
       
       <Settings 
         isOpen={showSettings} 

@@ -15,13 +15,13 @@ import {
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
+import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
 import { Document } from '@/lib/api';
 
 export default function SourcesPanel() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUpload, setShowUpload] = useState(false);
-  const [creatingProject, setCreatingProject] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   
   const {
@@ -31,31 +31,15 @@ export default function SourcesPanel() {
     loadingDocuments,
     fetchProjects,
     selectProject,
-    createProject,
     uploadDocument,
     createDocument,
     deleteDocument,
   } = useStore();
+  const { openProjectDialog } = useProjectDialog();
 
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
-
-  const handleCreateProject = async () => {
-    const name = prompt('Enter project name:');
-    if (!name) return;
-    
-    setCreatingProject(true);
-    try {
-      const project = await createProject(name);
-      selectProject(project);
-    } catch (error) {
-      console.error('Failed to create project:', error);
-      alert('Failed to create project');
-    } finally {
-      setCreatingProject(false);
-    }
-  };
 
   const handleUpload = async (items: File[] | string[]) => {
     if (!currentProject) {
@@ -137,15 +121,10 @@ export default function SourcesPanel() {
           </select>
           
           <button
-            onClick={handleCreateProject}
-            disabled={creatingProject}
+            onClick={openProjectDialog}
             className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
           >
-            {creatingProject ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <FolderOpen className="w-4 h-4" />
-            )}
+            <FolderOpen className="w-4 h-4" />
             <span className="text-sm">New Project</span>
           </button>
         </div>
