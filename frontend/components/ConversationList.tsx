@@ -125,13 +125,16 @@ export default function ConversationList() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col border-l border-[var(--border)] bg-[var(--sidebar-bg)] lg:w-48 xl:w-64">
+    <div className="w-full min-w-0 overflow-hidden bg-[var(--sidebar-bg)] border-l border-[var(--border)] flex flex-col h-full">
       {/* Header */}
       <div className="p-4 border-b border-[var(--sidebar-border)]">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
+          <div className="min-w-0 flex items-center gap-2">
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
+              aria-controls="conversation-panel-content"
+              aria-expanded={!isCollapsed}
+              aria-label={isCollapsed ? '展開對話' : '收合對話'}
               className="p-1 hover:bg-[var(--muted)] rounded transition-base"
             >
               {isCollapsed ? (
@@ -140,12 +143,13 @@ export default function ConversationList() {
                 <ChevronDown className="w-4 h-4" />
               )}
             </button>
-            <h3 className="text-sm font-medium">Conversations</h3>
+            <h3 className="truncate text-sm font-medium">對話</h3>
           </div>
           <button
             onClick={handleNewConversation}
+            aria-label="新增對話"
             className="p-1 hover:bg-[var(--muted)] rounded transition-base"
-            title="New Conversation"
+            title="新增對話"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -157,14 +161,19 @@ export default function ConversationList() {
             className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base text-sm"
           >
             <Plus className="w-4 h-4" />
-            <span>New Chat</span>
+            <span>新增對話</span>
           </button>
         )}
       </div>
 
       {/* Conversations List */}
-      {!isCollapsed && (
-        <div className="flex-1 overflow-y-auto p-2">
+      <div
+        id="conversation-panel-content"
+        role="region"
+        aria-label="對話內容"
+        hidden={isCollapsed}
+        className="flex-1 overflow-y-auto p-2"
+      >
           {Object.keys(groupedConversations).length === 0 ? (
             <div className="text-center py-8">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 text-[var(--muted-foreground)]" />
@@ -266,8 +275,7 @@ export default function ConversationList() {
               ))}
             </div>
           )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

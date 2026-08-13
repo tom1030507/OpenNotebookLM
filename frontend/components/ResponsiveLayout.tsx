@@ -14,6 +14,13 @@ interface ResponsiveLayoutProps {
   sidebar?: React.ReactNode;
   conversationPanel?: React.ReactNode;
   rightPanel?: React.ReactNode;
+  /**
+   * Grid track sizing for the desktop layout. Applied unconditionally but only
+   * takes effect at `lg` and up, where the container becomes a grid; below that
+   * the container is a flex row with the active panel promoted to a drawer.
+   * Track order matches `contentOrder`: sources, centre, conversations, studio.
+   */
+  desktopStyle?: React.CSSProperties;
 }
 
 const FOCUSABLE_DRAWER_ELEMENTS = [
@@ -38,6 +45,7 @@ export default function ResponsiveLayout({
   sidebar,
   conversationPanel,
   rightPanel,
+  desktopStyle,
 }: ResponsiveLayoutProps) {
   const [activePanel, dispatch] = useReducer(reduceWorkspacePanel, null);
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -134,7 +142,11 @@ export default function ResponsiveLayout({
         })}
       </nav>
 
-      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div
+        data-layout="desktop-workspace"
+        style={desktopStyle}
+        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden lg:grid"
+      >
         {layout.drawerPanelId && (
           <button
             type="button"
