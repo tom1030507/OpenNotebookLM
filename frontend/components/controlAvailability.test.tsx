@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatArea from './chat/ChatArea';
 import TopNav from './layout/TopNav';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
+
+// TopNav navigates on sign-out.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
 
 
 beforeEach(() => {
@@ -40,12 +46,12 @@ describe('workspace control availability', () => {
     expect(requestedOpen).toBe(false);
   });
 
-  it('marks notification and help as disabled, accessible coming-soon controls', () => {
+  it('exposes notifications and help as working controls', () => {
     render(<ProjectDialogProvider><TopNav /></ProjectDialogProvider>);
 
-    const notification = screen.getByRole('button', { name: 'Notifications (coming soon)' });
-    const help = screen.getByRole('button', { name: 'Help (coming soon)' });
-    expect((notification as HTMLButtonElement).disabled).toBe(true);
-    expect((help as HTMLButtonElement).disabled).toBe(true);
+    const notification = screen.getByRole('button', { name: 'Notifications' });
+    const help = screen.getByRole('button', { name: 'Help' });
+    expect((notification as HTMLButtonElement).disabled).toBe(false);
+    expect((help as HTMLButtonElement).disabled).toBe(false);
   });
 });

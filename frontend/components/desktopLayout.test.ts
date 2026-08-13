@@ -15,6 +15,12 @@ import {
 import type { Conversation, Document, Project } from '@/lib/api';
 import useStore from '@/store/useStore';
 
+// Home renders TopNav, which navigates on sign-out.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
+
 const originalStoreState = useStore.getState();
 const project: Project = {
   id: 'project-1',

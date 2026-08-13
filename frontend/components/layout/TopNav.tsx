@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
   FileText, 
   Settings as SettingsIcon,
@@ -15,6 +16,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import ExportDialog from '../ExportDialog';
+import TopNavInfoDialog from './TopNavInfoDialog';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
@@ -25,17 +27,54 @@ interface TopNavProps {
 }
 
 export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps) {
-  const availabilityLabel = 'coming soon';
   const [showExport, setShowExport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   
-  const { currentProject, currentConversation } = useStore();
+  const { currentProject, currentConversation, documents } = useStore();
+  const router = useRouter();
   const { openProjectDialog } = useProjectDialog();
 
   useEffect(() => {
     initializeTheme();
   }, []);
+
+  const readAccount = () => {
+    try {
+      const raw = window.localStorage.getItem('user');
+      const parsed = raw ? JSON.parse(raw) as { username?: string; email?: string } : null;
+      return {
+        username: parsed?.username || 'Demo user',
+        email: parsed?.email || 'demo@example.com',
+      };
+    } catch {
+      return { username: 'Demo user', email: 'demo@example.com' };
+    }
+  };
+
+  const signOut = () => {
+    for (const key of ['access_token', 'auth_token', 'user']) {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // Navigation still returns the user to the login page.
+      }
+    }
+
+    setShowUserMenu(false);
+    router.push('/login');
+  };
+
+  // Documents are the only asynchronous work the workspace runs today, so their
+  // status is what there is to notify about.
+  const pendingDocuments = documents.filter(
+    (document) => document.status === 'queued' || document.status === 'processing',
+  );
+  const failedDocuments = documents.filter((document) => document.status === 'error');
+  const notificationCount = pendingDocuments.length + failedDocuments.length;
 
   const toggleTheme = () => {
     const nextTheme: Theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -111,18 +150,23 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           
           {/* Notifications */}
           <button
-            disabled
-            aria-label={`Notifications (${availabilityLabel})`}
-            className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+            onClick={() => setShowNotifications(true)}
+            aria-label={notificationCount > 0 ? `Notifications (${notificationCount})` : 'Notifications'}
+            title="Notifications"
+            className="relative p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
           >
             <Bell className="w-4 h-4" />
+            {notificationCount > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[var(--error)]" />
+            )}
           </button>
           
           {/* Help */}
           <button
-            disabled
-            aria-label={`Help (${availabilityLabel})`}
-            className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+            onClick={() => setShowHelp(true)}
+            aria-label="Help"
+            title="Help"
+            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
           >
             <HelpCircle className="w-4 h-4" />
           </button>
@@ -156,16 +200,17 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                 className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50"
               >
                 <div className="px-4 py-2 border-b border-[var(--border)]">
-                  <p className="text-sm font-medium">User</p>
-                  <p className="text-xs text-[var(--muted-foreground)]">user@example.com</p>
+                  <p className="text-sm font-medium">{readAccount().username}</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">{readAccount().email}</p>
                 </div>
                 <button
-                  disabled
-                  aria-label={`Profile (${availabilityLabel})`}
-                  className="w-full text-left px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-base flex items-center justify-between"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    setShowProfile(true);
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base"
                 >
-                  <span>Profile</span>
-                  <span className="text-xs">{availabilityLabel}</span>
+                  Profile
                 </button>
                 <button 
                   onClick={() => {
@@ -178,15 +223,11 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                 </button>
                 <div className="border-t border-[var(--border)] mt-2 pt-2">
                   <button
-                    disabled
-                    aria-label={`Sign out (${availabilityLabel})`}
-                    className="w-full text-left px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-base flex items-center justify-between"
+                    onClick={signOut}
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base flex items-center gap-2"
                   >
-                    <span className="flex items-center gap-2">
-                      <LogOut className="w-4 h-4" />
-                      <span>Sign out</span>
-                    </span>
-                    <span className="text-xs">{availabilityLabel}</span>
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign out</span>
                   </button>
                 </div>
               </div>
@@ -195,6 +236,75 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
         </div>
       </header>
       
+      {showProfile && (
+        <TopNavInfoDialog title="Profile" onClose={() => setShowProfile(false)}>
+          <dl className="space-y-3 text-sm">
+            <div>
+              <dt className="text-xs text-[var(--muted-foreground)]">Username</dt>
+              <dd className="font-medium">{readAccount().username}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-[var(--muted-foreground)]">Email</dt>
+              <dd className="font-medium">{readAccount().email}</dd>
+            </div>
+          </dl>
+          <p className="mt-4 text-xs text-[var(--muted-foreground)]">
+            This workspace runs in demo mode. Account details come from the browser session.
+          </p>
+        </TopNavInfoDialog>
+      )}
+
+      {showHelp && (
+        <TopNavInfoDialog title="Help" onClose={() => setShowHelp(false)}>
+          <ol className="space-y-2 text-sm list-decimal list-inside">
+            <li>Create a project to hold related material.</li>
+            <li>Add sources: upload a PDF, or paste a web page or YouTube link.</li>
+            <li>Wait for a source to report Ready, then ask a question in the composer.</li>
+            <li>Export a conversation or a whole project from the toolbar.</li>
+          </ol>
+          <p className="mt-4 text-xs text-[var(--muted-foreground)]">
+            Studio outputs (audio, video, mind maps) are not available yet.
+          </p>
+          <a
+            href="https://github.com/tom1030507/OpenNotebookLM"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-block text-sm text-[var(--primary)] hover:underline"
+          >
+            Documentation on GitHub
+          </a>
+        </TopNavInfoDialog>
+      )}
+
+      {showNotifications && (
+        <TopNavInfoDialog title="Notifications" onClose={() => setShowNotifications(false)}>
+          {notificationCount === 0 ? (
+            <p className="text-sm text-[var(--muted-foreground)]">
+              No notifications. Source processing updates appear here.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {failedDocuments.map((document) => (
+                <li key={document.id} className="text-sm">
+                  <p className="font-medium">{document.name}</p>
+                  <p className="text-xs text-[var(--error)]">
+                    Failed to process{document.error_message ? `: ${document.error_message}` : ''}
+                  </p>
+                </li>
+              ))}
+              {pendingDocuments.map((document) => (
+                <li key={document.id} className="text-sm">
+                  <p className="font-medium">{document.name}</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    Currently {document.status}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </TopNavInfoDialog>
+      )}
+
       {/* Dialogs */}
       {showExport && (currentConversation || currentProject) && (
         <ExportDialog
