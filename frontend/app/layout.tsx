@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import NotificationProvider from "@/components/NotificationProvider";
+import { initializeTheme } from "@/lib/theme";
 import "./globals.css";
+
+const themeInitializationScript = `(${initializeTheme.toString()})();`;
 
 export const metadata: Metadata = {
   title: "OpenNotebookLM - AI-Powered Knowledge Assistant",
@@ -13,7 +16,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-TW">
+    <html lang="zh-TW" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitializationScript }} />
+      </head>
       <body className="antialiased">
         <NotificationProvider />
         {children}

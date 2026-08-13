@@ -237,12 +237,13 @@ describe('Add Sources controls', () => {
 
 
 describe('unavailable workspace controls', () => {
-  it('disables the theme toggle and exposes user-menu availability states', () => {
+  it('exposes a working theme toggle and user-menu availability states', () => {
     render(<ProjectDialogProvider><TopNav /></ProjectDialogProvider>);
 
-    const themeToggle = screen.getByRole('button', { name: '主題切換（即將推出）' });
-    expect(themeToggle.getAttribute('title')).toBe('主題切換（即將推出）');
-    expect((themeToggle as HTMLButtonElement).disabled).toBe(true);
+    // The 即將推出 placeholder this PR introduced is superseded by the real
+    // theme toggle from #3, so the control must now be genuinely usable.
+    const themeToggle = screen.getByRole('button', { name: '切換主題' });
+    expect((themeToggle as HTMLButtonElement).disabled).toBe(false);
 
     const userMenuTrigger = screen.getByRole('button', { name: '使用者選單' });
     expect(userMenuTrigger.getAttribute('aria-haspopup')).toBe('menu');

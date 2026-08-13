@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-:root {
+:root,
+[data-theme='light'] {
   /* Google NotebookLM Colors */
   --background: #f8f9fa;
   --foreground: #202124;
@@ -29,25 +30,35 @@
   --error: #ea4335;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #202124;
-    --foreground: #e8eaed;
-    --card: #292a2d;
-    --card-foreground: #e8eaed;
-    --primary: #8ab4f8;
-    --primary-hover: #aecbfa;
-    --secondary: #292a2d;
-    --secondary-foreground: #e8eaed;
-    --muted: #3c4043;
-    --muted-foreground: #9aa0a6;
-    --accent: #bb86fc;
-    --accent-foreground: #202124;
-    --border: #3c4043;
-    --input: #3c4043;
-    --sidebar-bg: #292a2d;
-    --sidebar-border: #3c4043;
-  }
+[data-theme='dark'] {
+  --background: #202124;
+  --foreground: #e8eaed;
+  --card: #292a2d;
+  --card-foreground: #e8eaed;
+  --primary: #8ab4f8;
+  --primary-hover: #aecbfa;
+  --secondary: #292a2d;
+  --secondary-foreground: #e8eaed;
+  --muted: #3c4043;
+  --muted-foreground: #9aa0a6;
+  --accent: #bb86fc;
+  --accent-foreground: #202124;
+  --border: #3c4043;
+  --input: #3c4043;
+  --sidebar-bg: #292a2d;
+  --sidebar-border: #3c4043;
+}
+
+.theme-icon--sun {
+  display: none;
+}
+
+[data-theme='dark'] .theme-icon--sun {
+  display: block;
+}
+
+[data-theme='dark'] .theme-icon--moon {
+  display: none;
 }
 
 /* Must stay inside a cascade layer: unlayered rules outrank every layer, so an

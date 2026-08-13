@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   FileText, 
   Settings as SettingsIcon,
   ChevronDown,
   Download,
   Moon,
+  Sun,
   User,
   FolderPlus,
   LogOut,
@@ -17,6 +18,7 @@ import ExportDialog from '../ExportDialog';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
+import { applyTheme, initializeTheme, THEME_STORAGE_KEY, type Theme } from '@/lib/theme';
 
 interface TopNavProps {
   notebookTitle?: string;
@@ -30,7 +32,23 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   
   const { currentProject, currentConversation } = useStore();
   const { openProjectDialog } = useProjectDialog();
-  
+
+  useEffect(() => {
+    initializeTheme();
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme: Theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+
+    applyTheme(nextTheme, document.documentElement);
+
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    } catch {
+      // The current-session choice still applies if persistence is unavailable.
+    }
+  };
+
   return (
     <>
       <header className="h-14 border-b border-[var(--border)] bg-[var(--card)] flex items-center px-4 gap-4">
@@ -81,12 +99,13 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           
           {/* Theme Toggle */}
           <button
-            disabled
-            title="主題切換（即將推出）"
-            aria-label="主題切換（即將推出）"
-            className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+            onClick={toggleTheme}
+            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+            title="Toggle theme"
+            aria-label="切換主題"
           >
-            <Moon className="w-4 h-4" />
+            <Sun data-theme-icon="sun" className="theme-icon--sun w-4 h-4" />
+            <Moon data-theme-icon="moon" className="theme-icon--moon w-4 h-4" />
           </button>
           
           {/* Notifications */}
