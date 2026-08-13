@@ -21,6 +21,12 @@ import TopNav from './layout/TopNav';
 import SourcesPanel from './layout/SourcesPanel';
 import useStore from '@/store/useStore';
 
+// TopNav navigates on sign-out.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
+
 const createdProject: Project = {
   id: 'project-created',
   name: 'Research plan',

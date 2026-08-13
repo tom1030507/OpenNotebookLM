@@ -9,7 +9,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatArea from './chat/ChatArea';
 import StudioPanel from './layout/StudioPanel';
@@ -18,6 +18,12 @@ import TopNav from './layout/TopNav';
 import type { Project } from '@/lib/api';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
+
+// TopNav navigates on sign-out.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
 
 
 const currentProject: Project = {
@@ -250,8 +256,9 @@ describe('unavailable workspace controls', () => {
     expect(userMenuTrigger.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(userMenuTrigger);
     expect(userMenuTrigger.getAttribute('aria-expanded')).toBe('true');
-    expect((screen.getByRole('button', { name: 'Profile (coming soon)' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Sign out (coming soon)' }) as HTMLButtonElement).disabled).toBe(true);
+    // Profile and Sign out are implemented now, so they must be usable.
+    expect((screen.getByRole('button', { name: 'Profile' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Sign out' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('states that Studio output features are coming soon', () => {

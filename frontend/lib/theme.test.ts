@@ -7,6 +7,12 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import RootLayout from '@/app/layout';
 import TopNav from '@/components/layout/TopNav';
 import ProjectDialogProvider from '@/components/ProjectDialogProvider';
+
+// TopNav navigates on sign-out.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
 import {
   applyTheme,
   initializeTheme,

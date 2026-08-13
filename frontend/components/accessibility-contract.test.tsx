@@ -23,8 +23,8 @@ vi.mock('next/navigation', () => ({
 }));
 
 const workspaceIconButtonNames = [
-  'Notifications (coming soon)',
-  'Help (coming soon)',
+  'Notifications',
+  'Help',
   'Settings',
   'User menu',
   'Attach file',
@@ -566,7 +566,7 @@ describe('workspace accessibility contract', () => {
     );
 
     [
-      'New Project', 'Export', 'Toggle theme', 'Notifications (coming soon)', 'Help (coming soon)', 'Settings', 'User menu',
+      'New Project', 'Export', 'Toggle theme', 'Notifications', 'Help', 'Settings', 'User menu',
       'Attach file', 'Send message', 'Preview document', 'Delete document', 'Copy content', 'Download document', 'Toggle fullscreen', 'Close document preview dialog',
       // Each name must exist; uniqueness is not required, since the top
       // navigation and the Sources panel both legitimately offer New Project.
