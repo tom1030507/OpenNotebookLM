@@ -110,15 +110,15 @@ describe('Add Sources controls', () => {
     render(<SourceWorkspace />);
 
     fireEvent.click(screen.getByRole('button', { name: '上傳來源' }));
-    expect(screen.getByRole('dialog', { name: 'Add Sources' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '關閉新增來源對話框' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add Source' }));
-    expect(screen.getByRole('dialog', { name: 'Add Sources' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '新增來源' }));
+    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '關閉新增來源對話框' }));
     fireEvent.click(screen.getByRole('button', { name: '附加檔案' }));
-    expect(screen.getByRole('dialog', { name: 'Add Sources' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
   });
 
   it('focuses the close button, closes with Escape, and restores focus to the opener', () => {
@@ -130,7 +130,7 @@ describe('Add Sources controls', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '關閉新增來源對話框' }));
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Add Sources' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
     expect(document.activeElement).toBe(opener);
   });
 
@@ -140,7 +140,7 @@ describe('Add Sources controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Add Sources' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
     });
   });
 
@@ -155,7 +155,7 @@ describe('Add Sources controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(await screen.findByText('Upload failed. Please check the URL and try again.')).not.toBeNull();
-    expect(screen.getByRole('dialog', { name: 'Add Sources' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
   });
 
   it('keeps a busy modal non-dismissible until its upload settles', async () => {
@@ -165,20 +165,20 @@ describe('Add Sources controls', () => {
     openUrlUploader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
-    const dialog = screen.getByRole('dialog', { name: 'Add Sources' });
+    const dialog = screen.getByRole('dialog', { name: '新增來源' });
     expect(dialog.getAttribute('aria-busy')).toBe('true');
     expect((screen.getByRole('button', { name: '關閉新增來源對話框' }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(dialog);
-    expect(screen.getByRole('dialog', { name: 'Add Sources' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
 
     await act(async () => {
       upload.resolve();
       await upload.promise;
     });
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Add Sources' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
     });
   });
 
@@ -195,13 +195,13 @@ describe('Add Sources controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '外部關閉來源對話框' }));
     fireEvent.click(screen.getByRole('button', { name: '外部重新開啟來源對話框' }));
-    expect(screen.getByRole('dialog', { name: 'Add Sources' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
 
     await act(async () => {
       firstUpload.resolve();
       await firstUpload.promise;
     });
-    expect(screen.getByRole('dialog', { name: 'Add Sources' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
   });
 
   it('submits one URL upload after rapid Enter and Add interactions while the button becomes busy', async () => {
@@ -230,7 +230,7 @@ describe('Add Sources controls', () => {
       await upload.promise;
     });
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Add Sources' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
     });
   });
 });

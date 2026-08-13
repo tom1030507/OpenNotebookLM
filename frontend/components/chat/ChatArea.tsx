@@ -261,7 +261,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     handleSend();
                   }
                 }}
-                placeholder={canChat ? "Ask anything about your sources..." : "Add sources to start chatting"}
+                placeholder={canChat ? '針對你的來源提問…' : '新增來源即可開始對話'}
                 className="w-full px-4 py-3 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
                 rows={1}
                 disabled={!canChat || isStreaming}

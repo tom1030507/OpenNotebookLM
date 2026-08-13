@@ -179,10 +179,10 @@ export default function ConversationList() {
             <div className="text-center py-8">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 text-[var(--muted-foreground)]" />
               <p className="text-xs text-[var(--muted-foreground)]">
-                No conversations yet
+                尚無對話
               </p>
               <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                Start a new chat to begin
+                開始新對話即可使用
               </p>
             </div>
           ) : (
