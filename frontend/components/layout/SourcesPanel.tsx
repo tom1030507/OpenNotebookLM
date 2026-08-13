@@ -231,7 +231,7 @@ export default function SourcesPanel({
             className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
           >
             <FolderOpen className="w-4 h-4" />
-            <span className="text-sm">New Project</span>
+            <span className="text-sm">新增專案</span>
           </button>
         </div>
         
@@ -242,7 +242,7 @@ export default function SourcesPanel({
             className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
           >
             <Plus className="w-4 h-4" />
-            <span className="text-sm">Add Source</span>
+            <span className="text-sm">新增來源</span>
           </button>
         )}
 
@@ -270,7 +270,7 @@ export default function SourcesPanel({
               <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
             </div>
             <p className="text-sm text-[var(--muted-foreground)]">
-              Select or create a project to get started
+              請選擇或建立專案以開始使用
             </p>
           </div>
         ) : loadingDocuments ? (
@@ -283,11 +283,11 @@ export default function SourcesPanel({
               <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
             </div>
             <p className="text-sm text-[var(--muted-foreground)]">
-              {searchQuery ? 'No sources found' : 'No sources yet'}
+              {searchQuery ? '找不到來源' : '尚無來源'}
             </p>
             {!searchQuery && (
               <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
+                點選「新增來源」以上傳 PDF、網址或 YouTube 影片
               </p>
             )}
           </div>
@@ -357,7 +357,7 @@ export default function SourcesPanel({
             className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
           >
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
-              <h3 id={uploadTitleId} className="text-lg font-semibold">Add Sources</h3>
+              <h3 id={uploadTitleId} className="text-lg font-semibold">新增來源</h3>
               <button
                 ref={uploadCloseRef}
                 onClick={closeAddSources}

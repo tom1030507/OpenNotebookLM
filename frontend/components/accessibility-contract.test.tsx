@@ -202,18 +202,18 @@ describe('workspace accessibility contract', () => {
     configureSourcesStore();
     renderWorkspace(<SourcesPanelHarness />);
 
-    const trigger = screen.getByRole('button', { name: 'Add Source' });
+    const trigger = screen.getByRole('button', { name: '新增來源' });
     trigger.focus();
     fireEvent.click(trigger);
 
-    const dialog = screen.getByRole('dialog', { name: 'Add Sources' });
+    const dialog = screen.getByRole('dialog', { name: '新增來源' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(document.activeElement).toBe(screen.getByRole('button', {
       name: '\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846',
     }));
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Add Sources' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -371,13 +371,13 @@ describe('workspace accessibility contract', () => {
       </>,
     );
 
-    const triggers = screen.getAllByRole('button', { name: 'Add Source' });
+    const triggers = screen.getAllByRole('button', { name: '新增來源' });
     fireEvent.click(triggers[0]);
-    const firstId = screen.getByRole('dialog', { name: 'Add Sources' }).getAttribute('aria-labelledby');
+    const firstId = screen.getByRole('dialog', { name: '新增來源' }).getAttribute('aria-labelledby');
     fireEvent.click(screen.getByRole('button', { name: '\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846' }));
 
     fireEvent.click(triggers[1]);
-    const secondId = screen.getByRole('dialog', { name: 'Add Sources' }).getAttribute('aria-labelledby');
+    const secondId = screen.getByRole('dialog', { name: '新增來源' }).getAttribute('aria-labelledby');
 
     expect(firstId).not.toBe(secondId);
     expect(document.getElementById(secondId || '')).toBeTruthy();
@@ -500,7 +500,7 @@ describe('workspace accessibility contract', () => {
     configureSourcesStore();
     renderWorkspace(<SourcesPanelHarness />);
 
-    const trigger = screen.getByRole('button', { name: 'Add Source' });
+    const trigger = screen.getByRole('button', { name: '新增來源' });
     trigger.focus();
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('button', { name: 'URL' }));
@@ -514,7 +514,7 @@ describe('workspace accessibility contract', () => {
     ).toBe(true));
     resolveUpload!(fetchResponse({ doc_id: 'uploaded-document', status: 'queued', message: 'accepted' }));
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Sources' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull());
     expect(useStore.getState().currentProject).toBe(project);
 
     fireEvent.click(trigger);
@@ -568,7 +568,9 @@ describe('workspace accessibility contract', () => {
     [
       '\u65b0\u589e\u5c08\u6848', '\u532f\u51fa\u5167\u5bb9', '\u5207\u63db\u4e3b\u984c', '通知功能即將推出', '說明功能即將推出', '\u8a2d\u5b9a', '\u4f7f\u7528\u8005\u9078\u55ae',
       '\u9644\u52a0\u6a94\u6848', '\u50b3\u9001\u8a0a\u606f', '\u9810\u89bd\u6587\u4ef6', '\u522a\u9664\u6587\u4ef6', '\u8907\u88fd\u5167\u5bb9', '\u4e0b\u8f09\u6587\u4ef6', '\u5207\u63db\u5168\u87a2\u5e55', '\u95dc\u9589\u6587\u4ef6\u9810\u89bd\u5c0d\u8a71\u6846',
-    ].forEach((name) => expect(screen.getByRole('button', { name })).toBeTruthy());
+      // Each name must exist; uniqueness is not required, since the top
+      // navigation and the Sources panel both legitimately offer 新增專案.
+    ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));
 
     fireEvent.change(screen.getByLabelText('browse'), {
       target: { files: [new File(['pdf'], 'paper.pdf', { type: 'application/pdf' })] },
@@ -605,7 +607,9 @@ describe('workspace accessibility contract', () => {
       '摺疊對話清單',
       '重新命名對話',
       '刪除對話',
-    ].forEach((name) => expect(screen.getByRole('button', { name })).toBeTruthy());
+      // Each name must exist; uniqueness is not required, since the top
+      // navigation and the Sources panel both legitimately offer 新增專案.
+    ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole('button', { name: '摺疊對話清單' }));
     expect(screen.getByRole('button', { name: '展開對話清單' })).toBeTruthy();
