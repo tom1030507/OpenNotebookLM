@@ -141,9 +141,15 @@ interface ErrorResponse {
 const configuredBaseUrl = (
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 ).replace(/\/+$/, '');
-const API_BASE_URL = configuredBaseUrl.endsWith('/api')
+
+/** Absolute base URL of the backend API, including the `/api` prefix. */
+export const API_BASE_URL = configuredBaseUrl.endsWith('/api')
   ? configuredBaseUrl
   : `${configuredBaseUrl}/api`;
+
+/** The API route that streams the file stored for an uploaded document. */
+export const documentFileUrl = (documentId: string): string =>
+  `${API_BASE_URL}/docs/${encodeURIComponent(documentId)}/file`;
 
 
 const extractError = async (response: Response): Promise<Error> => {
@@ -208,6 +214,25 @@ const requestText = async (path: string): Promise<string> => {
 };
 
 
+/**
+ * Turn a backend `source_url` into something a browser can load.
+ *
+ * A URL or YouTube source already carries an absolute external address. An
+ * upload instead carries a path on the backend's own disk, which would resolve
+ * against the frontend origin and 404 there, so it is served through the
+ * document file route on the API instead.
+ */
+const resolveDocumentUrl = (document: BackendDocument): string | undefined => {
+  if (!document.source_url) {
+    return undefined;
+  }
+
+  return /^https?:\/\//i.test(document.source_url)
+    ? document.source_url
+    : documentFileUrl(document.id);
+};
+
+
 const normalizeDocument = (document: BackendDocument): Document => {
   const metadataContent = typeof document.meta_json?.content === 'string'
     ? document.meta_json.content
@@ -217,7 +242,7 @@ const normalizeDocument = (document: BackendDocument): Document => {
     id: document.id,
     name: document.title,
     type: document.source_type,
-    url: document.source_url || undefined,
+    url: resolveDocumentUrl(document),
     content: document.content || metadataContent,
     meta: document.meta_json || {},
     status: document.status,

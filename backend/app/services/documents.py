@@ -14,14 +14,11 @@ from app.schemas import DocumentCreate
 from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
 from app.services.chunking import ChunkingService
+from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
 
 logger = structlog.get_logger()
 settings = get_settings()
-
-# Create uploads directory if it doesn't exist
-UPLOAD_DIR = Path("./uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 class DocumentService:
