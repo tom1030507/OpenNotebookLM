@@ -50,10 +50,15 @@
   }
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* Must stay inside a cascade layer: unlayered rules outrank every layer, so an
+   unlayered reset here would defeat Tailwind's own padding and margin
+   utilities regardless of specificity. */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 }
 
 body {
