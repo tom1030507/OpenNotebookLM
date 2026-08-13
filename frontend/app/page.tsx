@@ -1,6 +1,6 @@
 'use client';
 
-import { useReducer } from 'react';
+import { useReducer, useState } from 'react';
 
 import TopNav from '@/components/layout/TopNav';
 import SourcesPanel from '@/components/layout/SourcesPanel';
@@ -21,6 +21,7 @@ export default function Home() {
     desktopWorkspaceReducer,
     initialDesktopWorkspaceState,
   );
+  const [isAddSourcesOpen, setIsAddSourcesOpen] = useState(false);
   const currentProject = useStore((state) => state.currentProject);
 
   return (
@@ -38,6 +39,8 @@ export default function Home() {
               onCollapsedChange={() => {
                 dispatchLayout({ type: 'toggle-panel', panel: 'sources' });
               }}
+              isAddSourcesOpen={isAddSourcesOpen}
+              onAddSourcesOpenChange={setIsAddSourcesOpen}
             />
           }
           conversationPanel={<ConversationList />}
@@ -50,7 +53,7 @@ export default function Home() {
             />
           }
         >
-          <ChatArea />
+          <ChatArea onAddSourcesOpenChange={setIsAddSourcesOpen} />
         </ResponsiveLayout>
       </div>
     </ProjectDialogProvider>

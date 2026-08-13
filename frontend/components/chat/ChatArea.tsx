@@ -15,8 +15,13 @@ import {
   welcomeHeroStyles,
 } from '@/components/desktopLayout';
 import MarkdownRenderer from '../MarkdownRenderer';
+import { requestAddSources } from '../sourceActions';
 
-export default function ChatArea() {
+interface ChatAreaProps {
+  onAddSourcesOpenChange: (isOpen: boolean) => void;
+}
+
+export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -66,6 +71,12 @@ export default function ChatArea() {
   // Check if ready to chat
   const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'ready');
   const canChat = currentProject && hasDocuments;
+  const canAddSources = Boolean(currentProject);
+  const sourceActionHelperText = '請先選擇或建立專案後再新增來源';
+
+  const handleRequestAddSources = () => {
+    requestAddSources(canAddSources, onAddSourcesOpenChange);
+  };
 
   return (
     <div
@@ -109,7 +120,13 @@ export default function ChatArea() {
               </p>
 
               {/* Upload Button */}
-              <button className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] transition-base">
+              <button
+                onClick={handleRequestAddSources}
+                disabled={!canAddSources}
+                aria-label="上傳來源"
+                aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+              >
                 <Upload className="w-5 h-5" />
                 <span>上傳來源</span>
               </button>
@@ -223,7 +240,13 @@ export default function ChatArea() {
       <div className="border-t border-[var(--border)] bg-[var(--card)] p-4">
         <div className="max-w-3xl mx-auto">
           <div className="min-w-0 flex items-end gap-3">
-            <button className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base">
+            <button
+              onClick={handleRequestAddSources}
+              disabled={!canAddSources}
+              aria-label="新增來源"
+              aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
+              className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+            >
               <Paperclip className="w-5 h-5" />
             </button>
             
@@ -261,6 +284,14 @@ export default function ChatArea() {
               )}
             </button>
           </div>
+          {!canAddSources && (
+            <p
+              id="source-action-helper"
+              className="mt-2 text-xs text-[var(--muted-foreground)]"
+            >
+              {sourceActionHelperText}
+            </p>
+          )}
           
           {/* New Chat Button */}
           {messages.length > 0 && (

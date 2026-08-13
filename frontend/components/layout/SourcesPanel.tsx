@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import {
-  Plus,
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Plus, 
   Search,
   FileText,
   Globe,
@@ -20,20 +20,36 @@ import DocumentPreview from '../DocumentPreview';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
 import { Document } from '@/lib/api';
+import {
+  closeAddSourcesAfterSuccessfulUpload,
+  requestAddSources,
+} from '../sourceActions';
 
 interface SourcesPanelProps {
+  isAddSourcesOpen: boolean;
+  onAddSourcesOpenChange: (isOpen: boolean) => void;
   isCollapsed?: boolean;
   onCollapsedChange?: (isCollapsed: boolean) => void;
 }
 
 export default function SourcesPanel({
+  isAddSourcesOpen,
+  onAddSourcesOpenChange,
   isCollapsed = false,
   onCollapsedChange,
 }: SourcesPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [showUpload, setShowUpload] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [modalSession, setModalSession] = useState(0);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const isAddSourcesOpenRef = useRef(isAddSourcesOpen);
+  const modalSessionRef = useRef(0);
+  const wasAddSourcesOpenRef = useRef(false);
+  const previousFocusedElementRef = useRef<HTMLElement | null>(null);
 
+  isAddSourcesOpenRef.current = isAddSourcesOpen;
+  
   const {
     projects,
     currentProject,
@@ -51,32 +67,90 @@ export default function SourcesPanel({
     fetchProjects();
   }, [fetchProjects]);
 
+  useEffect(() => {
+    if (isAddSourcesOpen && !wasAddSourcesOpenRef.current) {
+      const nextSession = modalSessionRef.current + 1;
+      modalSessionRef.current = nextSession;
+      setModalSession(nextSession);
+      previousFocusedElementRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      closeButtonRef.current?.focus();
+    }
+
+    if (!isAddSourcesOpen && wasAddSourcesOpenRef.current) {
+      setIsUploading(false);
+      previousFocusedElementRef.current?.focus();
+      previousFocusedElementRef.current = null;
+    }
+
+    wasAddSourcesOpenRef.current = isAddSourcesOpen;
+  }, [isAddSourcesOpen]);
+
+  useEffect(() => {
+    if (!isAddSourcesOpen || isUploading) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onAddSourcesOpenChange(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isAddSourcesOpen, isUploading, onAddSourcesOpenChange]);
+
+
   const handleUpload = async (items: File[] | string[]) => {
     if (!currentProject) {
       alert('Please select or create a project first');
       return;
     }
 
-    for (const item of items) {
-      if (item instanceof File) {
-        await uploadDocument(currentProject.id, item);
-      } else {
-        // Handle URL or YouTube link
-        const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
-        await createDocument(currentProject.id, {
-          name: item,
-          type: isYouTube ? 'youtube' : 'url',
-          url: item,
-        });
+    const projectId = currentProject.id;
+    const uploadSession = modalSession;
+    await closeAddSourcesAfterSuccessfulUpload(async () => {
+      for (const item of items) {
+        if (item instanceof File) {
+          await uploadDocument(projectId, item);
+        } else {
+          // Handle URL or YouTube link
+          const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
+          await createDocument(projectId, {
+            name: item,
+            type: isYouTube ? 'youtube' : 'url',
+            url: item,
+          });
+        }
       }
-    }
+    }, () => {
+      if (
+        modalSessionRef.current === uploadSession
+        && isAddSourcesOpenRef.current
+      ) {
+        onAddSourcesOpenChange(false);
+      }
+    });
+  };
 
-    setShowUpload(false);
+  const handleUploadingChange = (uploadSession: number) => (uploading: boolean) => {
+    if (
+      modalSessionRef.current === uploadSession
+      && isAddSourcesOpenRef.current
+    ) {
+      setIsUploading(uploading);
+    }
+  };
+
+  const closeAddSources = () => {
+    if (!isUploading) {
+      onAddSourcesOpenChange(false);
+    }
   };
 
   const handleDeleteDocument = async (docId: string) => {
     if (!currentProject) return;
-
+    
     if (confirm('Are you sure you want to delete this document?')) {
       try {
         await deleteDocument(currentProject.id, docId);
@@ -102,7 +176,7 @@ export default function SourcesPanel({
   };
 
   // Filter documents based on search query
-  const filteredDocuments = documents.filter(doc =>
+  const filteredDocuments = documents.filter(doc => 
     doc.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -135,158 +209,170 @@ export default function SourcesPanel({
         hidden={isCollapsed}
         className="min-h-0 flex-1 flex flex-col"
       >
-        {/* Header */}
-        <div className="p-4 border-b border-[var(--sidebar-border)]">
-          <h2 className="pr-10 text-base font-medium mb-3">來源</h2>
-
-          {/* Project Selector */}
-          <div className="space-y-2 mb-3">
-            <select
-              value={currentProject?.id || ''}
-              onChange={(e) => {
-                const project = projects.find(p => p.id === e.target.value);
-                if (project) selectProject(project);
-              }}
-              className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
-            >
-              <option value="">Select a project</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={openProjectDialog}
-              className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
-            >
-              <FolderOpen className="w-4 h-4" />
-              <span className="text-sm">New Project</span>
-            </button>
-          </div>
-
-          {/* Add Source Button */}
-          {currentProject && (
-            <button
-              onClick={() => setShowUpload(!showUpload)}
-              className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="text-sm">Add Source</span>
-            </button>
-          )}
-
-          {/* Search */}
-          {currentProject && documents.length > 0 && (
-            <div className="mt-3 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
-              <input
-                type="text"
-                aria-label="搜尋來源"
-                placeholder="搜尋來源"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
-              />
-            </div>
-          )}
+      {/* Header */}
+      <div className="p-4 border-b border-[var(--sidebar-border)]">
+        <h2 className="pr-10 text-base font-medium mb-3">來源</h2>
+        
+        {/* Project Selector */}
+        <div className="space-y-2 mb-3">
+          <select
+            value={currentProject?.id || ''}
+            onChange={(e) => {
+              const project = projects.find(p => p.id === e.target.value);
+              if (project) selectProject(project);
+            }}
+            className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+          >
+            <option value="">Select a project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          
+          <button
+            onClick={openProjectDialog}
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
+          >
+            <FolderOpen className="w-4 h-4" />
+            <span className="text-sm">New Project</span>
+          </button>
         </div>
+        
+        {/* Add Source Button */}
+        {currentProject && (
+          <button 
+            onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="text-sm">Add Source</span>
+          </button>
+        )}
 
-        {/* Sources List */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {!currentProject ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
-                <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
-              </div>
-              <p className="text-sm text-[var(--muted-foreground)]">
-                Select or create a project to get started
+        {/* Search */}
+        {currentProject && documents.length > 0 && (
+          <div className="mt-3 relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
+            <input
+              type="text"
+              aria-label="搜尋來源"
+              placeholder="搜尋來源"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Sources List */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {!currentProject ? (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
+              <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
+            </div>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Select or create a project to get started
+            </p>
+          </div>
+        ) : loadingDocuments ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
+          </div>
+        ) : filteredDocuments.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
+              <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
+            </div>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              {searchQuery ? 'No sources found' : 'No sources yet'}
+            </p>
+            {!searchQuery && (
+              <p className="text-xs text-[var(--muted-foreground)] mt-2">
+                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
               </p>
-            </div>
-          ) : loadingDocuments ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
-            </div>
-          ) : filteredDocuments.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
-                <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
-              </div>
-              <p className="text-sm text-[var(--muted-foreground)]">
-                {searchQuery ? 'No sources found' : 'No sources yet'}
-              </p>
-              {!searchQuery && (
-                <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                  Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {filteredDocuments.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
-                  onClick={() => setPreviewDocument(doc)}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-[var(--muted)] rounded">
-                      {getSourceIcon(doc.type)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium truncate">
-                        {doc.name}
-                      </h3>
-                      <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                        {doc.status === 'processing' ? 'Processing...' :
-                         doc.status === 'ready' ? 'Ready' : doc.status}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPreviewDocument(doc);
-                        }}
-                        className="p-1 hover:bg-[var(--muted)] rounded"
-                        title="Preview"
-                      >
-                        <Eye className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDocument(doc.id);
-                        }}
-                        className="p-1 hover:bg-[var(--muted)] rounded"
-                        title="Delete"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredDocuments.map((doc) => (
+              <div
+                key={doc.id}
+                className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
+                onClick={() => setPreviewDocument(doc)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-[var(--muted)] rounded">
+                    {getSourceIcon(doc.type)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-medium truncate">
+                      {doc.name}
+                    </h3>
+                    <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                      {doc.status === 'processing' ? 'Processing...' : 
+                       doc.status === 'ready' ? 'Ready' : doc.status}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewDocument(doc);
+                      }}
+                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      title="Preview"
+                    >
+                      <Eye className="w-3 h-3" />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteDocument(doc.id);
+                      }}
+                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      title="Delete"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       </div>
 
       {/* Upload Modal */}
-      {showUpload && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      {isAddSourcesOpen && currentProject && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="新增來源"
+          aria-busy={isUploading}
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        >
           <div className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
               <h3 className="text-lg font-semibold">Add Sources</h3>
               <button
-                onClick={() => setShowUpload(false)}
+                ref={closeButtonRef}
+                onClick={closeAddSources}
+                disabled={isUploading}
+                aria-label="關閉新增來源"
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <FileUpload onUpload={handleUpload} />
+            <FileUpload
+              onUpload={handleUpload}
+              onUploadingChange={handleUploadingChange(modalSession)}
+            />
           </div>
         </div>
       )}

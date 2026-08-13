@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Upload, X, File, Link, Youtube, FileText, Loader2 } from 'lucide-react';
 import { getUploadFileError } from '@/lib/uploadValidation';
 
@@ -9,13 +9,15 @@ interface FileUploadProps {
   accept?: string;
   multiple?: boolean;
   maxSize?: number; // in MB
+  onUploadingChange?: (isUploading: boolean) => void;
 }
 
 export default function FileUpload({ 
   onUpload, 
   accept = '.pdf',
   multiple = false,
-  maxSize = 10 
+  maxSize = 10,
+  onUploadingChange,
 }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -23,6 +25,22 @@ export default function FileUpload({
   const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube'>('file');
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const uploadInFlightRef = useRef(false);
+
+  const startUpload = () => {
+    if (isUploading || uploadInFlightRef.current) return false;
+
+    uploadInFlightRef.current = true;
+    setIsUploading(true);
+    onUploadingChange?.(true);
+    return true;
+  };
+
+  const finishUpload = () => {
+    uploadInFlightRef.current = false;
+    setIsUploading(false);
+    onUploadingChange?.(false);
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -81,6 +99,8 @@ export default function FileUpload({
   };
 
   const handleUrlSubmit = async () => {
+    if (isUploading || uploadInFlightRef.current) return;
+
     if (!urlInput.trim()) {
       setErrors(['Please enter a valid URL']);
       return;
@@ -93,25 +113,29 @@ export default function FileUpload({
       return;
     }
 
+    if (!startUpload()) return;
+
     try {
-      setIsUploading(true);
       await onUpload([urlInput]);
       setUrlInput('');
       setErrors([]);
     } catch {
       setErrors(['Upload failed. Please check the URL and try again.']);
     } finally {
-      setIsUploading(false);
+      finishUpload();
     }
   };
 
   const handleUploadFiles = async () => {
+    if (isUploading || uploadInFlightRef.current) return;
+
     if (files.length === 0 && !urlInput) {
       setErrors(['Please select files or enter a URL']);
       return;
     }
 
-    setIsUploading(true);
+    if (!startUpload()) return;
+
     try {
       if (uploadType === 'file' && files.length > 0) {
         await onUpload(files);
@@ -124,7 +148,7 @@ export default function FileUpload({
     } catch {
       setErrors(['Upload failed. Please try again.']);
     } finally {
-      setIsUploading(false);
+      finishUpload();
     }
   };
 
@@ -219,8 +243,9 @@ export default function FileUpload({
                   : 'Enter website URL...'
               }
               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
-              onKeyPress={(e) => {
+              onKeyDown={(e) => {
                 if (e.key === 'Enter') {
+                  e.preventDefault();
                   void handleUrlSubmit();
                 }
               }}

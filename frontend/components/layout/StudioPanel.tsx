@@ -27,6 +27,7 @@ export default function StudioPanel({
   isCollapsed = false,
   onCollapsedChange,
 }: StudioPanelProps) {
+  const availabilityLabel = '即將推出';
   const studioOptions: StudioOption[] = [
     {
       id: 'audio',
@@ -94,7 +95,9 @@ export default function StudioPanel({
             {studioOptions.map((option) => (
               <button
                 key={option.id}
-                className="w-full p-4 bg-[var(--secondary)] rounded-lg hover:bg-[var(--muted)] transition-base text-left group"
+                disabled
+                aria-label={`${option.title}${availabilityLabel}`}
+                className="w-full p-4 bg-[var(--secondary)] rounded-lg text-left group disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[var(--card)] rounded-lg group-hover:bg-[var(--secondary)] transition-base">
@@ -104,11 +107,9 @@ export default function StudioPanel({
                     <h3 className="text-sm font-medium">
                       {option.title}
                     </h3>
-                    {option.description && (
-                      <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                        {option.description}
-                      </p>
-                    )}
+                    <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                      {availabilityLabel}
+                    </p>
                   </div>
                 </div>
               </button>
@@ -116,8 +117,13 @@ export default function StudioPanel({
           </div>
 
           {/* More Options */}
-          <button className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base flex items-center justify-center gap-2">
+          <button
+            disabled
+            aria-label={`更多選項${availabilityLabel}`}
+            className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
             <span>更多選項</span>
+            <span className="text-xs">{availabilityLabel}</span>
             <ChevronDown className="w-4 h-4" />
           </button>
 
@@ -129,10 +135,10 @@ export default function StudioPanel({
               </div>
               <div>
                 <h4 className="text-sm font-medium mb-1">
-                  工作室輸出內容儲存在這裡。
+                  工作室功能即將推出
                 </h4>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  加入來源後，點選即可新增語音摘要、研讀指南、心智圖等內容！
+                  音訊、影片、心智圖與報告功能仍在準備中。
                 </p>
               </div>
             </div>
