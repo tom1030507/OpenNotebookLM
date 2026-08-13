@@ -281,13 +281,13 @@ describe('desktop workspace layout', () => {
     render(createElement(Home));
 
     expect(screen.getByRole('heading', { name: '對話' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '收合對話' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '摺疊對話清單' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: '新增對話' })).toHaveLength(2);
   });
 
   test('keeps the controlled conversation content mounted while collapsed', () => {
     render(createElement(Home));
-    const toggle = screen.getByRole('button', { name: '收合對話' });
+    const toggle = screen.getByRole('button', { name: '摺疊對話清單' });
     const content = screen.getByRole('region', {
       name: '對話內容',
       hidden: true,

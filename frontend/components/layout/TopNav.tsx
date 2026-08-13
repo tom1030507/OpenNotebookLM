@@ -79,9 +79,9 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           {/* New Project Button */}
           <button
             onClick={openProjectDialog}
-            aria-label={'\u5EFA\u7ACB\u65B0\u5C08\u6848'}
+            aria-label={'\u65b0\u589e\u5c08\u6848'}
+            title={'\u65b0\u589e\u5c08\u6848'}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            title="New Project"
           >
             <FolderPlus className="w-4 h-4" />
           </button>
@@ -91,7 +91,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             <button
               onClick={() => setShowExport(true)}
               className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-              title="Export"
+              aria-label={'\u532f\u51fa\u5167\u5bb9'}
+              title={'\u532f\u51fa\u5167\u5bb9'}
             >
               <Download className="w-4 h-4" />
             </button>
@@ -101,8 +102,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <button
             onClick={toggleTheme}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            title="Toggle theme"
-            aria-label="切換主題"
+            aria-label={'\u5207\u63db\u4e3b\u984c'}
+            title={'\u5207\u63db\u4e3b\u984c'}
           >
             <Sun data-theme-icon="sun" className="theme-icon--sun w-4 h-4" />
             <Moon data-theme-icon="moon" className="theme-icon--moon w-4 h-4" />
@@ -129,6 +130,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           {/* Settings */}
           <button 
             onClick={() => setShowSettings(true)}
+            aria-label={'\u8a2d\u5b9a'}
+            title={'\u8a2d\u5b9a'}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
           >
             <SettingsIcon className="w-4 h-4" />
@@ -138,7 +141,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <div className="relative">
             <button 
               onClick={() => setShowUserMenu(!showUserMenu)}
-              aria-label="使用者選單"
+              aria-label={'\u4f7f\u7528\u8005\u9078\u55ae'}
+              title={'\u4f7f\u7528\u8005\u9078\u55ae'}
               aria-haspopup="menu"
               aria-expanded={showUserMenu}
               className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"

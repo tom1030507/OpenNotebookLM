@@ -290,6 +290,8 @@ export default function FileUpload({
               </div>
               <button
                 onClick={() => removeFile(index)}
+                aria-label={'\u79fb\u9664\u6a94\u6848'}
+                title={'\u79fb\u9664\u6a94\u6848'}
                 className="text-gray-400 hover:text-red-500"
               >
                 <X className="w-4 h-4" />

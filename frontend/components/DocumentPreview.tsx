@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { 
   X, 
   Download, 
@@ -14,6 +14,7 @@ import {
   Check
 } from 'lucide-react';
 import { Document } from '@/lib/api';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 interface DocumentPreviewProps {
   document: Document;
@@ -23,6 +24,16 @@ interface DocumentPreviewProps {
 export default function DocumentPreview({ document, onClose }: DocumentPreviewProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
+  useDialogFocus({
+    isOpen: true,
+    onClose,
+    dialogRef,
+    initialFocusRef: closeButtonRef,
+  });
 
   const handleCopy = async () => {
     if (document.content) {
@@ -194,6 +205,11 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
       }`}
     >
       <div 
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+        aria-modal="true"
+        aria-labelledby={titleId}
         className={`bg-[var(--background)] rounded-lg flex flex-col ${
           isFullscreen ? 'w-full h-full' : 'w-full max-w-5xl h-[90vh]'
         }`}
@@ -205,7 +221,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               {getIcon()}
             </div>
             <div>
-              <h3 className="font-medium">{document.name}</h3>
+              <h3 id={titleId} className="font-medium">{document.name}</h3>
               <p className="text-xs text-[var(--muted-foreground)]">
                 {document.type.toUpperCase()} • {document.status}
               </p>
@@ -216,8 +232,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             {document.content && (
               <button
                 onClick={handleCopy}
+                aria-label={'\u8907\u88fd\u5167\u5bb9'}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title="Copy content"
+                title={'\u8907\u88fd\u5167\u5bb9'}
               >
                 {copied ? (
                   <Check className="w-4 h-4 text-green-600" />
@@ -230,8 +247,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             {document.url && (
               <button
                 onClick={handleOpenExternal}
+                aria-label={'\u5728\u65b0\u5206\u9801\u958b\u555f'}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title="Open in new tab"
+                title={'\u5728\u65b0\u5206\u9801\u958b\u555f'}
               >
                 <ExternalLink className="w-4 h-4" />
               </button>
@@ -240,8 +258,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             {document.content && (
               <button
                 onClick={handleDownload}
+                aria-label={'\u4e0b\u8f09\u6587\u4ef6'}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title="Download"
+                title={'\u4e0b\u8f09\u6587\u4ef6'}
               >
                 <Download className="w-4 h-4" />
               </button>
@@ -249,8 +268,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
+              aria-label={'\u5207\u63db\u5168\u87a2\u5e55'}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              title={'\u5207\u63db\u5168\u87a2\u5e55'}
             >
               {isFullscreen ? (
                 <Minimize2 className="w-4 h-4" />
@@ -260,9 +280,12 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             </button>
             
             <button
+              ref={closeButtonRef}
               onClick={onClose}
+              type="button"
+              aria-label={'\u95dc\u9589\u6587\u4ef6\u9810\u89bd\u5c0d\u8a71\u6846'}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-              title="Close"
+              title={'\u95dc\u9589\u6587\u4ef6\u9810\u89bd\u5c0d\u8a71\u6846'}
             >
               <X className="w-4 h-4" />
             </button>

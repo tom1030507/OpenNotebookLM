@@ -30,7 +30,7 @@ describe('workspace control availability', () => {
     render(<ChatArea onAddSourcesOpenChange={(isOpen) => { requestedOpen = isOpen; }} />);
 
     const uploadButton = screen.getByRole('button', { name: '上傳來源' });
-    const attachmentButton = screen.getByRole('button', { name: '新增來源' });
+    const attachmentButton = screen.getByRole('button', { name: '附加檔案' });
     expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
     expect((attachmentButton as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('請先選擇或建立專案後再新增來源')).not.toBeNull();

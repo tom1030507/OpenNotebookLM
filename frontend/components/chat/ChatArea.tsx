@@ -243,7 +243,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             <button
               onClick={handleRequestAddSources}
               disabled={!canAddSources}
-              aria-label="新增來源"
+              aria-label={'\u9644\u52a0\u6a94\u6848'}
+              title={'\u9644\u52a0\u6a94\u6848'}
               aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
               className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-base"
             >
@@ -275,6 +276,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             
             <button
               onClick={handleSend}
+              aria-label={'\u50b3\u9001\u8a0a\u606f'}
+              title={'\u50b3\u9001\u8a0a\u606f'}
               disabled={!inputValue.trim() || !canChat || isStreaming}
               className="flex-shrink-0 p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base">
               {isStreaming ? (

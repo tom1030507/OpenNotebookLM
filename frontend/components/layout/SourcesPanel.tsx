@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { 
   Plus, 
   Search,
@@ -24,6 +24,7 @@ import {
   closeAddSourcesAfterSuccessfulUpload,
   requestAddSources,
 } from '../sourceActions';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 interface SourcesPanelProps {
   isAddSourcesOpen: boolean;
@@ -42,14 +43,32 @@ export default function SourcesPanel({
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [modalSession, setModalSession] = useState(0);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const uploadCloseRef = useRef<HTMLButtonElement>(null);
+  const uploadDialogRef = useRef<HTMLDivElement>(null);
+  const uploadTitleId = useId();
   const isAddSourcesOpenRef = useRef(isAddSourcesOpen);
   const modalSessionRef = useRef(0);
   const wasAddSourcesOpenRef = useRef(false);
-  const previousFocusedElementRef = useRef<HTMLElement | null>(null);
 
   isAddSourcesOpenRef.current = isAddSourcesOpen;
-  
+
+  // The dialog's open state lives in the page (so the chat CTA and paperclip can
+  // open it), while the shared focus hook owns initial focus, Tab trapping,
+  // Escape and focus restoration.
+  const closeAddSources = useCallback(() => {
+    if (!isUploading) {
+      onAddSourcesOpenChange(false);
+    }
+  }, [isUploading, onAddSourcesOpenChange]);
+
+  useDialogFocus({
+    isOpen: isAddSourcesOpen,
+    onClose: closeAddSources,
+    dismissible: !isUploading,
+    dialogRef: uploadDialogRef,
+    initialFocusRef: uploadCloseRef,
+  });
+
   const {
     projects,
     currentProject,
@@ -67,39 +86,20 @@ export default function SourcesPanel({
     fetchProjects();
   }, [fetchProjects]);
 
+  // Session counter so a stale upload can never close a dialog reopened after it.
   useEffect(() => {
     if (isAddSourcesOpen && !wasAddSourcesOpenRef.current) {
       const nextSession = modalSessionRef.current + 1;
       modalSessionRef.current = nextSession;
       setModalSession(nextSession);
-      previousFocusedElementRef.current = document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-      closeButtonRef.current?.focus();
     }
 
     if (!isAddSourcesOpen && wasAddSourcesOpenRef.current) {
       setIsUploading(false);
-      previousFocusedElementRef.current?.focus();
-      previousFocusedElementRef.current = null;
     }
 
     wasAddSourcesOpenRef.current = isAddSourcesOpen;
   }, [isAddSourcesOpen]);
-
-  useEffect(() => {
-    if (!isAddSourcesOpen || isUploading) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onAddSourcesOpenChange(false);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isAddSourcesOpen, isUploading, onAddSourcesOpenChange]);
-
 
   const handleUpload = async (items: File[] | string[]) => {
     if (!currentProject) {
@@ -139,12 +139,6 @@ export default function SourcesPanel({
       && isAddSourcesOpenRef.current
     ) {
       setIsUploading(uploading);
-    }
-  };
-
-  const closeAddSources = () => {
-    if (!isUploading) {
-      onAddSourcesOpenChange(false);
     }
   };
 
@@ -216,6 +210,7 @@ export default function SourcesPanel({
         {/* Project Selector */}
         <div className="space-y-2 mb-3">
           <select
+            aria-label={'選擇專案'}
             value={currentProject?.id || ''}
             onChange={(e) => {
               const project = projects.find(p => p.id === e.target.value);
@@ -324,7 +319,8 @@ export default function SourcesPanel({
                         setPreviewDocument(doc);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Preview"
+                      aria-label={'\u9810\u89bd\u6587\u4ef6'}
+                      title={'\u9810\u89bd\u6587\u4ef6'}
                     >
                       <Eye className="w-3 h-3" />
                     </button>
@@ -334,7 +330,8 @@ export default function SourcesPanel({
                         handleDeleteDocument(doc.id);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      title="Delete"
+                      aria-label={'\u522a\u9664\u6587\u4ef6'}
+                      title={'\u522a\u9664\u6587\u4ef6'}
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -349,21 +346,25 @@ export default function SourcesPanel({
 
       {/* Upload Modal */}
       {isAddSourcesOpen && currentProject && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="新增來源"
-          aria-busy={isUploading}
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        >
-          <div className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div
+            ref={uploadDialogRef}
+            role="dialog"
+            tabIndex={-1}
+            aria-modal="true"
+            aria-labelledby={uploadTitleId}
+            aria-busy={isUploading}
+            className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+          >
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Add Sources</h3>
+              <h3 id={uploadTitleId} className="text-lg font-semibold">Add Sources</h3>
               <button
-                ref={closeButtonRef}
+                ref={uploadCloseRef}
                 onClick={closeAddSources}
+                type="button"
+                aria-label={'\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846'}
+                title={'\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846'}
                 disabled={isUploading}
-                aria-label="關閉新增來源"
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"
               >
                 <X className="w-5 h-5" />

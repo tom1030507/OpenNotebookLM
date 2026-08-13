@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { 
   X, 
   Settings as SettingsIcon,
@@ -15,6 +15,7 @@ import {
   Save,
   Loader2
 } from 'lucide-react';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -32,6 +33,19 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [autoSave, setAutoSave] = useState(true);
   const [notifications, setNotifications] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const languageSelectId = useId();
+  const modelSelectId = useId();
+
+  useDialogFocus({
+    isOpen,
+    onClose,
+    dismissible: !isSaving,
+    dialogRef,
+    initialFocusRef: closeButtonRef,
+  });
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -54,11 +68,18 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[var(--background)] rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-[var(--background)] rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"
+      >
         {/* Sidebar */}
         <div className="w-64 border-r border-[var(--border)] bg-[var(--sidebar-bg)]">
           <div className="p-6 border-b border-[var(--border)]">
-            <h2 className="text-lg font-semibold">Settings</h2>
+            <h2 id={titleId} className="text-lg font-semibold">Settings</h2>
           </div>
           <nav className="p-4">
             {tabs.map((tab) => {
@@ -92,7 +113,12 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               {tabs.find(t => t.id === activeTab)?.label}
             </h3>
             <button
+              ref={closeButtonRef}
               onClick={onClose}
+              type="button"
+              aria-label={'\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846'}
+              title={'\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846'}
+              disabled={isSaving}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
             >
               <X className="w-5 h-5" />
@@ -134,8 +160,9 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                     </div>
 
                     <div>
-                      <label className="block text-sm mb-2">Language</label>
+                      <label htmlFor={languageSelectId} className="block text-sm mb-2">Language</label>
                       <select
+                        id={languageSelectId}
                         value={language}
                         onChange={(e) => setLanguage(e.target.value)}
                         className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
@@ -195,8 +222,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                     </div>
 
                     <div>
-                      <label className="block text-sm mb-2">Model</label>
-                      <select className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+                      <label htmlFor={modelSelectId} className="block text-sm mb-2">Model</label>
+                      <select id={modelSelectId} className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
                         <option value="gpt-4">GPT-4</option>
                         <option value="gpt-4-turbo">GPT-4 Turbo</option>
                         <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
@@ -332,7 +359,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
           <div className="flex justify-end gap-3 p-6 border-t border-[var(--border)]">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
+              disabled={isSaving}
+              className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-50"
             >
               Cancel
             </button>

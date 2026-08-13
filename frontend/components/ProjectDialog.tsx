@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { AlertCircle, FolderPlus, Loader2, X } from 'lucide-react';
 import useStore from '@/store/useStore';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 interface ProjectDialogProps {
   isOpen: boolean;
@@ -14,6 +15,9 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
   const [description, setDescription] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   const { createProject, selectProject } = useStore();
 
   const handleClose = () => {
@@ -22,6 +26,14 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
     setError('');
     onClose();
   };
+
+  useDialogFocus({
+    isOpen,
+    onClose: handleClose,
+    dismissible: !isCreating,
+    dialogRef,
+    initialFocusRef: nameInputRef,
+  });
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -50,25 +62,29 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
   if (!isOpen) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="project-dialog-title"
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-    >
-      <div className="bg-[var(--background)] rounded-lg w-full max-w-md">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-[var(--background)] rounded-lg w-full max-w-md"
+      >
         <div className="flex items-center justify-between p-6 border-b border-[var(--border)]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-[var(--primary)] bg-opacity-10 flex items-center justify-center">
               <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
             </div>
-            <h2 id="project-dialog-title" className="text-lg font-semibold">
+            <h2 id={titleId} className="text-lg font-semibold">
               {'\u5EFA\u7ACB\u65B0\u5C08\u6848'}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            aria-label={'\u95DC\u9589\u5EFA\u7ACB\u5C08\u6848\u5C0D\u8A71\u6846'}
+            type="button"
+            aria-label={'\u95DC\u9589\u5EFA\u7ACB\u65B0\u5C08\u6848\u5C0D\u8A71\u6846'}
+            title={'\u95DC\u9589\u5EFA\u7ACB\u65B0\u5C08\u6848\u5C0D\u8A71\u6846'}
             disabled={isCreating}
             className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
           >
@@ -95,8 +111,8 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
               onChange={(event) => setName(event.target.value)}
               placeholder={'\u4F8B\u5982\uFF1A\u7814\u7A76\u8AD6\u6587\u3001\u6703\u8B70\u7B46\u8A18'}
               className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+              ref={nameInputRef}
               disabled={isCreating}
-              autoFocus
             />
           </div>
 

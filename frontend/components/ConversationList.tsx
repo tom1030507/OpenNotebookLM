@@ -134,7 +134,8 @@ export default function ConversationList() {
               onClick={() => setIsCollapsed(!isCollapsed)}
               aria-controls="conversation-panel-content"
               aria-expanded={!isCollapsed}
-              aria-label={isCollapsed ? '展開對話' : '收合對話'}
+              aria-label={isCollapsed ? '展開對話清單' : '摺疊對話清單'}
+              title={isCollapsed ? '展開對話清單' : '摺疊對話清單'}
               className="p-1 hover:bg-[var(--muted)] rounded transition-base"
             >
               {isCollapsed ? (
@@ -148,8 +149,8 @@ export default function ConversationList() {
           <button
             onClick={handleNewConversation}
             aria-label="新增對話"
-            className="p-1 hover:bg-[var(--muted)] rounded transition-base"
             title="新增對話"
+            className="p-1 hover:bg-[var(--muted)] rounded transition-base"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -216,12 +217,16 @@ export default function ConversationList() {
                             />
                             <button
                               onClick={handleSaveEdit}
+                              aria-label="儲存對話名稱"
+                              title="儲存對話名稱"
                               className="p-1 text-green-600 hover:bg-green-100 rounded"
                             >
                               <Check className="w-3 h-3" />
                             </button>
                             <button
                               onClick={handleCancelEdit}
+                              aria-label="取消重新命名"
+                              title="取消重新命名"
                               className="p-1 text-red-600 hover:bg-red-100 rounded"
                             >
                               <X className="w-3 h-3" />
@@ -251,7 +256,8 @@ export default function ConversationList() {
                                   handleEdit(conv.id, conv.title);
                                 }}
                                 className="p-1 hover:bg-[var(--muted)] rounded"
-                                title="Edit"
+                                aria-label="重新命名對話"
+                                title="重新命名對話"
                               >
                                 <Edit2 className="w-3 h-3" />
                               </button>
@@ -261,7 +267,8 @@ export default function ConversationList() {
                                   handleDelete(conv.id);
                                 }}
                                 className="p-1 hover:bg-red-100 text-red-600 rounded"
-                                title="Delete"
+                                aria-label="刪除對話"
+                                title="刪除對話"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
