@@ -265,6 +265,6 @@ describe('unavailable workspace controls', () => {
     render(<StudioPanel />);
 
     expect(screen.getByText('Studio is coming soon')).not.toBeNull();
-    expect(screen.getByText('Audio, video, mind maps and reports are still in preparation.')).not.toBeNull();
+    expect(screen.getByText(/Audio, video and mind maps are still\s+in preparation/)).not.toBeNull();
   });
 });

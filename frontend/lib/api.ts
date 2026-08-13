@@ -420,6 +420,10 @@ const api = {
       `/export/project/${projectId}?format=${encodeURIComponent(format)}`,
     );
   },
+
+  exportProjectSummary(projectId: string): Promise<Blob> {
+    return requestBlob(`/export/project/${projectId}/summary`);
+  },
 };
 
 
