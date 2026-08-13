@@ -482,6 +482,7 @@ class DocumentService:
             logger.error("Failed to process YouTube video",
                         doc_id=doc_id,
                         youtube_url=youtube_url,
+                        error_type=type(e).__name__,
                         error=str(e))
             
             # Update status to error
