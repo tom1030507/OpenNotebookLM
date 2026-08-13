@@ -39,22 +39,22 @@ function renderWorkspace() {
   return render(
     <ResponsiveLayout
       sidebar={
-        <section aria-label="來源內容">
-          <button type="button">來源操作</button>
+        <section aria-label="Sources content">
+          <button type="button">Sources action</button>
         </section>
       }
       conversationPanel={
-        <section aria-label="對話內容">
-          <button type="button">新增對話</button>
+        <section aria-label="Conversations panel content">
+          <button type="button">New Conversation</button>
         </section>
       }
       rightPanel={
-        <section aria-label="工作室內容">
-          <button type="button">工作室操作</button>
+        <section aria-label="Studio content">
+          <button type="button">Studio action</button>
         </section>
       }
     >
-      <button type="button">聊天操作</button>
+      <button type="button">Chat action</button>
     </ResponsiveLayout>,
   );
 }
@@ -62,11 +62,11 @@ function renderWorkspace() {
 describe('ResponsiveLayout component integration', () => {
   it('renders compact and desktop structures from stable CSS-controlled markup with an in-flow toolbar', () => {
     const { container } = renderWorkspace();
-    const toolbar = screen.getByRole('navigation', { name: '工作區面板' });
+    const toolbar = screen.getByRole('navigation', { name: 'Workspace panels' });
 
     expect(toolbar.className).not.toContain('absolute');
     expect(toolbar.parentElement?.className).toContain('flex-col');
-    expect(screen.getByRole('button', { name: '開啟來源面板' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open Sources panel' })).toBeTruthy();
     expect(container.querySelector('[data-workspace-region="sources"]')).toBeTruthy();
     expect(container.querySelector('[data-workspace-region="conversations"]')).toBeTruthy();
     expect(container.querySelector('[data-workspace-region="studio"]')).toBeTruthy();
@@ -74,13 +74,13 @@ describe('ResponsiveLayout component integration', () => {
 
   it('opens a modal drawer with an in-flow close header, traps focus, restores it on every dismissal, and switches panels exclusively', () => {
     renderWorkspace();
-    const sourcesTrigger = screen.getByRole('button', { name: '開啟來源面板' });
-    const studioTrigger = screen.getByRole('button', { name: '開啟工作室面板' });
+    const sourcesTrigger = screen.getByRole('button', { name: 'Open Sources panel' });
+    const studioTrigger = screen.getByRole('button', { name: 'Open Studio panel' });
 
     fireEvent.click(sourcesTrigger);
-    const sourcesDialog = screen.getByRole('dialog', { name: '來源面板' });
+    const sourcesDialog = screen.getByRole('dialog', { name: 'Sources panel' });
     const sourcesHeader = sourcesDialog.querySelector('header');
-    const sourcesClose = within(sourcesDialog).getByRole('button', { name: '關閉來源面板' });
+    const sourcesClose = within(sourcesDialog).getByRole('button', { name: 'Close Sources panel' });
 
     expect(sourcesDialog.getAttribute('aria-modal')).toBe('true');
     expect(sourcesHeader).toBeTruthy();
@@ -88,25 +88,25 @@ describe('ResponsiveLayout component integration', () => {
     expect(document.activeElement).toBe(sourcesClose);
 
     fireEvent.keyDown(sourcesClose, { key: 'Tab', shiftKey: true });
-    const sourcesAction = within(sourcesDialog).getByRole('button', { name: '來源操作' });
+    const sourcesAction = within(sourcesDialog).getByRole('button', { name: 'Sources action' });
     expect(document.activeElement).toBe(sourcesAction);
 
     fireEvent.keyDown(sourcesAction, { key: 'Tab' });
     expect(document.activeElement).toBe(sourcesClose);
 
     fireEvent.click(studioTrigger);
-    const studioDialog = screen.getByRole('dialog', { name: '工作室面板' });
-    expect(screen.queryByRole('dialog', { name: '來源面板' })).toBeNull();
-    fireEvent.click(within(studioDialog).getByRole('button', { name: '關閉工作室面板' }));
+    const studioDialog = screen.getByRole('dialog', { name: 'Studio panel' });
+    expect(screen.queryByRole('dialog', { name: 'Sources panel' })).toBeNull();
+    fireEvent.click(within(studioDialog).getByRole('button', { name: 'Close Studio panel' }));
     expect(document.activeElement).toBe(studioTrigger);
 
     fireEvent.click(sourcesTrigger);
-    fireEvent.keyDown(screen.getByRole('dialog', { name: '來源面板' }), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Sources panel' }), { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(sourcesTrigger);
 
     fireEvent.click(sourcesTrigger);
-    fireEvent.click(screen.getByRole('button', { name: '關閉面板' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(sourcesTrigger);
   });
@@ -120,24 +120,24 @@ describe('ResponsiveLayout component integration', () => {
       }, []);
 
       return (
-        <section aria-label="來源內容">
-          <button type="button">來源操作</button>
+        <section aria-label="Sources content">
+          <button type="button">Sources action</button>
         </section>
       );
     }
 
     render(
       <ResponsiveLayout sidebar={<SourcesProbe />}>
-        <button type="button">聊天操作</button>
+        <button type="button">Chat action</button>
       </ResponsiveLayout>,
     );
 
     expect(sourcesMounts).toBe(1);
 
-    fireEvent.click(screen.getByRole('button', { name: '開啟來源面板' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Sources panel' }));
 
     expect(sourcesMounts).toBe(1);
-    expect(screen.getAllByRole('button', { name: '來源操作' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Sources action' })).toHaveLength(1);
   });
 
   it('clears an open drawer and its close affordance when the viewport reaches the desktop breakpoint', () => {
@@ -145,22 +145,22 @@ describe('ResponsiveLayout component integration', () => {
     media.install();
     renderWorkspace();
 
-    fireEvent.click(screen.getByRole('button', { name: '開啟來源面板' }));
-    expect(screen.getByRole('dialog', { name: '來源面板' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Sources panel' }));
+    expect(screen.getByRole('dialog', { name: 'Sources panel' })).toBeTruthy();
 
     media.enterDesktop();
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.queryByRole('button', { name: '關閉來源面板' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '關閉面板' })).toBeNull();
-    expect(screen.getByRole('button', { name: '開啟來源面板' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Close Sources panel' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open Sources panel' })).toBeTruthy();
   });
 
   it('carries the drawer width in a CSS variable so the desktop breakpoint can still override it', () => {
     renderWorkspace();
-    fireEvent.click(screen.getByRole('button', { name: '開啟來源面板' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Sources panel' }));
 
-    const drawer = screen.getByRole('dialog', { name: '來源面板' });
+    const drawer = screen.getByRole('dialog', { name: 'Sources panel' });
 
     expect(drawer.style.width).toBe('');
     expect(drawer.style.getPropertyValue('--workspace-drawer-width')).toBe('min(20rem, 90vw)');
@@ -172,8 +172,8 @@ describe('ResponsiveLayout component integration', () => {
     vi.stubGlobal('matchMedia', undefined);
     renderWorkspace();
 
-    fireEvent.click(screen.getByRole('button', { name: '開啟來源面板' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Sources panel' }));
 
-    expect(screen.getByRole('dialog', { name: '來源面板' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Sources panel' })).toBeTruthy();
   });
 });

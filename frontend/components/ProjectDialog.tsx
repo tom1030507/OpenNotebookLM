@@ -39,7 +39,7 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
     event.preventDefault();
 
     if (!name.trim()) {
-      setError('\u8ACB\u8F38\u5165\u5C08\u6848\u540D\u7A31');
+      setError('Please enter a project name');
       return;
     }
 
@@ -53,7 +53,7 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
       setDescription('');
       handleClose();
     } catch (caughtError: unknown) {
-      setError(caughtError instanceof Error ? caughtError.message : '\u5EFA\u7ACB\u5C08\u6848\u5931\u6557');
+      setError(caughtError instanceof Error ? caughtError.message : 'Failed to create project');
     } finally {
       setIsCreating(false);
     }
@@ -77,14 +77,14 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
               <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
             </div>
             <h2 id={titleId} className="text-lg font-semibold">
-              {'\u5EFA\u7ACB\u65B0\u5C08\u6848'}
+              {'Create New Project'}
             </h2>
           </div>
           <button
             onClick={handleClose}
             type="button"
-            aria-label={'\u95DC\u9589\u5EFA\u7ACB\u65B0\u5C08\u6848\u5C0D\u8A71\u6846'}
-            title={'\u95DC\u9589\u5EFA\u7ACB\u65B0\u5C08\u6848\u5C0D\u8A71\u6846'}
+            aria-label={'Close create project dialog'}
+            title={'Close create project dialog'}
             disabled={isCreating}
             className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
           >
@@ -102,14 +102,14 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
 
           <div>
             <label htmlFor="name" className="block text-sm font-medium mb-2">
-              {'\u5C08\u6848\u540D\u7A31'} <span className="text-red-500">*</span>
+              {'Project Name'} <span className="text-red-500">*</span>
             </label>
             <input
               id="name"
               type="text"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder={'\u4F8B\u5982\uFF1A\u7814\u7A76\u8AD6\u6587\u3001\u6703\u8B70\u7B46\u8A18'}
+              placeholder={'e.g. Research Papers, Meeting Notes'}
               className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
               ref={nameInputRef}
               disabled={isCreating}
@@ -118,13 +118,13 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
 
           <div>
             <label htmlFor="description" className="block text-sm font-medium mb-2">
-              {'\u5C08\u6848\u8AAA\u660E'}
+              {'Project Description'}
             </label>
             <textarea
               id="description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder={'\u9078\u586B\u7684\u5C08\u6848\u8AAA\u660E'}
+              placeholder={'Optional project description'}
               rows={3}
               className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base resize-none"
               disabled={isCreating}
@@ -132,8 +132,8 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
           </div>
 
           <div className="text-xs text-[var(--muted-foreground)]">
-            <p>{'\u5C08\u6848\u53EF\u5354\u52A9\u60A8\u6574\u7406\u6587\u4EF6\u8207\u5C0D\u8A71\u3002'}</p>
-            <p className="mt-1">{'\u60A8\u53EF\u5728\u5C08\u6848\u4E2D\u52A0\u5165 PDF\u3001\u7DB2\u5740\u3001YouTube \u5F71\u7247\u7B49\u4F86\u6E90\u3002'}</p>
+            <p>{'Projects help you organise your documents and conversations.'}</p>
+            <p className="mt-1">{'You can add PDFs, URLs, YouTube videos and more to a project.'}</p>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
@@ -143,7 +143,7 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
               disabled={isCreating}
               className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-50"
             >
-              {'\u53D6\u6D88'}
+              {'Cancel'}
             </button>
             <button
               type="submit"
@@ -153,10 +153,10 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
               {isCreating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>{'\u5EFA\u7ACB\u4E2D...'}</span>
+                  <span>{'Creating...'}</span>
                 </>
               ) : (
-                <span>{'\u5EFA\u7ACB\u5C08\u6848'}</span>
+                <span>{'Create Project'}</span>
               )}
             </button>
           </div>

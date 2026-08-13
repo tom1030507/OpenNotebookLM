@@ -134,8 +134,8 @@ export default function ConversationList() {
               onClick={() => setIsCollapsed(!isCollapsed)}
               aria-controls="conversation-panel-content"
               aria-expanded={!isCollapsed}
-              aria-label={isCollapsed ? '展開對話清單' : '摺疊對話清單'}
-              title={isCollapsed ? '展開對話清單' : '摺疊對話清單'}
+              aria-label={isCollapsed ? 'Expand conversations' : 'Collapse conversations'}
+              title={isCollapsed ? 'Expand conversations' : 'Collapse conversations'}
               className="p-1 hover:bg-[var(--muted)] rounded transition-base"
             >
               {isCollapsed ? (
@@ -144,12 +144,12 @@ export default function ConversationList() {
                 <ChevronDown className="w-4 h-4" />
               )}
             </button>
-            <h3 className="truncate text-sm font-medium">對話</h3>
+            <h3 className="truncate text-sm font-medium">Conversations</h3>
           </div>
           <button
             onClick={handleNewConversation}
-            aria-label="新增對話"
-            title="新增對話"
+            aria-label="New Conversation"
+            title="New Conversation"
             className="p-1 hover:bg-[var(--muted)] rounded transition-base"
           >
             <Plus className="w-4 h-4" />
@@ -162,7 +162,7 @@ export default function ConversationList() {
             className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base text-sm"
           >
             <Plus className="w-4 h-4" />
-            <span>新增對話</span>
+            <span>New Conversation</span>
           </button>
         )}
       </div>
@@ -171,7 +171,7 @@ export default function ConversationList() {
       <div
         id="conversation-panel-content"
         role="region"
-        aria-label="對話內容"
+        aria-label="Conversations panel content"
         hidden={isCollapsed}
         className="flex-1 overflow-y-auto p-2"
       >
@@ -179,10 +179,10 @@ export default function ConversationList() {
             <div className="text-center py-8">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 text-[var(--muted-foreground)]" />
               <p className="text-xs text-[var(--muted-foreground)]">
-                尚無對話
+                No conversations yet
               </p>
               <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                開始新對話即可使用
+                Start a new chat to begin
               </p>
             </div>
           ) : (
@@ -217,16 +217,16 @@ export default function ConversationList() {
                             />
                             <button
                               onClick={handleSaveEdit}
-                              aria-label="儲存對話名稱"
-                              title="儲存對話名稱"
+                              aria-label="Save conversation name"
+                              title="Save conversation name"
                               className="p-1 text-green-600 hover:bg-green-100 rounded"
                             >
                               <Check className="w-3 h-3" />
                             </button>
                             <button
                               onClick={handleCancelEdit}
-                              aria-label="取消重新命名"
-                              title="取消重新命名"
+                              aria-label="Cancel rename"
+                              title="Cancel rename"
                               className="p-1 text-red-600 hover:bg-red-100 rounded"
                             >
                               <X className="w-3 h-3" />
@@ -256,8 +256,8 @@ export default function ConversationList() {
                                   handleEdit(conv.id, conv.title);
                                 }}
                                 className="p-1 hover:bg-[var(--muted)] rounded"
-                                aria-label="重新命名對話"
-                                title="重新命名對話"
+                                aria-label="Rename conversation"
+                                title="Rename conversation"
                               >
                                 <Edit2 className="w-3 h-3" />
                               </button>
@@ -267,8 +267,8 @@ export default function ConversationList() {
                                   handleDelete(conv.id);
                                 }}
                                 className="p-1 hover:bg-red-100 text-red-600 rounded"
-                                aria-label="刪除對話"
-                                title="刪除對話"
+                                aria-label="Delete conversation"
+                                title="Delete conversation"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>

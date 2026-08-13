@@ -29,11 +29,11 @@ describe('workspace control availability', () => {
     let requestedOpen = false;
     render(<ChatArea onAddSourcesOpenChange={(isOpen) => { requestedOpen = isOpen; }} />);
 
-    const uploadButton = screen.getByRole('button', { name: '上傳來源' });
-    const attachmentButton = screen.getByRole('button', { name: '附加檔案' });
+    const uploadButton = screen.getByRole('button', { name: 'Upload sources' });
+    const attachmentButton = screen.getByRole('button', { name: 'Attach file' });
     expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
     expect((attachmentButton as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('請先選擇或建立專案後再新增來源')).not.toBeNull();
+    expect(screen.getByText('Select or create a project before adding sources')).not.toBeNull();
 
     fireEvent.click(uploadButton);
     fireEvent.click(attachmentButton);
@@ -43,8 +43,8 @@ describe('workspace control availability', () => {
   it('marks notification and help as disabled, accessible coming-soon controls', () => {
     render(<ProjectDialogProvider><TopNav /></ProjectDialogProvider>);
 
-    const notification = screen.getByRole('button', { name: '通知功能即將推出' });
-    const help = screen.getByRole('button', { name: '說明功能即將推出' });
+    const notification = screen.getByRole('button', { name: 'Notifications (coming soon)' });
+    const help = screen.getByRole('button', { name: 'Help (coming soon)' });
     expect((notification as HTMLButtonElement).disabled).toBe(true);
     expect((help as HTMLButtonElement).disabled).toBe(true);
   });

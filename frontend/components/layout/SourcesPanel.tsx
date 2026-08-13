@@ -176,7 +176,7 @@ export default function SourcesPanel({
 
   return (
     <aside
-      aria-label="來源"
+      aria-label="Sources"
       data-panel-state={isCollapsed ? 'collapsed' : 'expanded'}
       className="relative w-full min-w-0 overflow-hidden border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full"
     >
@@ -185,8 +185,8 @@ export default function SourcesPanel({
         onClick={() => onCollapsedChange?.(!isCollapsed)}
         aria-controls="sources-panel-content"
         aria-expanded={!isCollapsed}
-        aria-label={isCollapsed ? '展開來源' : '收合來源'}
-        title={isCollapsed ? '展開來源' : '收合來源'}
+        aria-label={isCollapsed ? 'Expand Sources' : 'Collapse Sources'}
+        title={isCollapsed ? 'Expand Sources' : 'Collapse Sources'}
         className="absolute top-2 right-2 z-10 p-1.5 hover:bg-[var(--card)] rounded-lg transition-base"
       >
         {isCollapsed ? (
@@ -199,18 +199,18 @@ export default function SourcesPanel({
       <div
         id="sources-panel-content"
         role="region"
-        aria-label="來源面板內容"
+        aria-label="Sources panel content"
         hidden={isCollapsed}
         className="min-h-0 flex-1 flex flex-col"
       >
       {/* Header */}
       <div className="p-4 border-b border-[var(--sidebar-border)]">
-        <h2 className="pr-10 text-base font-medium mb-3">來源</h2>
+        <h2 className="pr-10 text-base font-medium mb-3">Sources</h2>
         
         {/* Project Selector */}
         <div className="space-y-2 mb-3">
           <select
-            aria-label={'選擇專案'}
+            aria-label={'Select a project'}
             value={currentProject?.id || ''}
             onChange={(e) => {
               const project = projects.find(p => p.id === e.target.value);
@@ -231,7 +231,7 @@ export default function SourcesPanel({
             className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
           >
             <FolderOpen className="w-4 h-4" />
-            <span className="text-sm">新增專案</span>
+            <span className="text-sm">New Project</span>
           </button>
         </div>
         
@@ -242,7 +242,7 @@ export default function SourcesPanel({
             className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
           >
             <Plus className="w-4 h-4" />
-            <span className="text-sm">新增來源</span>
+            <span className="text-sm">Add Source</span>
           </button>
         )}
 
@@ -252,8 +252,8 @@ export default function SourcesPanel({
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
             <input
               type="text"
-              aria-label="搜尋來源"
-              placeholder="搜尋來源"
+              aria-label="Search sources"
+              placeholder="Search sources"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
@@ -270,7 +270,7 @@ export default function SourcesPanel({
               <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
             </div>
             <p className="text-sm text-[var(--muted-foreground)]">
-              請選擇或建立專案以開始使用
+              Select or create a project to get started
             </p>
           </div>
         ) : loadingDocuments ? (
@@ -283,11 +283,11 @@ export default function SourcesPanel({
               <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
             </div>
             <p className="text-sm text-[var(--muted-foreground)]">
-              {searchQuery ? '找不到來源' : '尚無來源'}
+              {searchQuery ? 'No sources found' : 'No sources yet'}
             </p>
             {!searchQuery && (
               <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                點選「新增來源」以上傳 PDF、網址或 YouTube 影片
+                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
               </p>
             )}
           </div>
@@ -319,8 +319,8 @@ export default function SourcesPanel({
                         setPreviewDocument(doc);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      aria-label={'\u9810\u89bd\u6587\u4ef6'}
-                      title={'\u9810\u89bd\u6587\u4ef6'}
+                      aria-label={'Preview document'}
+                      title={'Preview document'}
                     >
                       <Eye className="w-3 h-3" />
                     </button>
@@ -330,8 +330,8 @@ export default function SourcesPanel({
                         handleDeleteDocument(doc.id);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
-                      aria-label={'\u522a\u9664\u6587\u4ef6'}
-                      title={'\u522a\u9664\u6587\u4ef6'}
+                      aria-label={'Delete document'}
+                      title={'Delete document'}
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -357,13 +357,13 @@ export default function SourcesPanel({
             className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
           >
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
-              <h3 id={uploadTitleId} className="text-lg font-semibold">新增來源</h3>
+              <h3 id={uploadTitleId} className="text-lg font-semibold">Add Source</h3>
               <button
                 ref={uploadCloseRef}
                 onClick={closeAddSources}
                 type="button"
-                aria-label={'\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846'}
-                title={'\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846'}
+                aria-label={'Close add sources dialog'}
+                title={'Close add sources dialog'}
                 disabled={isUploading}
                 className="p-1 hover:bg-[var(--muted)] rounded transition-base"
               >

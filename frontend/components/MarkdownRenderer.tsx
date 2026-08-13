@@ -42,8 +42,8 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
                 <button
                   className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-gray-700 hover:bg-gray-600 rounded"
                   onClick={() => copyToClipboard(codeString)}
-                  aria-label="複製程式碼"
-                  title="複製程式碼"
+                  aria-label="Copy code"
+                  title="Copy code"
                 >
                   {copiedCode === codeString ? (
                     <Check className="w-4 h-4 text-green-400" />

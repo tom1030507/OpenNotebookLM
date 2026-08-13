@@ -18,7 +18,7 @@ import useStore from '@/store/useStore';
 const originalStoreState = useStore.getState();
 const project: Project = {
   id: 'project-1',
-  name: '版面測試專案',
+  name: 'Layout test project',
   description: null,
   meta_json: {},
   created_at: '2026-08-12T00:00:00Z',
@@ -29,9 +29,9 @@ const project: Project = {
 const documents: Document[] = [
   {
     id: 'document-1',
-    name: '第一份資料',
+    name: 'First document',
     type: 'text',
-    content: '第一份內容',
+    content: 'First content',
     meta: {},
     status: 'ready',
     created_at: '2026-08-12T00:00:00Z',
@@ -40,9 +40,9 @@ const documents: Document[] = [
   },
   {
     id: 'document-2',
-    name: '第二份資料',
+    name: 'Second document',
     type: 'text',
-    content: '第二份內容',
+    content: 'Second content',
     meta: {},
     status: 'ready',
     created_at: '2026-08-12T00:00:00Z',
@@ -53,7 +53,7 @@ const documents: Document[] = [
 const conversation: Conversation = {
   id: 'conversation-1',
   project_id: project.id,
-  title: '版面測試對話',
+  title: 'Layout test conversation',
   created_at: '2026-08-12T00:00:00Z',
   updated_at: '2026-08-12T00:00:00Z',
   message_count: 0,
@@ -149,7 +149,7 @@ describe('desktop workspace layout', () => {
       '[data-layout="welcome-actions"]',
     );
     const title = screen.getByRole('heading', {
-      name: '新增來源即可開始使用',
+      name: 'Add a source to get started',
     });
 
     expect(workspace?.style.gridTemplateColumns).toBe(
@@ -184,7 +184,7 @@ describe('desktop workspace layout', () => {
         false,
       ).center,
     ).toBe(640);
-    expect(screen.queryByRole('heading', { name: '對話' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Conversations' })).toBeNull();
 
     act(() => {
       useStore.setState({ currentProject: project });
@@ -194,7 +194,7 @@ describe('desktop workspace layout', () => {
       getDesktopWorkspaceStyle(initialDesktopWorkspaceState, true)
         .gridTemplateColumns,
     );
-    expect(screen.getByRole('heading', { name: '對話' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Conversations' })).toBeTruthy();
   });
 
   test('renders the no-project desktop grid deterministically during SSR', () => {
@@ -214,20 +214,20 @@ describe('desktop workspace layout', () => {
     const workspace = container.querySelector<HTMLElement>(
       '[data-layout="desktop-workspace"]',
     );
-    const sources = screen.getByRole('complementary', { name: '來源' });
+    const sources = screen.getByRole('complementary', { name: 'Sources' });
     const content = screen.getByRole('region', {
-      name: '來源面板內容',
+      name: 'Sources panel content',
       hidden: true,
     });
     const search = screen.getByRole('textbox', {
-      name: '搜尋來源',
+      name: 'Search sources',
     }) as HTMLInputElement;
-    const toggle = screen.getByRole('button', { name: '收合來源' });
+    const toggle = screen.getByRole('button', { name: 'Collapse Sources' });
     const expandedColumns = workspace?.style.gridTemplateColumns;
 
-    fireEvent.change(search, { target: { value: '第二' } });
-    expect(screen.queryByText('第一份資料')).toBeNull();
-    expect(screen.getByText('第二份資料')).toBeTruthy();
+    fireEvent.change(search, { target: { value: 'Second' } });
+    expect(screen.queryByText('First document')).toBeNull();
+    expect(screen.getByText('Second document')).toBeTruthy();
 
     toggle.focus();
     fireEvent.click(toggle);
@@ -238,7 +238,7 @@ describe('desktop workspace layout', () => {
     expect(content.hidden).toBe(true);
     expect(document.activeElement).toBe(toggle);
     expect(workspace?.style.gridTemplateColumns).not.toBe(expandedColumns);
-    expect(search.value).toBe('第二');
+    expect(search.value).toBe('Second');
 
     fireEvent.click(toggle);
 
@@ -247,18 +247,18 @@ describe('desktop workspace layout', () => {
     expect(content.hidden).toBe(false);
     expect(document.activeElement).toBe(toggle);
     expect(workspace?.style.gridTemplateColumns).toBe(expandedColumns);
-    expect(screen.getByRole('textbox', { name: '搜尋來源' })).toBe(search);
-    expect(search.value).toBe('第二');
+    expect(screen.getByRole('textbox', { name: 'Search sources' })).toBe(search);
+    expect(search.value).toBe('Second');
   });
 
   test('drives the Studio collapse callback and restores the same focused control', () => {
     render(createElement(Home));
-    const studio = screen.getByRole('complementary', { name: '工作室' });
+    const studio = screen.getByRole('complementary', { name: 'Studio' });
     const content = screen.getByRole('region', {
-      name: '工作室面板內容',
+      name: 'Studio panel content',
       hidden: true,
     });
-    const toggle = screen.getByRole('button', { name: '收合工作室' });
+    const toggle = screen.getByRole('button', { name: 'Collapse Studio' });
 
     toggle.focus();
     fireEvent.click(toggle);
@@ -280,16 +280,16 @@ describe('desktop workspace layout', () => {
   test('uses a compact Traditional Chinese conversation header contract', () => {
     render(createElement(Home));
 
-    expect(screen.getByRole('heading', { name: '對話' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '摺疊對話清單' })).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: '新增對話' })).toHaveLength(2);
+    expect(screen.getByRole('heading', { name: 'Conversations' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Collapse conversations' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'New Conversation' })).toHaveLength(2);
   });
 
   test('keeps the controlled conversation content mounted while collapsed', () => {
     render(createElement(Home));
-    const toggle = screen.getByRole('button', { name: '摺疊對話清單' });
+    const toggle = screen.getByRole('button', { name: 'Collapse conversations' });
     const content = screen.getByRole('region', {
-      name: '對話內容',
+      name: 'Conversations panel content',
       hidden: true,
     });
 

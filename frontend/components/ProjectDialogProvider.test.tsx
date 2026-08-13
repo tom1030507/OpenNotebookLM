@@ -23,8 +23,8 @@ import useStore from '@/store/useStore';
 
 const createdProject: Project = {
   id: 'project-created',
-  name: '研究計畫',
-  description: '新的專案',
+  name: 'Research plan',
+  description: 'New project',
   meta_json: {},
   created_at: '2026-08-12T00:00:00Z',
   updated_at: '2026-08-12T00:00:00Z',
@@ -87,15 +87,15 @@ describe('ProjectDialogProvider', () => {
     const alertSpy = vi.spyOn(window, 'alert');
     renderProjectCreationTriggers();
 
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[0]);
-    expect(screen.getAllByRole('dialog', { name: '建立新專案' })).toHaveLength(1);
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[0]);
+    expect(screen.getAllByRole('dialog', { name: 'Create New Project' })).toHaveLength(1);
 
-    await user.click(screen.getByRole('button', { name: '關閉建立新專案對話框' }));
-    expect(screen.queryByRole('dialog', { name: '建立新專案' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Close create project dialog' }));
+    expect(screen.queryByRole('dialog', { name: 'Create New Project' })).toBeNull();
 
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[1]);
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[1]);
 
-    expect(screen.getAllByRole('dialog', { name: '建立新專案' })).toHaveLength(1);
+    expect(screen.getAllByRole('dialog', { name: 'Create New Project' })).toHaveLength(1);
     expect(promptSpy).not.toHaveBeenCalled();
     expect(alertSpy).not.toHaveBeenCalled();
   });
@@ -105,43 +105,43 @@ describe('ProjectDialogProvider', () => {
     apiMock.createProject.mockResolvedValue(createdProject);
     renderProjectCreationTriggers();
 
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[1]);
-    await user.type(screen.getByRole('textbox', { name: /專案名稱/ }), createdProject.name);
-    await user.click(screen.getByRole('button', { name: '建立專案' }));
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[1]);
+    await user.type(screen.getByRole('textbox', { name: /Project Name/ }), createdProject.name);
+    await user.click(screen.getByRole('button', { name: 'Create Project' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '建立新專案' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Create New Project' })).toBeNull();
     });
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(createdProject.id);
   });
 
   it('keeps the dialog open and displays the API error when creation fails', async () => {
     const user = userEvent.setup();
-    apiMock.createProject.mockRejectedValue(new Error('伺服器暫時無法建立專案'));
+    apiMock.createProject.mockRejectedValue(new Error('The server could not create the project'));
     renderProjectCreationTriggers();
 
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[0]);
-    await user.type(screen.getByRole('textbox', { name: /專案名稱/ }), '研究計畫');
-    await user.click(screen.getByRole('button', { name: '建立專案' }));
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[0]);
+    await user.type(screen.getByRole('textbox', { name: /Project Name/ }), 'Research plan');
+    await user.click(screen.getByRole('button', { name: 'Create Project' }));
 
-    expect(await screen.findByText('伺服器暫時無法建立專案')).not.toBeNull();
-    expect(screen.getByRole('dialog', { name: '建立新專案' })).not.toBeNull();
+    expect(await screen.findByText('The server could not create the project')).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Create New Project' })).not.toBeNull();
   });
 
   it('clears a creation error after closing and reopening the dialog', async () => {
     const user = userEvent.setup();
-    apiMock.createProject.mockRejectedValue(new Error('伺服器暫時無法建立專案'));
+    apiMock.createProject.mockRejectedValue(new Error('The server could not create the project'));
     renderProjectCreationTriggers();
 
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[0]);
-    await user.type(screen.getByRole('textbox', { name: /專案名稱/ }), '研究計畫');
-    await user.click(screen.getByRole('button', { name: '建立專案' }));
-    await screen.findByText('伺服器暫時無法建立專案');
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[0]);
+    await user.type(screen.getByRole('textbox', { name: /Project Name/ }), 'Research plan');
+    await user.click(screen.getByRole('button', { name: 'Create Project' }));
+    await screen.findByText('The server could not create the project');
 
-    await user.click(screen.getByRole('button', { name: '關閉建立新專案對話框' }));
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[1]);
+    await user.click(screen.getByRole('button', { name: 'Close create project dialog' }));
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[1]);
 
-    expect(screen.queryByText('伺服器暫時無法建立專案')).toBeNull();
+    expect(screen.queryByText('The server could not create the project')).toBeNull();
   });
 
   it('keeps the dialog open when its close control is pressed during a pending successful creation', async () => {
@@ -150,24 +150,24 @@ describe('ProjectDialogProvider', () => {
     apiMock.createProject.mockReturnValue(creation.promise);
     renderProjectCreationTriggers();
 
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[0]);
-    await user.type(screen.getByRole('textbox', { name: /專案名稱/ }), createdProject.name);
-    await user.click(screen.getByRole('button', { name: '建立專案' }));
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[0]);
+    await user.type(screen.getByRole('textbox', { name: /Project Name/ }), createdProject.name);
+    await user.click(screen.getByRole('button', { name: 'Create Project' }));
 
     const closeButton = screen.getByRole('button', {
-      name: '關閉建立新專案對話框',
+      name: 'Close create project dialog',
     }) as HTMLButtonElement;
-    const cancelButton = screen.getByRole('button', { name: '取消' }) as HTMLButtonElement;
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
 
     expect(closeButton.disabled).toBe(true);
     expect(cancelButton.disabled).toBe(true);
     await user.click(closeButton);
-    expect(screen.getByRole('dialog', { name: '建立新專案' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Create New Project' })).not.toBeNull();
 
     creation.resolve(createdProject);
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '建立新專案' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Create New Project' })).toBeNull();
     });
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(createdProject.id);
   });
@@ -178,23 +178,23 @@ describe('ProjectDialogProvider', () => {
     apiMock.createProject.mockReturnValue(creation.promise);
     renderProjectCreationTriggers();
 
-    await user.click(screen.getAllByRole('button', { name: '新增專案' })[0]);
-    await user.type(screen.getByRole('textbox', { name: /專案名稱/ }), createdProject.name);
-    await user.click(screen.getByRole('button', { name: '建立專案' }));
+    await user.click(screen.getAllByRole('button', { name: 'New Project' })[0]);
+    await user.type(screen.getByRole('textbox', { name: /Project Name/ }), createdProject.name);
+    await user.click(screen.getByRole('button', { name: 'Create Project' }));
 
     const closeButton = screen.getByRole('button', {
-      name: '關閉建立新專案對話框',
+      name: 'Close create project dialog',
     }) as HTMLButtonElement;
     expect(closeButton.disabled).toBe(true);
     await user.click(closeButton);
-    expect(screen.getByRole('dialog', { name: '建立新專案' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Create New Project' })).not.toBeNull();
 
-    creation.reject(new Error('伺服器暫時無法建立專案'));
+    creation.reject(new Error('The server could not create the project'));
 
-    expect(await screen.findByText('伺服器暫時無法建立專案')).not.toBeNull();
-    expect(screen.getByRole('dialog', { name: '建立新專案' })).not.toBeNull();
+    expect(await screen.findByText('The server could not create the project')).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Create New Project' })).not.toBeNull();
     expect((screen.getByRole('button', {
-      name: '關閉建立新專案對話框',
+      name: 'Close create project dialog',
     }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

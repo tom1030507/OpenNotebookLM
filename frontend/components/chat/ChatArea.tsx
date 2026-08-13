@@ -72,7 +72,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'ready');
   const canChat = currentProject && hasDocuments;
   const canAddSources = Boolean(currentProject);
-  const sourceActionHelperText = '請先選擇或建立專案後再新增來源';
+  const sourceActionHelperText = 'Select or create a project before adding sources';
 
   const handleRequestAddSources = () => {
     requestAddSources(canAddSources, onAddSourcesOpenChange);
@@ -112,23 +112,23 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 className="leading-tight font-normal mb-4"
                 style={welcomeHeroStyles.title}
               >
-                新增來源即可開始使用
+                Add a source to get started
               </h2>
               
               <p className="max-w-2xl mx-auto text-base text-[var(--muted-foreground)] mb-8">
-                NotebookLM 提供的資訊未必正確。請查證回覆內容。
+                NotebookLM can be inaccurate. Please verify its responses.
               </p>
 
               {/* Upload Button */}
               <button
                 onClick={handleRequestAddSources}
                 disabled={!canAddSources}
-                aria-label="上傳來源"
+                aria-label="Upload sources"
                 aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
                 className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
               >
                 <Upload className="w-5 h-5" />
-                <span>上傳來源</span>
+                <span>Upload sources</span>
               </button>
 
               {/* Quick Actions */}
@@ -141,18 +141,18 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
                   style={welcomeHeroStyles.card}
                 >
-                  <h3 className="font-medium text-base mb-1.5">快速開始</h3>
+                  <h3 className="font-medium text-base mb-1.5">Quick start</h3>
                   <p className="text-sm text-[var(--muted-foreground)]">
-                    上傳 PDF、網頁或 YouTube 影片
+                    Upload PDFs, web pages, or YouTube videos
                   </p>
                 </div>
                 <div
                   className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
                   style={welcomeHeroStyles.card}
                 >
-                  <h3 className="font-medium text-base mb-1.5">智能問答</h3>
+                  <h3 className="font-medium text-base mb-1.5">Smart answers</h3>
                   <p className="text-sm text-[var(--muted-foreground)]">
-                    基於你的文件回答問題
+                    Answers based on your documents
                   </p>
                 </div>
               </div>
@@ -192,7 +192,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     {/* Citations */}
                     {message.citations && message.citations.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-[var(--border)]">
-                        <p className="text-xs opacity-70 mb-2">來源引用：</p>
+                        <p className="text-xs opacity-70 mb-2">Sources: </p>
                         {message.citations.map((citation, idx) => (
                           <div
                             key={idx}
@@ -200,7 +200,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                           >
                             <span className="font-medium">{citation.source}</span>
                             {citation.page && (
-                              <span className="opacity-70"> - 第 {citation.page} 頁</span>
+                              <span className="opacity-70"> - page {citation.page}</span>
                             )}
                           </div>
                         ))}
@@ -243,8 +243,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             <button
               onClick={handleRequestAddSources}
               disabled={!canAddSources}
-              aria-label={'\u9644\u52a0\u6a94\u6848'}
-              title={'\u9644\u52a0\u6a94\u6848'}
+              aria-label={'Attach file'}
+              title={'Attach file'}
               aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
               className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-base"
             >
@@ -261,7 +261,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     handleSend();
                   }
                 }}
-                placeholder={canChat ? '針對你的來源提問…' : '新增來源即可開始對話'}
+                placeholder={canChat ? 'Ask anything about your sources...' : 'Add sources to start chatting'}
                 className="w-full px-4 py-3 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
                 rows={1}
                 disabled={!canChat || isStreaming}
@@ -276,8 +276,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             
             <button
               onClick={handleSend}
-              aria-label={'\u50b3\u9001\u8a0a\u606f'}
-              title={'\u50b3\u9001\u8a0a\u606f'}
+              aria-label={'Send message'}
+              title={'Send message'}
               disabled={!inputValue.trim() || !canChat || isStreaming}
               className="flex-shrink-0 p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base">
               {isStreaming ? (

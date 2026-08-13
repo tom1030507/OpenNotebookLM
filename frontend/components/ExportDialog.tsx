@@ -116,8 +116,8 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
             <button
               onClick={onClose}
               type="button"
-              aria-label={'\u95dc\u9589\u532f\u51fa\u5c0d\u8a71\u6846'}
-              title={'\u95dc\u9589\u532f\u51fa\u5c0d\u8a71\u6846'}
+              aria-label={'Close export dialog'}
+              title={'Close export dialog'}
               disabled={isExporting}
               className="p-1 hover:bg-[var(--muted)] rounded transition-base"
             >

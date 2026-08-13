@@ -113,7 +113,7 @@ export default function ResponsiveLayout({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <nav
-        aria-label="工作區面板"
+        aria-label="Workspace panels"
         className="flex shrink-0 gap-2 border-b border-[var(--border)] bg-[var(--card)] p-3 lg:hidden"
       >
         {layout.drawerControls.map(({ id, label }) => {
@@ -133,7 +133,7 @@ export default function ResponsiveLayout({
                 dispatch({ type: 'toggle', panel: id });
               }}
               aria-pressed={isOpen}
-              aria-label={isOpen ? `${label}面板已開啟` : `開啟${label}面板`}
+              aria-label={isOpen ? `${label} panel is open` : `Open ${label} panel`}
               className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
             >
               {label}
@@ -150,7 +150,7 @@ export default function ResponsiveLayout({
         {layout.drawerPanelId && (
           <button
             type="button"
-            aria-label="關閉面板"
+            aria-label="Close panel"
             tabIndex={-1}
             className="absolute inset-0 z-40 bg-black/50 lg:hidden"
             onClick={dismissDrawer}
@@ -177,7 +177,7 @@ export default function ResponsiveLayout({
               data-workspace-region={item}
               role={isDrawer ? 'dialog' : undefined}
               aria-modal={isDrawer ? 'true' : undefined}
-              aria-label={isDrawer ? `${activePanelLabel}面板` : undefined}
+              aria-label={isDrawer ? `${activePanelLabel} panel` : undefined}
               onKeyDown={isDrawer ? (event) => drawerFocusController.trapTab(event) : undefined}
               style={
                 isDrawer
@@ -196,11 +196,11 @@ export default function ResponsiveLayout({
                 <header className="flex shrink-0 items-center justify-end border-b border-[var(--border)] p-3 lg:hidden">
                   <button
                     type="button"
-                    aria-label={`關閉${activePanelLabel}面板`}
+                    aria-label={`Close ${activePanelLabel} panel`}
                     onClick={dismissDrawer}
                     className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
                   >
-                    關閉
+                    Close
                   </button>
                 </header>
               )}

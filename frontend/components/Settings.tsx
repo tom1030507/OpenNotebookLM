@@ -116,8 +116,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               ref={closeButtonRef}
               onClick={onClose}
               type="button"
-              aria-label={'\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846'}
-              title={'\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846'}
+              aria-label={'Close settings dialog'}
+              title={'Close settings dialog'}
               disabled={isSaving}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
             >
@@ -168,8 +168,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                       >
                         <option value="en">English</option>
-                        <option value="zh">中文</option>
-                        <option value="ja">日本語</option>
+                        <option value="zh">Chinese</option>
+                        <option value="ja">Japanese</option>
                         <option value="es">Español</option>
                         <option value="fr">Français</option>
                       </select>

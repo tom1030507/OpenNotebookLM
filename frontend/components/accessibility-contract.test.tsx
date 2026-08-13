@@ -23,15 +23,15 @@ vi.mock('next/navigation', () => ({
 }));
 
 const workspaceIconButtonNames = [
-  '通知功能即將推出',
-  '說明功能即將推出',
-  '\u8a2d\u5b9a',
-  '\u4f7f\u7528\u8005\u9078\u55ae',
-  '\u9644\u52a0\u6a94\u6848',
-  '\u50b3\u9001\u8a0a\u606f',
+  'Notifications (coming soon)',
+  'Help (coming soon)',
+  'Settings',
+  'User menu',
+  'Attach file',
+  'Send message',
 ];
-const openProjectDialog = '\u958b\u555f\u5efa\u7acb\u5c08\u6848\u5c0d\u8a71\u6846';
-const closeProjectDialog = '\u95dc\u9589\u5efa\u7acb\u65b0\u5c08\u6848\u5c0d\u8a71\u6846';
+const openProjectDialog = 'Open create project dialog';
+const closeProjectDialog = 'Close create project dialog';
 const initialStoreState = useStore.getState();
 const project: Project = {
   id: 'project-1',
@@ -172,9 +172,9 @@ describe('workspace accessibility contract', () => {
     trigger.focus();
     fireEvent.click(trigger);
 
-    const dialog = screen.getByRole('dialog', { name: '建立新專案' });
+    const dialog = screen.getByRole('dialog', { name: 'Create New Project' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '專案名稱 *' }));
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Project Name *' }));
     expect(screen.getByRole('button', { name: closeProjectDialog })).toBeTruthy();
 
     fireEvent.keyDown(dialog, { key: 'Escape' });
@@ -202,18 +202,18 @@ describe('workspace accessibility contract', () => {
     configureSourcesStore();
     renderWorkspace(<SourcesPanelHarness />);
 
-    const trigger = screen.getByRole('button', { name: '新增來源' });
+    const trigger = screen.getByRole('button', { name: 'Add Source' });
     trigger.focus();
     fireEvent.click(trigger);
 
-    const dialog = screen.getByRole('dialog', { name: '新增來源' });
+    const dialog = screen.getByRole('dialog', { name: 'Add Source' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(document.activeElement).toBe(screen.getByRole('button', {
-      name: '\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846',
+      name: 'Close add sources dialog',
     }));
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -226,7 +226,7 @@ describe('workspace accessibility contract', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     const dialog = screen.getByRole('dialog', { name: 'Settings' });
-    expect(screen.getByRole('button', { name: '\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Close settings dialog' }).hasAttribute('disabled')).toBe(true);
 
     fireEvent.keyDown(dialog, { key: 'Escape' });
 
@@ -252,7 +252,7 @@ describe('workspace accessibility contract', () => {
 
     fireEvent.click(screen.getByRole('button', { name: openProjectDialog }));
     const closeButton = screen.getByRole('button', { name: closeProjectDialog });
-    const cancelButton = screen.getByRole('button', { name: '取消' });
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
 
     closeButton.focus();
     fireEvent.keyDown(closeButton, { key: 'Tab', shiftKey: true });
@@ -281,12 +281,12 @@ describe('workspace accessibility contract', () => {
     const trigger = screen.getByRole('button', { name: openProjectDialog });
     trigger.focus();
     fireEvent.click(trigger);
-    fireEvent.change(screen.getByRole('textbox', { name: '專案名稱 *' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Project Name *' }), {
       target: { value: 'Busy project' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '建立專案' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
 
-    const dialog = screen.getByRole('dialog', { name: '建立新專案' });
+    const dialog = screen.getByRole('dialog', { name: 'Create New Project' });
     await waitFor(() => expect(screen.getByRole('button', { name: closeProjectDialog }).hasAttribute('disabled')).toBe(true));
     screen.getByRole('button', { name: 'Background control' }).focus();
     fireEvent.keyDown(document, { key: 'Tab' });
@@ -298,18 +298,18 @@ describe('workspace accessibility contract', () => {
   it('limits Escape and focus restoration to the topmost nested workspace dialog', () => {
     renderWorkspace(<TopNav />);
 
-    const settingsTrigger = screen.getByRole('button', { name: '\u8a2d\u5b9a' });
+    const settingsTrigger = screen.getByRole('button', { name: 'Settings' });
     settingsTrigger.focus();
     fireEvent.click(settingsTrigger);
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy();
 
-    const projectTrigger = screen.getByRole('button', { name: '\u65b0\u589e\u5c08\u6848' });
+    const projectTrigger = screen.getByRole('button', { name: 'New Project' });
     projectTrigger.focus();
     fireEvent.click(projectTrigger);
-    expect(screen.getByRole('dialog', { name: '建立新專案' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Create New Project' })).toBeTruthy();
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: '建立新專案' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Create New Project' })).toBeNull();
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy();
     expect(document.activeElement).toBe(projectTrigger);
 
@@ -321,11 +321,11 @@ describe('workspace accessibility contract', () => {
   it('hands the Tab trap to the nested dialog and back to the outer dialog on close', () => {
     renderWorkspace(<TopNav />);
 
-    fireEvent.click(screen.getByRole('button', { name: '設定' }));
-    const settingsClose = screen.getByRole('button', { name: '關閉設定對話框' });
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const settingsClose = screen.getByRole('button', { name: 'Close settings dialog' });
 
-    fireEvent.click(screen.getByRole('button', { name: '新增專案' }));
-    const projectDialog = screen.getByRole('dialog', { name: '建立新專案' });
+    fireEvent.click(screen.getByRole('button', { name: 'New Project' }));
+    const projectDialog = screen.getByRole('dialog', { name: 'Create New Project' });
 
     // Focus parked on an outer-dialog control must be pulled back into the nested dialog.
     settingsClose.focus();
@@ -371,13 +371,13 @@ describe('workspace accessibility contract', () => {
       </>,
     );
 
-    const triggers = screen.getAllByRole('button', { name: '新增來源' });
+    const triggers = screen.getAllByRole('button', { name: 'Add Source' });
     fireEvent.click(triggers[0]);
-    const firstId = screen.getByRole('dialog', { name: '新增來源' }).getAttribute('aria-labelledby');
-    fireEvent.click(screen.getByRole('button', { name: '\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846' }));
+    const firstId = screen.getByRole('dialog', { name: 'Add Source' }).getAttribute('aria-labelledby');
+    fireEvent.click(screen.getByRole('button', { name: 'Close add sources dialog' }));
 
     fireEvent.click(triggers[1]);
-    const secondId = screen.getByRole('dialog', { name: '新增來源' }).getAttribute('aria-labelledby');
+    const secondId = screen.getByRole('dialog', { name: 'Add Source' }).getAttribute('aria-labelledby');
 
     expect(firstId).not.toBe(secondId);
     expect(document.getElementById(secondId || '')).toBeTruthy();
@@ -388,16 +388,16 @@ describe('workspace accessibility contract', () => {
       {
         Harness: ProjectDialogHarness,
         trigger: openProjectDialog,
-        dialog: '建立新專案',
+        dialog: 'Create New Project',
         initialRole: 'textbox',
-        initialFocus: '專案名稱 *',
+        initialFocus: 'Project Name *',
       },
       {
         Harness: DocumentPreviewHarness,
         trigger: 'Open document preview',
         dialog: 'Accessibility Notes',
         initialRole: 'button',
-        initialFocus: '\u95dc\u9589\u6587\u4ef6\u9810\u89bd\u5c0d\u8a71\u6846',
+        initialFocus: 'Close document preview dialog',
       },
       {
         Harness: ExportDialogHarness,
@@ -411,7 +411,7 @@ describe('workspace accessibility contract', () => {
         trigger: 'Open settings',
         dialog: 'Settings',
         initialRole: 'button',
-        initialFocus: '\u95dc\u9589\u8a2d\u5b9a\u5c0d\u8a71\u6846',
+        initialFocus: 'Close settings dialog',
       },
     ];
 
@@ -435,7 +435,7 @@ describe('workspace accessibility contract', () => {
     configureSourcesStore([previewDocument]);
     renderWorkspace(<SourcesPanelHarness />);
 
-    const previewTrigger = screen.getByRole('button', { name: '預覽文件' });
+    const previewTrigger = screen.getByRole('button', { name: 'Preview document' });
     previewTrigger.focus();
     fireEvent.click(previewTrigger);
 
@@ -456,7 +456,7 @@ describe('workspace accessibility contract', () => {
     });
     renderWorkspace(<TopNav />);
 
-    const exportTrigger = screen.getByRole('button', { name: '匯出內容' });
+    const exportTrigger = screen.getByRole('button', { name: 'Export' });
     exportTrigger.focus();
     fireEvent.click(exportTrigger);
 
@@ -500,7 +500,7 @@ describe('workspace accessibility contract', () => {
     configureSourcesStore();
     renderWorkspace(<SourcesPanelHarness />);
 
-    const trigger = screen.getByRole('button', { name: '新增來源' });
+    const trigger = screen.getByRole('button', { name: 'Add Source' });
     trigger.focus();
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('button', { name: 'URL' }));
@@ -510,15 +510,15 @@ describe('workspace accessibility contract', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => expect(
-      screen.getByRole('button', { name: '\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846' }).hasAttribute('disabled'),
+      screen.getByRole('button', { name: 'Close add sources dialog' }).hasAttribute('disabled'),
     ).toBe(true));
     resolveUpload!(fetchResponse({ doc_id: 'uploaded-document', status: 'queued', message: 'accepted' }));
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull());
     expect(useStore.getState().currentProject).toBe(project);
 
     fireEvent.click(trigger);
-    const closeButton = screen.getByRole('button', { name: '\u95dc\u9589\u65b0\u589e\u4f86\u6e90\u5c0d\u8a71\u6846' });
+    const closeButton = screen.getByRole('button', { name: 'Close add sources dialog' });
     expect(closeButton.hasAttribute('disabled')).toBe(false);
     await waitFor(() => expect(document.activeElement).toBe(closeButton));
   });
@@ -566,23 +566,23 @@ describe('workspace accessibility contract', () => {
     );
 
     [
-      '\u65b0\u589e\u5c08\u6848', '\u532f\u51fa\u5167\u5bb9', '\u5207\u63db\u4e3b\u984c', '通知功能即將推出', '說明功能即將推出', '\u8a2d\u5b9a', '\u4f7f\u7528\u8005\u9078\u55ae',
-      '\u9644\u52a0\u6a94\u6848', '\u50b3\u9001\u8a0a\u606f', '\u9810\u89bd\u6587\u4ef6', '\u522a\u9664\u6587\u4ef6', '\u8907\u88fd\u5167\u5bb9', '\u4e0b\u8f09\u6587\u4ef6', '\u5207\u63db\u5168\u87a2\u5e55', '\u95dc\u9589\u6587\u4ef6\u9810\u89bd\u5c0d\u8a71\u6846',
+      'New Project', 'Export', 'Toggle theme', 'Notifications (coming soon)', 'Help (coming soon)', 'Settings', 'User menu',
+      'Attach file', 'Send message', 'Preview document', 'Delete document', 'Copy content', 'Download document', 'Toggle fullscreen', 'Close document preview dialog',
       // Each name must exist; uniqueness is not required, since the top
-      // navigation and the Sources panel both legitimately offer 新增專案.
+      // navigation and the Sources panel both legitimately offer New Project.
     ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));
 
     fireEvent.change(screen.getByLabelText('browse'), {
       target: { files: [new File(['pdf'], 'paper.pdf', { type: 'application/pdf' })] },
     });
-    expect(screen.getByRole('button', { name: '\u79fb\u9664\u6a94\u6848' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove file' })).toBeTruthy();
   });
 
   it('names the sources project selector', () => {
     configureSourcesStore();
     renderWorkspace(<SourcesPanelHarness />);
 
-    expect(screen.getByRole('combobox', { name: '選擇專案' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Select a project' })).toBeTruthy();
   });
 
   it('associates every settings select with its visible label', () => {
@@ -604,36 +604,36 @@ describe('workspace accessibility contract', () => {
     renderWorkspace(<ConversationList />);
 
     [
-      '摺疊對話清單',
-      '重新命名對話',
-      '刪除對話',
+      'Collapse conversations',
+      'Rename conversation',
+      'Delete conversation',
       // Each name must exist; uniqueness is not required, since the top
-      // navigation and the Sources panel both legitimately offer 新增專案.
+      // navigation and the Sources panel both legitimately offer New Project.
     ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: '摺疊對話清單' }));
-    expect(screen.getByRole('button', { name: '展開對話清單' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse conversations' }));
+    expect(screen.getByRole('button', { name: 'Expand conversations' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '展開對話清單' }));
-    fireEvent.click(screen.getByRole('button', { name: '重新命名對話' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand conversations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rename conversation' }));
 
-    expect(screen.getByRole('button', { name: '儲存對話名稱' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '取消重新命名' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save conversation name' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancel rename' })).toBeTruthy();
   });
 
   it('names the markdown code copy control', () => {
     renderWorkspace(<MarkdownRenderer content={'```ts\nconst answer = 42;\n```'} />);
 
-    expect(screen.getByRole('button', { name: '複製程式碼' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeTruthy();
   });
 
   it('names the login password visibility control in both states', () => {
     renderWorkspace(<LoginPage />);
 
-    const reveal = screen.getByRole('button', { name: '顯示密碼' });
+    const reveal = screen.getByRole('button', { name: 'Show password' });
     fireEvent.click(reveal);
 
-    expect(screen.getByRole('button', { name: '隱藏密碼' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Hide password' })).toBeTruthy();
   });
 
   it('keeps the document preview frame inside the dialog tab cycle', () => {
@@ -641,7 +641,7 @@ describe('workspace accessibility contract', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'External Accessibility Notes' });
     const frame = dialog.querySelector('iframe');
-    const copyButton = screen.getByRole('button', { name: '複製內容' });
+    const copyButton = screen.getByRole('button', { name: 'Copy content' });
 
     copyButton.focus();
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
@@ -657,7 +657,7 @@ describe('workspace accessibility contract', () => {
       </>,
     );
 
-    expect(screen.getByRole('button', { name: '\u5728\u65b0\u5206\u9801\u958b\u555f' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '\u95dc\u9589\u532f\u51fa\u5c0d\u8a71\u6846' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open in new tab' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Close export dialog' })).toBeTruthy();
   });
 });
