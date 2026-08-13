@@ -45,7 +45,7 @@ export default function StudioPanel() {
   ];
 
   return (
-    <aside className="w-80 border-l border-[var(--border)] bg-[var(--card)] flex flex-col h-full">
+    <aside className="flex h-full w-full flex-col border-l border-[var(--border)] bg-[var(--card)] lg:w-64 xl:w-80">
       {/* Header */}
       <div className="p-4 border-b border-[var(--border)]">
         <h2 className="text-base font-medium">工作室</h2>
