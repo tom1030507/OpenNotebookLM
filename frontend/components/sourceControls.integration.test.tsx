@@ -261,10 +261,18 @@ describe('unavailable workspace controls', () => {
     expect((screen.getByRole('button', { name: 'Sign out' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('states that Studio output features are coming soon', () => {
+  it('separates the available Studio outputs from the ones still in preparation', () => {
     render(<StudioPanel />);
 
-    expect(screen.getByText('Studio is coming soon')).not.toBeNull();
-    expect(screen.getByText(/Audio, video and mind maps are still\s+in preparation/)).not.toBeNull();
+    expect(screen.getByText('Studio outputs')).not.toBeNull();
+    expect(screen.getByText(/Audio summaries and reports are available now/)).not.toBeNull();
+    expect(screen.getByText(/Video and mind\s+maps are still in preparation/)).not.toBeNull();
+
+    // The two without a backend stay marked.
+    for (const name of ['Video summary', 'Mind map']) {
+      expect(
+        (screen.getByRole('button', { name: `${name} (coming soon)` }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    }
   });
 });
