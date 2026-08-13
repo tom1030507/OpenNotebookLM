@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Mic,
   Video,
@@ -9,13 +9,18 @@ import {
   ChevronDown,
   PanelRightClose,
   PanelRightOpen,
+  Loader2,
 } from 'lucide-react';
+import useStore from '@/store/useStore';
+import api from '@/lib/api';
 
 interface StudioOption {
   id: string;
   title: string;
   description: string;
   icon: React.ReactNode;
+  /** Outputs with no backend endpoint stay unavailable. */
+  available?: boolean;
 }
 
 interface StudioPanelProps {
@@ -28,6 +33,34 @@ export default function StudioPanel({
   onCollapsedChange,
 }: StudioPanelProps) {
   const availabilityLabel = 'coming soon';
+  const currentProject = useStore((state) => state.currentProject);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportError, setReportError] = useState('');
+
+  // The backend exposes a project summary, so Report is a real action. Audio,
+  // video and mind maps have no endpoint yet, so they stay unavailable.
+  const generateReport = async () => {
+    if (!currentProject) return;
+
+    setIsGeneratingReport(true);
+    setReportError('');
+
+    try {
+      const blob = await api.exportProjectSummary(currentProject.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${currentProject.name} report.md`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      setReportError('The report could not be generated. Please try again.');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
   const studioOptions: StudioOption[] = [
     {
       id: 'audio',
@@ -49,6 +82,7 @@ export default function StudioPanel({
     },
     {
       id: 'report',
+      available: true,
       title: 'Report',
       description: '',
       icon: <FileText className="w-5 h-5" />
@@ -95,26 +129,39 @@ export default function StudioPanel({
             {studioOptions.map((option) => (
               <button
                 key={option.id}
-                disabled
-                aria-label={`${option.title}${availabilityLabel}`}
+                onClick={option.available ? generateReport : undefined}
+                disabled={!option.available || !currentProject || isGeneratingReport}
+                aria-label={option.available
+                  ? option.title
+                  : `${option.title} (${availabilityLabel})`}
                 className="w-full p-4 bg-[var(--secondary)] rounded-lg text-left group disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[var(--card)] rounded-lg group-hover:bg-[var(--secondary)] transition-base">
-                    {option.icon}
+                    {option.available && isGeneratingReport
+                      ? <Loader2 className="w-5 h-5 animate-spin" />
+                      : option.icon}
                   </div>
                   <div className="flex-1">
                     <h3 className="text-sm font-medium">
                       {option.title}
                     </h3>
                     <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                      {availabilityLabel}
+                      {option.available
+                        ? (currentProject ? 'Summarise this project' : 'Select a project first')
+                        : availabilityLabel}
                     </p>
                   </div>
                 </div>
               </button>
             ))}
           </div>
+
+          {reportError && (
+            <p role="alert" className="mt-3 text-xs text-[var(--error)]">
+              {reportError}
+            </p>
+          )}
 
           {/* More Options */}
           <button
@@ -139,7 +186,8 @@ export default function StudioPanel({
                   Studio is coming soon
                 </h4>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Audio, video, mind maps and reports are still in preparation.
+                  Reports are available now. Audio, video and mind maps are still
+                  in preparation.
                 </p>
               </div>
             </div>
