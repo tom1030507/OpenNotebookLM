@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Mic,
   Video,
@@ -10,9 +10,11 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Loader2,
+  Square,
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
+import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
 
 interface StudioOption {
   id: string;
@@ -21,6 +23,8 @@ interface StudioOption {
   icon: React.ReactNode;
   /** Outputs with no backend endpoint stay unavailable. */
   available?: boolean;
+  /** Distinguishes the live actions from one another. */
+  action?: 'report' | 'audio';
 }
 
 interface StudioPanelProps {
@@ -36,6 +40,41 @@ export default function StudioPanel({
   const currentProject = useStore((state) => state.currentProject);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [isPreparingAudio, setIsPreparingAudio] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(true);
+
+  // Speech support can only be read in the browser, so check after mount to
+  // keep the server-rendered markup stable.
+  useEffect(() => {
+    setSpeechSupported(isSpeechSupported());
+    return () => stopSpeaking();
+  }, []);
+
+  const playAudioSummary = async () => {
+    if (!currentProject) return;
+
+    setIsPreparingAudio(true);
+    setReportError('');
+
+    try {
+      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(currentProject.id));
+
+      setIsPreparingAudio(false);
+      setIsSpeaking(true);
+      await speakText(spoken);
+    } catch {
+      setReportError('The audio summary could not be read out. Please try again.');
+    } finally {
+      setIsPreparingAudio(false);
+      setIsSpeaking(false);
+    }
+  };
+
+  const stopAudioSummary = () => {
+    stopSpeaking();
+    setIsSpeaking(false);
+  };
 
   // The backend exposes a project summary, so Report is a real action. Audio,
   // video and mind maps have no endpoint yet, so they stay unavailable.
@@ -61,9 +100,57 @@ export default function StudioPanel({
       setIsGeneratingReport(false);
     }
   };
+  const optionAction = (option: StudioOption) => {
+    if (option.action === 'report') return generateReport;
+    if (option.action === 'audio') return isSpeaking ? stopAudioSummary : playAudioSummary;
+    return undefined;
+  };
+
+  const optionDisabled = (option: StudioOption) => {
+    if (!option.available || !currentProject) return true;
+    if (option.action === 'audio') return !speechSupported || isPreparingAudio;
+    return isGeneratingReport;
+  };
+
+  const optionLabel = (option: StudioOption) => {
+    if (!option.available) return `${option.title} (${availabilityLabel})`;
+    if (option.action === 'audio' && isSpeaking) return 'Stop audio summary';
+    return option.title;
+  };
+
+  const optionIcon = (option: StudioOption) => {
+    if (option.action === 'audio') {
+      if (isPreparingAudio) return <Loader2 className="w-5 h-5 animate-spin" />;
+      if (isSpeaking) return <Square className="w-5 h-5" />;
+      return option.icon;
+    }
+
+    if (option.action === 'report' && isGeneratingReport) {
+      return <Loader2 className="w-5 h-5 animate-spin" />;
+    }
+
+    return option.icon;
+  };
+
+  const optionHint = (option: StudioOption) => {
+    if (!option.available) return availabilityLabel;
+    if (!currentProject) return 'Select a project first';
+
+    if (option.action === 'audio') {
+      if (!speechSupported) return 'Not supported in this browser';
+      if (isPreparingAudio) return 'Preparing audio…';
+      if (isSpeaking) return 'Playing — select to stop';
+      return 'Listen to this project';
+    }
+
+    return 'Summarise this project';
+  };
+
   const studioOptions: StudioOption[] = [
     {
       id: 'audio',
+      available: true,
+      action: 'audio',
       title: 'Audio summary',
       description: '',
       icon: <Mic className="w-5 h-5" />
@@ -83,6 +170,7 @@ export default function StudioPanel({
     {
       id: 'report',
       available: true,
+      action: 'report',
       title: 'Report',
       description: '',
       icon: <FileText className="w-5 h-5" />
@@ -129,27 +217,21 @@ export default function StudioPanel({
             {studioOptions.map((option) => (
               <button
                 key={option.id}
-                onClick={option.available ? generateReport : undefined}
-                disabled={!option.available || !currentProject || isGeneratingReport}
-                aria-label={option.available
-                  ? option.title
-                  : `${option.title} (${availabilityLabel})`}
+                onClick={optionAction(option)}
+                disabled={optionDisabled(option)}
+                aria-label={optionLabel(option)}
                 className="w-full p-4 bg-[var(--secondary)] rounded-lg text-left group disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[var(--card)] rounded-lg group-hover:bg-[var(--secondary)] transition-base">
-                    {option.available && isGeneratingReport
-                      ? <Loader2 className="w-5 h-5 animate-spin" />
-                      : option.icon}
+                    {optionIcon(option)}
                   </div>
                   <div className="flex-1">
                     <h3 className="text-sm font-medium">
                       {option.title}
                     </h3>
                     <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                      {option.available
-                        ? (currentProject ? 'Summarise this project' : 'Select a project first')
-                        : availabilityLabel}
+                      {optionHint(option)}
                     </p>
                   </div>
                 </div>
@@ -183,11 +265,11 @@ export default function StudioPanel({
               </div>
               <div>
                 <h4 className="text-sm font-medium mb-1">
-                  Studio is coming soon
+                  Studio outputs
                 </h4>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Reports are available now. Audio, video and mind maps are still
-                  in preparation.
+                  Audio summaries and reports are available now. Video and mind
+                  maps are still in preparation.
                 </p>
               </div>
             </div>

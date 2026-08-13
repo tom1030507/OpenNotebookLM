@@ -197,6 +197,17 @@ const requestBlob = async (path: string): Promise<Blob> => {
 };
 
 
+const requestText = async (path: string): Promise<string> => {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { Accept: 'text/plain, text/markdown, */*' },
+  });
+  if (!response.ok) {
+    throw await extractError(response);
+  }
+  return response.text();
+};
+
+
 const normalizeDocument = (document: BackendDocument): Document => {
   const metadataContent = typeof document.meta_json?.content === 'string'
     ? document.meta_json.content
@@ -423,6 +434,11 @@ const api = {
 
   exportProjectSummary(projectId: string): Promise<Blob> {
     return requestBlob(`/export/project/${projectId}/summary`);
+  },
+
+  /** The same summary as text, for reading aloud rather than downloading. */
+  fetchProjectSummaryText(projectId: string): Promise<string> {
+    return requestText(`/export/project/${projectId}/summary`);
   },
 };
 
