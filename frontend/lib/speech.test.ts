@@ -102,6 +102,44 @@ describe('speakText', () => {
     await expect(finished).rejects.toThrow(/synthesis-failed/);
   });
 
+  it.each(['interrupted', 'canceled', 'cancelled'])(
+    'settles quietly when playback is stopped (%s)',
+    async (error) => {
+      const fake = installSpeechSynthesis();
+
+      const finished = speakText('hello');
+      stopSpeaking();
+      // cancel() makes the browser report the stop as an error on the utterance.
+      fake.spoken[0].onerror?.({ error });
+
+      await expect(finished).resolves.toBeUndefined();
+    },
+  );
+
+  it('ignores a late error once playback has finished', async () => {
+    const fake = installSpeechSynthesis();
+
+    const finished = speakText('hello');
+    fake.spoken[0].onend?.();
+    fake.spoken[0].onerror?.({ error: 'synthesis-failed' });
+
+    await expect(finished).resolves.toBeUndefined();
+  });
+
+  it('keeps a replay clean when cancelling the previous reading errors', async () => {
+    const fake = installSpeechSynthesis();
+
+    const first = speakText('hello');
+    // Replaying cancels the first utterance, which reports 'interrupted'.
+    const second = speakText('again');
+    fake.spoken[0].onerror?.({ error: 'interrupted' });
+
+    await expect(first).resolves.toBeUndefined();
+
+    fake.spoken[1].onend?.();
+    await expect(second).resolves.toBeUndefined();
+  });
+
   it('rejects immediately when speech is unavailable', async () => {
     vi.stubGlobal('speechSynthesis', undefined);
     await expect(speakText('hello')).rejects.toThrow(/not available/i);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   Mic,
   Video,
@@ -43,36 +43,54 @@ export default function StudioPanel({
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
+  // Identifies the reading in progress. Stopping retires it, so anything the
+  // browser reports about it afterwards cannot disturb the panel — or a reading
+  // the listener has since started.
+  const playbackRun = useRef(0);
 
   // Speech support can only be read in the browser, so check after mount to
   // keep the server-rendered markup stable.
   useEffect(() => {
     setSpeechSupported(isSpeechSupported());
-    return () => stopSpeaking();
+    return () => {
+      playbackRun.current += 1;
+      stopSpeaking();
+    };
   }, []);
 
   const playAudioSummary = async () => {
     if (!currentProject) return;
+
+    const run = playbackRun.current + 1;
+    playbackRun.current = run;
+    const isCurrent = () => playbackRun.current === run;
 
     setIsPreparingAudio(true);
     setReportError('');
 
     try {
       const spoken = summaryToSpeech(await api.fetchProjectSummaryText(currentProject.id));
+      if (!isCurrent()) return;
 
       setIsPreparingAudio(false);
       setIsSpeaking(true);
       await speakText(spoken);
     } catch {
-      setReportError('The audio summary could not be read out. Please try again.');
+      if (isCurrent()) {
+        setReportError('The audio summary could not be read out. Please try again.');
+      }
     } finally {
-      setIsPreparingAudio(false);
-      setIsSpeaking(false);
+      if (isCurrent()) {
+        setIsPreparingAudio(false);
+        setIsSpeaking(false);
+      }
     }
   };
 
   const stopAudioSummary = () => {
+    playbackRun.current += 1;
     stopSpeaking();
+    setIsPreparingAudio(false);
     setIsSpeaking(false);
   };
 

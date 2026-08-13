@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import StudioPanel from './StudioPanel';
 import useStore from '@/store/useStore';
@@ -39,6 +39,23 @@ function installSpeech() {
     speaking: false,
   });
   return spoken;
+}
+
+/**
+ * Mirrors the browser: cancel() reports the stop as an error on whatever is
+ * being spoken, so a deliberate stop arrives through the failure path.
+ */
+function installSpeechReportingCancelAsError(error: string) {
+  const spoken = installSpeech();
+  const cancel = vi.fn(() => {
+    spoken.forEach((utterance) => utterance.onerror?.({ error }));
+  });
+  vi.stubGlobal('speechSynthesis', {
+    speak: (u: Utterance) => spoken.push(u),
+    cancel,
+    speaking: false,
+  });
+  return { spoken, cancel };
 }
 
 const summary = '# Research notes\n\n- **Example Domain** overview';
@@ -100,6 +117,78 @@ describe('Studio audio summary', () => {
 
     await waitFor(() => expect(cancel).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByRole('button', { name: 'Audio summary' })).toBeTruthy());
+  });
+
+  it('treats a stop as deliberate rather than a playback failure', async () => {
+    const { cancel } = installSpeechReportingCancelAsError('interrupted');
+    vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop audio summary' }));
+
+    await waitFor(() => expect(cancel).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Audio summary' })).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/could not be read out/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop audio summary' })).toBeNull();
+  });
+
+  it('still reports a genuine synthesis failure', async () => {
+    const spoken = installSpeech();
+    vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await screen.findByRole('button', { name: 'Stop audio summary' });
+
+    spoken[0].onerror?.({ error: 'synthesis-failed' });
+
+    expect(await screen.findByText(/could not be read out/i)).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Audio summary' })).toBeTruthy());
+  });
+
+  it('leaves no error behind when a replay cancels the previous reading', async () => {
+    const { spoken } = installSpeechReportingCancelAsError('canceled');
+    vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await screen.findByRole('button', { name: 'Stop audio summary' });
+
+    // Stop, then play again: the second run must not inherit the first's cancel.
+    fireEvent.click(screen.getByRole('button', { name: 'Stop audio summary' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Audio summary' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+
+    await waitFor(() => expect(spoken).toHaveLength(2));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Stop audio summary' })).toBeTruthy();
+  });
+
+  it('keeps the replacement reading playing when a stopped one reports its cancel late', async () => {
+    // cancel() here never reports anything: the test decides when the browser
+    // gets around to telling us the stopped reading was interrupted.
+    const spoken = installSpeech();
+    vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop audio summary' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Audio summary' })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await waitFor(() => expect(spoken).toHaveLength(2));
+    await screen.findByRole('button', { name: 'Stop audio summary' });
+
+    await act(async () => {
+      spoken[0].onerror?.({ error: 'interrupted' });
+      await Promise.resolve();
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByRole('button', { name: 'Stop audio summary' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('explains itself when the browser cannot speak', () => {

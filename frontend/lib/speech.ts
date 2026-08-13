@@ -48,7 +48,18 @@ export function stopSpeaking(): void {
   synthesis()?.cancel();
 }
 
-/** Speaks `text`, resolving when playback finishes and rejecting on failure. */
+/**
+ * Error values a browser reports when playback was cancelled rather than
+ * broken: `cancel()` fires `onerror` on whatever was being spoken. Chrome says
+ * 'interrupted' for a reading already under way and 'canceled' for one still
+ * queued; the British spelling is accepted for engines that prefer it.
+ */
+const STOP_ERRORS = new Set(['interrupted', 'canceled', 'cancelled']);
+
+/**
+ * Speaks `text`, resolving when playback finishes or is stopped, and rejecting
+ * only when synthesis itself fails.
+ */
 export function speakText(text: string, rate = 1): Promise<void> {
   const speech = synthesis();
 
@@ -69,7 +80,17 @@ export function speakText(text: string, rate = 1): Promise<void> {
     utterance.rate = rate;
     utterance.onend = () => resolve();
     utterance.onerror = (event: { error?: string }) => {
-      reject(new Error(`Speech playback failed: ${event?.error ?? 'unknown error'}`));
+      const error = event?.error ?? 'unknown error';
+
+      // Stopping playback — either through stopSpeaking() or the cancel above —
+      // is reported as an error too. A deliberate stop is not a fault, so the
+      // reading just ends; only real synthesis trouble reaches the caller.
+      if (STOP_ERRORS.has(error)) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(`Speech playback failed: ${error}`));
     };
 
     speech.speak(utterance);
