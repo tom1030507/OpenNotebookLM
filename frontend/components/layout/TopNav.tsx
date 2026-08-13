@@ -25,7 +25,7 @@ interface TopNavProps {
 }
 
 export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps) {
-  const availabilityLabel = '即將推出';
+  const availabilityLabel = 'coming soon';
   const [showExport, setShowExport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -79,8 +79,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           {/* New Project Button */}
           <button
             onClick={openProjectDialog}
-            aria-label={'\u65b0\u589e\u5c08\u6848'}
-            title={'\u65b0\u589e\u5c08\u6848'}
+            aria-label={'New Project'}
+            title={'New Project'}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
           >
             <FolderPlus className="w-4 h-4" />
@@ -91,8 +91,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             <button
               onClick={() => setShowExport(true)}
               className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-              aria-label={'\u532f\u51fa\u5167\u5bb9'}
-              title={'\u532f\u51fa\u5167\u5bb9'}
+              aria-label={'Export'}
+              title={'Export'}
             >
               <Download className="w-4 h-4" />
             </button>
@@ -102,8 +102,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <button
             onClick={toggleTheme}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            aria-label={'\u5207\u63db\u4e3b\u984c'}
-            title={'\u5207\u63db\u4e3b\u984c'}
+            aria-label={'Toggle theme'}
+            title={'Toggle theme'}
           >
             <Sun data-theme-icon="sun" className="theme-icon--sun w-4 h-4" />
             <Moon data-theme-icon="moon" className="theme-icon--moon w-4 h-4" />
@@ -112,7 +112,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           {/* Notifications */}
           <button
             disabled
-            aria-label={`通知功能${availabilityLabel}`}
+            aria-label={`Notifications (${availabilityLabel})`}
             className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
           >
             <Bell className="w-4 h-4" />
@@ -121,7 +121,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           {/* Help */}
           <button
             disabled
-            aria-label={`說明功能${availabilityLabel}`}
+            aria-label={`Help (${availabilityLabel})`}
             className="p-2 text-[var(--muted-foreground)] rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-base"
           >
             <HelpCircle className="w-4 h-4" />
@@ -130,8 +130,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           {/* Settings */}
           <button 
             onClick={() => setShowSettings(true)}
-            aria-label={'\u8a2d\u5b9a'}
-            title={'\u8a2d\u5b9a'}
+            aria-label={'Settings'}
+            title={'Settings'}
             className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
           >
             <SettingsIcon className="w-4 h-4" />
@@ -141,8 +141,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <div className="relative">
             <button 
               onClick={() => setShowUserMenu(!showUserMenu)}
-              aria-label={'\u4f7f\u7528\u8005\u9078\u55ae'}
-              title={'\u4f7f\u7528\u8005\u9078\u55ae'}
+              aria-label={'User menu'}
+              title={'User menu'}
               aria-haspopup="menu"
               aria-expanded={showUserMenu}
               className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"
@@ -161,10 +161,10 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                 </div>
                 <button
                   disabled
-                  aria-label={`個人資料${availabilityLabel}`}
+                  aria-label={`Profile (${availabilityLabel})`}
                   className="w-full text-left px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-base flex items-center justify-between"
                 >
-                  <span>個人資料</span>
+                  <span>Profile</span>
                   <span className="text-xs">{availabilityLabel}</span>
                 </button>
                 <button 
@@ -179,12 +179,12 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                 <div className="border-t border-[var(--border)] mt-2 pt-2">
                   <button
                     disabled
-                    aria-label={`登出${availabilityLabel}`}
+                    aria-label={`Sign out (${availabilityLabel})`}
                     className="w-full text-left px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-base flex items-center justify-between"
                   >
                     <span className="flex items-center gap-2">
                       <LogOut className="w-4 h-4" />
-                      <span>登出</span>
+                      <span>Sign out</span>
                     </span>
                     <span className="text-xs">{availabilityLabel}</span>
                   </button>

@@ -136,8 +136,8 @@ describe('TopNav theme toggle', () => {
     // TopNav consumes the project-dialog context once PR #6 is in.
     render(React.createElement(ProjectDialogProvider, null, React.createElement(TopNav)));
 
-    const toggle = screen.getByRole('button', { name: '切換主題' });
-    expect(screen.getByRole('button', { name: '切換主題' })).toBe(toggle);
+    const toggle = screen.getByRole('button', { name: 'Toggle theme' });
+    expect(screen.getByRole('button', { name: 'Toggle theme' })).toBe(toggle);
     expect(toggle.querySelector('[data-theme-icon="sun"]')).not.toBeNull();
     expect(toggle.querySelector('[data-theme-icon="moon"]')).not.toBeNull();
 

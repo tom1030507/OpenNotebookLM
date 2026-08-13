@@ -2,9 +2,9 @@
 export const DESKTOP_MEDIA_QUERY = '(min-width: 64rem)';
 
 export const WORKSPACE_PANELS = [
-  { id: 'sources', label: '來源' },
-  { id: 'conversations', label: '對話' },
-  { id: 'studio', label: '工作室' },
+  { id: 'sources', label: 'Sources' },
+  { id: 'conversations', label: 'Conversations' },
+  { id: 'studio', label: 'Studio' },
 ] as const;
 
 export type WorkspacePanelId = (typeof WORKSPACE_PANELS)[number]['id'];

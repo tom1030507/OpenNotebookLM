@@ -12,7 +12,7 @@ import type { Document, Project } from '@/lib/api';
 
 const project: Project = {
   id: 'project-1',
-  name: '研究筆記',
+  name: 'Research notes',
   description: null,
   meta_json: {},
   created_at: '2026-08-13T00:00:00Z',
@@ -23,9 +23,9 @@ const project: Project = {
 
 const readyDocument: Document = {
   id: 'document-1',
-  name: '第一份資料',
+  name: 'First document',
   type: 'text',
-  content: '內容',
+  content: 'Content',
   meta: {},
   status: 'ready',
   created_at: '2026-08-13T00:00:00Z',
@@ -66,55 +66,55 @@ afterEach(() => {
   useStore.setState(initialState, true);
 });
 
-describe('remaining workspace copy is Traditional Chinese', () => {
-  it('translates the sources panel actions and empty state', () => {
+describe('workspace copy is English', () => {
+  it('renders English copy for the sources panel actions and empty state', () => {
     render(<SourcesPanelHarness />);
 
-    expect(screen.getByRole('button', { name: '新增專案' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '新增來源' })).toBeTruthy();
-    expect(screen.getByText('尚無來源')).toBeTruthy();
-    expect(screen.getByText(/點選「新增來源」以上傳 PDF、網址或 YouTube 影片/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New Project' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add Source' })).toBeTruthy();
+    expect(screen.getByText('No sources yet')).toBeTruthy();
+    expect(screen.getByText(/to upload PDFs, URLs, or YouTube videos/)).toBeTruthy();
   });
 
-  it('translates the no-project empty state', () => {
+  it('renders English copy for the no-project empty state', () => {
     useStore.setState({ projects: [], currentProject: null });
     render(<SourcesPanelHarness />);
 
-    expect(screen.getByText('請選擇或建立專案以開始使用')).toBeTruthy();
+    expect(screen.getByText('Select or create a project to get started')).toBeTruthy();
   });
 
-  it('translates the sources search empty state', () => {
+  it('renders English copy for the sources search empty state', () => {
     useStore.setState({ documents: [readyDocument] });
     render(<SourcesPanelHarness />);
 
-    const search = screen.getByRole('textbox', { name: '搜尋來源' });
-    search.setAttribute('value', '不存在');
+    const search = screen.getByRole('textbox', { name: 'Search sources' });
+    search.setAttribute('value', 'nonexistent');
     // Typing is exercised elsewhere; here we only need the no-result copy path.
     expect(screen.queryByText('No sources found')).toBeNull();
   });
 
-  it('translates the conversation list empty state', () => {
+  it('renders English copy for the conversation list empty state', () => {
     render(<ConversationList />);
 
-    expect(screen.getByText('尚無對話')).toBeTruthy();
-    expect(screen.getByText('開始新對話即可使用')).toBeTruthy();
+    expect(screen.getByText('No conversations yet')).toBeTruthy();
+    expect(screen.getByText('Start a new chat to begin')).toBeTruthy();
   });
 
-  it('translates the chat composer placeholders in both states', () => {
+  it('renders English copy for the chat composer placeholders in both states', () => {
     const { unmount } = render(<ChatArea onAddSourcesOpenChange={() => {}} />);
-    expect(screen.getByPlaceholderText('新增來源即可開始對話')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Add sources to start chatting')).toBeTruthy();
     unmount();
 
     useStore.setState({ documents: [readyDocument] });
     render(<ChatArea onAddSourcesOpenChange={() => {}} />);
-    expect(screen.getByPlaceholderText('針對你的來源提問…')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Ask anything about your sources...')).toBeTruthy();
   });
 
-  it('names the add sources dialog in Traditional Chinese', () => {
+  it('names the add sources dialog in English', () => {
     render(<SourcesPanelHarness />);
 
-    fireEvent.click(screen.getByRole('button', { name: '新增來源' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Source' }));
 
-    expect(screen.getByRole('dialog', { name: '新增來源' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).toBeTruthy();
   });
 });

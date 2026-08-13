@@ -232,9 +232,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             {document.content && (
               <button
                 onClick={handleCopy}
-                aria-label={'\u8907\u88fd\u5167\u5bb9'}
+                aria-label={'Copy content'}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title={'\u8907\u88fd\u5167\u5bb9'}
+                title={'Copy content'}
               >
                 {copied ? (
                   <Check className="w-4 h-4 text-green-600" />
@@ -247,9 +247,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             {document.url && (
               <button
                 onClick={handleOpenExternal}
-                aria-label={'\u5728\u65b0\u5206\u9801\u958b\u555f'}
+                aria-label={'Open in new tab'}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title={'\u5728\u65b0\u5206\u9801\u958b\u555f'}
+                title={'Open in new tab'}
               >
                 <ExternalLink className="w-4 h-4" />
               </button>
@@ -258,9 +258,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             {document.content && (
               <button
                 onClick={handleDownload}
-                aria-label={'\u4e0b\u8f09\u6587\u4ef6'}
+                aria-label={'Download document'}
                 className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-                title={'\u4e0b\u8f09\u6587\u4ef6'}
+                title={'Download document'}
               >
                 <Download className="w-4 h-4" />
               </button>
@@ -268,9 +268,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
-              aria-label={'\u5207\u63db\u5168\u87a2\u5e55'}
+              aria-label={'Toggle fullscreen'}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-              title={'\u5207\u63db\u5168\u87a2\u5e55'}
+              title={'Toggle fullscreen'}
             >
               {isFullscreen ? (
                 <Minimize2 className="w-4 h-4" />
@@ -283,9 +283,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               ref={closeButtonRef}
               onClick={onClose}
               type="button"
-              aria-label={'\u95dc\u9589\u6587\u4ef6\u9810\u89bd\u5c0d\u8a71\u6846'}
+              aria-label={'Close document preview dialog'}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
-              title={'\u95dc\u9589\u6587\u4ef6\u9810\u89bd\u5c0d\u8a71\u6846'}
+              title={'Close document preview dialog'}
             >
               <X className="w-4 h-4" />
             </button>

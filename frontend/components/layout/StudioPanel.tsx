@@ -27,29 +27,29 @@ export default function StudioPanel({
   isCollapsed = false,
   onCollapsedChange,
 }: StudioPanelProps) {
-  const availabilityLabel = '即將推出';
+  const availabilityLabel = 'coming soon';
   const studioOptions: StudioOption[] = [
     {
       id: 'audio',
-      title: '音頻摘要',
+      title: 'Audio summary',
       description: '',
       icon: <Mic className="w-5 h-5" />
     },
     {
       id: 'video', 
-      title: '影片摘要',
+      title: 'Video summary',
       description: '',
       icon: <Video className="w-5 h-5" />
     },
     {
       id: 'mindmap',
-      title: '心智圖',
+      title: 'Mind map',
       description: '',
       icon: <Brain className="w-5 h-5" />
     },
     {
       id: 'report',
-      title: '報告',
+      title: 'Report',
       description: '',
       icon: <FileText className="w-5 h-5" />
     }
@@ -57,7 +57,7 @@ export default function StudioPanel({
 
   return (
     <aside
-      aria-label="工作室"
+      aria-label="Studio"
       data-panel-state={isCollapsed ? 'collapsed' : 'expanded'}
       className="relative w-full min-w-0 overflow-hidden border-l border-[var(--border)] bg-[var(--card)] flex flex-col h-full"
     >
@@ -66,8 +66,8 @@ export default function StudioPanel({
         onClick={() => onCollapsedChange?.(!isCollapsed)}
         aria-controls="studio-panel-content"
         aria-expanded={!isCollapsed}
-        aria-label={isCollapsed ? '展開工作室' : '收合工作室'}
-        title={isCollapsed ? '展開工作室' : '收合工作室'}
+        aria-label={isCollapsed ? 'Expand Studio' : 'Collapse Studio'}
+        title={isCollapsed ? 'Expand Studio' : 'Collapse Studio'}
         className="absolute top-2 right-2 z-10 p-1.5 hover:bg-[var(--muted)] rounded-lg transition-base"
       >
         {isCollapsed ? (
@@ -80,13 +80,13 @@ export default function StudioPanel({
       <div
         id="studio-panel-content"
         role="region"
-        aria-label="工作室面板內容"
+        aria-label="Studio panel content"
         hidden={isCollapsed}
         className="min-h-0 flex-1 flex flex-col"
       >
         {/* Header */}
         <div className="p-4 border-b border-[var(--border)]">
-          <h2 className="pr-10 text-base font-medium">工作室</h2>
+          <h2 className="pr-10 text-base font-medium">Studio</h2>
         </div>
 
         {/* Studio Options */}
@@ -119,12 +119,13 @@ export default function StudioPanel({
           {/* More Options */}
           <button
             disabled
-            aria-label={`更多選項${availabilityLabel}`}
+            aria-label={`More options (${availabilityLabel})`}
             className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            <span>更多選項</span>
-            <span className="text-xs">{availabilityLabel}</span>
-            <ChevronDown className="w-4 h-4" />
+            {/* The availability note lives in the accessible name only: English
+                is long enough to wrap and crowd the bounded Studio track. */}
+            <span className="truncate">More options</span>
+            <ChevronDown className="w-4 h-4 shrink-0" />
           </button>
 
           {/* Tip Section */}
@@ -135,10 +136,10 @@ export default function StudioPanel({
               </div>
               <div>
                 <h4 className="text-sm font-medium mb-1">
-                  工作室功能即將推出
+                  Studio is coming soon
                 </h4>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  音訊、影片、心智圖與報告功能仍在準備中。
+                  Audio, video, mind maps and reports are still in preparation.
                 </p>
               </div>
             </div>

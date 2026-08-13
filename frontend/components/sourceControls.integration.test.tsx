@@ -22,7 +22,7 @@ import useStore from '@/store/useStore';
 
 const currentProject: Project = {
   id: 'project-1',
-  name: '研究筆記',
+  name: 'Research notes',
   description: null,
   meta_json: {},
   created_at: '2026-08-12T00:00:00Z',
@@ -64,8 +64,8 @@ function ReopenableSourcesPanel() {
 
   return (
     <ProjectDialogProvider>
-      <button onClick={() => setIsAddSourcesOpen(false)}>外部關閉來源對話框</button>
-      <button onClick={() => setIsAddSourcesOpen(true)}>外部重新開啟來源對話框</button>
+      <button onClick={() => setIsAddSourcesOpen(false)}>Externally close the sources dialog</button>
+      <button onClick={() => setIsAddSourcesOpen(true)}>Externally reopen the sources dialog</button>
       <SourcesPanel
         isAddSourcesOpen={isAddSourcesOpen}
         onAddSourcesOpenChange={setIsAddSourcesOpen}
@@ -76,7 +76,7 @@ function ReopenableSourcesPanel() {
 
 
 function openUrlUploader() {
-  fireEvent.click(screen.getByRole('button', { name: '附加檔案' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Attach file' }));
   fireEvent.click(screen.getByRole('button', { name: 'URL' }));
   const urlInput = screen.getByPlaceholderText('Enter website URL...');
   fireEvent.change(urlInput, { target: { value: 'https://example.com' } });
@@ -109,28 +109,28 @@ describe('Add Sources controls', () => {
   it('opens the dialog from the welcome CTA, paperclip, and SourcesPanel Add Source button', () => {
     render(<SourceWorkspace />);
 
-    fireEvent.click(screen.getByRole('button', { name: '上傳來源' }));
-    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Upload sources' }));
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '關閉新增來源對話框' }));
-    fireEvent.click(screen.getByRole('button', { name: '新增來源' }));
-    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close add sources dialog' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Source' }));
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '關閉新增來源對話框' }));
-    fireEvent.click(screen.getByRole('button', { name: '附加檔案' }));
-    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close add sources dialog' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Attach file' }));
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
   });
 
   it('focuses the close button, closes with Escape, and restores focus to the opener', () => {
     render(<SourceWorkspace />);
-    const opener = screen.getByRole('button', { name: '上傳來源' });
+    const opener = screen.getByRole('button', { name: 'Upload sources' });
 
     opener.focus();
     fireEvent.click(opener);
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '關閉新增來源對話框' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close add sources dialog' }));
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull();
     expect(document.activeElement).toBe(opener);
   });
 
@@ -140,14 +140,14 @@ describe('Add Sources controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull();
     });
   });
 
   it('keeps the dialog open and surfaces an error after a URL upload fails', async () => {
     useStore.setState({
       createDocument: async () => {
-        throw new Error('上傳失敗');
+        throw new Error('Upload failed');
       },
     });
     render(<SourceWorkspace />);
@@ -155,7 +155,7 @@ describe('Add Sources controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(await screen.findByText('Upload failed. Please check the URL and try again.')).not.toBeNull();
-    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
   });
 
   it('keeps a busy modal non-dismissible until its upload settles', async () => {
@@ -165,20 +165,20 @@ describe('Add Sources controls', () => {
     openUrlUploader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
-    const dialog = screen.getByRole('dialog', { name: '新增來源' });
+    const dialog = screen.getByRole('dialog', { name: 'Add Source' });
     expect(dialog.getAttribute('aria-busy')).toBe('true');
-    expect((screen.getByRole('button', { name: '關閉新增來源對話框' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Close add sources dialog' }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(dialog);
-    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
 
     await act(async () => {
       upload.resolve();
       await upload.promise;
     });
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull();
     });
   });
 
@@ -193,15 +193,15 @@ describe('Add Sources controls', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '外部關閉來源對話框' }));
-    fireEvent.click(screen.getByRole('button', { name: '外部重新開啟來源對話框' }));
-    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Externally close the sources dialog' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Externally reopen the sources dialog' }));
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
 
     await act(async () => {
       firstUpload.resolve();
       await firstUpload.promise;
     });
-    expect(screen.getByRole('dialog', { name: '新增來源' })).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
   });
 
   it('submits one URL upload after rapid Enter and Add interactions while the button becomes busy', async () => {
@@ -230,7 +230,7 @@ describe('Add Sources controls', () => {
       await upload.promise;
     });
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '新增來源' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull();
     });
   });
 });
@@ -240,24 +240,24 @@ describe('unavailable workspace controls', () => {
   it('exposes a working theme toggle and user-menu availability states', () => {
     render(<ProjectDialogProvider><TopNav /></ProjectDialogProvider>);
 
-    // The 即將推出 placeholder this PR introduced is superseded by the real
+    // The coming soon placeholder this PR introduced is superseded by the real
     // theme toggle from #3, so the control must now be genuinely usable.
-    const themeToggle = screen.getByRole('button', { name: '切換主題' });
+    const themeToggle = screen.getByRole('button', { name: 'Toggle theme' });
     expect((themeToggle as HTMLButtonElement).disabled).toBe(false);
 
-    const userMenuTrigger = screen.getByRole('button', { name: '使用者選單' });
+    const userMenuTrigger = screen.getByRole('button', { name: 'User menu' });
     expect(userMenuTrigger.getAttribute('aria-haspopup')).toBe('menu');
     expect(userMenuTrigger.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(userMenuTrigger);
     expect(userMenuTrigger.getAttribute('aria-expanded')).toBe('true');
-    expect((screen.getByRole('button', { name: '個人資料即將推出' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: '登出即將推出' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Profile (coming soon)' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Sign out (coming soon)' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('states that Studio output features are coming soon', () => {
     render(<StudioPanel />);
 
-    expect(screen.getByText('工作室功能即將推出')).not.toBeNull();
-    expect(screen.getByText('音訊、影片、心智圖與報告功能仍在準備中。')).not.toBeNull();
+    expect(screen.getByText('Studio is coming soon')).not.toBeNull();
+    expect(screen.getByText('Audio, video, mind maps and reports are still in preparation.')).not.toBeNull();
   });
 });

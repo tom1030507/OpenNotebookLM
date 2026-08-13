@@ -9,9 +9,9 @@ describe('ResponsiveLayout layout contract', () => {
     const layout = getResponsiveLayoutContract('conversations');
 
     expect(layout.drawerControls).toEqual([
-      { id: 'sources', label: '來源' },
-      { id: 'conversations', label: '對話' },
-      { id: 'studio', label: '工作室' },
+      { id: 'sources', label: 'Sources' },
+      { id: 'conversations', label: 'Conversations' },
+      { id: 'studio', label: 'Studio' },
     ]);
     expect(layout.inlinePanelIds).toEqual(['sources', 'conversations', 'studio']);
     expect(layout.drawerPanelId).toBe('conversations');
@@ -28,9 +28,9 @@ describe('ResponsiveLayout layout contract', () => {
     const layout = getResponsiveLayoutContract('studio');
 
     expect(layout.drawerControls).toEqual([
-      { id: 'sources', label: '來源' },
-      { id: 'conversations', label: '對話' },
-      { id: 'studio', label: '工作室' },
+      { id: 'sources', label: 'Sources' },
+      { id: 'conversations', label: 'Conversations' },
+      { id: 'studio', label: 'Studio' },
     ]);
     expect(layout.drawerPanelId).toBe('studio');
     expect(layout.inlinePanelIds).toEqual(['sources', 'conversations', 'studio']);

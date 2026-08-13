@@ -34,7 +34,7 @@ export function useProjectDialog() {
   const context = useContext(ProjectDialogContext);
 
   if (!context) {
-    throw new Error('useProjectDialog \u5FC5\u9808\u5728 ProjectDialogProvider \u5167\u4F7F\u7528');
+    throw new Error('useProjectDialog must be used inside ProjectDialogProvider');
   }
 
   return context;
