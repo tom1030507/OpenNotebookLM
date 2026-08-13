@@ -15,6 +15,7 @@ import {
   initialDesktopWorkspaceState,
 } from '@/components/desktopLayout';
 import useStore from '@/store/useStore';
+import useDocumentStatusWatch from '@/hooks/useDocumentStatusWatch';
 
 export default function Home() {
   const [layoutState, dispatchLayout] = useReducer(
@@ -23,6 +24,10 @@ export default function Home() {
   );
   const [isAddSourcesOpen, setIsAddSourcesOpen] = useState(false);
   const currentProject = useStore((state) => state.currentProject);
+
+  // Sources become queryable a while after they are uploaded, so the workspace
+  // has to keep looking until they do.
+  useDocumentStatusWatch();
 
   return (
     <ProjectDialogProvider>

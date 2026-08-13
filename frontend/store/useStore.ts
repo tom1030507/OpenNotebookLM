@@ -33,6 +33,7 @@ interface AppState {
   
   // Actions - Documents
   fetchDocuments: (projectId: string) => Promise<void>;
+  refreshDocuments: (projectId: string) => Promise<void>;
   uploadDocument: (projectId: string, file: File) => Promise<void>;
   createDocument: (projectId: string, data: {
     name: string;
@@ -190,6 +191,21 @@ const useStore = create<AppState>()(
           }
         },
         
+        // The same fetch without the loading flag, so a source that is still
+        // being indexed can be re-checked without flashing a spinner over the
+        // list the reader is looking at.
+        refreshDocuments: async (projectId) => {
+          if (get().currentProject?.id !== projectId) return;
+          try {
+            const documents = await api.getDocuments(projectId);
+            if (get().currentProject?.id === projectId) {
+              set({ documents });
+            }
+          } catch (error) {
+            console.error('Failed to refresh documents:', error);
+          }
+        },
+
         uploadDocument: async (projectId, file) => {
           const uploadId = `${projectId}-${file.name}-${Date.now()}`;
           let progressInterval: ReturnType<typeof setInterval> | undefined;

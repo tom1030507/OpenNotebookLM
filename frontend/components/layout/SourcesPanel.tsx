@@ -19,12 +19,21 @@ import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
-import { Document } from '@/lib/api';
+import { Document, DocumentStatus } from '@/lib/api';
 import {
   closeAddSourcesAfterSuccessfulUpload,
   requestAddSources,
 } from '../sourceActions';
 import useDialogFocus from '@/hooks/useDialogFocus';
+
+// A source is only "Ready" once the backend can retrieve it, so the states
+// before that need names a reader recognises rather than the raw status word.
+const STATUS_LABELS: Partial<Record<DocumentStatus, string>> = {
+  queued: 'Queued',
+  processing: 'Processing...',
+  ready: 'Ready',
+  error: 'Failed',
+};
 
 interface SourcesPanelProps {
   isAddSourcesOpen: boolean;
@@ -308,9 +317,13 @@ export default function SourcesPanel({
                       {doc.name}
                     </h3>
                     <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                      {doc.status === 'processing' ? 'Processing...' : 
-                       doc.status === 'ready' ? 'Ready' : doc.status}
+                      {STATUS_LABELS[doc.status] ?? doc.status}
                     </p>
+                    {doc.status === 'error' && doc.error_message && (
+                      <p className="text-xs text-[var(--error)] mt-1 break-words">
+                        {doc.error_message}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
                     <button 

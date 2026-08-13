@@ -27,15 +27,85 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 class DocumentService:
     """Service for document ingestion and processing."""
     
-    def __init__(self):
-        """Initialize document service."""
+    def __init__(self, chunking_service=None, embedding_service=None):
+        """Initialize document service.
+
+        Args:
+            chunking_service: Optional chunking service, mainly so tests can
+                run without the embedding model
+            embedding_service: Optional embedding service, same reason
+        """
         self.pdf_adapter = PDFAdapter(use_pymupdf=False)  # Use pdfminer for now
         self.url_adapter = URLAdapter()
         self.youtube_adapter = None  # Initialize only if needed
         self.executor = ThreadPoolExecutor(max_workers=4)
-        self.chunking_service = ChunkingService()
-        self.embedding_service = EmbeddingService()
-    
+        self.chunking_service = chunking_service or ChunkingService()
+        self.embedding_service = embedding_service or EmbeddingService()
+
+    def _index_document(self, db: Session, doc_id: str, source_label: str) -> str:
+        """Chunk and embed a document, then mark it ready.
+
+        "ready" is what the UI trusts before it lets anyone query a source, so
+        it is only committed once the chunks and their embeddings exist.
+        Committing it any earlier leaves a window where the composer is enabled
+        but every question is answered from nothing.
+
+        Args:
+            db: Database session
+            doc_id: Document ID
+            source_label: Source kind, used in log messages
+
+        Returns:
+            The status the document ended up in
+        """
+        try:
+            chunks = self.chunking_service.chunk_document(db, doc_id)
+            logger.info(f"Created {len(chunks)} chunks for {source_label} document {doc_id}")
+
+            embeddings = self.embedding_service.embed_chunks(db, doc_id)
+            logger.info(f"Generated {len(embeddings)} embeddings for {source_label} document {doc_id}")
+        except Exception as e:
+            logger.error(f"Failed to chunk/embed {source_label} document: {e}")
+            return self._mark_failed(db, doc_id, f"Indexing failed: {e}")
+
+        # Without embeddings the source is not searchable, so calling it ready
+        # would be the same lie in a different place.
+        if not embeddings:
+            return self._mark_failed(
+                db,
+                doc_id,
+                "No searchable text could be extracted, so this source cannot be queried."
+            )
+
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc:
+            doc.status = "ready"
+            doc.error_message = None
+            db.commit()
+
+        return "ready"
+
+    def _mark_failed(self, db: Session, doc_id: str, message: str) -> str:
+        """Record that a document cannot be used, discarding partial work.
+
+        Args:
+            db: Database session
+            doc_id: Document ID
+            message: Message to show the user
+
+        Returns:
+            The status the document ended up in
+        """
+        db.rollback()
+
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc:
+            doc.status = "error"
+            doc.error_message = message
+            db.commit()
+
+        return "error"
+
     async def process_pdf_upload(
         self,
         db: Session,
@@ -132,32 +202,28 @@ class DocumentService:
                 str(file_path)
             )
             
-            # Update document with extracted content
+            # Store the extracted content, staying in "processing": the source
+            # is not usable until it has been indexed below.
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if doc:
                 doc.content = result["text"]
-                doc.status = "ready"
-                doc.meta_json.update({
+                # Reassign rather than mutate: meta_json is a plain JSON
+                # column, so an in-place update is invisible to SQLAlchemy and
+                # never reaches the database.
+                doc.meta_json = {
+                    **(doc.meta_json or {}),
                     "num_pages": result["num_pages"],
                     "metadata": result.get("metadata", {}),
                     "processed_at": datetime.utcnow().isoformat(),
-                })
+                }
                 db.commit()
-                
-                # Create chunks
-                try:
-                    chunks = self.chunking_service.chunk_document(db, doc_id)
-                    logger.info(f"Created {len(chunks)} chunks for PDF document {doc_id}")
-                    
-                    # Generate embeddings
-                    embeddings = self.embedding_service.embed_chunks(db, doc_id)
-                    logger.info(f"Generated {len(embeddings)} embeddings for PDF document {doc_id}")
-                except Exception as e:
-                    logger.error(f"Failed to chunk/embed PDF document: {e}")
-                
+
+                status = self._index_document(db, doc_id, "PDF")
+
                 logger.info("PDF processing completed",
                            doc_id=doc_id,
-                           num_pages=result["num_pages"])
+                           num_pages=result["num_pages"],
+                           status=status)
             
         except Exception as e:
             logger.error("Failed to process PDF",
@@ -257,34 +323,30 @@ class DocumentService:
                 url
             )
             
-            # Update document with extracted content
+            # Store the extracted content, staying in "processing": the source
+            # is not usable until it has been indexed below.
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if doc:
                 doc.content = result["text"]
                 doc.title = result.get("title", url)
-                doc.status = "ready"
-                doc.meta_json.update({
+                # Reassign rather than mutate: meta_json is a plain JSON
+                # column, so an in-place update is invisible to SQLAlchemy and
+                # never reaches the database.
+                doc.meta_json = {
+                    **(doc.meta_json or {}),
                     "metadata": result.get("metadata", {}),
                     "headings": result.get("headings", []),
                     "num_links": len(result.get("links", [])),
                     "processed_at": datetime.utcnow().isoformat(),
-                })
+                }
                 db.commit()
-                
-                # Create chunks
-                try:
-                    chunks = self.chunking_service.chunk_document(db, doc_id)
-                    logger.info(f"Created {len(chunks)} chunks for URL document {doc_id}")
-                    
-                    # Generate embeddings
-                    embeddings = self.embedding_service.embed_chunks(db, doc_id)
-                    logger.info(f"Generated {len(embeddings)} embeddings for URL document {doc_id}")
-                except Exception as e:
-                    logger.error(f"Failed to chunk/embed URL document: {e}")
-                
+
+                status = self._index_document(db, doc_id, "URL")
+
                 logger.info("URL processing completed",
                            doc_id=doc_id,
-                           url=url)
+                           url=url,
+                           status=status)
             
         except Exception as e:
             logger.error("Failed to process URL",
@@ -389,36 +451,32 @@ class DocumentService:
                 youtube_url
             )
             
-            # Update document with extracted content
+            # Store the extracted content, staying in "processing": the source
+            # is not usable until it has been indexed below.
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if doc:
                 doc.content = result["text"]
                 doc.title = f"YouTube: {result.get('video_id', youtube_url)}"
-                doc.status = "ready"
-                doc.meta_json.update({
+                # Reassign rather than mutate: meta_json is a plain JSON
+                # column, so an in-place update is invisible to SQLAlchemy and
+                # never reaches the database.
+                doc.meta_json = {
+                    **(doc.meta_json or {}),
                     "video_id": result.get("video_id"),
                     "duration": result.get("duration", 0),
                     "language": result.get("language", "unknown"),
                     "metadata": result.get("metadata", {}),
                     "num_segments": len(result.get("segments", [])),
                     "processed_at": datetime.utcnow().isoformat(),
-                })
+                }
                 db.commit()
-                
-                # Create chunks
-                try:
-                    chunks = self.chunking_service.chunk_document(db, doc_id)
-                    logger.info(f"Created {len(chunks)} chunks for YouTube document {doc_id}")
-                    
-                    # Generate embeddings
-                    embeddings = self.embedding_service.embed_chunks(db, doc_id)
-                    logger.info(f"Generated {len(embeddings)} embeddings for YouTube document {doc_id}")
-                except Exception as e:
-                    logger.error(f"Failed to chunk/embed YouTube document: {e}")
-                
+
+                status = self._index_document(db, doc_id, "YouTube")
+
                 logger.info("YouTube processing completed",
                            doc_id=doc_id,
-                           video_id=result.get("video_id"))
+                           video_id=result.get("video_id"),
+                           status=status)
             
         except Exception as e:
             logger.error("Failed to process YouTube video",
