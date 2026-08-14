@@ -18,21 +18,36 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/opennotebook.db"
     
     # Embedding
+    # bge-m3 is multilingual, unlike the English-only bge-small it replaced, and
+    # needs no query/passage prefixes. Changing this invalidates every stored
+    # vector — see "Embeddings" in the README before switching.
     emb_backend: str = "sqlitevec"  # sqlitevec or faiss
-    emb_model_name: str = "BAAI/bge-small-en-v1.5"
-    emb_dimension: int = 384
+    emb_model_name: str = "BAAI/bge-m3"
+    emb_dimension: int = 1024  # corrected from the loaded model at startup
     
     # LLM
-    llm_mode: str = "local"  # local, cloud, or auto
-    local_model_path: str = "./models/phi-2.gguf"
+    # "auto" uses the first provider that is actually configured: Claude, then
+    # OpenAI, then a local OpenAI-compatible server. Name one to pin it.
+    llm_mode: str = "auto"  # auto, claude, openai, local, or none
+    local_model_path: str = "./models/phi-2.gguf"  # unused; the local path talks HTTP
     local_model_context_size: int = 2048
     local_model_max_tokens: int = 512
-    
+
+    # Local OpenAI-compatible server (Ollama, llama.cpp, vLLM, ...)
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "llama3.2"  # must match a model you have pulled
+
     # Cloud APIs
     openai_api_key: Optional[str] = None
-    openai_model: str = "gpt-3.5-turbo"
+    openai_model: str = "gpt-5.6"
     claude_api_key: Optional[str] = None
-    claude_model: str = "claude-3-haiku-20240307"
+    claude_model: str = "claude-opus-5"
+    # Answering from retrieved chunks is not a reasoning-heavy task, so the
+    # default trades depth for latency. Raise it for harder corpora.
+    claude_effort: str = "low"  # low, medium, high, xhigh, max
+    # Thinking is on by default on current Claude models and shares the output
+    # budget with the answer, so a caller's max_tokens is raised to this floor.
+    claude_min_max_tokens: int = 2048
     
     # YouTube
     enable_yt_transcription: bool = True

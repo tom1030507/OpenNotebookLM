@@ -13,6 +13,24 @@ router = APIRouter()
 settings = get_settings()
 
 
+def _configured_llm() -> tuple:
+    """Return the (provider, model) a question would be sent to.
+
+    Mirrors the provider selection in services.llm without constructing a
+    client, so a health check never performs network I/O.
+    """
+    mode = (settings.llm_mode or "auto").lower()
+    if mode == "none":
+        return None, None
+    if mode in ("claude", "cloud", "auto") and settings.claude_api_key:
+        return "claude", settings.claude_model
+    if mode in ("openai", "cloud", "auto") and settings.openai_api_key:
+        return "openai", settings.openai_model
+    if mode in ("local", "auto"):
+        return "local", settings.ollama_model
+    return None, None
+
+
 @router.get("/healthz")
 async def health_check(db: Session = Depends(get_db)):
     """Health check endpoint."""
@@ -26,7 +44,9 @@ async def health_check(db: Session = Depends(get_db)):
     # Get system metrics
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
-    
+
+    llm_provider, llm_model = _configured_llm()
+
     return {
         "ok": db_status == "healthy",
         "timestamp": utc_now_iso(),
@@ -40,7 +60,14 @@ async def health_check(db: Session = Depends(get_db)):
         },
         "config": {
             "llm_mode": settings.llm_mode,
+            # Which provider and model a question would actually be sent to.
+            # Reported without a network probe, so this says "configured", not
+            # "reachable" — a failed call is logged and reported per-answer as
+            # model_used="fallback".
+            "llm_provider": llm_provider,
+            "llm_model": llm_model,
             "emb_backend": settings.emb_backend,
+            "emb_model": settings.emb_model_name,
             "debug": settings.debug,
         }
     }

@@ -13,9 +13,18 @@ services:
       - APP_PORT=8000
       - DB_PATH=/app/data/opennotebook.db
       - EMB_BACKEND=sqlitevec
-      - LLM_MODE=${LLM_MODE:-local}
+      # sentence-transformers caches downloaded models under $HOME/.cache/torch,
+      # which lives in the container's writable layer — recreating the container
+      # would re-download gigabytes. Point it at the mounted models volume.
+      - SENTENCE_TRANSFORMERS_HOME=/app/models
+      - HF_HOME=/app/models
+      - LLM_MODE=${LLM_MODE:-auto}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.6}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-5}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434/v1}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
       - ENABLE_YT_TRANSCRIPTION=true
       - MAX_FILE_SIZE_MB=50
       - CHUNK_SIZE=512
