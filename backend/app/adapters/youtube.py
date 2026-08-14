@@ -43,8 +43,7 @@ class YouTubeAdapter:
                 raise ValueError(f"Could not extract video ID from URL: {url}")
             
             # Get transcript
-            api = YouTubeTranscriptApi()
-            transcript_list = api.list(video_id)
+            transcript_list = self._list_transcripts(video_id)
             
             # Try to get transcript in preferred language
             transcript = None
@@ -110,9 +109,43 @@ class YouTubeAdapter:
             }
             
         except Exception as e:
-            logger.error("Failed to extract YouTube transcript", url=url, error=str(e))
+            logger.error("Failed to extract YouTube transcript",
+                         url=url,
+                         error_type=type(e).__name__,
+                         error=str(e))
             raise
-    
+
+    def _list_transcripts(self, video_id: str):
+        """List the transcripts available for a video.
+
+        youtube-transcript-api changed its entry point between majors: 0.x
+        exposes the classmethod ``YouTubeTranscriptApi.list_transcripts()``,
+        while 1.x exposes the instance method ``YouTubeTranscriptApi().list()``.
+        Use whichever the installed version provides instead of assuming one.
+
+        Args:
+            video_id: YouTube video ID
+
+        Returns:
+            The library's transcript list object
+
+        Raises:
+            RuntimeError: if neither entry point is available
+        """
+        list_transcripts = getattr(YouTubeTranscriptApi, 'list_transcripts', None)
+        if callable(list_transcripts):
+            # youtube-transcript-api 0.x
+            return list_transcripts(video_id)
+
+        if callable(getattr(YouTubeTranscriptApi, 'list', None)):
+            # youtube-transcript-api 1.x
+            return YouTubeTranscriptApi().list(video_id)
+
+        raise RuntimeError(
+            "Incompatible youtube-transcript-api: YouTubeTranscriptApi exposes "
+            "neither list_transcripts() (0.x) nor list() (1.x)"
+        )
+
     def _extract_video_id(self, url: str) -> Optional[str]:
         """Extract video ID from YouTube URL.
         
