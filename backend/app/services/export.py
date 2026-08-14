@@ -8,7 +8,9 @@ from typing import Optional, Tuple, Any, Dict, List
 from sqlalchemy.orm import Session
 import structlog
 
-from app.db.models import Project, Conversation, Message, Document, Chunk
+from app.db.models import (
+    Project, Conversation, Message, Document, Chunk, ProjectDocument
+)
 
 logger = structlog.get_logger()
 
@@ -151,6 +153,19 @@ class ExportService:
         else:
             raise ValueError(f"Unsupported format: {format}")
     
+    def _get_project_documents(
+        self,
+        db: Session,
+        project: Project
+    ) -> List[Document]:
+        """Get the documents linked to a project."""
+        return db.query(Document).join(
+            ProjectDocument,
+            ProjectDocument.document_id == Document.id
+        ).filter(
+            ProjectDocument.project_id == project.id
+        ).all()
+
     def _export_project_json(
         self,
         db: Session,
@@ -170,13 +185,8 @@ class ExportService:
         
         if include_documents:
             data["documents"] = []
-            # Get documents through relationships
-            documents = db.query(Document).join(
-                Document.projects
-            ).filter(
-                Project.id == project.id
-            ).all()
-            
+            documents = self._get_project_documents(db, project)
+
             for doc in documents:
                 doc_data = {
                     "id": doc.id,
@@ -225,13 +235,8 @@ class ExportService:
         
         if include_documents:
             content += "## Documents\n\n"
-            # Get documents through relationships
-            documents = db.query(Document).join(
-                Document.projects
-            ).filter(
-                Project.id == project.id
-            ).all()
-            
+            documents = self._get_project_documents(db, project)
+
             for doc in documents:
                 content += f"### {doc.title}\n"
                 content += f"- Type: {doc.source_type}\n"
@@ -264,13 +269,8 @@ class ExportService:
         documents = []
         total_chunks = 0
         
-        # Get documents through relationships
-        project_documents = db.query(Document).join(
-            Document.projects
-        ).filter(
-            Project.id == project.id
-        ).all()
-        
+        project_documents = self._get_project_documents(db, project)
+
         for doc in project_documents:
             chunk_count = len(doc.chunks) if doc.chunks else 0
             total_chunks += chunk_count
