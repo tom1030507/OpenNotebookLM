@@ -17,6 +17,38 @@ from app.utils.time import as_utc
 UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
 
 
+# Authentication schemas
+# email-validator is not installed, so the address is checked with a pattern
+# rather than pydantic's EmailStr.
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
+class UserRegister(BaseModel):
+    """Schema for registering an account."""
+    username: str = Field(..., min_length=3, max_length=64)
+    email: str = Field(..., max_length=255, pattern=EMAIL_PATTERN)
+    # bcrypt reads at most 72 bytes, so longer passwords are refused here
+    # rather than being silently truncated.
+    password: str = Field(..., min_length=8, max_length=72)
+
+
+class UserResponse(BaseModel):
+    """Schema for account response. Never carries password material."""
+    id: str
+    username: str
+    email: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TokenResponse(BaseModel):
+    """Schema for a successful sign-in."""
+    access_token: str
+    token_type: str = "bearer"
+
+
 # Project schemas
 class ProjectBase(BaseModel):
     """Base project schema."""

@@ -30,6 +30,24 @@ class Project(Base):
     conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
 
 
+class User(Base):
+    """Account used to sign in to the workspace."""
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    hashed_password = Column(String, nullable=False)  # bcrypt hash, never plain text
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    last_login_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("idx_users_username", "username"),
+        Index("idx_users_email", "email"),
+    )
+
+
 class Document(Base):
     """Document model."""
     __tablename__ = "documents"

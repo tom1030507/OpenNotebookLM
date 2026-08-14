@@ -7,6 +7,7 @@ import TopNav from './TopNav';
 import ProjectDialogProvider from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
 import type { Document, Project } from '@/lib/api';
+import { AUTH_TOKEN_COOKIE, storeSession } from '@/lib/session';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -77,20 +78,21 @@ afterEach(() => {
 
 describe('TopNav controls that were previously inert', () => {
   it('signs the user out by clearing credentials and returning to the login page', () => {
-    window.localStorage.setItem('access_token', 'demo');
-    window.localStorage.setItem('auth_token', 'demo');
-    window.localStorage.setItem('user', JSON.stringify({ username: 'demo', email: 'demo@example.com' }));
+    storeSession('demo', { username: 'demo', email: 'demo@example.com' });
     renderTopNav();
 
     fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
     const signOut = screen.getByRole('button', { name: 'Sign out' });
     expect((signOut as HTMLButtonElement).disabled).toBe(false);
+    expect(document.cookie).toContain(AUTH_TOKEN_COOKIE);
 
     fireEvent.click(signOut);
 
     expect(window.localStorage.getItem('access_token')).toBeNull();
     expect(window.localStorage.getItem('auth_token')).toBeNull();
     expect(window.localStorage.getItem('user')).toBeNull();
+    // The middleware gates on the cookie, so signing out has to expire it too.
+    expect(document.cookie).not.toContain(AUTH_TOKEN_COOKIE);
     expect(push).toHaveBeenCalledWith('/login');
   });
 

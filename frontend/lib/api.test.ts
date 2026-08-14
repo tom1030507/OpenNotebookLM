@@ -368,6 +368,90 @@ describe('API client', () => {
     await expect(api.getDocuments('missing')).rejects.toThrow('Project not found');
   });
 
+  it('reads FastAPI validation errors, which report detail as a list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      detail: [
+        { loc: ['body', 'password'], msg: 'String should have at least 8 characters' },
+      ],
+    }, 422)));
+
+    await expect(api.register({
+      username: 'ada',
+      email: 'ada@example.com',
+      password: 'short',
+    })).rejects.toThrow('String should have at least 8 characters');
+  });
+
+  it('signs in against the configured API base URL, not a bare env value', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      access_token: 'a-signed-token',
+      token_type: 'bearer',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.login({ username: 'ada', password: 'lovelace-1843' }))
+      .resolves.toEqual({ access_token: 'a-signed-token', token_type: 'bearer' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/token');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(fetchMock.mock.calls[0][1].headers['Content-Type']).toBe(
+      'application/x-www-form-urlencoded',
+    );
+    expect((fetchMock.mock.calls[0][1].body as URLSearchParams).toString()).toBe(
+      'username=ada&password=lovelace-1843',
+    );
+  });
+
+  it('registers against the configured API base URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      id: 'user-1',
+      username: 'ada',
+      email: 'ada@example.com',
+      created_at: '2026-01-01T00:00:00Z',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.register({
+      username: 'ada',
+      email: 'ada@example.com',
+      password: 'lovelace-1843',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/register');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+      username: 'ada',
+      email: 'ada@example.com',
+      password: 'lovelace-1843',
+    });
+  });
+
+  it('reads the signed-in account with the bearer token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      id: 'user-1',
+      username: 'ada',
+      email: 'ada@example.com',
+      created_at: '2026-01-01T00:00:00Z',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getAccount('a-signed-token')).resolves.toEqual(
+      expect.objectContaining({ username: 'ada', email: 'ada@example.com' }),
+    );
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/me');
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
+      'Bearer a-signed-token',
+    );
+  });
+
+  it('reports a failed sign-in through the detail message, not a status code', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      detail: 'Incorrect username or password',
+    }, 401)));
+
+    await expect(api.login({ username: 'ada', password: 'wrong' }))
+      .rejects.toThrow('Incorrect username or password');
+  });
+
   it('returns export responses as blobs', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('# Conversation', {
       status: 200,
