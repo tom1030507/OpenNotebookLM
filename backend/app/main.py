@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.db.database import init_db
-from app.routers import projects, ingest, query, export, health, files
+from app.routers import auth, projects, ingest, query, export, health, files
 from app.api import cache
 from app.utils.logging import setup_logging
 
@@ -60,6 +60,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router, tags=["health"])
+app.include_router(auth.router, prefix="/api", tags=["authentication"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(ingest.router, prefix="/api", tags=["ingest"])
 app.include_router(files.router, prefix="/api", tags=["files"])

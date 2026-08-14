@@ -1,25 +1,30 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+import { AUTH_TOKEN_COOKIE } from './lib/session';
+
 // Public routes that don't require authentication
-const publicRoutes = ['/login', '/register', '/api/auth'];
+const publicRoutes = ['/login', '/register'];
+
+const isPublicRoute = (pathname: string) => publicRoutes.some(
+  (route) => pathname === route || pathname.startsWith(`${route}/`),
+);
 
 export function middleware(request: NextRequest) {
-  // DISABLED - Allow all requests without authentication
-  return NextResponse.next();
-  
-  // Original authentication logic commented out for development
-  /*
   const { pathname } = request.nextUrl;
-  if (pathname === '/' || pathname === '') {
-    const cookieToken = request.cookies.get('auth_token');
-    const authHeader = request.headers.get('authorization');
-    if (!cookieToken && !authHeader) {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
+
+  if (isPublicRoute(pathname)) {
+    return NextResponse.next();
   }
+
+  // The workspace keeps its token in localStorage, which middleware cannot
+  // read, so sign-in mirrors it into this cookie and sign-out expires it
+  // (see lib/session.ts).
+  if (!request.cookies.get(AUTH_TOKEN_COOKIE)) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
   return NextResponse.next();
-  */
 }
 
 // Configure which routes to run middleware on

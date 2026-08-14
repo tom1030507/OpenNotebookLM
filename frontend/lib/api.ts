@@ -133,8 +133,24 @@ interface CreateDocumentInput {
   url?: string;
 }
 
+export interface AccessToken {
+  access_token: string;
+  token_type: string;
+}
+
+export interface Account {
+  id: string;
+  username: string;
+  email: string;
+  created_at: string;
+}
+
+interface ValidationErrorItem {
+  msg?: string;
+}
+
 interface ErrorResponse {
-  detail?: string;
+  detail?: string | ValidationErrorItem[];
 }
 
 interface CacheClearResponse {
@@ -157,11 +173,39 @@ export const documentFileUrl = (documentId: string): string =>
   `${API_BASE_URL}/docs/${encodeURIComponent(documentId)}/file`;
 
 
+/**
+ * Resolve a backend path against the configured API base URL. Every caller
+ * goes through this so a missing NEXT_PUBLIC_API_URL cannot produce a
+ * relative `/undefined/...` request.
+ */
+export const apiUrl = (path: string): string => `${API_BASE_URL}${path}`;
+
+
+const describeDetail = (detail: ErrorResponse['detail']): string | null => {
+  if (typeof detail === 'string') {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    // FastAPI reports request validation failures as a list of field errors.
+    const messages = detail
+      .map((item) => item?.msg)
+      .filter((message): message is string => Boolean(message));
+    if (messages.length) {
+      return messages.join('. ');
+    }
+  }
+
+  return null;
+};
+
+
 const extractError = async (response: Response): Promise<Error> => {
   try {
     const payload = await response.json() as ErrorResponse;
-    if (payload.detail) {
-      return new Error(payload.detail);
+    const detail = describeDetail(payload.detail);
+    if (detail) {
+      return new Error(detail);
     }
   } catch {
     // Fall back to the HTTP status below when the response is not JSON.
@@ -183,7 +227,7 @@ const requestJson = async <T>(
     ...(!isFormData && init.body ? { 'Content-Type': 'application/json' } : {}),
     ...(init.headers as Record<string, string> | undefined),
   };
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  const response = await fetch(apiUrl(path), { ...init, headers });
 
   if (!response.ok) {
     throw await extractError(response);
@@ -198,7 +242,7 @@ const requestJson = async <T>(
 
 
 const requestBlob = async (path: string): Promise<Blob> => {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     headers: { Accept: '*/*' },
   });
   if (!response.ok) {
@@ -209,7 +253,7 @@ const requestBlob = async (path: string): Promise<Blob> => {
 
 
 const requestText = async (path: string): Promise<string> => {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     headers: { Accept: 'text/plain, text/markdown, */*' },
   });
   if (!response.ok) {
@@ -318,6 +362,35 @@ const completeDocumentCreation = async (
 
 
 const api = {
+  /** Exchange credentials for an access token. */
+  login(credentials: { username: string; password: string }): Promise<AccessToken> {
+    return requestJson<AccessToken>('/auth/token', {
+      method: 'POST',
+      // The token endpoint is an OAuth2 password form, not JSON.
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(credentials),
+    });
+  },
+
+  /** Create an account. */
+  register(account: {
+    username: string;
+    email: string;
+    password: string;
+  }): Promise<Account> {
+    return requestJson<Account>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(account),
+    });
+  },
+
+  /** Read the account a token belongs to. */
+  getAccount(accessToken: string): Promise<Account> {
+    return requestJson<Account>('/auth/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  },
+
   async getProjects(): Promise<Project[]> {
     const response = await requestJson<ProjectListResponse>('/projects');
     return response.projects;

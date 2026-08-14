@@ -1,0 +1,186 @@
+// @vitest-environment jsdom
+
+import React from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import LoginPage from './page';
+import api from '@/lib/api';
+import { AUTH_TOKEN_COOKIE } from '@/lib/session';
+
+const push = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push }),
+}));
+
+
+const cookieValue = (name: string) => document.cookie
+  .split('; ')
+  .find((entry) => entry.startsWith(`${name}=`))
+  ?.slice(name.length + 1);
+
+
+const fillIn = (label: RegExp | string, value: string) => {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+};
+
+
+// In either mode one button submits and the other toggles, so the submit
+// button is the one whose name matches the mode.
+const submit = (name: 'Login' | 'Register' = 'Login') => fireEvent.click(
+  screen.getByRole('button', { name }),
+);
+
+const switchToRegister = () => fireEvent.click(
+  screen.getByRole('button', { name: 'Register' }),
+);
+
+
+beforeEach(() => {
+  push.mockClear();
+  window.localStorage.clear();
+  document.cookie = `${AUTH_TOKEN_COOKIE}=; Path=/; Max-Age=0`;
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+
+describe('login page', () => {
+  it('signs in through the shared API client and opens the workspace', async () => {
+    const login = vi.spyOn(api, 'login').mockResolvedValue({
+      access_token: 'a-signed-token',
+      token_type: 'bearer',
+    });
+    vi.spyOn(api, 'getAccount').mockResolvedValue({
+      id: 'user-1',
+      username: 'ada',
+      email: 'ada@example.com',
+      created_at: '2026-01-01T00:00:00Z',
+    });
+
+    render(<LoginPage />);
+    fillIn(/username/i, 'ada');
+    fillIn(/^password$/i, 'lovelace-1843');
+    submit();
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect(login).toHaveBeenCalledWith({
+      username: 'ada',
+      password: 'lovelace-1843',
+    });
+    expect(window.localStorage.getItem('auth_token')).toBe('a-signed-token');
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBe('a-signed-token');
+    expect(JSON.parse(window.localStorage.getItem('user') as string)).toEqual({
+      username: 'ada',
+      email: 'ada@example.com',
+    });
+  });
+
+  it('shows a wrong password as an error in the form and stays put', async () => {
+    vi.spyOn(api, 'login').mockRejectedValue(
+      new Error('Incorrect username or password'),
+    );
+
+    render(<LoginPage />);
+    fillIn(/username/i, 'ada');
+    fillIn(/^password$/i, 'not-my-password');
+    submit();
+
+    expect(await screen.findByText('Incorrect username or password')).toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('auth_token')).toBeNull();
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Login' })).toBeTruthy();
+  });
+
+  it('registers and then signs the new account in', async () => {
+    const register = vi.spyOn(api, 'register').mockResolvedValue({
+      id: 'user-1',
+      username: 'grace',
+      email: 'grace@example.com',
+      created_at: '2026-01-01T00:00:00Z',
+    });
+    vi.spyOn(api, 'login').mockResolvedValue({
+      access_token: 'a-new-token',
+      token_type: 'bearer',
+    });
+
+    render(<LoginPage />);
+    switchToRegister();
+    fillIn(/username/i, 'grace');
+    fillIn(/email/i, 'grace@example.com');
+    fillIn(/^password$/i, 'hopper-secret');
+    fillIn(/confirm password/i, 'hopper-secret');
+    submit('Register');
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect(register).toHaveBeenCalledWith({
+      username: 'grace',
+      email: 'grace@example.com',
+      password: 'hopper-secret',
+    });
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBe('a-new-token');
+  });
+
+  it('reports a rejected registration without leaving a session behind', async () => {
+    vi.spyOn(api, 'register').mockRejectedValue(
+      new Error('That username or email is already registered'),
+    );
+    const login = vi.spyOn(api, 'login');
+
+    render(<LoginPage />);
+    switchToRegister();
+    fillIn(/username/i, 'grace');
+    fillIn(/email/i, 'grace@example.com');
+    fillIn(/^password$/i, 'hopper-secret');
+    fillIn(/confirm password/i, 'hopper-secret');
+    submit('Register');
+
+    expect(
+      await screen.findByText('That username or email is already registered'),
+    ).toBeTruthy();
+    expect(login).not.toHaveBeenCalled();
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeUndefined();
+  });
+
+  it('catches mismatched passwords before calling the API', async () => {
+    const register = vi.spyOn(api, 'register');
+
+    render(<LoginPage />);
+    switchToRegister();
+    fillIn(/username/i, 'grace');
+    fillIn(/email/i, 'grace@example.com');
+    fillIn(/^password$/i, 'hopper-secret');
+    fillIn(/confirm password/i, 'hopper-secrets');
+    submit('Register');
+
+    expect(await screen.findByText('Passwords do not match')).toBeTruthy();
+    expect(register).not.toHaveBeenCalled();
+  });
+
+  it('keeps the demo sign-in working without reaching the backend', async () => {
+    const login = vi.spyOn(api, 'login');
+
+    render(<LoginPage />);
+    fillIn(/username/i, 'admin');
+    fillIn(/^password$/i, 'admin123');
+    submit();
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect(login).not.toHaveBeenCalled();
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeTruthy();
+    expect(window.localStorage.getItem('auth_token')).toBeTruthy();
+  });
+
+  it('keeps the quick demo access button working', async () => {
+    render(<LoginPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Quick Demo Access/ }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeTruthy();
+  });
+});

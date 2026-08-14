@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "change-this-secret-key-in-production"
     cors_origins: str = "http://localhost:3000,http://localhost:3001"
+
+    # Authentication
+    # No default: a deployment must supply its own signing key. Development
+    # falls back to a per-process random key (see services.auth).
+    jwt_secret_key: Optional[str] = None
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 720
     
     # Monitoring
     enable_metrics: bool = True

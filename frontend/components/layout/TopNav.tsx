@@ -24,6 +24,7 @@ import useStore from '@/store/useStore';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { applyThemePreference, initializeTheme, type Theme } from '@/lib/theme';
+import { clearSession } from '@/lib/session';
 import {
   COMPACT_TOP_NAV_MEDIA_QUERY,
   TOP_NAV_ACTIONS,
@@ -86,13 +87,9 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   };
 
   const signOut = () => {
-    for (const key of ['access_token', 'auth_token', 'user']) {
-      try {
-        window.localStorage.removeItem(key);
-      } catch {
-        // Navigation still returns the user to the login page.
-      }
-    }
+    // Clears the stored account and the cookie the middleware gates on, so the
+    // workspace is no longer reachable once the user has signed out.
+    clearSession();
 
     setShowUserMenu(false);
     router.push('/login');

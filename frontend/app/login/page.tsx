@@ -13,6 +13,8 @@ import {
   Loader2,
   AlertCircle
 } from 'lucide-react';
+import api from '@/lib/api';
+import { storeSession, type SessionUser } from '@/lib/session';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,19 +31,20 @@ export default function LoginPage() {
     confirmPassword: ''
   });
 
-  // Demo login function for development
-  const handleDemoLogin = async () => {
-    setLoading(true);
-    // Simulate login delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Store demo tokens
-    localStorage.setItem('access_token', 'demo_token_' + Date.now());
-    localStorage.setItem('auth_token', 'demo_token_' + Date.now());
-    localStorage.setItem('user', JSON.stringify({ username: 'demo', email: 'demo@example.com' }));
-    
-    // Redirect to main app
+  // Open the workspace with the session recorded for both the client and the
+  // server-side middleware.
+  const enterWorkspace = (accessToken: string, user: SessionUser) => {
+    storeSession(accessToken, user);
     router.push('/');
+  };
+
+  // Demo login for development: no account and no backend required.
+  const handleDemoLogin = () => {
+    setLoading(true);
+    enterWorkspace(`demo_token_${Date.now()}`, {
+      username: 'demo',
+      email: 'demo@example.com',
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -51,81 +54,47 @@ export default function LoginPage() {
     
     // Demo mode - bypass authentication
     if (formData.username === 'admin' && formData.password === 'admin123') {
-      await handleDemoLogin();
+      handleDemoLogin();
       return;
     }
 
     try {
       if (isLogin) {
-        // Login
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/token`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            username: formData.username,
-            password: formData.password,
-          }),
+        const { access_token: accessToken } = await api.login({
+          username: formData.username,
+          password: formData.password,
         });
 
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.detail || 'Login failed');
-        }
+        // The token only carries the username, so ask the backend for the
+        // account the workspace displays. A hiccup here must not block sign-in.
+        const account = await api.getAccount(accessToken).catch(() => null);
 
-        const tokens = await response.json();
-        
-        // Store tokens
-        localStorage.setItem('access_token', tokens.access_token);
-        localStorage.setItem('refresh_token', tokens.refresh_token);
-        localStorage.setItem('auth_token', tokens.access_token); // For API client
-        
-        // Redirect to main app
-        router.push('/');
+        enterWorkspace(accessToken, {
+          username: account?.username || formData.username,
+          email: account?.email || '',
+        });
       } else {
-        // Register
         if (formData.password !== formData.confirmPassword) {
           throw new Error('Passwords do not match');
         }
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
+        await api.register({
+          username: formData.username,
+          email: formData.email,
+          password: formData.password,
+        });
+
+        try {
+          const { access_token: accessToken } = await api.login({
+            username: formData.username,
+            password: formData.password,
+          });
+          enterWorkspace(accessToken, {
             username: formData.username,
             email: formData.email,
-            password: formData.password,
-          }),
-        });
-
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.detail || 'Registration failed');
-        }
-
-        // Auto-login after registration
-        const loginResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/token`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            username: formData.username,
-            password: formData.password,
-          }),
-        });
-
-        if (loginResponse.ok) {
-          const tokens = await loginResponse.json();
-          localStorage.setItem('access_token', tokens.access_token);
-          localStorage.setItem('refresh_token', tokens.refresh_token);
-          localStorage.setItem('auth_token', tokens.access_token);
-          router.push('/');
-        } else {
-          // Registration successful but login failed
+          });
+        } catch {
+          // The account exists; only the follow-up sign-in failed.
           setIsLogin(true);
           setError('Registration successful! Please login.');
         }
@@ -166,13 +135,17 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Username */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label
+                htmlFor="username"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
                 Username
               </label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
+                  id="username"
                   name="username"
                   value={formData.username}
                   onChange={handleInputChange}
@@ -186,13 +159,17 @@ export default function LoginPage() {
             {/* Email (Register only) */}
             {!isLogin && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label
+                  htmlFor="email"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
                   Email
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type="email"
+                    id="email"
                     name="email"
                     value={formData.email}
                     onChange={handleInputChange}
@@ -206,13 +183,17 @@ export default function LoginPage() {
 
             {/* Password */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
                 Password
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type={showPassword ? 'text' : 'password'}
+                  id="password"
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}
@@ -239,13 +220,17 @@ export default function LoginPage() {
             {/* Confirm Password (Register only) */}
             {!isLogin && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label
+                  htmlFor="confirmPassword"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
                   Confirm Password
                 </label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    id="confirmPassword"
                     name="confirmPassword"
                     value={formData.confirmPassword}
                     onChange={handleInputChange}
@@ -326,10 +311,7 @@ export default function LoginPage() {
               {/* Quick Demo Access Button */}
               <button
                 type="button"
-                onClick={async () => {
-                  // Directly call demo login
-                  await handleDemoLogin();
-                }}
+                onClick={handleDemoLogin}
                 className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
               >
                 Quick Demo Access →
