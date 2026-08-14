@@ -25,7 +25,9 @@ sentence-transformers==2.2.2
 faiss-cpu==1.7.4
 llama-cpp-python==0.2.20
 openai==1.3.7
-anthropic==0.8.0
+# 0.8.0 predates the Messages API entirely (no client.messages), so it cannot
+# talk to any current Claude model.
+anthropic==0.122.0
 tiktoken==0.5.1
 
 # Utils

@@ -9,218 +9,333 @@
 
 <br>
 
-> An open-source alternative to Google's NotebookLM - Transform your documents into an intelligent knowledge base with advanced RAG capabilities.
+> A self-hosted alternative to Google's NotebookLM: import your documents, ask
+> questions about them, and get answers with citations back to the source.
 
-## 🌟 Key Features
+Everything runs on your machine. Documents, embeddings, and conversations live
+in a local SQLite database; the only thing that leaves your machine is the
+prompt sent to whichever LLM provider you configure — and you can point that at
+a local model too.
 
-### 📚 Document Intelligence
-- **Multi-format Support**: Import PDFs, web pages, and YouTube transcripts
-- **Smart Chunking**: Context-aware document splitting with metadata preservation
-- **Vector Search**: High-performance semantic search using embeddings
+## What works today
 
-### 🤖 AI-Powered Q&A
-- **RAG Pipeline**: Retrieval-Augmented Generation with source citations
-- **Conversation Memory**: Context-aware multi-turn conversations
-- **Hybrid Models**: Support for both local (Ollama) and cloud (OpenAI) LLMs
+| Capability | Status |
+|---|---|
+| Import PDFs, web pages, YouTube transcripts | ✅ |
+| Chunking, embedding, semantic retrieval with citations | ✅ |
+| Multi-turn conversations, persisted per project | ✅ |
+| Generated answers from Claude, OpenAI, or a local model | ✅ **once you configure a provider** — see [Configuring the LLM](#configuring-the-llm) |
+| Register / sign in, session-gated workspace | ✅ |
+| Export a conversation, a project, or a project summary | ✅ |
+| Studio: audio summary (browser speech), Markdown report | ✅ |
+| Studio: video summary, mind map | ❌ not implemented — marked as unavailable in the UI |
+| Per-user isolation of projects | ❌ accounts exist, but every signed-in user sees every project |
 
-### ⚡ Performance & Scalability
-- **Caching Layer**: Redis/in-memory caching for <1ms response times
-- **Batch Processing**: Efficient handling of large document sets
-- **Async Operations**: Non-blocking document processing
+**Without an LLM provider configured, question answering still returns a
+response — but an extractive one**: the first few sentences of the best-matching
+chunks, prefixed "Based on the provided documents". The API labels those
+responses `model_used: "fallback"`. That is the single most important thing to
+know before evaluating answer quality.
 
-### 🔐 Enterprise Ready
-- **Authentication**: JWT-based auth with role-based access control
-- **Multi-user Support**: Isolated projects and conversations per user
-- **Export Options**: JSON, Markdown, and plain text exports
-
-### 🎨 Modern UI
-- **React/Next.js Frontend**: Responsive and intuitive interface
-- **Real-time Updates**: WebSocket support for live updates
-- **Dark Mode**: Built-in theme switching
-
-## 🚀 Quick Start
+## Quick start
 
 ### Prerequisites
 
 | Component | Version | Required |
 |-----------|---------|----------|
-| Python | 3.10+ | ✅ |
-| Node.js | 18+ | ✅ |
-| Docker | 20.10+ | Optional |
-| Redis | 6.0+ | Optional |
+| Docker | 20.10+ | ✅ for the Docker path |
+| Python | 3.10+ | ✅ for local development |
+| Node.js | 18+ | ✅ for local development |
 
-### 🐳 Docker Installation (Recommended)
+### Docker
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/OpenNotebookLM.git
+git clone https://github.com/tom1030507/OpenNotebookLM.git
 cd OpenNotebookLM
 
-# Configure environment
-cp deploy/.env.example deploy/.env
-# Edit .env with your settings
-
-# Start services
-cd deploy
-docker-compose up -d
-
-# Check status
-docker-compose ps
+cp .env.example .env        # then edit it — see Configuration below
+docker compose up -d --build
+docker compose ps
 ```
 
-Access points:
-- 🌐 Frontend: http://localhost:3000
-- 🔧 Backend API: http://localhost:8000
-- 📚 API Docs: http://localhost:8000/docs
+- Frontend: http://localhost:3000
+- API: http://localhost:8000
+- API docs: http://localhost:8000/docs
+- Health: http://localhost:8000/healthz
 
-### 💻 Local Development
+The root `docker-compose.yml` also defines optional `ollama` and `redis`
+services; start them with `--profile with-ollama` / `--profile with-cache`.
 
-#### Backend Setup
+### Local development
 
 ```bash
+# Backend
 cd backend
-
-# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate          # Windows: .\venv\Scripts\activate
 pip install -r requirements.txt
-
-# Start development server
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-#### Frontend Setup
-
 ```bash
+# Frontend (in a second terminal)
 cd frontend
-
-# Install dependencies
-npm install
-# or yarn install
-
-# Start development server
+npm ci
 npm run dev
-# or yarn dev
 ```
 
-#### Database Setup
+The database is created automatically at `backend/data/opennotebook.db` on
+first run. The first request also downloads the embedding model (see below), so
+expect a slow cold start.
+
+### Signing in
+
+The workspace is gated: visiting `/` without a session redirects to `/login`.
+Three ways in:
+
+- **Quick Demo Access** — a button on the login page. Entirely client-side; no
+  account is created.
+- `admin` / `admin123` — the same demo short-circuit, by credentials.
+- **Register** — creates a real account through `POST /api/auth/register`.
+  Passwords are hashed with bcrypt.
+
+Sign-in mirrors the token into an `auth_token` cookie, because the Next.js
+middleware that guards `/` runs on the server and cannot read `localStorage`.
+The middleware checks only that the cookie is *present* — it is a navigation
+gate, not an authorization boundary, and the API itself is not behind auth yet.
+
+## Configuring the LLM
+
+Question answering is only as good as the model behind it. Set **one** of these
+in `.env`; `LLM_MODE=auto` (the default) picks the first one configured, in the
+order Claude → OpenAI → local server.
+
+### Claude (default when a key is present)
 
 ```bash
-# SQLite (default)
-# Database will be created automatically at ./data/opennotebook.db
-
-# PostgreSQL (optional)
-# Set DATABASE_URL in .env:
-# DATABASE_URL=postgresql://user:password@localhost/opennotebook
+CLAUDE_API_KEY=sk-ant-...
+CLAUDE_MODEL=claude-opus-5      # default
+CLAUDE_EFFORT=low               # low | medium | high | xhigh | max
 ```
 
-## 📖 Documentation
+Two details worth knowing:
 
-### API Documentation
-- **Interactive API Docs**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **Health Check**: http://localhost:8000/healthz
+- **Sampling parameters are not sent.** Current Claude models reject
+  `temperature`, so the `temperature` argument in a query request is ignored on
+  this path. Control depth with `CLAUDE_EFFORT` instead. Answering from
+  retrieved chunks is not reasoning-heavy, which is why the default is `low`.
+- **Thinking is on by default and shares the output budget with the answer.**
+  A request's `max_tokens` is therefore raised to at least
+  `CLAUDE_MIN_MAX_TOKENS` (2048) so the reply isn't truncated by the thinking.
 
-### Guides
-- [Quick Start Guide](./docs/quickstart.md)
-- [Cache Implementation](./docs/cache-implementation.md)
-- [API Reference](./docs/api-reference.md)
-- [Deployment Guide](./docs/deployment.md)
+### OpenAI
 
-## 🏗️ Architecture
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-5.6            # default
+```
+
+This path is written against the chat-completions API and sends `max_tokens`.
+It has not been exercised against a live key here, and newer OpenAI models have
+been migrating that parameter to `max_completion_tokens` — if a request is
+rejected for the parameter name, that is the thing to change in
+`OpenAICompatibleProvider.generate`.
+
+### A local model (Ollama, llama.cpp, vLLM)
+
+Any server that speaks the OpenAI chat-completions API works:
+
+```bash
+LLM_MODE=local
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3.2           # must match a model you have pulled
+```
+
+```bash
+ollama serve
+ollama pull llama3.2
+```
+
+### Checking which provider is actually in use
+
+`GET /healthz` reports the configured provider and model:
+
+```json
+{ "config": { "llm_mode": "auto", "llm_provider": "claude", "llm_model": "claude-opus-5" } }
+```
+
+That says *configured*, not *reachable* — no network call is made from a health
+check. To tell whether an answer was generated or extracted, read `model_used`
+on the `/api/query` response: anything other than `"fallback"` is a real
+generated answer. A provider that fails at call time logs the underlying error
+at `ERROR` level and falls back for that request.
+
+## Embeddings
+
+Retrieval quality depends on the embedding model, configured by
+`EMB_MODEL_NAME`. The dimension is read from the model at load time, so
+`EMB_DIMENSION` self-corrects and does not need to match.
+
+The default is `BAAI/bge-m3`: multilingual (the previous default,
+`bge-small-en-v1.5`, was English-only) and usable without query/passage
+prefixes. Budget for the first run — sentence-transformers fetches the whole
+model repository, about **4.6 GB** for bge-m3, and caches it under
+`$HOME/.cache/torch`. Docker Compose redirects that cache to the mounted
+`./models` volume so recreating the container doesn't re-download it; if you run
+the backend outside Docker, set `SENTENCE_TRANSFORMERS_HOME` somewhere
+persistent.
+
+`intfloat/multilingual-e5-base` (768 dimensions, roughly a quarter of the
+download) also loads against this dependency set and is a reasonable lighter
+choice — but the e5 family expects `query: ` and `passage: ` prefixes on its
+inputs, and `services/embeddings.py` does not add them. Without that change it
+works but retrieves worse, silently, which is why it is not the default.
+
+Stored vectors are only comparable to vectors produced by the same model.
+**Changing `EMB_MODEL_NAME` invalidates every embedding already in the
+database** — retrieval will fail on a dimension mismatch until documents are
+re-indexed. To switch models:
+
+1. Stop the backend.
+2. Set the new `EMB_MODEL_NAME` in `.env`.
+3. Delete the existing embeddings (they are regenerated on re-ingest):
+   ```bash
+   sqlite3 backend/data/opennotebook.db "DELETE FROM embeddings;"
+   ```
+4. Restart, then re-upload the affected documents.
+
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/healthz`, `/ready` | Liveness and readiness |
+| `POST` | `/api/auth/register`, `/api/auth/token` | Create an account, exchange credentials for a token |
+| `GET` | `/api/auth/me` | The account behind a bearer token |
+| `GET`/`POST` | `/api/projects` | List and create projects |
+| `GET`/`PUT`/`DELETE` | `/api/projects/{id}` | Read, rename, delete a project |
+| `GET` | `/api/projects/{id}/documents` | Documents in a project |
+| `POST` | `/api/projects/{id}/upload` | Upload a file (PDF, txt, md) |
+| `POST` | `/api/projects/{id}/upload-url` | Import a web page |
+| `POST` | `/api/projects/{id}/upload-youtube` | Import a YouTube transcript |
+| `GET` | `/api/docs/{id}`, `/api/docs/{id}/status` | Document detail and ingest status |
+| `GET` | `/api/docs/{id}/file` | The stored file, served inline (PDF preview) |
+| `POST` | `/api/query` | Ask a question; returns `answer`, `sources`, `chunks_used`, `model_used` |
+| `GET`/`POST` | `/api/projects/{id}/conversations` | List and create conversations |
+| `GET`/`PUT`/`DELETE` | `/api/conversations/{id}` | Read, rename, delete a conversation |
+| `GET` | `/api/export/conversation/{id}` | Export one conversation (markdown, json, txt) |
+| `GET` | `/api/export/project/{id}` | Export a project (markdown, json) |
+| `GET` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
+| `GET`/`DELETE` | `/api/cache/*` | Cache stats, health, clear, invalidate, warm up |
+
+Interactive docs at `/docs`, ReDoc at `/redoc`.
+
+Every datetime the API returns carries a UTC designator (`+00:00`), so clients
+in any timezone render timestamps correctly.
+
+## Project layout
 
 ```
 OpenNotebookLM/
-├── backend/                 # FastAPI backend
+├── backend/
 │   ├── app/
-│   │   ├── api/            # API route handlers
-│   │   ├── services/       # Business logic layer
-│   │   │   ├── cache.py    # Caching service
-│   │   │   ├── rag.py      # RAG pipeline
-│   │   │   ├── embeddings.py # Embedding generation
-│   │   │   └── llm.py      # LLM integration
-│   │   ├── adapters/       # External integrations
-│   │   │   ├── pdf.py      # PDF processing
-│   │   │   ├── url.py      # Web scraping
-│   │   │   └── youtube.py  # YouTube transcripts
-│   │   ├── db/             # Database layer
-│   │   │   ├── models.py   # SQLAlchemy models
-│   │   │   └── database.py # Database connection
-│   │   └── routers/        # API endpoints
-│   └── tests/              # Test suites
-│       ├── unit/           # Unit tests
-│       ├── integration/    # Integration tests
-│       └── e2e/            # End-to-end tests
-├── frontend/               # Next.js frontend
-│   ├── components/         # React components
-│   ├── pages/             # Next.js pages
-│   ├── stores/            # Zustand state management
-│   └── utils/             # Utility functions
-├── deploy/                # Deployment configurations
-│   ├── docker-compose.yml # Docker orchestration
-│   └── kubernetes/        # K8s manifests
-└── docs/                  # Documentation
+│   │   ├── routers/          # auth, projects, ingest, query, export, files, health
+│   │   ├── services/         # rag, embeddings, llm, chunking, documents,
+│   │   │                     # export, projects, auth, cache, document_files
+│   │   ├── adapters/         # pdf, url, youtube
+│   │   ├── db/               # SQLAlchemy models, session, UTCDateTime column type
+│   │   ├── utils/            # logging, time
+│   │   ├── api/cache.py      # cache management endpoints
+│   │   ├── config.py         # settings (env-driven)
+│   │   └── main.py           # app factory and router registration
+│   └── tests/                # pytest; tests/unit/ holds the focused ones
+├── frontend/                 # Next.js App Router
+│   ├── app/                  # routes: / and /login
+│   ├── components/           # workspace UI (layout/, chat/, dialogs)
+│   ├── hooks/                # useMediaQuery, useDialogFocus, useDocumentStatusWatch
+│   ├── lib/                  # api client, theme, session, speech, datetime
+│   ├── store/                # Zustand store
+│   └── middleware.ts         # session gate for /
+├── deploy/                   # Dockerfile.api, docker-compose.yml, .env.example
+└── docker-compose.yml        # backend, frontend, optional ollama and redis
 ```
 
-## ⚙️ Configuration
+## Configuration
 
-### Environment Variables
+Environment variables, with the defaults from `backend/app/config.py`:
 
-| Variable | Description | Default | Options |
-|----------|-------------|---------|----------|
-| **LLM Configuration** ||||
-| `LLM_MODE` | LLM provider mode | `auto` | `local`, `cloud`, `auto` |
-| `LLM_MODEL` | Model name | `llama2` | Any Ollama/OpenAI model |
-| `OPENAI_API_KEY` | OpenAI API key | - | Required for cloud mode |
-| `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` | - |
-| **Embedding Configuration** ||||
-| `EMB_MODEL_NAME` | Embedding model | `BAAI/bge-small-en-v1.5` | Any sentence-transformer |
-| `EMB_DIMENSION` | Embedding dimension | `384` | Model-specific |
-| `EMB_BACKEND` | Vector store backend | `sqlitevec` | `sqlitevec`, `faiss` |
-| **Cache Configuration** ||||
-| `REDIS_URL` | Redis connection URL | - | `redis://localhost:6379` |
-| `CACHE_TTL` | Default cache TTL | `3600` | Seconds |
-| **Database Configuration** ||||
-| `DATABASE_URL` | Database connection | `sqlite:///./data/opennotebook.db` | Any SQLAlchemy URL |
-| **Security Configuration** ||||
-| `JWT_SECRET_KEY` | JWT signing key | Random | Strong secret key |
-| `JWT_ALGORITHM` | JWT algorithm | `HS256` | - |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token expiry | `30` | Minutes |
-| **Application Settings** ||||
-| `MAX_FILE_SIZE_MB` | Max upload size | `50` | MB |
-| `CHUNK_SIZE` | Document chunk size | `1000` | Characters |
-| `CHUNK_OVERLAP` | Chunk overlap | `200` | Characters |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| **LLM** | | |
+| `LLM_MODE` | Provider selection: `auto`, `claude`, `openai`, `local`, `none` | `auto` |
+| `CLAUDE_API_KEY` | Anthropic API key | – |
+| `CLAUDE_MODEL` | Claude model id | `claude-opus-5` |
+| `CLAUDE_EFFORT` | Reasoning depth: `low`…`max` | `low` |
+| `CLAUDE_MIN_MAX_TOKENS` | Floor for a request's output budget | `2048` |
+| `OPENAI_API_KEY` | OpenAI API key | – |
+| `OPENAI_MODEL` | OpenAI model id | `gpt-5.6` |
+| `OLLAMA_BASE_URL` | Local OpenAI-compatible endpoint | `http://localhost:11434/v1` |
+| `OLLAMA_MODEL` | Local model name | `llama3.2` |
+| **Embedding** | | |
+| `EMB_MODEL_NAME` | sentence-transformers model | `BAAI/bge-m3` |
+| `EMB_DIMENSION` | Vector dimension (auto-corrected from the model) | `1024` |
+| `EMB_BACKEND` | Vector store backend | `sqlitevec` |
+| **Retrieval & chunking** | | |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking window | `512` / `50` |
+| `RETRIEVAL_TOP_K` | Chunks retrieved per question | `5` |
+| `RERANK_ENABLED` | Re-rank retrieved chunks | `true` |
+| **Database** | | |
+| `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/opennotebook.db` |
+| **Auth** | | |
+| `JWT_SECRET_KEY` | Token signing key — **required** unless `APP_ENV=development` | – |
+| `JWT_ALGORITHM` | Signing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime | `720` |
+| **Uploads** | | |
+| `MAX_FILE_SIZE_MB` | Upload limit | `50` |
+| `ALLOWED_FILE_TYPES` | Accepted extensions | `pdf,txt,md` |
 
-For a complete list, see [`deploy/.env.example`](./deploy/.env.example)
+Without `JWT_SECRET_KEY`, a development server signs tokens with a key
+generated per process — sessions do not survive a restart. Any non-development
+deployment refuses to start without it.
 
-## 🧪 Testing
+See [`.env.example`](./.env.example) and
+[`deploy/.env.example`](./deploy/.env.example).
 
-### Running Tests
+## Testing
 
 ```bash
-# Run all tests
-cd backend
-pytest
+# Backend — from the repo root, against a running container
+docker exec <backend-container> sh -lc "cd /app && python -m pytest tests -q"
 
-# Run with coverage
-pytest --cov=app --cov-report=html
+# or locally, if the ML dependencies are installed
+cd backend && pytest -q
 
-# Run specific test suite
-pytest tests/unit/
-pytest tests/integration/
-pytest tests/e2e/
-
-# Run with verbose output
-pytest -v
+# Frontend
+cd frontend && npm test          # vitest
+cd frontend && npm run lint
 ```
 
-### Test Coverage
+Both suites are green on `master`. Note that the backend suite needs the ML
+dependencies (`sentence-transformers` and its transformers pin) importable — a
+bare virtualenv without them cannot collect the tests.
 
-| Component | Coverage | Status |
-|-----------|----------|--------|
-| Cache Service | 95% | ✅ |
-| RAG Pipeline | 88% | ✅ |
-| Auth System | 92% | ✅ |
-| Document Processing | 85% | ✅ |
+## Known limitations
+
+Stated plainly, because several of these look like features until you hit them:
+
+- **The API is not behind authentication.** Accounts and the login flow work,
+  but every `/api/*` endpoint accepts unauthenticated requests, and projects
+  have no owner — anyone signed in sees everything.
+- **Caching is in-memory.** `app/services/cache.py` will use Redis if a client
+  and a `redis_url` setting are present; neither ships, so the cache is
+  per-process and resets on restart.
+- **YouTube import depends on YouTube.** The pinned
+  `youtube-transcript-api==0.6.1` scrapes the watch page, and YouTube rate-limits
+  it — imports can fail with an XML parse error on a blocked response even
+  though the code is correct.
+- **Studio's video summary and mind map are not implemented.** They are visible
+  but disabled, and generating either needs backend work.
+- **No WebSockets.** Ingest progress is polled, not pushed.
+
+## License
+
+MIT.
