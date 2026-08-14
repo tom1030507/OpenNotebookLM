@@ -137,6 +137,11 @@ interface ErrorResponse {
   detail?: string;
 }
 
+interface CacheClearResponse {
+  /** -1 when the backend flushed a Redis database it cannot count. */
+  cleared: number;
+}
+
 
 const configuredBaseUrl = (
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -464,6 +469,14 @@ const api = {
   /** The same summary as text, for reading aloud rather than downloading. */
   fetchProjectSummaryText(projectId: string): Promise<string> {
     return requestText(`/export/project/${projectId}/summary`);
+  },
+
+  /** Drop the server's cached query results and embeddings. */
+  async clearCache(): Promise<number> {
+    const response = await requestJson<CacheClearResponse>('/cache/clear', {
+      method: 'DELETE',
+    });
+    return response.cleared;
   },
 };
 

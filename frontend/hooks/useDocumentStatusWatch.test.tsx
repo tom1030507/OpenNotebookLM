@@ -7,6 +7,10 @@ import useDocumentStatusWatch, { MAX_POLLS, POLL_INTERVAL_MS } from './useDocume
 import useStore from '@/store/useStore';
 import type { Document, DocumentStatus, Project } from '@/lib/api';
 
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+
+vi.mock('react-hot-toast', () => ({ default: toast }));
+
 const project: Project = {
   id: 'project-1',
   name: 'Research notes',
@@ -46,6 +50,8 @@ const advance = async (ms: number) => {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  toast.success.mockClear();
+  toast.error.mockClear();
   useStore.setState({ currentProject: project, projects: [project], documents: [] });
 });
 
@@ -111,6 +117,49 @@ describe('useDocumentStatusWatch', () => {
 
     await advance(POLL_INTERVAL_MS * (MAX_POLLS + 20));
     expect(refreshDocuments).toHaveBeenCalledTimes(MAX_POLLS);
+  });
+
+  it('announces a source that has finished processing', async () => {
+    useStore.setState({ documents: [documentWith('processing')] });
+    render(<Watcher />);
+
+    await act(async () => {
+      useStore.setState({ documents: [documentWith('ready')] });
+    });
+
+    expect(toast.success).toHaveBeenCalledWith('Example Domain is ready');
+  });
+
+  it('announces a source that could not be processed', async () => {
+    useStore.setState({ documents: [documentWith('queued')] });
+    render(<Watcher />);
+
+    await act(async () => {
+      useStore.setState({ documents: [documentWith('error')] });
+    });
+
+    expect(toast.error).toHaveBeenCalledWith('Example Domain could not be processed');
+  });
+
+  it('stays quiet when the reader turned processing notifications off', async () => {
+    useStore.setState({
+      notifyOnProcessingComplete: false,
+      documents: [documentWith('processing')],
+    });
+    render(<Watcher />);
+
+    await act(async () => {
+      useStore.setState({ documents: [documentWith('ready')] });
+    });
+
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('says nothing about sources that had already settled when the tab opened', () => {
+    useStore.setState({ documents: [documentWith('ready')] });
+    render(<Watcher />);
+
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('stops watching when the workspace has no project', async () => {

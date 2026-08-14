@@ -276,6 +276,19 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
   });
 
+  it('clears the server cache and reports how much it dropped', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      cleared: 7,
+      pattern: null,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.clearCache()).resolves.toBe(7);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/cache/clear');
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+  });
+
   it('normalizes a missing conversation title for string-only UI controls', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{
       id: 'conversation-1',
