@@ -2,12 +2,14 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy import (
-    Column, String, Integer, Text, DateTime, 
+    Column, String, Integer, Text,
     ForeignKey, JSON, Float, Boolean, LargeBinary, Index
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
+from app.db.types import UTCDateTime
 
 Base = declarative_base()
 
@@ -20,8 +22,8 @@ class Project(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
     meta_json = Column(JSON, default={})
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at = Column(UTCDateTime, default=func.now())
+    updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
     
     # Relationships
     documents = relationship("ProjectDocument", back_populates="project", cascade="all, delete-orphan")
@@ -40,8 +42,8 @@ class Document(Base):
     meta_json = Column(JSON, default={})
     status = Column(String, default="queued")  # queued, processing, ready, error
     error_message = Column(Text)
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at = Column(UTCDateTime, default=func.now())
+    updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
     
     # Relationships
     chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
@@ -59,7 +61,7 @@ class ProjectDocument(Base):
     
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
-    added_at = Column(DateTime, default=func.now())
+    added_at = Column(UTCDateTime, default=func.now())
     
     # Relationships
     project = relationship("Project", back_populates="documents")
@@ -80,7 +82,7 @@ class Chunk(Base):
     ts_start = Column(Float)  # For YouTube (timestamp in seconds)
     ts_end = Column(Float)  # For YouTube
     meta_json = Column(JSON, default={})
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(UTCDateTime, default=func.now())
     
     # Relationships
     document = relationship("Document", back_populates="chunks")
@@ -101,7 +103,7 @@ class Embedding(Base):
     vector = Column(LargeBinary)  # For SQLite storage
     vector_json = Column(JSON)  # Alternative JSON storage
     model_name = Column(String)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(UTCDateTime, default=func.now())
     
     # Relationships
     chunk = relationship("Chunk", back_populates="embedding")
@@ -118,8 +120,8 @@ class Conversation(Base):
     id = Column(String, primary_key=True)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     title = Column(String)
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at = Column(UTCDateTime, default=func.now())
+    updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
     
     # Relationships
     project = relationship("Project", back_populates="conversations")
@@ -145,7 +147,7 @@ class Message(Base):
     processing_time = Column(Float)
     is_bookmarked = Column(Boolean, default=False)
     tags = Column(JSON, default=[])
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(UTCDateTime, default=func.now())
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
@@ -171,7 +173,7 @@ class Citation(Base):
     ts_end = Column(Float)
     char_span_start = Column(Integer)
     char_span_end = Column(Integer)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(UTCDateTime, default=func.now())
     
     __table_args__ = (
         Index("idx_citations_message_id", "message_id"),

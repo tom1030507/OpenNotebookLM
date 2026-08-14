@@ -3,7 +3,6 @@ import json
 import os
 import tempfile
 import zipfile
-from datetime import datetime
 from typing import Optional, Tuple, Any, Dict, List
 from sqlalchemy.orm import Session
 import structlog
@@ -11,6 +10,7 @@ import structlog
 from app.db.models import (
     Project, Conversation, Message, Document, Chunk, ProjectDocument
 )
+from app.utils.time import utc_now
 
 logger = structlog.get_logger()
 
@@ -73,7 +73,7 @@ class ExportService:
             
             content += "---\n\n"
         
-        filename = f"conversation_{conversation.id}_{datetime.now().strftime('%Y%m%d')}.md"
+        filename = f"conversation_{conversation.id}_{utc_now().strftime('%Y%m%d')}.md"
         return content, "text/markdown", filename
     
     def _export_conversation_json(
@@ -105,7 +105,7 @@ class ExportService:
             data["messages"].append(msg_data)
         
         content = json.dumps(data, indent=2, ensure_ascii=False)
-        filename = f"conversation_{conversation.id}_{datetime.now().strftime('%Y%m%d')}.json"
+        filename = f"conversation_{conversation.id}_{utc_now().strftime('%Y%m%d')}.json"
         return content, "application/json", filename
     
     def _export_conversation_text(
@@ -130,7 +130,7 @@ class ExportService:
             
             content += "-" * 30 + "\n\n"
         
-        filename = f"conversation_{conversation.id}_{datetime.now().strftime('%Y%m%d')}.txt"
+        filename = f"conversation_{conversation.id}_{utc_now().strftime('%Y%m%d')}.txt"
         return content, "text/plain", filename
     
     def export_project(
@@ -214,7 +214,7 @@ class ExportService:
                 data["conversations"].append(conv_data)
         
         content = json.dumps(data, indent=2, ensure_ascii=False)
-        filename = f"project_{project.id}_{datetime.now().strftime('%Y%m%d')}.json"
+        filename = f"project_{project.id}_{utc_now().strftime('%Y%m%d')}.json"
         return content, "application/json", filename
     
     def _export_project_markdown(
@@ -256,7 +256,7 @@ class ExportService:
                 content += f"- Messages: {len(conv.messages)}\n"
                 content += f"- Created: {conv.created_at}\n\n"
         
-        filename = f"project_{project.id}_{datetime.now().strftime('%Y%m%d')}.md"
+        filename = f"project_{project.id}_{utc_now().strftime('%Y%m%d')}.md"
         return content, "text/markdown", filename
     
     def generate_project_summary(

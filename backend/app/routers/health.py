@@ -2,12 +2,12 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import datetime
 import os
 import psutil
 
 from app.db.database import get_db
 from app.config import get_settings
+from app.utils.time import utc_now_iso
 
 router = APIRouter()
 settings = get_settings()
@@ -29,7 +29,7 @@ async def health_check(db: Session = Depends(get_db)):
     
     return {
         "ok": db_status == "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now_iso(),
         "version": "0.1.0",
         "environment": settings.app_env,
         "database": db_status,

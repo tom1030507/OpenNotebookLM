@@ -3,7 +3,6 @@ import uuid
 import os
 from typing import Dict, Optional, BinaryIO
 from pathlib import Path
-from datetime import datetime
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import structlog
@@ -16,6 +15,7 @@ from app.config import get_settings
 from app.services.chunking import ChunkingService
 from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
+from app.utils.time import utc_now_iso
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -144,7 +144,7 @@ class DocumentService:
                 meta_json={
                     "filename": filename,
                     "file_size": len(content),
-                    "upload_time": datetime.utcnow().isoformat(),
+                    "upload_time": utc_now_iso(),
                 }
             )
             
@@ -211,7 +211,7 @@ class DocumentService:
                     **(doc.meta_json or {}),
                     "num_pages": result["num_pages"],
                     "metadata": result.get("metadata", {}),
-                    "processed_at": datetime.utcnow().isoformat(),
+                    "processed_at": utc_now_iso(),
                 }
                 db.commit()
 
@@ -265,7 +265,7 @@ class DocumentService:
                 status="queued",
                 meta_json={
                     "url": url,
-                    "upload_time": datetime.utcnow().isoformat(),
+                    "upload_time": utc_now_iso(),
                 }
             )
             
@@ -334,7 +334,7 @@ class DocumentService:
                     "metadata": result.get("metadata", {}),
                     "headings": result.get("headings", []),
                     "num_links": len(result.get("links", [])),
-                    "processed_at": datetime.utcnow().isoformat(),
+                    "processed_at": utc_now_iso(),
                 }
                 db.commit()
 
@@ -393,7 +393,7 @@ class DocumentService:
                 status="queued",
                 meta_json={
                     "youtube_url": youtube_url,
-                    "upload_time": datetime.utcnow().isoformat(),
+                    "upload_time": utc_now_iso(),
                 }
             )
             
@@ -464,7 +464,7 @@ class DocumentService:
                     "language": result.get("language", "unknown"),
                     "metadata": result.get("metadata", {}),
                     "num_segments": len(result.get("segments", [])),
-                    "processed_at": datetime.utcnow().isoformat(),
+                    "processed_at": utc_now_iso(),
                 }
                 db.commit()
 
