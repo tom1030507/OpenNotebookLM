@@ -82,6 +82,51 @@ describe('API client', () => {
     }]);
   });
 
+  it('points an uploaded document at the API file route', async () => {
+    // The backend stores a path on its own disk, which the browser cannot
+    // fetch: it has to become an absolute URL on the API origin.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{
+      id: 'document-1',
+      title: 'Paper',
+      source_type: 'pdf',
+      source_url: 'uploads/document-1_paper.pdf',
+      meta_json: {},
+      status: 'ready',
+      error_message: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      chunk_count: 1,
+    }])));
+
+    const [document] = await api.getDocuments('project-1');
+
+    expect(document.url).toBe(
+      'http://localhost:8000/api/docs/document-1/file',
+    );
+  });
+
+  it.each([
+    { type: 'url' as const, url: 'https://example.com/article' },
+    { type: 'youtube' as const, url: 'https://youtu.be/abc123' },
+  ])('leaves an external $type source URL untouched', async ({ type, url }) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{
+      id: 'document-1',
+      title: 'External source',
+      source_type: type,
+      source_url: url,
+      meta_json: {},
+      status: 'ready',
+      error_message: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      chunk_count: 1,
+    }])));
+
+    const [document] = await api.getDocuments('project-1');
+
+    expect(document.url).toBe(url);
+  });
+
   it('fetches the complete document after a file upload', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
