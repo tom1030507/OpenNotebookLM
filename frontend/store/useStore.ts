@@ -24,7 +24,11 @@ interface AppState {
   // UI State
   sidebarOpen: boolean;
   studioOpen: boolean;
-  
+
+  // Preferences
+  /** Whether finishing a source announces itself. Read by useDocumentStatusWatch. */
+  notifyOnProcessingComplete: boolean;
+
   // Actions - Projects
   fetchProjects: () => Promise<void>;
   selectProject: (project: Project) => void;
@@ -57,7 +61,10 @@ interface AppState {
   // Actions - UI
   toggleSidebar: () => void;
   toggleStudio: () => void;
-  
+
+  // Actions - Preferences
+  setNotifyOnProcessingComplete: (enabled: boolean) => void;
+
   // Reset
   reset: () => void;
 }
@@ -76,6 +83,7 @@ const initialState = {
   loadingMessages: false,
   sidebarOpen: true,
   studioOpen: true,
+  notifyOnProcessingComplete: true,
 };
 
 const useStore = create<AppState>()(
@@ -427,7 +435,12 @@ const useStore = create<AppState>()(
         toggleStudio: () => {
           set((state) => ({ studioOpen: !state.studioOpen }));
         },
-        
+
+        // Preferences
+        setNotifyOnProcessingComplete: (enabled) => {
+          set({ notifyOnProcessingComplete: enabled });
+        },
+
         // Reset
         reset: () => {
           set(initialState);
@@ -438,6 +451,7 @@ const useStore = create<AppState>()(
         partialize: (state) => ({
           sidebarOpen: state.sidebarOpen,
           studioOpen: state.studioOpen,
+          notifyOnProcessingComplete: state.notifyOnProcessingComplete,
         }),
       }
     )

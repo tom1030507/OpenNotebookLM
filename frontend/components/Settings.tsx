@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useId, useRef, useState } from 'react';
-import { 
-  X, 
+import {
+  X,
   Settings as SettingsIcon,
   Moon,
   Sun,
@@ -16,6 +16,13 @@ import {
   Loader2
 } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
+import api from '@/lib/api';
+import useStore from '@/store/useStore';
+import {
+  applyThemePreference,
+  readThemePreference,
+  type ThemePreference,
+} from '@/lib/theme';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -24,20 +31,35 @@ interface SettingsProps {
 
 type SettingsTab = 'general' | 'api' | 'data' | 'notifications' | 'security' | 'about';
 
+const REPOSITORY_URL = 'https://github.com/tom1030507/OpenNotebookLM';
+// The Studio panel marks its unfinished outputs with the same words.
+const availabilityLabel = 'coming soon';
+
 export default function Settings({ isOpen, onClose }: SettingsProps) {
+  const storedNotifyOnComplete = useStore((state) => state.notifyOnProcessingComplete);
+  const setStoredNotifyOnComplete = useStore((state) => state.setNotifyOnProcessingComplete);
+
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [language, setLanguage] = useState('en');
-  const [openaiKey, setOpenaiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [autoSave, setAutoSave] = useState(true);
-  const [notifications, setNotifications] = useState(true);
+  const [theme, setTheme] = useState<ThemePreference>(
+    () => (isOpen ? readThemePreference() : 'system'),
+  );
+  const [notifyOnComplete, setNotifyOnComplete] = useState(storedNotifyOnComplete);
+  const [wasOpen, setWasOpen] = useState(isOpen);
   const [isSaving, setIsSaving] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [cacheResult, setCacheResult] = useState('');
+  const [cacheError, setCacheError] = useState('');
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const languageSelectId = useId();
+  const languageHintId = useId();
+  const autoSaveHintId = useId();
   const modelSelectId = useId();
+  const apiKeyId = useId();
+  const apiKeyHintId = useId();
+  const endpointId = useId();
+  const endpointHintId = useId();
 
   useDialogFocus({
     isOpen,
@@ -47,12 +69,54 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     initialFocusRef: closeButtonRef,
   });
 
+  // Seed the controls from the preferences in force every time the dialog
+  // opens, so reopening shows what was saved rather than the defaults.
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+
+    if (isOpen) {
+      setTheme(readThemePreference());
+      setNotifyOnComplete(storedNotifyOnComplete);
+      setCacheResult('');
+      setCacheError('');
+    }
+  }
+
+  // Both writes are synchronous, but the dialog awaits the commit so it cannot
+  // be dismissed part-way through one.
+  const savePreferences = async () => {
+    applyThemePreference(theme);
+    setStoredNotifyOnComplete(notifyOnComplete);
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
-    // Simulate save
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsSaving(false);
+
+    try {
+      await savePreferences();
+    } finally {
+      setIsSaving(false);
+    }
+
     onClose();
+  };
+
+  const clearCache = async () => {
+    setIsClearingCache(true);
+    setCacheResult('');
+    setCacheError('');
+
+    try {
+      const cleared = await api.clearCache();
+      setCacheResult(cleared < 0
+        // A flushed Redis database reports no count.
+        ? 'Server cache cleared.'
+        : `Server cache cleared: ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} dropped.`);
+    } catch {
+      setCacheError('The cache could not be cleared. Please try again.');
+    } finally {
+      setIsClearingCache(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -141,12 +205,15 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                           { value: 'system', icon: SettingsIcon, label: 'System' },
                         ].map((option) => {
                           const Icon = option.icon;
+                          const isSelected = theme === option.value;
                           return (
                             <button
                               key={option.value}
-                              onClick={() => setTheme(option.value as typeof theme)}
+                              type="button"
+                              aria-pressed={isSelected}
+                              onClick={() => setTheme(option.value as ThemePreference)}
                               className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-base ${
-                                theme === option.value
+                                isSelected
                                   ? 'border-[var(--primary)] bg-[var(--primary)] bg-opacity-10'
                                   : 'border-[var(--border)] hover:bg-[var(--muted)]'
                               }`}
@@ -157,22 +224,26 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                           );
                         })}
                       </div>
+                      <p className="text-xs text-[var(--muted-foreground)] mt-2">
+                        System follows your operating system. The toolbar toggle
+                        changes the same setting.
+                      </p>
                     </div>
 
                     <div>
                       <label htmlFor={languageSelectId} className="block text-sm mb-2">Language</label>
                       <select
                         id={languageSelectId}
-                        value={language}
-                        onChange={(e) => setLanguage(e.target.value)}
-                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                        aria-describedby={languageHintId}
+                        disabled
+                        defaultValue="en"
+                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                       >
                         <option value="en">English</option>
-                        <option value="zh">Chinese</option>
-                        <option value="ja">Japanese</option>
-                        <option value="es">Español</option>
-                        <option value="fr">Français</option>
                       </select>
+                      <p id={languageHintId} className="text-xs text-[var(--muted-foreground)] mt-2">
+                        The interface is English only ({availabilityLabel}).
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -180,14 +251,22 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                 <div>
                   <h4 className="text-sm font-medium mb-4">Behavior</h4>
                   <div className="space-y-3">
-                    <label className="flex items-center gap-3">
+                    <label className="flex items-start gap-3">
                       <input
                         type="checkbox"
-                        checked={autoSave}
-                        onChange={(e) => setAutoSave(e.target.checked)}
-                        className="w-4 h-4 rounded border-[var(--border)]"
+                        checked
+                        readOnly
+                        disabled
+                        aria-describedby={autoSaveHintId}
+                        className="w-4 h-4 mt-0.5 rounded border-[var(--border)]"
                       />
-                      <span className="text-sm">Auto-save conversations</span>
+                      <div>
+                        <p className="text-sm">Auto-save conversations</p>
+                        <p id={autoSaveHintId} className="text-xs text-[var(--muted-foreground)]">
+                          Always on: every question and answer is stored with its
+                          conversation on the server, so this cannot be turned off.
+                        </p>
+                      </div>
                     </label>
                   </div>
                 </div>
@@ -196,34 +275,44 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
             {activeTab === 'api' && (
               <div className="space-y-6">
+                <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
+                  <p className="text-sm mb-2">Model access is configured on the server.</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    The backend reads its model settings from its own environment
+                    (LLM_MODE, OPENAI_API_KEY). The fields below are not connected
+                    to it yet ({availabilityLabel}), so nothing typed here would be
+                    stored or sent anywhere.
+                  </p>
+                </div>
+
                 <div>
                   <h4 className="text-sm font-medium mb-4">OpenAI Configuration</h4>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm mb-2">API Key</label>
-                      <div className="flex gap-2">
-                        <input
-                          type={showApiKey ? 'text' : 'password'}
-                          value={openaiKey}
-                          onChange={(e) => setOpenaiKey(e.target.value)}
-                          placeholder="sk-..."
-                          className="flex-1 px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                        />
-                        <button
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
-                        >
-                          {showApiKey ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                        Your API key is stored securely and never shared.
+                      <label htmlFor={apiKeyId} className="block text-sm mb-2">API Key</label>
+                      <input
+                        id={apiKeyId}
+                        type="password"
+                        value=""
+                        readOnly
+                        disabled
+                        aria-describedby={apiKeyHintId}
+                        placeholder="sk-..."
+                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                      />
+                      <p id={apiKeyHintId} className="text-xs text-[var(--muted-foreground)] mt-2">
+                        Set OPENAI_API_KEY in the backend environment instead.
                       </p>
                     </div>
 
                     <div>
                       <label htmlFor={modelSelectId} className="block text-sm mb-2">Model</label>
-                      <select id={modelSelectId} className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+                      <select
+                        id={modelSelectId}
+                        disabled
+                        defaultValue="gpt-4"
+                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                      >
                         <option value="gpt-4">GPT-4</option>
                         <option value="gpt-4-turbo">GPT-4 Turbo</option>
                         <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
@@ -236,12 +325,20 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                   <h4 className="text-sm font-medium mb-4">Local Model Configuration</h4>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm mb-2">Endpoint URL</label>
+                      <label htmlFor={endpointId} className="block text-sm mb-2">Endpoint URL</label>
                       <input
+                        id={endpointId}
                         type="text"
+                        value=""
+                        readOnly
+                        disabled
+                        aria-describedby={endpointHintId}
                         placeholder="http://localhost:11434"
-                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                       />
+                      <p id={endpointHintId} className="text-xs text-[var(--muted-foreground)] mt-2">
+                        Set LOCAL_MODEL_PATH in the backend environment instead.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -254,34 +351,52 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                   <h4 className="text-sm font-medium mb-4">Storage</h4>
                   <div className="space-y-4">
                     <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm">Documents</span>
-                        <span className="text-sm font-medium">124 MB</span>
-                      </div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm">Embeddings</span>
-                        <span className="text-sm font-medium">56 MB</span>
-                      </div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm">Conversations</span>
-                        <span className="text-sm font-medium">12 MB</span>
-                      </div>
-                      <div className="border-t border-[var(--border)] mt-3 pt-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">Total</span>
-                          <span className="text-sm font-medium">192 MB</span>
-                        </div>
-                      </div>
+                      <p className="text-sm mb-2">
+                        Documents, embeddings and conversations live on the server.
+                      </p>
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        The backend does not report how much space they use, so
+                        there are no figures to show here ({availabilityLabel}).
+                      </p>
                     </div>
 
                     <div className="flex gap-2">
-                      <button className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base">
-                        Clear Cache
+                      <button
+                        type="button"
+                        onClick={clearCache}
+                        disabled={isClearingCache}
+                        className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {isClearingCache && <Loader2 className="w-4 h-4 animate-spin" />}
+                        <span>Clear Cache</span>
                       </button>
-                      <button className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base">
+                      <button
+                        type="button"
+                        disabled
+                        aria-label={`Export Data (${availabilityLabel})`}
+                        className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
                         Export Data
                       </button>
                     </div>
+
+                    {cacheResult && (
+                      <p role="status" className="text-xs text-[var(--muted-foreground)]">
+                        {cacheResult}
+                      </p>
+                    )}
+                    {cacheError && (
+                      <p role="alert" className="text-xs text-[var(--error)]">
+                        {cacheError}
+                      </p>
+                    )}
+
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      Clear Cache drops the server&apos;s cached answers and
+                      embeddings; sources and conversations are untouched.
+                      Exporting everything at once is {availabilityLabel} — export
+                      a conversation or a project from the toolbar instead.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -292,17 +407,18 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                 <div>
                   <h4 className="text-sm font-medium mb-4">Notification Preferences</h4>
                   <div className="space-y-3">
-                    <label className="flex items-center gap-3">
+                    <label className="flex items-start gap-3">
                       <input
                         type="checkbox"
-                        checked={notifications}
-                        onChange={(e) => setNotifications(e.target.checked)}
-                        className="w-4 h-4 rounded border-[var(--border)]"
+                        checked={notifyOnComplete}
+                        onChange={(e) => setNotifyOnComplete(e.target.checked)}
+                        className="w-4 h-4 mt-0.5 rounded border-[var(--border)]"
                       />
                       <div>
                         <p className="text-sm">Processing complete</p>
                         <p className="text-xs text-[var(--muted-foreground)]">
-                          Notify when document processing is finished
+                          Show a message in this tab when a source finishes
+                          processing, or fails.
                         </p>
                       </div>
                     </label>
@@ -314,12 +430,17 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             {activeTab === 'security' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-medium mb-4">Privacy & Security</h4>
+                  <h4 className="text-sm font-medium mb-4">Privacy &amp; Security</h4>
                   <div className="space-y-4">
                     <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
-                      <p className="text-sm mb-2">Your data is encrypted and stored locally.</p>
+                      <p className="text-sm mb-2">
+                        Your data stays in the deployment you run.
+                      </p>
                       <p className="text-xs text-[var(--muted-foreground)]">
-                        We never share your documents or conversations with third parties.
+                        Sources, embeddings and conversations are stored by this
+                        workspace&apos;s own backend. They are not encrypted at
+                        rest, and they only reach an external model provider if
+                        the server is configured to use one.
                       </p>
                     </div>
                   </div>
@@ -339,13 +460,28 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                       </p>
                     </div>
                     <div className="space-y-2">
-                      <a href="#" className="block text-sm text-[var(--primary)] hover:underline">
+                      <a
+                        href={`${REPOSITORY_URL}#readme`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-sm text-[var(--primary)] hover:underline"
+                      >
                         Documentation
                       </a>
-                      <a href="#" className="block text-sm text-[var(--primary)] hover:underline">
+                      <a
+                        href={REPOSITORY_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-sm text-[var(--primary)] hover:underline"
+                      >
                         GitHub Repository
                       </a>
-                      <a href="#" className="block text-sm text-[var(--primary)] hover:underline">
+                      <a
+                        href={`${REPOSITORY_URL}/issues/new`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-sm text-[var(--primary)] hover:underline"
+                      >
                         Report an Issue
                       </a>
                     </div>

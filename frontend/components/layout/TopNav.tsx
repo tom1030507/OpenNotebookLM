@@ -23,7 +23,7 @@ import Settings from '../Settings';
 import useStore from '@/store/useStore';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { applyTheme, initializeTheme, THEME_STORAGE_KEY, type Theme } from '@/lib/theme';
+import { applyThemePreference, initializeTheme, type Theme } from '@/lib/theme';
 import {
   COMPACT_TOP_NAV_MEDIA_QUERY,
   TOP_NAV_ACTIONS,
@@ -106,16 +106,12 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const failedDocuments = documents.filter((document) => document.status === 'error');
   const notificationCount = pendingDocuments.length + failedDocuments.length;
 
+  // The toggle is an explicit choice, so it records light or dark rather than
+  // leaving the theme following the system. Settings reads the same record.
   const toggleTheme = () => {
     const nextTheme: Theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
 
-    applyTheme(nextTheme, document.documentElement);
-
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
-    } catch {
-      // The current-session choice still applies if persistence is unavailable.
-    }
+    applyThemePreference(nextTheme);
   };
 
   const canExport = Boolean(currentProject || currentConversation);
