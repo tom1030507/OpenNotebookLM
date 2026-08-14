@@ -13,6 +13,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import useStore from '@/store/useStore';
+import { parseApiTimestamp } from '@/lib/datetime';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function ConversationList() {
@@ -95,7 +96,7 @@ export default function ConversationList() {
     monthAgo.setMonth(monthAgo.getMonth() - 1);
 
     conversations.forEach(conv => {
-      const convDate = new Date(conv.created_at);
+      const convDate = parseApiTimestamp(conv.created_at);
       
       if (convDate >= today) {
         groups.Today.push(conv);
@@ -244,7 +245,7 @@ export default function ConversationList() {
                               </p>
                               <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1 mt-0.5">
                                 <Clock className="w-3 h-3" />
-                                {formatDistanceToNow(new Date(conv.created_at), { addSuffix: true })}
+                                {formatDistanceToNow(parseApiTimestamp(conv.created_at), { addSuffix: true })}
                               </p>
                             </div>
                             

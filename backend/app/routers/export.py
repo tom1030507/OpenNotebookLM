@@ -7,11 +7,11 @@ import structlog
 import json
 import tempfile
 import os
-from datetime import datetime
 
 from app.db.database import get_db
 from app.db.models import Project, Conversation, Message, Document
 from app.services.export import ExportService
+from app.utils.time import utc_now
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -132,7 +132,7 @@ async def export_project_summary(
         # Create markdown report
         report = f"""# Project Summary: {project.name}
 
-**Generated**: {datetime.now().isoformat()}
+**Generated**: {utc_now().isoformat()}
 
 ## Overview
 {project.description or 'No description provided.'}
@@ -204,7 +204,7 @@ async def batch_export(
         return FileResponse(
             path=zip_path,
             media_type="application/zip",
-            filename=f"conversations_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            filename=f"conversations_export_{utc_now().strftime('%Y%m%d_%H%M%S')}.zip"
         )
         
     except Exception as e:

@@ -1,7 +1,20 @@
 """Pydantic schemas for API models."""
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Annotated, Optional, List, Dict, Any
+from pydantic import AfterValidator, BaseModel, Field
+
+from app.utils.time import as_utc
+
+# Every datetime this API emits has to carry a UTC designator: a designator-less
+# value such as "2026-08-13T09:00:00" is read as *local* time by ECMAScript, so a
+# browser in UTC+8 renders a record created seconds ago as hours old and files it
+# under the wrong date-group header.
+#
+# Stored datetimes already arrive labelled, via app.db.types.UTCDateTime. This
+# alias closes the boundary for anything else a route might hand a response
+# model, labelling a naive value as the UTC it is meant to be rather than letting
+# it serialise bare.
+UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
 
 
 # Project schemas
@@ -27,8 +40,8 @@ class ProjectUpdate(BaseModel):
 class ProjectResponse(ProjectBase):
     """Schema for project response."""
     id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
     document_count: int = 0
     conversation_count: int = 0
     
@@ -63,8 +76,8 @@ class DocumentResponse(DocumentBase):
     id: str
     status: str
     error_message: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
     chunk_count: int = 0
     
     class Config:
@@ -112,8 +125,8 @@ class ConversationResponse(BaseModel):
     id: str
     project_id: str
     title: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
     message_count: int = 0
     
     class Config:
@@ -153,7 +166,7 @@ class MessageResponse(BaseModel):
     processing_time: Optional[float] = None
     is_bookmarked: bool = False
     tags: List[str] = []
-    created_at: datetime
+    created_at: UtcDatetime
     
     class Config:
         from_attributes = True
@@ -193,7 +206,7 @@ class ExportRequest(BaseModel):
 class HealthResponse(BaseModel):
     """Schema for health check response."""
     ok: bool
-    timestamp: datetime
+    timestamp: UtcDatetime
     version: str
     environment: str
     database: str
