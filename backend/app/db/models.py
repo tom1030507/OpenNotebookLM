@@ -39,8 +39,8 @@ class User(Base):
     email = Column(String, unique=True, nullable=False)
     hashed_password = Column(String, nullable=False)  # bcrypt hash, never plain text
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=func.now())
-    last_login_at = Column(DateTime)
+    created_at = Column(UTCDateTime, default=func.now())
+    last_login_at = Column(UTCDateTime)
 
     __table_args__ = (
         Index("idx_users_username", "username"),

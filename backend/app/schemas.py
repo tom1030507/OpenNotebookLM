@@ -37,7 +37,7 @@ class UserResponse(BaseModel):
     id: str
     username: str
     email: str
-    created_at: datetime
+    created_at: UtcDatetime
 
     class Config:
         from_attributes = True
