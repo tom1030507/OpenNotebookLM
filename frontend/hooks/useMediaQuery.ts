@@ -4,8 +4,12 @@ export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(false);
 
   useEffect(() => {
+    // Server rendering and environments without media-query support keep the
+    // caller's non-matching default rather than throwing.
+    if (typeof window.matchMedia !== 'function') return;
+
     const media = window.matchMedia(query);
-    
+
     // Set initial value
     setMatches(media.matches);
 

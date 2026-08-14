@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  FileText, 
+import {
+  FileText,
   Settings as SettingsIcon,
   ChevronDown,
   Download,
   Moon,
+  MoreHorizontal,
   Sun,
   User,
   FolderPlus,
@@ -20,23 +21,52 @@ import TopNavInfoDialog from './TopNavInfoDialog';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
+import useDialogFocus from '@/hooks/useDialogFocus';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { applyTheme, initializeTheme, THEME_STORAGE_KEY, type Theme } from '@/lib/theme';
+import {
+  COMPACT_TOP_NAV_MEDIA_QUERY,
+  TOP_NAV_ACTIONS,
+  getTopNavActionLayout,
+  type TopNavActionId,
+} from './topNavContract';
 
 interface TopNavProps {
   notebookTitle?: string;
+}
+
+interface TopNavAction {
+  /** Visible text in the overflow menu. */
+  label: string;
+  /** Accessible name, when it has to carry more than the label does. */
+  accessibleName?: string;
+  icon: React.ReactNode;
+  onSelect: () => void;
+  isBadged?: boolean;
 }
 
 export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps) {
   const [showExport, setShowExport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showMoreActions, setShowMoreActions] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  
+  const moreActionsRef = useRef<HTMLDivElement>(null);
+  const firstOverflowActionRef = useRef<HTMLButtonElement>(null);
+
   const { currentProject, currentConversation, documents } = useStore();
   const router = useRouter();
   const { openProjectDialog } = useProjectDialog();
+  const isCompact = useMediaQuery(COMPACT_TOP_NAV_MEDIA_QUERY);
+
+  useDialogFocus({
+    isOpen: showMoreActions,
+    onClose: () => setShowMoreActions(false),
+    dialogRef: moreActionsRef,
+    initialFocusRef: firstOverflowActionRef,
+  });
 
   useEffect(() => {
     initializeTheme();
@@ -88,25 +118,93 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
     }
   };
 
+  const canExport = Boolean(currentProject || currentConversation);
+  const actions: Record<TopNavActionId, TopNavAction> = {
+    'new-project': {
+      label: 'New Project',
+      icon: <FolderPlus className="w-4 h-4" />,
+      onSelect: openProjectDialog,
+    },
+    export: {
+      label: 'Export',
+      icon: <Download className="w-4 h-4" />,
+      onSelect: () => setShowExport(true),
+    },
+    theme: {
+      label: 'Toggle theme',
+      icon: (
+        <>
+          <Sun data-theme-icon="sun" className="theme-icon--sun w-4 h-4" />
+          <Moon data-theme-icon="moon" className="theme-icon--moon w-4 h-4" />
+        </>
+      ),
+      onSelect: toggleTheme,
+    },
+    notifications: {
+      label: 'Notifications',
+      accessibleName: notificationCount > 0 ? `Notifications (${notificationCount})` : 'Notifications',
+      icon: <Bell className="w-4 h-4" />,
+      onSelect: () => setShowNotifications(true),
+      isBadged: true,
+    },
+    help: {
+      label: 'Help',
+      icon: <HelpCircle className="w-4 h-4" />,
+      onSelect: () => setShowHelp(true),
+    },
+    settings: {
+      label: 'Settings',
+      icon: <SettingsIcon className="w-4 h-4" />,
+      onSelect: () => setShowSettings(true),
+    },
+  };
+
+  const { inlineActionIds, overflowActionIds } = getTopNavActionLayout(
+    TOP_NAV_ACTIONS.filter((id) => id !== 'export' || canExport),
+    isCompact,
+  );
+  // Compact targets are 44px squares; the desktop bar keeps its original padding.
+  const actionButtonClassName = `${
+    isCompact ? 'flex h-11 w-11 items-center justify-center' : 'p-2'
+  } text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base`;
+  const menuPanelClassName = 'absolute right-0 mt-2 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50';
+  // Menu rows only need the 44px floor where fingers, not pointers, use them.
+  const menuItemClassName = `w-full ${isCompact ? 'min-h-11 ' : ''}text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base`;
+
+  const openUserMenu = () => {
+    setShowMoreActions(false);
+    setShowUserMenu(!showUserMenu);
+  };
+
+  const openMoreActions = () => {
+    setShowUserMenu(false);
+    setShowMoreActions(!showMoreActions);
+  };
+
+  const runOverflowAction = (action: TopNavAction) => {
+    setShowMoreActions(false);
+    action.onSelect();
+  };
+
   return (
     <>
       <header className="h-14 border-b border-[var(--border)] bg-[var(--card)] flex items-center px-4 gap-4">
         {/* Logo */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center">
             <FileText className="w-4 h-4 text-white" />
           </div>
         </div>
 
-        {/* Notebook Title */}
-        <div className="flex items-center gap-2 flex-1">
-          <h1 className="text-base font-medium text-[var(--foreground)]">
+        {/* Notebook Title — truncates so the controls keep their tap targets */}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <h1 className="text-base font-medium text-[var(--foreground)] truncate">
             {currentProject ? currentProject.name : notebookTitle}
           </h1>
           {currentConversation && (
             <>
-              <ChevronDown className="w-4 h-4 text-[var(--muted-foreground)] rotate-[-90deg]" />
-              <span className="text-sm text-[var(--muted-foreground)]">
+              <ChevronDown className="w-4 h-4 shrink-0 text-[var(--muted-foreground)] rotate-[-90deg]" />
+              <span className="text-sm text-[var(--muted-foreground)] truncate">
                 {currentConversation.title}
               </span>
             </>
@@ -114,90 +212,92 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
         </div>
 
         {/* Right Actions */}
-        <div className="flex items-center gap-2">
-          {/* New Project Button */}
-          <button
-            onClick={openProjectDialog}
-            aria-label={'New Project'}
-            title={'New Project'}
-            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-          >
-            <FolderPlus className="w-4 h-4" />
-          </button>
-          
-          {/* Export Button */}
-          {(currentProject || currentConversation) && (
-            <button
-              onClick={() => setShowExport(true)}
-              className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-              aria-label={'Export'}
-              title={'Export'}
-            >
-              <Download className="w-4 h-4" />
-            </button>
-          )}
-          
-          {/* Theme Toggle */}
-          <button
-            onClick={toggleTheme}
-            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-            aria-label={'Toggle theme'}
-            title={'Toggle theme'}
-          >
-            <Sun data-theme-icon="sun" className="theme-icon--sun w-4 h-4" />
-            <Moon data-theme-icon="moon" className="theme-icon--moon w-4 h-4" />
-          </button>
-          
-          {/* Notifications */}
-          <button
-            onClick={() => setShowNotifications(true)}
-            aria-label={notificationCount > 0 ? `Notifications (${notificationCount})` : 'Notifications'}
-            title="Notifications"
-            className="relative p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-          >
-            <Bell className="w-4 h-4" />
-            {notificationCount > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[var(--error)]" />
-            )}
-          </button>
-          
-          {/* Help */}
-          <button
-            onClick={() => setShowHelp(true)}
-            aria-label="Help"
-            title="Help"
-            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {inlineActionIds.map((id) => {
+            const action = actions[id];
 
-          {/* Settings */}
-          <button 
-            onClick={() => setShowSettings(true)}
-            aria-label={'Settings'}
-            title={'Settings'}
-            className="p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
-          >
-            <SettingsIcon className="w-4 h-4" />
-          </button>
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={action.onSelect}
+                aria-label={action.accessibleName ?? action.label}
+                title={action.label}
+                className={action.isBadged ? `relative ${actionButtonClassName}` : actionButtonClassName}
+              >
+                {action.icon}
+                {id === 'notifications' && notificationCount > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[var(--error)]" />
+                )}
+              </button>
+            );
+          })}
+
+          {/* Overflow menu for the actions a phone-width bar cannot show */}
+          {overflowActionIds.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={openMoreActions}
+                aria-label="More actions"
+                title="More actions"
+                aria-haspopup="menu"
+                aria-expanded={showMoreActions}
+                className="flex h-11 w-11 items-center justify-center text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+              >
+                <MoreHorizontal className="w-5 h-5" />
+              </button>
+
+              {showMoreActions && (
+                <div
+                  ref={moreActionsRef}
+                  role="menu"
+                  aria-label="More actions"
+                  className={`w-56 ${menuPanelClassName}`}
+                >
+                  {overflowActionIds.map((id, index) => {
+                    const action = actions[id];
+
+                    return (
+                      <button
+                        key={id}
+                        ref={index === 0 ? firstOverflowActionRef : undefined}
+                        type="button"
+                        onClick={() => runOverflowAction(action)}
+                        aria-label={action.accessibleName ?? action.label}
+                        title={action.label}
+                        className={`${menuItemClassName} flex items-center gap-3`}
+                      >
+                        <span className="flex shrink-0 items-center text-[var(--muted-foreground)]">
+                          {action.icon}
+                        </span>
+                        <span>{action.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* User Menu */}
           <div className="relative">
-            <button 
-              onClick={() => setShowUserMenu(!showUserMenu)}
+            <button
+              onClick={openUserMenu}
               aria-label={'User menu'}
               title={'User menu'}
               aria-haspopup="menu"
               aria-expanded={showUserMenu}
-              className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base"
+              className={`${isCompact ? 'h-11 w-11' : 'w-8 h-8'} rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base`}
             >
               <User className="w-5 h-5" />
             </button>
-            
+
             {showUserMenu && (
               <div
                 role="menu"
-                className="absolute right-0 mt-2 w-48 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50"
+                aria-label="User menu"
+                className={`w-48 ${menuPanelClassName}`}
               >
                 <div className="px-4 py-2 border-b border-[var(--border)]">
                   <p className="text-sm font-medium">{readAccount().username}</p>
@@ -208,23 +308,23 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                     setShowUserMenu(false);
                     setShowProfile(true);
                   }}
-                  className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base"
+                  className={menuItemClassName}
                 >
                   Profile
                 </button>
-                <button 
+                <button
                   onClick={() => {
                     setShowUserMenu(false);
                     setShowSettings(true);
                   }}
-                  className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base"
+                  className={menuItemClassName}
                 >
                   Settings
                 </button>
                 <div className="border-t border-[var(--border)] mt-2 pt-2">
                   <button
                     onClick={signOut}
-                    className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base flex items-center gap-2"
+                    className={`${menuItemClassName} flex items-center gap-2`}
                   >
                     <LogOut className="w-4 h-4" />
                     <span>Sign out</span>
