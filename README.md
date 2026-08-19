@@ -268,11 +268,22 @@ re-indexed. To switch models:
 
 1. Stop the backend.
 2. Set the new `EMB_MODEL_NAME` in `.env`.
-3. Delete the existing embeddings (they are regenerated on re-ingest):
+3. Restart, then rebuild the index in place:
    ```bash
-   sqlite3 backend/data/opennotebook.db "DELETE FROM embeddings;"
+   docker exec <backend-container> sh -lc "cd /app && python -m scripts.reindex"
    ```
-4. Restart, then re-upload the affected documents.
+
+`scripts/reindex.py` re-extracts, re-chunks and re-embeds every document already
+in the database, keeping document ids — so projects, conversations and citations
+survive, which deleting the embeddings and re-uploading by hand does not. Back up
+`backend/data/opennotebook.db` first and use `--dry-run` to see what it would
+touch; `--source-type` and `--ids` narrow it. A source it cannot re-read — a URL
+that now 404s, a PDF whose upload is gone — is marked `error` and keeps its old
+chunks, so it stops being retrievable until it is re-added.
+
+The same script is how a change to extraction or chunking reaches documents that
+are already indexed. Stored chunks were produced by the old code and do not
+improve on their own.
 
 ## Retrieval
 
