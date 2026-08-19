@@ -9,10 +9,11 @@ from app.schemas import (
     FileUploadResponse, URLUploadRequest, YouTubeUploadRequest,
     DocumentResponse, DocumentStatusResponse
 )
+from app.db.models import User
 from app.services.documents import DocumentService
-from app.services.projects import ProjectService
 from app.config import get_settings
 from app.routers.auth import get_current_user
+from app.routers.ownership import require_document, require_project
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -31,16 +32,14 @@ async def upload_file(
     project_id: str,
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Upload a file to a project.
+    """Upload a file to one of the caller's projects.
     
     Supports PDF files for now.
     """
-    # Check if project exists
-    project = ProjectService.get_project(db, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, current_user)
     
     # Validate file type
     if not file.filename.lower().endswith('.pdf'):
@@ -66,6 +65,7 @@ async def upload_file(
         document = await document_service.process_pdf_upload(
             db=db,
             project_id=project_id,
+            user_id=current_user.id,
             file=file.file,
             filename=file.filename,
             title=title
@@ -89,19 +89,18 @@ async def upload_file(
 async def upload_url(
     project_id: str,
     request: URLUploadRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Add a URL document to a project."""
-    # Check if project exists
-    project = ProjectService.get_project(db, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Add a URL document to one of the caller's projects."""
+    require_project(db, project_id, current_user)
     
     try:
         # Process the URL
         document = await document_service.process_url(
             db=db,
             project_id=project_id,
+            user_id=current_user.id,
             url=request.url,
             title=request.title
         )
@@ -124,13 +123,11 @@ async def upload_url(
 async def upload_youtube(
     project_id: str,
     request: YouTubeUploadRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Add a YouTube video transcript to a project."""
-    # Check if project exists
-    project = ProjectService.get_project(db, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Add a YouTube video transcript to one of the caller's projects."""
+    require_project(db, project_id, current_user)
     
     if not settings.enable_yt_transcription:
         raise HTTPException(
@@ -143,6 +140,7 @@ async def upload_youtube(
         document = await document_service.process_youtube(
             db=db,
             project_id=project_id,
+            user_id=current_user.id,
             youtube_url=request.youtube_url,
             title=request.title
         )
@@ -164,13 +162,11 @@ async def upload_youtube(
 @router.get("/docs/{doc_id}/status", response_model=DocumentStatusResponse)
 async def get_document_status(
     doc_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Get the processing status of a document."""
-    document = document_service.get_document_status(db, doc_id)
-    
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+    """Get the processing status of one of the caller's documents."""
+    document = require_document(db, doc_id, current_user)
     
     # Calculate progress (simple estimation)
     progress = None
@@ -195,13 +191,11 @@ async def get_document_status(
 @router.get("/docs/{doc_id}", response_model=DocumentResponse)
 async def get_document(
     doc_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Get document details."""
-    document = document_service.get_document_status(db, doc_id)
-    
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+    """Get details of one of the caller's documents."""
+    document = require_document(db, doc_id, current_user)
     
     # Count chunks if available
     chunk_count = len(document.chunks) if document.chunks else 0
@@ -223,9 +217,11 @@ async def get_document(
 @router.delete("/docs/{doc_id}")
 async def delete_document(
     doc_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Delete a document."""
+    """Delete one of the caller's documents."""
+    require_document(db, doc_id, current_user)
     success = document_service.delete_document(db, doc_id)
     
     if not success:

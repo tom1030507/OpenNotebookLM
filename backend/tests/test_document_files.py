@@ -15,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.database import get_db
 from app.db.models import Base, Document
 from app.routers import files
-from conftest import authenticated_client
+from conftest import authenticated_client, owner_id
 
 
 PDF_BYTES = b"%PDF-1.4 preview me"
@@ -64,6 +64,7 @@ def add_document(db, source_url, source_type="pdf", meta_json=None):
     """Record a document with the given stored path."""
     db.add(Document(
         id=DOC_ID,
+        user_id=owner_id(db),
         title="Paper",
         source_type=source_type,
         source_url=source_url,

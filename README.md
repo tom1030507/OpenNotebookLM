@@ -29,7 +29,7 @@ a local model too.
 | Export a conversation, a project, or a project summary | ✅ |
 | Studio: audio summary (browser speech), Markdown report | ✅ |
 | Studio: video summary, mind map | ❌ not implemented — marked as unavailable in the UI |
-| Per-user isolation of projects | ❌ accounts exist, but every signed-in user sees every project |
+| Per-user isolation: your projects, documents and conversations are yours alone | ✅ |
 
 **Without an LLM provider configured, question answering still returns a
 response — but an extractive one**: the first few sentences of the best-matching
@@ -109,8 +109,33 @@ That middleware only checks the cookie is *present*: it is a navigation
 convenience so you land on `/login` instead of an empty workspace, and it is not
 what protects your data. The API is.
 
-Signed-in users all see the same projects — see the last row of
-[What works today](#what-works-today).
+### Whose data is whose
+
+Projects and documents carry an owner, and every route that reads or writes them
+checks it. Conversations follow their project; retrieval is confined to the
+caller's own documents even when no project is selected, so a question cannot
+reach another account's chunks.
+
+A resource that belongs to someone else answers `404`, exactly like one that does
+not exist. That is deliberate: `403` would confirm the id is real, which turns id
+enumeration into a way of discovering what other accounts have.
+
+**Rows created before ownership existed have no owner, and the API treats them as
+belonging to nobody rather than to everybody.** They stay in the database and
+stop appearing in the UI until they are claimed:
+
+```bash
+docker exec <backend-container> sh -lc   "cd /app && python -m scripts.assign_owner --username <account> --dry-run"
+```
+
+Drop `--dry-run` to write. Only null owners are touched, so it is safe to re-run
+and can never move a row between accounts. The `user_id` columns themselves are
+added to an existing database on start-up by `db.database.ensure_added_columns`,
+since `create_all` only ever creates missing *tables*.
+
+Not scoped per account: `/api/cache/stats`, `/api/cache/health` and
+`/api/cache/clear` act on one shared process-wide cache. They need a token but
+not an owner, and clearing it affects everyone.
 
 ## Configuring the LLM
 
@@ -459,9 +484,8 @@ bare virtualenv without them cannot collect the tests.
 
 Stated plainly, because several of these look like features until you hit them:
 
-- **The API is not behind authentication.** Accounts and the login flow work,
-  but every `/api/*` endpoint accepts unauthenticated requests, and projects
-  have no owner — anyone signed in sees everything.
+- **There is no sharing.** Ownership is all-or-nothing: a project belongs to one
+  account, and there is no way to grant another account access to it.
 - **Caching is in-memory.** `app/services/cache.py` will use Redis if a client
   and a `redis_url` setting are present; neither ships, so the cache is
   per-process and resets on restart.

@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.database import get_db
 from app.db.models import Base, Document, Project, ProjectDocument
 from app.routers import export
-from conftest import authenticated_client
+from conftest import authenticated_client, owner_id
 
 
 app = FastAPI()
@@ -49,17 +49,20 @@ with TestingSessionLocal() as setup_session:
 def two_projects_with_own_documents():
     """Seed two projects, each owning exactly one document."""
     with TestingSessionLocal() as db:
+        owner = owner_id(db)
         db.add_all([
-            Project(id="project-a", name="Project A"),
-            Project(id="project-b", name="Project B"),
+            Project(id="project-a", user_id=owner, name="Project A"),
+            Project(id="project-b", user_id=owner, name="Project B"),
             Document(
                 id="document-a",
+                user_id=owner,
                 title="Only In A",
                 source_type="pdf",
                 status="ready",
             ),
             Document(
                 id="document-b",
+                user_id=owner,
                 title="Only In B",
                 source_type="pdf",
                 status="ready",

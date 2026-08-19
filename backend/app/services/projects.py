@@ -15,12 +15,22 @@ class ProjectService:
     """Service for project operations."""
     
     @staticmethod
-    def create_project(db: Session, project_data: ProjectCreate) -> Project:
-        """Create a new project."""
+    def create_project(db: Session, project_data: ProjectCreate, user_id: str) -> Project:
+        """Create a new project owned by the given account.
+
+        Args:
+            db: Database session
+            project_data: Name, description and metadata
+            user_id: Account that will own the project
+
+        Returns:
+            The created project
+        """
         project_id = str(uuid.uuid4())
         
         project = Project(
             id=project_id,
+            user_id=user_id,
             name=project_data.name,
             description=project_data.description,
             meta_json=project_data.meta_json or {}
@@ -50,12 +60,28 @@ class ProjectService:
     @staticmethod
     def get_projects(
         db: Session, 
+        user_id: str,
         skip: int = 0, 
         limit: int = 100,
         search: Optional[str] = None
     ) -> tuple[List[Project], int]:
-        """Get list of projects with pagination."""
-        query = db.query(Project)
+        """Get one account's projects, paginated.
+
+        `user_id` is positional and has no default on purpose: a listing that
+        forgets it would quietly return every account's projects, which is the
+        bug this parameter exists to prevent.
+
+        Args:
+            db: Database session
+            user_id: Account whose projects to return
+            skip: Offset
+            limit: Page size
+            search: Optional name/description filter
+
+        Returns:
+            The page of projects and the total for this account
+        """
+        query = db.query(Project).filter(Project.user_id == user_id)
         
         # Apply search filter if provided
         if search:

@@ -4,8 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 import structlog
 
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db
+from app.db.models import User
 from app.services.cache import cache_service
 from app.routers.auth import get_current_user
+from app.routers.ownership import require_document, require_project
 
 logger = structlog.get_logger()
 
@@ -89,8 +94,17 @@ async def clear_cache(
 
 
 @router.delete("/invalidate/project/{project_id}", response_model=CacheInvalidateResponse)
-async def invalidate_project_cache(project_id: str):
-    """Invalidate all cache entries for a project."""
+async def invalidate_project_cache(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Invalidate the cache entries for one of the caller's projects."""
+    # Checked even though this only drops cache entries: the response says how
+    # many were invalidated, which would otherwise report on another account's
+    # activity, and a 404-vs-200 difference would confirm the id exists.
+    require_project(db, project_id, current_user)
+
     try:
         count = cache_service.invalidate_project_cache(project_id)
         return CacheInvalidateResponse(
@@ -104,8 +118,14 @@ async def invalidate_project_cache(project_id: str):
 
 
 @router.delete("/invalidate/document/{document_id}", response_model=CacheInvalidateResponse)
-async def invalidate_document_cache(document_id: str):
-    """Invalidate all cache entries for a document."""
+async def invalidate_document_cache(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Invalidate the cache entries for one of the caller's documents."""
+    require_document(db, document_id, current_user)
+
     try:
         count = cache_service.invalidate_document_cache(document_id)
         return CacheInvalidateResponse(
@@ -119,8 +139,14 @@ async def invalidate_document_cache(document_id: str):
 
 
 @router.post("/warmup/{project_id}")
-async def warmup_cache(project_id: str):
-    """Warm up cache for a project by pre-loading common queries."""
+async def warmup_cache(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Warm up the cache for one of the caller's projects."""
+    require_project(db, project_id, current_user)
+
     # This is a placeholder for cache warming logic
     # In production, you might want to:
     # 1. Load frequently asked queries
