@@ -8,7 +8,6 @@ than a hole to probe with guessed filenames.
 """
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -16,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.database import get_db
 from app.db.models import Base, Document
 from app.routers import files
+from conftest import authenticated_client
 
 
 PDF_BYTES = b"%PDF-1.4 preview me"
@@ -52,12 +52,12 @@ def db():
 
 @pytest.fixture
 def client(db):
-    """A client for just the document file route."""
+    """A signed-in client for just the document file route."""
     app = FastAPI()
     app.include_router(files.router, prefix="/api")
     app.dependency_overrides[get_db] = lambda: db
 
-    return TestClient(app)
+    return authenticated_client(app, db)
 
 
 def add_document(db, source_url, source_type="pdf", meta_json=None):

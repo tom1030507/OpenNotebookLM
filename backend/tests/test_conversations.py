@@ -29,6 +29,7 @@ rag_module.RAGService = StubRAGService
 sys.modules["app.services.rag"] = rag_module
 
 from app.routers import projects, query  # noqa: E402
+from conftest import authorize  # noqa: E402
 
 
 @pytest.fixture()
@@ -59,7 +60,11 @@ def client():
 
     app.dependency_overrides[get_db] = override_get_db
 
-    with TestClient(app) as test_client:
+    # The routers refuse anonymous callers, so the client holds a token.
+    with testing_session() as setup_session:
+        headers = authorize(app, setup_session)
+
+    with TestClient(app, headers=headers) as test_client:
         yield test_client, testing_session
 
     Base.metadata.drop_all(bind=engine)
