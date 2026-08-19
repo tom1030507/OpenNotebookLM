@@ -83,11 +83,21 @@ class ClaudeProvider:
 class OpenAICompatibleProvider:
     """OpenAI, or any server speaking the same chat-completions API."""
 
-    def __init__(self, name: str, model: str, api_key: str, base_url: Optional[str]):
+    def __init__(
+        self,
+        name: str,
+        model: str,
+        api_key: str,
+        base_url: Optional[str],
+        reasoning_format: Optional[str] = None,
+        min_max_tokens: int = 0,
+    ):
         from openai import OpenAI  # imported lazily, as above
 
         self.name = name
         self.model = model
+        self.reasoning_format = reasoning_format
+        self.min_max_tokens = min_max_tokens
         self._client = (
             OpenAI(api_key=api_key, base_url=base_url)
             if base_url
@@ -111,12 +121,21 @@ class OpenAICompatibleProvider:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        request: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            # A reasoning model writes its thinking into this budget first, so
+            # the floor is what keeps the ceiling from cutting off the answer.
+            "max_tokens": max(max_tokens, self.min_max_tokens),
+        }
+        if self.reasoning_format:
+            # Not part of the OpenAI API. It travels in extra_body, and only
+            # when configured, because OpenAI rejects parameters it does not
+            # recognise — which would take down the default path.
+            request["extra_body"] = {"reasoning_format": self.reasoning_format}
+
+        response = self._client.chat.completions.create(**request)
         usage = response.usage
         return {
             "text": response.choices[0].message.content,
@@ -148,7 +167,9 @@ def _build_provider():
             name="openai",
             model=settings.openai_model,
             api_key=settings.openai_api_key,
-            base_url=None,
+            base_url=settings.openai_base_url,
+            reasoning_format=settings.openai_reasoning_format,
+            min_max_tokens=settings.openai_min_max_tokens,
         )
 
     if mode in ("local", "auto"):

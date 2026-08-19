@@ -21,6 +21,13 @@ services:
       - LLM_MODE=${LLM_MODE:-auto}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.6}
+      # Empty means OpenAI itself; set it to redirect this path at Groq,
+      # OpenRouter, DeepSeek, or any other chat-completions-compatible provider.
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      # Groq only: parsed, raw, or hidden. Empty for every other provider.
+      - OPENAI_REASONING_FORMAT=${OPENAI_REASONING_FORMAT:-}
+      # Floor for a request's output budget; reasoning models spend it first.
+      - OPENAI_MIN_MAX_TOKENS=${OPENAI_MIN_MAX_TOKENS:-2048}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-5}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434/v1}

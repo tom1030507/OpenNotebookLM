@@ -128,18 +128,69 @@ Two details worth knowing:
   A request's `max_tokens` is therefore raised to at least
   `CLAUDE_MIN_MAX_TOKENS` (2048) so the reply isn't truncated by the thinking.
 
-### OpenAI
+### OpenAI, or any provider that speaks its API
 
 ```bash
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-5.6            # default
+OPENAI_BASE_URL=                # empty for OpenAI itself
 ```
 
-This path is written against the chat-completions API and sends `max_tokens`.
-It has not been exercised against a live key here, and newer OpenAI models have
-been migrating that parameter to `max_completion_tokens` — if a request is
-rejected for the parameter name, that is the thing to change in
-`OpenAICompatibleProvider.generate`.
+`OPENAI_BASE_URL` redirects this path at any service implementing the same
+chat-completions API, which is most of them. Give it the provider's `/v1`
+endpoint and an `OPENAI_MODEL` that provider actually serves:
+
+| Provider | `OPENAI_BASE_URL` |
+|----------|-------------------|
+| Groq | `https://api.groq.com/openai/v1` |
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| DeepSeek | `https://api.deepseek.com/v1` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| xAI | `https://api.x.ai/v1` |
+| Mistral | `https://api.mistral.ai/v1` |
+
+Model ids differ per provider and change often — list them rather than
+guessing, e.g. `curl -s $OPENAI_BASE_URL/models -H "Authorization: Bearer $KEY"`.
+
+#### Reasoning models return their thinking as the answer
+
+Groq's reasoning models (`qwen/qwen3.6-27b`, MiniMax M2.7) put their entire chain
+of thought in `message.content`, wrapped in `<think>` tags — so it arrives as the
+answer and the UI renders it. `OPENAI_REASONING_FORMAT=hidden` suppresses it
+(`parsed` moves it to a separate field, `raw` is the provider default).
+
+Measured on one retrieval question at the 512-token budget `services/rag.py`
+sends:
+
+| `OPENAI_MODEL` | `<think>` in the answer | output tokens used |
+|----------------|-------------------------|--------------------|
+| `qwen/qwen3.6-27b` | yes | 373 / 512 |
+| `qwen/qwen3.6-27b` + `hidden` | no | 332 / 512 |
+| `llama-3.3-70b-versatile` | no | 25 / 512 |
+
+`hidden` cleans the output but the reasoning is still generated, still billed,
+and still counted against `max_tokens` — and because it comes first, hitting the
+ceiling truncates the answer rather than the thinking. That is what
+`OPENAI_MIN_MAX_TOKENS` (default 2048) exists to prevent: at the 512
+`services/rag.py` sends, turns that reasoned for the whole budget came back cut
+mid-sentence, or empty. Raise it further if answers still arrive truncated — a
+five-turn conversation measured here peaked at 1915 output tokens. A
+non-reasoning model is the cheaper way to a clean answer.
+
+`OPENAI_REASONING_FORMAT` itself is a Groq extension — it is sent only when set,
+because OpenAI and the others reject parameters they do not recognise.
+
+`openai/gpt-oss-*` models are unaffected: they return reasoning in a separate
+field already.
+
+This path sends `max_tokens`. It has not been exercised against a live key here,
+and newer OpenAI models have been migrating that parameter to
+`max_completion_tokens` — if a request is rejected for the parameter name, that
+is the thing to change in `OpenAICompatibleProvider.generate`.
+
+Note the `openai` SDK also reads an `OPENAI_BASE_URL` from the process
+environment on its own, so an exported value takes effect even when this setting
+is unset. Set it explicitly if you mean to reach OpenAI.
 
 ### A local model (Ollama, llama.cpp, vLLM)
 

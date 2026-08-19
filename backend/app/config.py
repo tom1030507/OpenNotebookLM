@@ -40,6 +40,27 @@ class Settings(BaseSettings):
     # Cloud APIs
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-5.6"
+    # Point the OpenAI path at any provider speaking the same chat-completions
+    # API — Groq, OpenRouter, DeepSeek, Gemini's compatibility layer — by giving
+    # its /v1 endpoint here. None means OpenAI itself. The `openai` SDK also
+    # honours an OPENAI_BASE_URL in the environment, so leaving this unset is
+    # not the same as forcing OpenAI; set it explicitly to be sure.
+    openai_base_url: Optional[str] = None
+    # Groq extension, for its reasoning models. Left unset, a model such as
+    # qwen3.6-27b returns its whole chain of thought inside the answer, wrapped
+    # in <think> tags. "hidden" drops it, "parsed" moves it to a separate field,
+    # "raw" is the provider default. The reasoning is generated either way and
+    # is charged against the request's max_tokens, so a non-reasoning model
+    # stays the cheaper way to get a clean answer. Only send this to a provider
+    # that understands it — OpenAI itself rejects unknown parameters.
+    openai_reasoning_format: Optional[str] = None  # parsed, raw, or hidden
+    # A reasoning model spends this budget on thinking before it writes the
+    # answer, so too small a value truncates the reply rather than the thinking
+    # — measured on Groq's qwen3.6-27b, turns that reasoned for the whole 512
+    # services/rag.py sends came back cut mid-sentence or empty. A request's
+    # max_tokens is raised to this floor, never lowered to it, and a
+    # non-reasoning model is unaffected: it stops when the answer ends.
+    openai_min_max_tokens: int = 2048
     claude_api_key: Optional[str] = None
     claude_model: str = "claude-opus-5"
     # Answering from retrieved chunks is not a reasoning-heavy task, so the
