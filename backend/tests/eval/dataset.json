@@ -1,0 +1,406 @@
+{
+  "description": "Retrieval-quality evaluation set. Ground truth is answer-bearing text, not chunk ids, so the same questions stay comparable across changes to the chunker. Every must_contain string was checked to appear only in the listed expect_docs, so a correct retrieval is never scored as a miss.",
+  "corpus": [
+    {
+      "id": "en-rag",
+      "lang": "en",
+      "url": "https://en.wikipedia.org/wiki/Retrieval-augmented_generation"
+    },
+    {
+      "id": "en-attention",
+      "lang": "en",
+      "url": "https://en.wikipedia.org/wiki/Attention_(machine_learning)"
+    },
+    {
+      "id": "en-transformer",
+      "lang": "en",
+      "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)"
+    },
+    {
+      "id": "zh-rag",
+      "lang": "zh",
+      "url": "https://zh.wikipedia.org/zh-tw/%E6%AA%A2%E7%B4%A2%E5%A2%9E%E5%BC%B7%E7%94%9F%E6%88%90"
+    },
+    {
+      "id": "zh-transformer",
+      "lang": "zh",
+      "url": "https://zh.wikipedia.org/zh-tw/Transformer%E6%A8%A1%E5%9E%8B"
+    },
+    {
+      "id": "zh-attention",
+      "lang": "zh",
+      "url": "https://zh.wikipedia.org/zh-tw/%E6%B3%A8%E6%84%8F%E5%8A%9B%E6%A9%9F%E5%88%B6"
+    }
+  ],
+  "queries": [
+    {
+      "id": "en-01",
+      "lang": "en",
+      "mode": "mono",
+      "query": "How did Ars Technica describe what RAG does to an LLM?",
+      "expect_docs": [
+        "en-rag"
+      ],
+      "must_contain": [
+        "blending the LLM process with a web search"
+      ]
+    },
+    {
+      "id": "en-02",
+      "lang": "en",
+      "mode": "mono",
+      "query": "Which space telescope did Google's LLM demo get wrong, and what did the error cost?",
+      "expect_docs": [
+        "en-rag"
+      ],
+      "must_contain": [
+        "James Webb Space Telescope"
+      ]
+    },
+    {
+      "id": "en-03",
+      "lang": "en",
+      "mode": "mono",
+      "query": "What is prompt stuffing and why does it change the model's answer?",
+      "expect_docs": [
+        "en-rag",
+        "zh-rag"
+      ],
+      "must_contain": [
+        "prompt stuffing"
+      ]
+    },
+    {
+      "id": "en-04",
+      "lang": "en",
+      "mode": "mono",
+      "query": "What is the Inverse Cloze Task used for when pre-training a retriever?",
+      "expect_docs": [
+        "en-rag"
+      ],
+      "must_contain": [
+        "Inverse Cloze Task"
+      ]
+    },
+    {
+      "id": "en-05",
+      "lang": "en",
+      "mode": "mono",
+      "query": "What does it mean that attention uses soft weights rather than fixed ones?",
+      "expect_docs": [
+        "en-attention"
+      ],
+      "must_contain": [
+        "soft weights"
+      ]
+    },
+    {
+      "id": "en-06",
+      "lang": "en",
+      "mode": "mono",
+      "query": "Which efficient attention variant is called Linformer?",
+      "expect_docs": [
+        "en-attention"
+      ],
+      "must_contain": [
+        "Linformer"
+      ]
+    },
+    {
+      "id": "en-07",
+      "lang": "en",
+      "mode": "mono",
+      "query": "What is a thought vector?",
+      "expect_docs": [
+        "en-attention",
+        "zh-attention"
+      ],
+      "must_contain": [
+        "thought vector"
+      ]
+    },
+    {
+      "id": "en-08",
+      "lang": "en",
+      "mode": "mono",
+      "query": "How does the query-key mechanism compute attention weights?",
+      "expect_docs": [
+        "en-attention",
+        "zh-attention"
+      ],
+      "must_contain": [
+        "query-key"
+      ]
+    },
+    {
+      "id": "en-09",
+      "lang": "en",
+      "mode": "mono",
+      "query": "What is positional encoding and why does a transformer need it?",
+      "expect_docs": [
+        "en-transformer"
+      ],
+      "must_contain": [
+        "positional encoding"
+      ]
+    },
+    {
+      "id": "en-10",
+      "lang": "en",
+      "mode": "mono",
+      "query": "What is ALiBi and how does it bias attention?",
+      "expect_docs": [
+        "en-transformer"
+      ],
+      "must_contain": [
+        "ALiBi"
+      ]
+    },
+    {
+      "id": "en-11",
+      "lang": "en",
+      "mode": "mono",
+      "query": "How does a KV cache speed up autoregressive decoding?",
+      "expect_docs": [
+        "en-transformer"
+      ],
+      "must_contain": [
+        "KV cache"
+      ]
+    },
+    {
+      "id": "en-12",
+      "lang": "en",
+      "mode": "mono",
+      "query": "What does RMSNorm replace and where is it used in a transformer?",
+      "expect_docs": [
+        "en-transformer"
+      ],
+      "must_contain": [
+        "RMSNorm"
+      ]
+    },
+    {
+      "id": "zh-01",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "RAG 的三種主要分塊策略是哪三種？",
+      "expect_docs": [
+        "zh-rag"
+      ],
+      "must_contain": [
+        "固定長度重疊分塊",
+        "基於語法的分塊"
+      ]
+    },
+    {
+      "id": "zh-02",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "什麼是提示詞填充，它為什麼能引導模型的回答？",
+      "expect_docs": [
+        "zh-rag"
+      ],
+      "must_contain": [
+        "提示詞填充"
+      ]
+    },
+    {
+      "id": "zh-03",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "混合搜尋怎麼補足純向量搜尋會遺漏關鍵事實的問題？",
+      "expect_docs": [
+        "zh-rag"
+      ],
+      "must_contain": [
+        "混合搜尋",
+        "傳統文字搜尋"
+      ]
+    },
+    {
+      "id": "zh-04",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "評估 RAG 系統常用哪些基準資料集？",
+      "expect_docs": [
+        "zh-rag"
+      ],
+      "must_contain": [
+        "BEIR",
+        "Natural Questions"
+      ]
+    },
+    {
+      "id": "zh-05",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "注意力機制的「軟權重」是什麼意思？",
+      "expect_docs": [
+        "zh-attention"
+      ],
+      "must_contain": [
+        "軟權重"
+      ]
+    },
+    {
+      "id": "zh-06",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "查詢-鍵機制如何算出注意力的權重？",
+      "expect_docs": [
+        "zh-attention"
+      ],
+      "must_contain": [
+        "查詢-鍵機制"
+      ]
+    },
+    {
+      "id": "zh-07",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "1990 年代類似注意力的架構當時被叫做什麼名稱？",
+      "expect_docs": [
+        "zh-attention"
+      ],
+      "must_contain": [
+        "乘法模組"
+      ]
+    },
+    {
+      "id": "zh-08",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "注意力機制在神經圖靈機裡扮演什麼角色？",
+      "expect_docs": [
+        "zh-attention"
+      ],
+      "must_contain": [
+        "神經圖靈機"
+      ]
+    },
+    {
+      "id": "zh-09",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "什麼是旋轉位置編碼？",
+      "expect_docs": [
+        "zh-transformer"
+      ],
+      "must_contain": [
+        "旋轉位置編碼"
+      ]
+    },
+    {
+      "id": "zh-10",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "Transformer 使用哪一種詞元化方法把文字切成詞元？",
+      "expect_docs": [
+        "zh-transformer"
+      ],
+      "must_contain": [
+        "位元組對編碼"
+      ]
+    },
+    {
+      "id": "zh-11",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "縮放點積注意力是怎麼計算的？",
+      "expect_docs": [
+        "zh-transformer"
+      ],
+      "must_contain": [
+        "縮放點積"
+      ]
+    },
+    {
+      "id": "zh-12",
+      "lang": "zh",
+      "mode": "mono",
+      "query": "殘差連接在 Transformer 區塊裡有什麼作用？",
+      "expect_docs": [
+        "zh-transformer"
+      ],
+      "must_contain": [
+        "殘差連接"
+      ]
+    },
+    {
+      "id": "x-01",
+      "lang": "zh",
+      "mode": "cross",
+      "query": "專家混合（Mixture of Experts）架構怎麼用在 Transformer 上？",
+      "expect_docs": [
+        "en-transformer"
+      ],
+      "must_contain": [
+        "Mixture of Experts"
+      ]
+    },
+    {
+      "id": "x-02",
+      "lang": "zh",
+      "mode": "cross",
+      "query": "什麼是推測解碼（speculative decoding）？",
+      "expect_docs": [
+        "en-transformer"
+      ],
+      "must_contain": [
+        "speculative decoding"
+      ]
+    },
+    {
+      "id": "x-03",
+      "lang": "zh",
+      "mode": "cross",
+      "query": "FlashAttention 解決了什麼效能問題？",
+      "expect_docs": [
+        "en-attention",
+        "en-transformer"
+      ],
+      "must_contain": [
+        "FlashAttention"
+      ]
+    },
+    {
+      "id": "x-04",
+      "lang": "en",
+      "mode": "cross",
+      "query": "Which long-context transformer variant is named Longformer?",
+      "expect_docs": [
+        "zh-transformer"
+      ],
+      "must_contain": [
+        "Longformer"
+      ]
+    },
+    {
+      "id": "x-05",
+      "lang": "en",
+      "mode": "cross",
+      "query": "Which benchmark datasets are commonly used to evaluate a RAG system?",
+      "expect_docs": [
+        "zh-rag"
+      ],
+      "must_contain": [
+        "BEIR",
+        "Natural Questions"
+      ]
+    },
+    {
+      "id": "x-06",
+      "lang": "en",
+      "mode": "cross",
+      "query": "What were attention-like architectures called in the 1990s?",
+      "expect_docs": [
+        "zh-attention"
+      ],
+      "must_contain": [
+        "乘法模組",
+        "sigma pi"
+      ]
+    }
+  ]
+}
