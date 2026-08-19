@@ -161,26 +161,31 @@ describe('login page', () => {
     expect(register).not.toHaveBeenCalled();
   });
 
-  it('keeps the demo sign-in working without reaching the backend', async () => {
-    const login = vi.spyOn(api, 'login');
+  it('offers no way in that skips the backend', () => {
+    // A session the backend never issued is refused by every API route, so a
+    // client-side shortcut lands straight back here. There is no shortcut.
+    render(<LoginPage />);
+
+    expect(screen.queryByRole('button', { name: /Quick Demo Access/ })).toBeNull();
+    expect(screen.queryByText(/admin123/)).toBeNull();
+  });
+
+  it('sends the old demo credentials to the backend like any others', async () => {
+    const login = vi.spyOn(api, 'login').mockRejectedValue(
+      new Error('Incorrect username or password'),
+    );
 
     render(<LoginPage />);
     fillIn(/username/i, 'admin');
     fillIn(/^password$/i, 'admin123');
     submit();
 
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
-    expect(login).not.toHaveBeenCalled();
-    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeTruthy();
-    expect(window.localStorage.getItem('auth_token')).toBeTruthy();
-  });
-
-  it('keeps the quick demo access button working', async () => {
-    render(<LoginPage />);
-
-    fireEvent.click(screen.getByRole('button', { name: /Quick Demo Access/ }));
-
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
-    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeTruthy();
+    expect(await screen.findByText('Incorrect username or password')).toBeTruthy();
+    expect(login).toHaveBeenCalledWith({
+      username: 'admin',
+      password: 'admin123',
+    });
+    expect(push).not.toHaveBeenCalled();
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeUndefined();
   });
 });

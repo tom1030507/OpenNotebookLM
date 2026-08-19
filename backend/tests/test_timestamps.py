@@ -51,6 +51,7 @@ rag_module.RAGService = StubRAGService
 sys.modules["app.services.rag"] = rag_module
 
 from app.routers import export, health, projects, query  # noqa: E402
+from conftest import authorize  # noqa: E402
 
 
 # A JSON string that starts like an ISO 8601 date-time. Deliberately loose: the
@@ -136,7 +137,11 @@ def client(session_factory):
 
     app.dependency_overrides[get_db] = override_get_db
 
-    with TestClient(app) as test_client:
+    # The routers refuse anonymous callers, so the client holds a token.
+    with session_factory() as setup_session:
+        headers = authorize(app, setup_session)
+
+    with TestClient(app, headers=headers) as test_client:
         yield test_client
 
 

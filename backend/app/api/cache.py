@@ -1,13 +1,23 @@
 """API endpoints for cache management."""
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 import structlog
 
 from app.services.cache import cache_service
+from app.routers.auth import get_current_user
 
 logger = structlog.get_logger()
-router = APIRouter(prefix="/api/cache", tags=["Cache"])
+
+# Every route below requires a signed-in caller. Declaring that on the
+# router rather than on each handler means an endpoint added later is
+# protected by default, and it travels with the router wherever it is
+# mounted.
+router = APIRouter(
+    prefix="/api/cache",
+    tags=["Cache"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class CacheStats(BaseModel):

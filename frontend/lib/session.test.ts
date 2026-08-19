@@ -2,7 +2,12 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { AUTH_TOKEN_COOKIE, clearSession, storeSession } from './session';
+import {
+  AUTH_TOKEN_COOKIE,
+  clearSession,
+  readAccessToken,
+  storeSession,
+} from './session';
 
 
 const cookieValue = (name: string) => document.cookie
@@ -52,5 +57,25 @@ describe('browser session', () => {
     expect(cookieValue(AUTH_TOKEN_COOKIE)).toBe(
       encodeURIComponent('token with; semicolon'),
     );
+  });
+
+  it('reads back the token the API client has to send', () => {
+    storeSession('a-signed-token', { username: 'ada', email: 'ada@example.com' });
+
+    expect(readAccessToken()).toBe('a-signed-token');
+  });
+
+  it('falls back to the mirrored key when the first one is gone', () => {
+    window.localStorage.setItem('auth_token', 'the-surviving-copy');
+
+    expect(readAccessToken()).toBe('the-surviving-copy');
+  });
+
+  it('has no token to read once the session is cleared', () => {
+    storeSession('a-signed-token', { username: 'ada', email: 'ada@example.com' });
+
+    clearSession();
+
+    expect(readAccessToken()).toBeNull();
   });
 });
