@@ -9,10 +9,11 @@ import tempfile
 import os
 
 from app.db.database import get_db
-from app.db.models import Project, Conversation, Message, Document
+from app.db.models import Project, Conversation, Message, Document, User
 from app.services.export import ExportService
 from app.utils.time import utc_now
 from app.routers.auth import get_current_user
+from app.routers.ownership import require_conversation, require_project
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -30,9 +31,10 @@ async def export_conversation(
     conversation_id: str,
     format: str = "markdown",
     include_citations: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Export a conversation to various formats.
+    """Export one of the caller's conversations to various formats.
     
     Supported formats: markdown, json, txt
     """
@@ -40,13 +42,7 @@ async def export_conversation(
     if format not in ["markdown", "json", "txt"]:
         raise HTTPException(status_code=400, detail="Invalid export format")
     
-    # Get conversation
-    conversation = db.query(Conversation).filter(
-        Conversation.id == conversation_id
-    ).first()
-    
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conversation = require_conversation(db, conversation_id, current_user)
     
     try:
         # Export conversation
@@ -76,9 +72,10 @@ async def export_project(
     format: str = "json",
     include_documents: bool = True,
     include_conversations: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Export an entire project.
+    """Export one of the caller's projects in full.
     
     Includes all documents, conversations, and metadata.
     """
@@ -86,11 +83,7 @@ async def export_project(
     if format not in ["json", "markdown"]:
         raise HTTPException(status_code=400, detail="Invalid export format")
     
-    # Get project
-    project = db.query(Project).filter(Project.id == project_id).first()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = require_project(db, project_id, current_user)
     
     try:
         # Export project
@@ -118,17 +111,14 @@ async def export_project(
 @router.get("/export/project/{project_id}/summary")
 async def export_project_summary(
     project_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Generate and export a summary report of the project.
+    """Generate and export a summary report of one of the caller's projects.
     
     Includes statistics, key insights, and document overview.
     """
-    # Get project
-    project = db.query(Project).filter(Project.id == project_id).first()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = require_project(db, project_id, current_user)
     
     try:
         # Generate summary
@@ -183,9 +173,10 @@ async def export_project_summary(
 async def batch_export(
     conversation_ids: list[str],
     format: str = "json",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Export multiple conversations at once.
+    """Export several of the caller's conversations at once.
     
     Returns a ZIP file containing all exports.
     """
@@ -194,6 +185,11 @@ async def batch_export(
     
     if format not in ["markdown", "json", "txt"]:
         raise HTTPException(status_code=400, detail="Invalid export format")
+    
+    # Every id is checked before any of them is exported, so a batch cannot be
+    # used to smuggle one other account's conversation in among your own.
+    for conversation_id in conversation_ids:
+        require_conversation(db, conversation_id, current_user)
     
     try:
         # Create temporary file for ZIP

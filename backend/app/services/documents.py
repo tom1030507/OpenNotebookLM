@@ -107,6 +107,7 @@ class DocumentService:
         self,
         db: Session,
         project_id: str,
+        user_id: str,
         file: BinaryIO,
         filename: str,
         title: Optional[str] = None
@@ -116,6 +117,7 @@ class DocumentService:
         Args:
             db: Database session
             project_id: Project ID
+            user_id: Account that will own the document
             file: File object
             filename: Original filename
             title: Optional document title
@@ -137,6 +139,7 @@ class DocumentService:
             # Create document record with queued status
             document = Document(
                 id=doc_id,
+                user_id=user_id,
                 title=title or filename,
                 source_type="pdf",
                 source_url=str(file_path),
@@ -242,6 +245,7 @@ class DocumentService:
         self,
         db: Session,
         project_id: str,
+        user_id: str,
         url: str,
         title: Optional[str] = None
     ) -> Document:
@@ -250,6 +254,7 @@ class DocumentService:
         Args:
             db: Database session
             project_id: Project ID
+            user_id: Account that will own the document
             url: URL to extract content from
             title: Optional document title
             
@@ -263,6 +268,7 @@ class DocumentService:
             # Create document record with queued status
             document = Document(
                 id=doc_id,
+                user_id=user_id,
                 title=title or url,
                 source_type="url",
                 source_url=url,
@@ -366,6 +372,7 @@ class DocumentService:
         self,
         db: Session,
         project_id: str,
+        user_id: str,
         youtube_url: str,
         title: Optional[str] = None
     ) -> Document:
@@ -374,6 +381,7 @@ class DocumentService:
         Args:
             db: Database session
             project_id: Project ID
+            user_id: Account that will own the document
             youtube_url: YouTube video URL
             title: Optional document title
             
@@ -391,6 +399,7 @@ class DocumentService:
             # Create document record with queued status
             document = Document(
                 id=doc_id,
+                user_id=user_id,
                 title=title or youtube_url,
                 source_type="youtube",
                 source_url=youtube_url,

@@ -10,9 +10,14 @@ from app.config import get_settings
 from app.db.database import get_db
 from app.services.rag import RAGService
 from app.services.projects import ProjectService
-from app.db.models import Conversation, Project
+from app.db.models import Conversation, User
 from app.schemas import ConversationResponse
 from app.routers.auth import get_current_user
+from app.routers.ownership import (
+    owned_document_ids,
+    require_conversation,
+    require_project,
+)
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -72,7 +77,8 @@ class ConversationUpdateRequest(BaseModel):
 @router.post("/query", response_model=QueryResponse)
 async def query(
     request: QueryRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Process a RAG query.
     
@@ -82,23 +88,19 @@ async def query(
     3. Returns an answer with source citations
     """
     try:
+        # Retrieval is confined to the caller's own documents, always, and
+        # independently of the project scope below. Without this a question with
+        # no project selected searched every chunk in the database.
+        allowed_document_ids = owned_document_ids(db, current_user)
+
         # Validate project if specified
         if request.project_id:
-            project = db.query(Project).filter(
-                Project.id == request.project_id
-            ).first()
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+            require_project(db, request.project_id, current_user)
         
         # Handle conversation
         conversation_id = request.conversation_id
         if request.conversation_id:
-            # Use existing conversation
-            conversation = db.query(Conversation).filter(
-                Conversation.id == request.conversation_id
-            ).first()
-            if not conversation:
-                raise HTTPException(status_code=404, detail="Conversation not found")
+            conversation = require_conversation(db, request.conversation_id, current_user)
 
             if (
                 request.project_id
@@ -122,7 +124,8 @@ async def query(
                 top_k=request.top_k,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
-                include_sources=request.include_sources
+                include_sources=request.include_sources,
+                allowed_document_ids=allowed_document_ids
             )
         else:
             # Create new conversation if project is specified
@@ -145,7 +148,8 @@ async def query(
                     top_k=request.top_k,
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
-                    include_sources=request.include_sources
+                    include_sources=request.include_sources,
+                    allowed_document_ids=allowed_document_ids
                 )
             else:
                 # One-off query without conversation
@@ -156,7 +160,8 @@ async def query(
                     top_k=request.top_k,
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
-                    include_sources=request.include_sources
+                    include_sources=request.include_sources,
+                    allowed_document_ids=allowed_document_ids
                 )
         
         return QueryResponse(
@@ -183,11 +188,10 @@ async def create_conversation(
     project_id: str,
     request: ConversationCreateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Create an empty conversation for a project."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Create an empty conversation in one of the caller's projects."""
+    require_project(db, project_id, current_user)
 
     conversation = Conversation(
         id=str(uuid.uuid4()),
@@ -211,15 +215,11 @@ async def create_conversation(
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Get conversation details with messages."""
-    conversation = db.query(Conversation).filter(
-        Conversation.id == conversation_id
-    ).first()
-    
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    """Get one of the caller's conversations, with its messages."""
+    conversation = require_conversation(db, conversation_id, current_user)
     
     # Get messages
     messages = []
@@ -250,13 +250,10 @@ async def update_conversation(
     conversation_id: str,
     request: ConversationUpdateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Rename an existing conversation."""
-    conversation = db.query(Conversation).filter(
-        Conversation.id == conversation_id,
-    ).first()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    """Rename one of the caller's conversations."""
+    conversation = require_conversation(db, conversation_id, current_user)
 
     conversation.title = request.title
     db.commit()
@@ -278,12 +275,11 @@ async def update_conversation(
 )
 async def list_project_conversations(
     project_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """List all conversations in a project."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """List the conversations in one of the caller's projects."""
+    require_project(db, project_id, current_user)
     
     conversations = db.query(Conversation).filter(
         Conversation.project_id == project_id
@@ -305,15 +301,11 @@ async def list_project_conversations(
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Delete a conversation."""
-    conversation = db.query(Conversation).filter(
-        Conversation.id == conversation_id
-    ).first()
-    
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    """Delete one of the caller's conversations."""
+    conversation = require_conversation(db, conversation_id, current_user)
     
     db.delete(conversation)
     db.commit()

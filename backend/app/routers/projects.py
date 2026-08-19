@@ -9,8 +9,10 @@ from app.schemas import (
     ProjectCreate, ProjectUpdate, ProjectResponse, 
     ProjectListResponse, DocumentResponse
 )
+from app.db.models import User
 from app.services.projects import ProjectService
 from app.routers.auth import get_current_user
+from app.routers.ownership import require_document, require_project
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -23,11 +25,12 @@ logger = structlog.get_logger()
 @router.post("/projects", response_model=ProjectResponse)
 async def create_project(
     project_data: ProjectCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Create a new project."""
+    """Create a new project owned by the caller."""
     try:
-        project = ProjectService.create_project(db, project_data)
+        project = ProjectService.create_project(db, project_data, current_user.id)
         return ProjectResponse(
             id=project.id,
             name=project.name,
@@ -48,12 +51,15 @@ async def list_projects(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     search: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """List all projects with pagination."""
+    """List the caller's projects with pagination."""
     try:
         skip = (page - 1) * per_page
-        projects, total = ProjectService.get_projects(db, skip=skip, limit=per_page, search=search)
+        projects, total = ProjectService.get_projects(
+            db, current_user.id, skip=skip, limit=per_page, search=search
+        )
         
         project_responses = [
             ProjectResponse(
@@ -82,13 +88,12 @@ async def list_projects(
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Get a specific project by ID."""
+    """Get one of the caller's projects by ID."""
+    require_project(db, project_id, current_user)
     project = ProjectService.get_project(db, project_id)
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
     
     return ProjectResponse(
         id=project.id,
@@ -106,13 +111,12 @@ async def get_project(
 async def update_project(
     project_id: str,
     project_update: ProjectUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Update a project."""
+    """Update one of the caller's projects."""
+    require_project(db, project_id, current_user)
     project = ProjectService.update_project(db, project_id, project_update)
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
     
     return ProjectResponse(
         id=project.id,
@@ -129,13 +133,12 @@ async def update_project(
 @router.delete("/projects/{project_id}")
 async def delete_project(
     project_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Delete a project."""
-    success = ProjectService.delete_project(db, project_id)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Delete one of the caller's projects."""
+    require_project(db, project_id, current_user)
+    ProjectService.delete_project(db, project_id)
     
     return {"status": "success", "message": "Project deleted successfully"}
 
@@ -145,13 +148,11 @@ async def get_project_documents(
     project_id: str,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Get documents associated with a project."""
-    # First check if project exists
-    project = ProjectService.get_project(db, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Get documents in one of the caller's projects."""
+    require_project(db, project_id, current_user)
     
     documents = ProjectService.get_project_documents(db, project_id, skip=skip, limit=limit)
     
@@ -175,9 +176,16 @@ async def get_project_documents(
 async def add_document_to_project(
     project_id: str,
     document_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Add a document to a project."""
+    """Add one of the caller's documents to one of the caller's projects."""
+    # Both ends are checked. Authorising only the project would let a caller
+    # attach someone else's document to their own project and then read it
+    # through the project's document list.
+    require_project(db, project_id, current_user)
+    require_document(db, document_id, current_user)
+
     success = ProjectService.add_document_to_project(db, project_id, document_id)
     
     if not success:
@@ -190,9 +198,11 @@ async def add_document_to_project(
 async def remove_document_from_project(
     project_id: str,
     document_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Remove a document from a project."""
+    """Remove a document from one of the caller's projects."""
+    require_project(db, project_id, current_user)
     success = ProjectService.remove_document_from_project(db, project_id, document_id)
     
     if not success:

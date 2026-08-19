@@ -20,6 +20,12 @@ class Project(Base):
     __tablename__ = "projects"
     
     id = Column(String, primary_key=True)
+    # Nullable because rows written before ownership existed have no owner to
+    # name. A null owner means the API treats the row as belonging to nobody
+    # rather than to everybody -- see scripts/assign_owner.py to claim them.
+    # The column itself is added to older databases by
+    # `db.database.ensure_added_columns`, since create_all only creates tables.
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
     name = Column(String, nullable=False)
     description = Column(Text)
     meta_json = Column(JSON, default={})
@@ -27,8 +33,13 @@ class Project(Base):
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
     
     # Relationships
+    owner = relationship("User", back_populates="projects")
     documents = relationship("ProjectDocument", back_populates="project", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_projects_user_id", "user_id"),
+    )
 
 
 class User(Base):
@@ -43,6 +54,10 @@ class User(Base):
     created_at = Column(UTCDateTime, default=func.now())
     last_login_at = Column(UTCDateTime)
 
+    # Relationships
+    projects = relationship("Project", back_populates="owner")
+    documents = relationship("Document", back_populates="owner")
+
     __table_args__ = (
         Index("idx_users_username", "username"),
         Index("idx_users_email", "email"),
@@ -54,6 +69,12 @@ class Document(Base):
     __tablename__ = "documents"
     
     id = Column(String, primary_key=True)
+    # Documents carry their own owner rather than inheriting one through
+    # ProjectDocument. A document does not need a project to exist -- in the
+    # database this was written against, 25 of 27 documents belonged to no project
+    # at all -- so deriving ownership from membership would leave those rows with
+    # no answer to "whose is this?".
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
     title = Column(String, nullable=False)
     source_type = Column(String, nullable=False)  # pdf, url, youtube
     source_url = Column(Text)
@@ -65,12 +86,14 @@ class Document(Base):
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
     
     # Relationships
+    owner = relationship("User", back_populates="documents")
     chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
     projects = relationship("ProjectDocument", back_populates="document", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index("idx_documents_status", "status"),
         Index("idx_documents_source_type", "source_type"),
+        Index("idx_documents_user_id", "user_id"),
     )
 
 

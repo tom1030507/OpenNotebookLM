@@ -46,7 +46,8 @@ class RAGService:
         max_tokens: int = 512,
         include_sources: bool = True,
         use_cache: bool = True,
-        retrieval_query: Optional[str] = None
+        retrieval_query: Optional[str] = None,
+        allowed_document_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """Process a query using RAG.
         
@@ -62,6 +63,11 @@ class RAGService:
             retrieval_query: What to search with, when it differs from what the
                 model is asked. Conversation turns need this: the prompt carries
                 the transcript, but retrieval must run on the current question.
+            allowed_document_ids: Hard limit on which documents may be searched,
+                regardless of project. The API passes the caller's own documents,
+                so a question can never reach another account's chunks. An empty
+                list means nothing is searchable; None means no limit, which only
+                callers outside the request path (the eval harness) should use.
 
         Returns:
             Query response with answer and sources
@@ -77,7 +83,8 @@ class RAGService:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     include_sources=include_sources,
-                    retrieval_query=retrieval_query
+                    retrieval_query=retrieval_query,
+                    allowed_document_ids=allowed_document_ids
                 )
                 
                 cached_result = cache_service.get_cached_query(
@@ -96,7 +103,8 @@ class RAGService:
                 db=db,
                 query=retrieval_query or query,
                 project_id=project_id,
-                top_k=top_k
+                top_k=top_k,
+                allowed_document_ids=allowed_document_ids
             )
             
             if not relevant_chunks:
@@ -144,7 +152,8 @@ class RAGService:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     include_sources=include_sources,
-                    retrieval_query=retrieval_query
+                    retrieval_query=retrieval_query,
+                    allowed_document_ids=allowed_document_ids
                 )
                 
                 cache_service.cache_query_result(
@@ -169,7 +178,8 @@ class RAGService:
         temperature: float = 0.7,
         max_tokens: int = 512,
         include_sources: bool = True,
-        retrieval_query: Optional[str] = None
+        retrieval_query: Optional[str] = None,
+        allowed_document_ids: Optional[List[str]] = None
     ) -> str:
         """Generate a unique cache key for the query.
         
@@ -189,9 +199,16 @@ class RAGService:
         # conversation the answer depends on the transcript, so keying on the
         # current question alone would serve an answer computed under different
         # history -- a correctness bug dressed up as a higher hit rate.
+        # The scope is part of the key. Without it two accounts asking the same
+        # question with no project selected would share a cache entry, and the
+        # second would be served the first one's answer -- built from documents it
+        # is not allowed to see.
+        scope = "any" if allowed_document_ids is None else ",".join(sorted(allowed_document_ids))
+
         key_parts = [
             query,
             str(retrieval_query),
+            scope,
             str(project_id),
             str(top_k),
             str(temperature),
@@ -208,7 +225,8 @@ class RAGService:
         db: Session,
         query: str,
         project_id: Optional[str] = None,
-        top_k: Optional[int] = None
+        top_k: Optional[int] = None,
+        allowed_document_ids: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """Retrieve relevant chunks for the query.
 
@@ -223,6 +241,8 @@ class RAGService:
             query: Search query
             project_id: Optional project ID
             top_k: Number of chunks to retrieve; defaults to RETRIEVAL_TOP_K
+            allowed_document_ids: Hard limit on searchable documents, applied on
+                top of the project scope rather than instead of it
 
         Returns:
             List of relevant chunks with metadata
@@ -239,6 +259,19 @@ class RAGService:
 
             if not document_ids:
                 logger.warning(f"No documents found in project {project_id}")
+                return []
+
+        # Narrow to what the caller may see. This is applied last and always, so
+        # a project scope cannot widen it: attaching someone else's document to a
+        # project would still not make it searchable.
+        if allowed_document_ids is not None:
+            allowed = set(allowed_document_ids)
+            document_ids = (
+                [doc_id for doc_id in document_ids if doc_id in allowed]
+                if document_ids is not None
+                else sorted(allowed)
+            )
+            if not document_ids:
                 return []
 
         candidate_k = max(settings.retrieval_candidate_k, top_k)
@@ -650,7 +683,8 @@ Question: {query}
         temperature: float = 0.7,
         max_tokens: int = 512,
         include_sources: bool = True,
-        use_cache: bool = True
+        use_cache: bool = True,
+        allowed_document_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """Process a query with conversation context.
         
@@ -663,6 +697,7 @@ Question: {query}
             temperature: LLM temperature
             max_tokens: Maximum tokens in response
             include_sources: Whether to include source citations
+            allowed_document_ids: Hard limit on searchable documents; see `query`
 
         Returns:
             Query response with conversation awareness
@@ -693,7 +728,8 @@ Current question: {query}"""
             max_tokens=max_tokens,
             include_sources=include_sources,
             use_cache=use_cache,
-            retrieval_query=self._retrieval_query(db, query, conversation_id)
+            retrieval_query=self._retrieval_query(db, query, conversation_id),
+            allowed_document_ids=allowed_document_ids
         )
         
         # Save to conversation

@@ -60,6 +60,13 @@ TypeScript follows the existing two-space, semicolon, single-quote style. React
 components are `PascalCase.tsx`; hooks and stores read as `useMediaQuery`,
 `useStore`.
 
+Schema changes: `Base.metadata.create_all` creates missing *tables* and nothing
+else, so a column added to a model never reaches a database that already exists —
+the app starts and then fails on "no such column". Add the column to
+`ADDED_COLUMNS` in `app/db/database.py` as well; it is applied idempotently on
+start-up. There is no migration tool wired up (alembic is in requirements but
+unused).
+
 Timestamps: new datetimes come from `app.utils.time.utc_now`, never
 `datetime.now()` or `datetime.utcnow()`, and stored datetime columns use
 `UTCDateTime` so everything the API emits carries a UTC designator. Where
@@ -77,6 +84,16 @@ the auth fixtures (`authenticated_client`, `authorize`, `auth_headers`,
 
 Every data-bearing route sits behind `get_current_user`, so a new route is
 authenticated by default and a test that forgets a token gets `401`.
+
+**Authenticated is not authorized.** Knowing who is calling does not say whether
+the row is theirs, and a route that only holds the token check will happily serve
+another account's project by id. Resolve ids through
+`app/routers/ownership.py` — `require_project`, `require_document`,
+`require_conversation` — and scope listings with `visible_projects` /
+`owned_document_ids`. Those helpers answer `404` for someone else's row, matching
+the answer for one that does not exist, so an id cannot be probed for existence.
+`tests/test_user_isolation.py` covers the pairing for every route; extend it when
+adding one.
 
 Note that some route tests replace `sys.modules["app.services.rag"]` with a stub
 so importing the query router does not load the embedding model. That replacement

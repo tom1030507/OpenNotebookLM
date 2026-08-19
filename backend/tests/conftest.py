@@ -62,6 +62,29 @@ def seed_user(db: Session, username: str = TEST_USERNAME) -> User:
     return user
 
 
+def owner_id(db: Session, username: str = TEST_USERNAME) -> str:
+    """Return the id of a seeded account, to stamp on rows a test creates.
+
+    Data-bearing rows have an owner now, and the API will not return a row that
+    belongs to nobody, so a fixture that inserts one directly has to say whose it
+    is.
+
+    Args:
+        db: Session on the test database
+        username: Account to look up
+
+    Returns:
+        The account's id
+
+    Raises:
+        AssertionError: if the account has not been seeded yet
+    """
+    user = db.query(User).filter(User.username == username).first()
+    assert user, "seed the account first, via authorize() or authenticated_client()"
+
+    return user.id
+
+
 def auth_headers(username: str = TEST_USERNAME) -> dict[str, str]:
     """Build an Authorization header carrying a token for the given account."""
     token = TEST_AUTH_SERVICE.create_access_token(username)
