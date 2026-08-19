@@ -22,6 +22,26 @@ except ImportError:
 logger = structlog.get_logger()
 settings = get_settings()
 
+# The e5 family is trained with asymmetric prefixes: indexed text is embedded as
+# "passage: ..." and a search string as "query: ...". Omitting them costs
+# retrieval quality silently — nothing errors, results are just worse. Models
+# outside the family (bge, MiniLM, ...) take no prefix and must not get one.
+E5_PREFIXES = {"query": "query: ", "passage": "passage: "}
+
+
+def prefix_for_role(role: str) -> str:
+    """Return the prefix this model expects for the given role.
+
+    Args:
+        role: "query" for a search string, "passage" for indexed content.
+
+    Returns:
+        The prefix to prepend, or "" for models that take none.
+    """
+    if "e5" in settings.emb_model_name.lower():
+        return E5_PREFIXES.get(role, "")
+    return ""
+
 
 class EmbeddingService:
     """Service for generating and managing embeddings."""
@@ -76,24 +96,32 @@ class EmbeddingService:
         self,
         text: Union[str, List[str]],
         normalize: bool = True,
-        use_cache: bool = True
+        use_cache: bool = True,
+        role: str = "passage"
     ) -> Union[np.ndarray, List[np.ndarray]]:
         """Generate embedding for text.
-        
+
         Args:
             text: Text or list of texts to embed
             normalize: Whether to normalize the embeddings
             use_cache: Whether to use cache for embeddings
-            
+            role: "passage" for indexed content, "query" for a search string.
+                Models trained with asymmetric prefixes need the distinction;
+                see `prefix_for_role`.
+
         Returns:
             Embedding vector(s)
         """
+        prefix = prefix_for_role(role)
         try:
             if isinstance(text, str):
                 # Check cache for single text
                 if use_cache and cache_service:
-                    # Generate cache key for the text
-                    cache_key = hashlib.sha256(f"{text}_{normalize}".encode()).hexdigest()
+                    # Keyed by role too: the same string embedded as a query and
+                    # as a passage are different vectors.
+                    cache_key = hashlib.sha256(
+                        f"{prefix}{text}_{normalize}".encode()
+                    ).hexdigest()
                     cached_embedding = cache_service.get_cached_embedding(
                         document_id="text_embed",
                         chunk_id=cache_key
@@ -104,7 +132,7 @@ class EmbeddingService:
                 
                 # Single text
                 embedding = EmbeddingService._model.encode(
-                    text,
+                    f"{prefix}{text}",
                     normalize_embeddings=normalize,
                     show_progress_bar=False
                 )
@@ -128,7 +156,9 @@ class EmbeddingService:
                 if use_cache and cache_service:
                     # Check cache for each text
                     for i, t in enumerate(text):
-                        cache_key = hashlib.sha256(f"{t}_{normalize}".encode()).hexdigest()
+                        cache_key = hashlib.sha256(
+                            f"{prefix}{t}_{normalize}".encode()
+                        ).hexdigest()
                         cached_embedding = cache_service.get_cached_embedding(
                             document_id="text_embed",
                             chunk_id=cache_key
@@ -145,16 +175,18 @@ class EmbeddingService:
                 # Process uncached texts
                 if texts_to_process:
                     new_embeddings = EmbeddingService._model.encode(
-                        texts_to_process,
+                        [f"{prefix}{t}" for t in texts_to_process],
                         normalize_embeddings=normalize,
                         show_progress_bar=len(texts_to_process) > 100,
                         batch_size=32
                     )
-                    
+
                     # Cache new embeddings
                     if use_cache and cache_service:
                         for t, emb in zip(texts_to_process, new_embeddings):
-                            cache_key = hashlib.sha256(f"{t}_{normalize}".encode()).hexdigest()
+                            cache_key = hashlib.sha256(
+                                f"{prefix}{t}_{normalize}".encode()
+                            ).hexdigest()
                             cache_service.cache_embedding(
                                 document_id="text_embed",
                                 chunk_id=cache_key,
@@ -198,7 +230,7 @@ class EmbeddingService:
             
             chunks = db.query(Chunk).filter(
                 Chunk.document_id == document_id
-            ).order_by(Chunk.id).all()
+            ).order_by(Chunk.start_offset, Chunk.id).all()
             
             if not chunks:
                 logger.warning(f"No chunks found for document {document_id}")
@@ -241,9 +273,12 @@ class EmbeddingService:
                 # Prepare text with context
                 chunk_text = chunk.text
                 
-                # Add document title as context
-                if document.title:
-                    chunk_text = f"{document.title}\n\n{chunk_text}"
+                # Title *and* heading path: a bare passage loses the section it
+                # came from, and the section name is often the only place the
+                # question's own vocabulary appears.
+                context = [part for part in (document.title, chunk.heading_path) if part]
+                if context:
+                    chunk_text = " > ".join(context) + "\n\n" + chunk_text
                 
                 texts_to_embed.append(chunk_text)
                 chunks_to_embed.append(chunk)
@@ -255,7 +290,9 @@ class EmbeddingService:
                 ).all()
             
             # Generate embeddings in batch (with caching)
-            embeddings = self.generate_embedding(texts_to_embed, normalize=True, use_cache=True)
+            embeddings = self.generate_embedding(
+                texts_to_embed, normalize=True, use_cache=True, role="passage"
+            )
             
             # Save to database
             embedding_records = []
@@ -373,7 +410,9 @@ class EmbeddingService:
         """
         try:
             # Generate query embedding
-            query_embedding = self.generate_embedding(query, normalize=True)
+            query_embedding = self.generate_embedding(
+                query, normalize=True, role="query"
+            )
             
             # Get all embeddings (with optional document filter)
             embedding_query = db.query(Embedding).join(Chunk)
@@ -430,7 +469,8 @@ class EmbeddingService:
                         "metadata": {
                             "page_num": chunk.page_num,
                             "timestamp": chunk.ts_start,
-                            "section": chunk.meta_json.get("section") if chunk.meta_json else None
+                            "section": chunk.meta_json.get("section") if chunk.meta_json else None,
+                            "heading_path": chunk.heading_path,
                         }
                     })
             

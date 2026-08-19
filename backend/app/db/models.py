@@ -10,6 +10,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.types import UTCDateTime
+from app.utils.time import utc_now
 
 Base = declarative_base()
 
@@ -165,7 +166,12 @@ class Message(Base):
     processing_time = Column(Float)
     is_bookmarked = Column(Boolean, default=False)
     tags = Column(JSON, default=[])
-    created_at = Column(UTCDateTime, default=func.now())
+    # Python-side, not func.now(): SQLite's CURRENT_TIMESTAMP has second
+    # resolution, and the two messages of one turn are written in a single
+    # commit. Tied timestamps make `order_by(created_at)` arbitrary, which
+    # scrambles the history in the prompt and made picking the previous
+    # question for a follow-up return whichever row the engine felt like.
+    created_at = Column(UTCDateTime, default=utc_now)
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")

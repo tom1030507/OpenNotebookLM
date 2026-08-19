@@ -12,13 +12,22 @@ except ImportError:
     HAS_PYMUPDF = False
 
 try:
-    from pdfminer.high_level import extract_text, extract_pages
+    from pdfminer.high_level import extract_pages
     from pdfminer.layout import LAParams, LTTextBox
     HAS_PDFMINER = True
 except ImportError:
     HAS_PDFMINER = False
 
+from app.utils.text import PAGE_SEPARATOR
+
 logger = structlog.get_logger()
+
+# A whole line that is a page label, e.g. "Page 7 of 12".
+PAGE_LABEL_RE = re.compile(r"^page\s+\d+(\s+of\s+\d+)?$", re.IGNORECASE)
+
+# Digits and the punctuation a page number is usually dressed in. A line left
+# empty by removing these was nothing but a page number.
+PAGE_DECORATION_RE = re.compile(r"[\d\s\-–—.·|/()\[\]]+")
 
 
 class PDFAdapter:
@@ -142,31 +151,29 @@ class PDFAdapter:
     def _extract_with_pdfminer(self, file_path: str) -> Dict[str, any]:
         """Extract text using pdfminer."""
         try:
-            # Extract full text
-            text = extract_text(file_path)
-            text = self._clean_text(text)
-            
-            # Extract page-by-page
+            # Build the document text by joining the pages, rather than parsing
+            # the file a second time with extract_text(). `text` is then exactly
+            # the pages joined by a blank line, which is what lets the chunker
+            # map a chunk's offset to its real page instead of guessing.
             pages = []
             laparams = LAParams()
-            
+
             for page_num, page_layout in enumerate(extract_pages(file_path, laparams=laparams), start=1):
                 page_text = []
                 for element in page_layout:
                     if isinstance(element, LTTextBox):
                         page_text.append(element.get_text())
-                
-                page_content = "".join(page_text)
-                page_content = self._clean_text(page_content)
-                
+
+                page_content = self._clean_text("".join(page_text))
+
                 pages.append({
                     "page_num": page_num,
                     "text": page_content,
                     "char_count": len(page_content),
                 })
-            
+
             return {
-                "text": text,
+                "text": PAGE_SEPARATOR.join(page["text"] for page in pages),
                 "pages": pages,
                 "num_pages": len(pages),
                 "metadata": {}  # pdfminer doesn't extract metadata easily
@@ -180,35 +187,28 @@ class PDFAdapter:
         try:
             # Create a file-like object from bytes
             pdf_file = io.BytesIO(pdf_bytes)
-            
-            # Extract full text
-            text = extract_text(pdf_file)
-            text = self._clean_text(text)
-            
-            # Reset file pointer for page extraction
-            pdf_file.seek(0)
-            
-            # Extract page-by-page
+
+            # As in _extract_with_pdfminer: one parse, and `text` is the pages
+            # joined, so chunk offsets locate their page exactly.
             pages = []
             laparams = LAParams()
-            
+
             for page_num, page_layout in enumerate(extract_pages(pdf_file, laparams=laparams), start=1):
                 page_text = []
                 for element in page_layout:
                     if isinstance(element, LTTextBox):
                         page_text.append(element.get_text())
-                
-                page_content = "".join(page_text)
-                page_content = self._clean_text(page_content)
-                
+
+                page_content = self._clean_text("".join(page_text))
+
                 pages.append({
                     "page_num": page_num,
                     "text": page_content,
                     "char_count": len(page_content),
                 })
-            
+
             return {
-                "text": text,
+                "text": PAGE_SEPARATOR.join(page["text"] for page in pages),
                 "pages": pages,
                 "num_pages": len(pages),
                 "metadata": {}
@@ -217,34 +217,59 @@ class PDFAdapter:
             logger.error("Failed to extract text from bytes with pdfminer", error=str(e))
             raise
     
+    def _is_running_header(self, line: str) -> bool:
+        """Whether a whole line is a page number or a running footer.
+
+        Matches a line that is nothing but a number with decoration — "12",
+        "- 3 -", "[4]", "Page 7 of 12". The previous rule was "a short line
+        containing a digit", which both missed the decorated forms and discarded
+        real content such as "H2O".
+
+        Args:
+            line: One line of extracted text.
+
+        Returns:
+            True if the line should be dropped.
+        """
+        if not line:
+            return False
+        if PAGE_LABEL_RE.match(line):
+            return True
+        return not PAGE_DECORATION_RE.sub("", line) and any(c.isdigit() for c in line)
+
     def _clean_text(self, text: str) -> str:
         """Clean extracted text.
-        
+
+        Order matters here. `re.sub(r'\\s+', ' ', text)` used to run first, which
+        deleted every newline and left the header/footer rule below matching
+        against a single line — it could never fire, so running headers and page
+        numbers were repeated into every chunk.
+
         Args:
             text: Raw extracted text
-            
+
         Returns:
             Cleaned text
         """
-        # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text)
-        
-        # Remove page headers/footers (common patterns)
-        # This is a simple heuristic and may need adjustment
-        lines = text.split('\n')
+        # Rejoin words the layout broke across lines, before the line structure
+        # that reveals them is gone.
+        text = re.sub(r'(\w)-\n(\w)', r'\1\2', text)
+
         cleaned_lines = []
-        
-        for line in lines:
-            # Skip likely headers/footers (short lines with numbers)
-            if len(line.strip()) < 5 and any(char.isdigit() for char in line):
+        for raw_line in text.split('\n'):
+            # Collapse horizontal whitespace only; the newlines stay meaningful.
+            line = re.sub(r'[^\S\n]+', ' ', raw_line).strip()
+
+            if self._is_running_header(line):
                 continue
+
             cleaned_lines.append(line)
-        
+
         text = '\n'.join(cleaned_lines)
-        
+
         # Remove multiple consecutive newlines
         text = re.sub(r'\n{3,}', '\n\n', text)
-        
+
         return text.strip()
     
     def extract_with_ocr(self, file_path: str) -> Dict[str, any]:

@@ -18,12 +18,13 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/opennotebook.db"
     
     # Embedding
-    # bge-m3 is multilingual, unlike the English-only bge-small it replaced, and
-    # needs no query/passage prefixes. Changing this invalidates every stored
-    # vector — see "Embeddings" in the README before switching.
+    # Multilingual, unlike the English-only bge-small it replaced. Chosen over
+    # bge-m3 on memory: bge-m3 peaks at ~4.85 GB RSS against ~2.69 GB here, which
+    # OOM-killed a full re-index on an 8 GB host. Changing this invalidates every
+    # stored vector — see "Embeddings" in the README before switching.
     emb_backend: str = "sqlitevec"  # sqlitevec or faiss
-    emb_model_name: str = "BAAI/bge-m3"
-    emb_dimension: int = 1024  # corrected from the loaded model at startup
+    emb_model_name: str = "intfloat/multilingual-e5-base"
+    emb_dimension: int = 768  # corrected from the loaded model at startup
     
     # LLM
     # "auto" uses the first provider that is actually configured: Claude, then
@@ -106,10 +107,31 @@ class Settings(BaseSettings):
     
     # Retrieval
     retrieval_top_k: int = 5
+    # Candidates pulled from each retriever before fusion. Replaces a
+    # hardcoded `top_k * 2`, which left the ranker almost nothing to choose
+    # between.
+    retrieval_candidate_k: int = 30
+    # Minimum cosine similarity for a dense candidate. Zero by default:
+    # measured e5 similarities sit between 0.67 and 0.71 whether a chunk is
+    # relevant or not, so any cut inside that band is arbitrary -- and the
+    # 0.5 that used to be hardcoded here filtered nothing at all.
+    retrieval_min_score: float = 0.0
+    # Hybrid dense + BM25 retrieval, fused by reciprocal rank. Costs no extra
+    # memory, which is what makes it the usable lever on a small host.
+    hybrid_enabled: bool = True
+    hybrid_rrf_k: int = 60
+    # Jaccard token overlap at which two candidates are the same passage.
+    dedupe_jaccard: float = 0.9
+    # Legacy heuristic reranker. Only consulted when hybrid_enabled is false;
+    # its keyword term scores zero for CJK text.
     rerank_enabled: bool = True
     rerank_alpha: float = 0.7
     rerank_beta: float = 0.2
     rerank_gamma: float = 0.1
+    # Ceiling on the characters of retrieved context put in a prompt. Counted
+    # in characters rather than tokens on purpose: it needs no tokenizer and
+    # is conservative for Latin text, where a character is well under a token.
+    context_char_budget: int = 12000
     
     class Config:
         env_file = ".env"

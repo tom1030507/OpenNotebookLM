@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 import structlog
 import uuid
 
+from app.config import get_settings
 from app.db.database import get_db
 from app.services.rag import RAGService
 from app.services.projects import ProjectService
@@ -29,9 +30,11 @@ class QueryRequest(BaseModel):
     query: str
     project_id: Optional[str] = None
     conversation_id: Optional[str] = None
-    top_k: int = 5
-    temperature: float = 0.7
-    max_tokens: int = 512
+    # RETRIEVAL_TOP_K was advertised in the README and .env.example while nothing
+    # read it; this is where it now takes effect.
+    top_k: int = Field(default_factory=lambda: get_settings().retrieval_top_k, ge=1, le=50)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=512, ge=1, le=8192)
     include_sources: bool = True
 
 
@@ -118,7 +121,8 @@ async def query(
                 project_id=request.project_id,
                 top_k=request.top_k,
                 temperature=request.temperature,
-                max_tokens=request.max_tokens
+                max_tokens=request.max_tokens,
+                include_sources=request.include_sources
             )
         else:
             # Create new conversation if project is specified
@@ -140,7 +144,8 @@ async def query(
                     project_id=request.project_id,
                     top_k=request.top_k,
                     temperature=request.temperature,
-                    max_tokens=request.max_tokens
+                    max_tokens=request.max_tokens,
+                    include_sources=request.include_sources
                 )
             else:
                 # One-off query without conversation

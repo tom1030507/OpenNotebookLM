@@ -93,3 +93,7 @@ dist/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Eval artefacts
+output/
+backend/tests/eval/.cache/
