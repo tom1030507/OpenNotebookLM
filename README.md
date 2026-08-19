@@ -25,7 +25,7 @@ a local model too.
 | Chunking, embedding, semantic retrieval with citations | ✅ |
 | Multi-turn conversations, persisted per project | ✅ |
 | Generated answers from Claude, OpenAI, or a local model | ✅ **once you configure a provider** — see [Configuring the LLM](#configuring-the-llm) |
-| Register / sign in, session-gated workspace | ✅ |
+| Register / sign in; the API refuses every request without a bearer token | ✅ |
 | Export a conversation, a project, or a project summary | ✅ |
 | Studio: audio summary (browser speech), Markdown report | ✅ |
 | Studio: video summary, mind map | ❌ not implemented — marked as unavailable in the UI |
@@ -90,19 +90,27 @@ expect a slow cold start.
 
 ### Signing in
 
-The workspace is gated: visiting `/` without a session redirects to `/login`.
-Three ways in:
+**Register** on `/login` creates an account through `POST /api/auth/register`;
+passwords are hashed with bcrypt. Signing in exchanges those credentials for a
+bearer token at `POST /api/auth/token`. There is no way in that skips the
+backend — a session it never issued is refused by every API route.
 
-- **Quick Demo Access** — a button on the login page. Entirely client-side; no
-  account is created.
-- `admin` / `admin123` — the same demo short-circuit, by credentials.
-- **Register** — creates a real account through `POST /api/auth/register`.
-  Passwords are hashed with bcrypt.
+The API is the boundary. Every route below except the health checks and the two
+credential endpoints is mounted behind `get_current_user`, so a request with no
+`Authorization` header, or with a token the backend cannot validate, gets `401`
+either way — the two are deliberately indistinguishable. The frontend attaches
+the token to every request it makes, and on a `401` it discards the local
+session and returns to `/login` rather than leaving you on a workspace where
+each panel fails on its own.
 
-Sign-in mirrors the token into an `auth_token` cookie, because the Next.js
+Sign-in also mirrors the token into an `auth_token` cookie, because the Next.js
 middleware that guards `/` runs on the server and cannot read `localStorage`.
-The middleware checks only that the cookie is *present* — it is a navigation
-gate, not an authorization boundary, and the API itself is not behind auth yet.
+That middleware only checks the cookie is *present*: it is a navigation
+convenience so you land on `/login` instead of an empty workspace, and it is not
+what protects your data. The API is.
+
+Signed-in users all see the same projects — see the last row of
+[What works today](#what-works-today).
 
 ## Configuring the LLM
 
@@ -277,6 +285,12 @@ re-indexed. To switch models:
 | `GET` | `/api/export/project/{id}` | Export a project (markdown, json) |
 | `GET` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
 | `GET`/`DELETE` | `/api/cache/*` | Cache stats, health, clear, invalidate, warm up |
+
+Every path except `/healthz`, `/ready` and the two `/api/auth` credential
+endpoints requires `Authorization: Bearer <token>` and answers `401` without
+one. `/api/docs/{id}/file` is no exception, which is why the preview pane
+fetches a file through the API client and renders the bytes, rather than
+pointing an `<iframe>` at the route.
 
 Interactive docs at `/docs`, ReDoc at `/redoc`.
 

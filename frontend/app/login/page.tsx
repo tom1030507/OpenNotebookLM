@@ -32,31 +32,17 @@ export default function LoginPage() {
   });
 
   // Open the workspace with the session recorded for both the client and the
-  // server-side middleware.
+  // server-side middleware. Every API route refuses a token the backend did not
+  // issue, so this is only ever reached with a real one.
   const enterWorkspace = (accessToken: string, user: SessionUser) => {
     storeSession(accessToken, user);
     router.push('/');
-  };
-
-  // Demo login for development: no account and no backend required.
-  const handleDemoLogin = () => {
-    setLoading(true);
-    enterWorkspace(`demo_token_${Date.now()}`, {
-      username: 'demo',
-      email: 'demo@example.com',
-    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    
-    // Demo mode - bypass authentication
-    if (formData.username === 'admin' && formData.password === 'admin123') {
-      handleDemoLogin();
-      return;
-    }
 
     try {
       if (isLogin) {
@@ -296,28 +282,6 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Demo Credentials */}
-          {isLogin && (
-            <div className="mt-4 space-y-2">
-              <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                  Demo credentials:
-                </p>
-                <p className="text-xs font-mono text-gray-700 dark:text-gray-300">
-                  Username: admin | Password: admin123
-                </p>
-              </div>
-              
-              {/* Quick Demo Access Button */}
-              <button
-                type="button"
-                onClick={handleDemoLogin}
-                className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
-              >
-                Quick Demo Access →
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>

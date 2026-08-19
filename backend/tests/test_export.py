@@ -1,7 +1,6 @@
 """Tests for the export API."""
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -9,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.database import get_db
 from app.db.models import Base, Document, Project, ProjectDocument
 from app.routers import export
+from conftest import authenticated_client
 
 
 app = FastAPI()
@@ -39,8 +39,10 @@ app.dependency_overrides[get_db] = override_get_db
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# Create test client
-client = TestClient(app)
+# Create test client. The router refuses anonymous callers, so the client
+# presents a bearer token on every request.
+with TestingSessionLocal() as setup_session:
+    client = authenticated_client(app, setup_session)
 
 
 @pytest.fixture

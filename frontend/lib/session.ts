@@ -11,7 +11,10 @@ export const AUTH_TOKEN_COOKIE = 'auth_token';
 /** Matches the backend's default ACCESS_TOKEN_EXPIRE_MINUTES of 720. */
 const SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
 
-const STORAGE_KEYS = ['access_token', 'auth_token', 'user'] as const;
+/** The keys `storeSession` mirrors the access token into. */
+const TOKEN_KEYS = ['access_token', 'auth_token'] as const;
+
+const STORAGE_KEYS = [...TOKEN_KEYS, 'user'] as const;
 
 export interface SessionUser {
   username: string;
@@ -47,6 +50,33 @@ export const storeSession = (accessToken: string, user: SessionUser): void => {
   }
 
   writeCookie(accessToken, SESSION_MAX_AGE_SECONDS);
+};
+
+/**
+ * Read the access token the API client has to send.
+ *
+ * `storeSession` writes the same value under both keys, so either one is the
+ * session: a browsing context that kept only one of them still works. Returns
+ * null on the server, where there is no storage to read.
+ */
+export const readAccessToken = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  for (const key of TOKEN_KEYS) {
+    try {
+      const token = window.localStorage.getItem(key);
+      if (token) {
+        return token;
+      }
+    } catch {
+      // Storage can be denied outright, which reads as signed out.
+      return null;
+    }
+  }
+
+  return null;
 };
 
 /** Forget the signed-in session. */

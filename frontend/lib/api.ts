@@ -1,3 +1,6 @@
+import { clearSession, readAccessToken } from './session';
+
+
 export interface Project {
   id: string;
   name: string;
@@ -172,6 +175,16 @@ export const API_BASE_URL = configuredBaseUrl.endsWith('/api')
 export const documentFileUrl = (documentId: string): string =>
   `${API_BASE_URL}/docs/${encodeURIComponent(documentId)}/file`;
 
+/**
+ * True when a document's file lives behind the API's own protected route.
+ *
+ * Those bytes need the session token, and a browser cannot put an Authorization
+ * header on an element's `src`, so they have to be fetched rather than linked.
+ * An external source has no such problem.
+ */
+export const needsAuthorizedFetch = (document: Document): boolean =>
+  document.url === documentFileUrl(document.id);
+
 
 /**
  * Resolve a backend path against the configured API base URL. Every caller
@@ -200,6 +213,44 @@ const describeDetail = (detail: ErrorResponse['detail']): string | null => {
 };
 
 
+const LOGIN_PATH = '/login';
+
+/**
+ * Requests whose 401 means "these credentials are wrong", not "your session is
+ * over". Signing in reads the account it just minted a token for, and the form
+ * shows what came back — a redirect from here would reload the page and throw
+ * that message away.
+ */
+const CREDENTIAL_PATH_PREFIX = '/auth/';
+
+
+/** The Authorization header for the stored session, or nothing when signed out. */
+const authorization = (): Record<string, string> => {
+  const token = readAccessToken();
+
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+
+/**
+ * Give up a session the backend no longer accepts.
+ *
+ * Without this the workspace keeps a token every request will be refused for,
+ * and each panel fails on its own on a screen with no way back to sign-in.
+ */
+const abandonSession = (): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  clearSession();
+
+  if (window.location.pathname !== LOGIN_PATH) {
+    window.location.assign(LOGIN_PATH);
+  }
+};
+
+
 const extractError = async (response: Response): Promise<Error> => {
   try {
     const payload = await response.json() as ErrorResponse;
@@ -217,6 +268,25 @@ const extractError = async (response: Response): Promise<Error> => {
 };
 
 
+/**
+ * Let a successful response through, and turn any other into a thrown error.
+ *
+ * A refused token also ends the local session, so the workspace stops acting
+ * signed in the moment the backend says otherwise.
+ */
+const guard = async (path: string, response: Response): Promise<void> => {
+  if (response.ok) {
+    return;
+  }
+
+  if (response.status === 401 && !path.startsWith(CREDENTIAL_PATH_PREFIX)) {
+    abandonSession();
+  }
+
+  throw await extractError(response);
+};
+
+
 const requestJson = async <T>(
   path: string,
   init: RequestInit = {},
@@ -225,13 +295,14 @@ const requestJson = async <T>(
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(!isFormData && init.body ? { 'Content-Type': 'application/json' } : {}),
+    ...authorization(),
+    // An explicit header wins: `getAccount` checks a token it was handed rather
+    // than the one in storage.
     ...(init.headers as Record<string, string> | undefined),
   };
   const response = await fetch(apiUrl(path), { ...init, headers });
 
-  if (!response.ok) {
-    throw await extractError(response);
-  }
+  await guard(path, response);
 
   if (response.status === 204) {
     return undefined as T;
@@ -243,22 +314,20 @@ const requestJson = async <T>(
 
 const requestBlob = async (path: string): Promise<Blob> => {
   const response = await fetch(apiUrl(path), {
-    headers: { Accept: '*/*' },
+    headers: { Accept: '*/*', ...authorization() },
   });
-  if (!response.ok) {
-    throw await extractError(response);
-  }
+  await guard(path, response);
+
   return response.blob();
 };
 
 
 const requestText = async (path: string): Promise<string> => {
   const response = await fetch(apiUrl(path), {
-    headers: { Accept: 'text/plain, text/markdown, */*' },
+    headers: { Accept: 'text/plain, text/markdown, */*', ...authorization() },
   });
-  if (!response.ok) {
-    throw await extractError(response);
-  }
+  await guard(path, response);
+
   return response.text();
 };
 
@@ -405,6 +474,16 @@ const api = {
 
   async deleteProject(projectId: string): Promise<void> {
     await requestJson(`/projects/${projectId}`, { method: 'DELETE' });
+  },
+
+  /**
+   * Download the file stored for an uploaded document.
+   *
+   * The route requires a token, so the bytes come through the client rather
+   * than from an element's `src`. See `needsAuthorizedFetch`.
+   */
+  fetchDocumentFile(documentId: string): Promise<Blob> {
+    return requestBlob(`/docs/${encodeURIComponent(documentId)}/file`);
   },
 
   async getDocuments(projectId: string): Promise<Document[]> {

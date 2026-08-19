@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Document } from '@/lib/api';
 import useDialogFocus from '@/hooks/useDialogFocus';
+import usePreviewSource from '@/hooks/usePreviewSource';
 
 interface DocumentPreviewProps {
   document: Document;
@@ -27,6 +28,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // An uploaded file is behind the API's protected route, so its bytes arrive
+  // as an object URL rather than as an address the browser can load directly.
+  const preview = usePreviewSource(document);
 
   useDialogFocus({
     isOpen: true,
@@ -57,8 +61,12 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   };
 
   const handleOpenExternal = () => {
-    if (document.url) {
-      window.open(document.url, '_blank');
+    // For an upload this is the object URL, which a new tab can open; the
+    // protected route behind it would answer that tab with a 401.
+    const target = preview.src || document.url;
+
+    if (target) {
+      window.open(target, '_blank');
     }
   };
 
@@ -79,20 +87,29 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const renderContent = () => {
     switch (document.type) {
       case 'pdf':
-        if (document.url) {
+        if (preview.src) {
           return (
             <iframe
-              src={document.url}
+              src={preview.src}
               className="w-full h-full"
               title={document.name}
             />
+          );
+        }
+        if (document.url && !preview.error) {
+          return (
+            <div className="p-8 text-center">
+              <p className="text-[var(--muted-foreground)]">
+                Loading preview...
+              </p>
+            </div>
           );
         }
         return (
           <div className="p-8 text-center">
             <FileText className="w-16 h-16 mx-auto mb-4 text-[var(--muted-foreground)]" />
             <p className="text-[var(--muted-foreground)]">
-              PDF preview not available
+              {preview.error || 'PDF preview not available'}
             </p>
             {document.content && (
               <div className="mt-4 text-left max-w-3xl mx-auto">

@@ -12,8 +12,13 @@ from app.db.database import get_db
 from app.db.models import Project, Conversation, Message, Document
 from app.services.export import ExportService
 from app.utils.time import utc_now
+from app.routers.auth import get_current_user
 
-router = APIRouter()
+# Every route below requires a signed-in caller. Declaring that on the
+# router rather than on each handler means an endpoint added later is
+# protected by default, and it travels with the router wherever it is
+# mounted.
+router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
 
 # Initialize export service
