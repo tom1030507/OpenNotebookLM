@@ -210,6 +210,10 @@ class DocumentService:
                 doc.meta_json = {
                     **(doc.meta_json or {}),
                     "num_pages": result["num_pages"],
+                    # Keep the per-page text. Dropping it was the only reason
+                    # Chunk.page_num was NULL for every PDF: the chunker has the
+                    # code to map offsets to pages, it just never had the pages.
+                    "pages": result.get("pages", []),
                     "metadata": result.get("metadata", {}),
                     "processed_at": utc_now_iso(),
                 }
