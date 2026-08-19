@@ -227,20 +227,31 @@ Retrieval quality depends on the embedding model, configured by
 `EMB_MODEL_NAME`. The dimension is read from the model at load time, so
 `EMB_DIMENSION` self-corrects and does not need to match.
 
-The default is `BAAI/bge-m3`: multilingual (the previous default,
-`bge-small-en-v1.5`, was English-only) and usable without query/passage
-prefixes. Budget for the first run — sentence-transformers fetches the whole
-model repository, about **4.6 GB** for bge-m3, and caches it under
-`$HOME/.cache/torch`. Docker Compose redirects that cache to the mounted
-`./models` volume so recreating the container doesn't re-download it; if you run
-the backend outside Docker, set `SENTENCE_TRANSFORMERS_HOME` somewhere
-persistent.
+The default is `intfloat/multilingual-e5-base` (768 dimensions). The previous
+default, `bge-small-en-v1.5`, was English-only.
 
-`intfloat/multilingual-e5-base` (768 dimensions, roughly a quarter of the
-download) also loads against this dependency set and is a reasonable lighter
-choice — but the e5 family expects `query: ` and `passage: ` prefixes on its
-inputs, and `services/embeddings.py` does not add them. Without that change it
-works but retrieves worse, silently, which is why it is not the default.
+The e5 family is trained with asymmetric prefixes — indexed text as
+`passage: …`, a search string as `query: …`. `services/embeddings.py` applies
+them automatically for models whose name contains `e5`, and adds nothing for
+models that must not have them. If you switch to a non-e5 model, no change is
+needed.
+
+**Memory is the binding constraint, not download size.** Measured in this
+project's container, with the app's own imports already loaded (0.61 GB):
+
+| Model | Peak RSS | Dimensions | Download |
+|---|---|---|---|
+| `intfloat/multilingual-e5-base` | 2.69 GB | 768 | ~1.1 GB |
+| `BAAI/bge-m3` | 4.85 GB | 1024 | ~4.6 GB |
+
+bge-m3 is the stronger multilingual model and needs no prefixes, but on an 8 GB
+host it OOM-killed a full re-index. Use it only where the memory headroom is
+real.
+
+sentence-transformers caches models under `$HOME/.cache/torch`. Docker Compose
+redirects that to the mounted `./models` volume so recreating the container does
+not re-download; outside Docker, set `SENTENCE_TRANSFORMERS_HOME` somewhere
+persistent.
 
 Stored vectors are only comparable to vectors produced by the same model.
 **Changing `EMB_MODEL_NAME` invalidates every embedding already in the
@@ -254,6 +265,47 @@ re-indexed. To switch models:
    sqlite3 backend/data/opennotebook.db "DELETE FROM embeddings;"
    ```
 4. Restart, then re-upload the affected documents.
+
+## Retrieval
+
+Retrieval is hybrid: a dense vector search and a BM25 keyword search run over the
+same scope, and their two ranked lists are fused. Both halves are needed.
+
+The dense half alone is weak here in a way that is easy to miss. Measured on this
+project's evaluation corpus, `multilingual-e5-base` returns cosine similarities
+between roughly 0.67 and 0.71 for relevant and irrelevant chunks alike — a spread
+of about 0.01 between rank 1 and rank 10. Any similarity threshold inside that
+band is arbitrary, which is why `RETRIEVAL_MIN_SCORE` defaults to 0 and why an
+exact term match carries so much weight.
+
+The BM25 half supplies that. Its tokenizer emits Latin words and **CJK character
+bigrams**, so Chinese text is searchable; splitting on whitespace, as the previous
+re-ranker did, yields one token for an entire Chinese sentence and scores zero.
+
+Fusion ranks by the *best* reciprocal rank either retriever gave a chunk, with the
+sum as the tie-break. Plain summed RRF credits a chunk simply for appearing in
+both lists, and with a weak dense list that buries a keyword hit: two questions
+whose answer BM25 ranked first fell out of the top ten entirely that way.
+
+Chunking follows the document's own structure. Extraction emits headings as
+`## Heading`, the chunker keeps a heading stack so no chunk straddles a section,
+and the section path is stored on the chunk, prepended to the text that gets
+embedded, and shown in the citation.
+
+### Measuring retrieval quality
+
+`backend/scripts/eval_retrieval.py` scores retrieval against a fixed corpus of
+six Wikipedia pages (three English, three Traditional Chinese) and 30 questions,
+12 of them cross-lingual. It builds its own database and never touches
+`data/opennotebook.db`:
+
+```bash
+docker exec <backend-container> sh -lc   "cd /app && LLM_MODE=none python -m scripts.eval_retrieval --tag mychange --out /tmp/rag-eval"
+```
+
+Ground truth is answer-bearing *text*, not chunk ids, so the same question set
+stays comparable across changes to the chunker. Reports land in the `--out`
+directory as `metrics.json` and `report.md`.
 
 ## API
 
@@ -324,16 +376,25 @@ Environment variables, with the defaults from `backend/app/config.py`:
 | `CLAUDE_MIN_MAX_TOKENS` | Floor for a request's output budget | `2048` |
 | `OPENAI_API_KEY` | OpenAI API key | – |
 | `OPENAI_MODEL` | OpenAI model id | `gpt-5.6` |
+| `OPENAI_BASE_URL` | Redirect the OpenAI path at a compatible provider | – (OpenAI) |
+| `OPENAI_REASONING_FORMAT` | Groq only: `parsed`, `raw`, `hidden` | – |
+| `OPENAI_MIN_MAX_TOKENS` | Floor for a request's output budget | `2048` |
 | `OLLAMA_BASE_URL` | Local OpenAI-compatible endpoint | `http://localhost:11434/v1` |
 | `OLLAMA_MODEL` | Local model name | `llama3.2` |
 | **Embedding** | | |
-| `EMB_MODEL_NAME` | sentence-transformers model | `BAAI/bge-m3` |
-| `EMB_DIMENSION` | Vector dimension (auto-corrected from the model) | `1024` |
+| `EMB_MODEL_NAME` | sentence-transformers model | `intfloat/multilingual-e5-base` |
+| `EMB_DIMENSION` | Vector dimension (auto-corrected from the model) | `768` |
 | `EMB_BACKEND` | Vector store backend | `sqlitevec` |
 | **Retrieval & chunking** | | |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking window | `512` / `50` |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking window, in characters | `512` / `50` |
 | `RETRIEVAL_TOP_K` | Chunks retrieved per question | `5` |
-| `RERANK_ENABLED` | Re-rank retrieved chunks | `true` |
+| `RETRIEVAL_CANDIDATE_K` | Candidates each retriever offers before fusion | `30` |
+| `RETRIEVAL_MIN_SCORE` | Minimum cosine similarity for a dense candidate | `0.0` |
+| `HYBRID_ENABLED` | Fuse dense and BM25 retrieval | `true` |
+| `HYBRID_RRF_K` | Rank-damping constant for the fusion | `60` |
+| `DEDUPE_JACCARD` | Token overlap at which two candidates are one passage | `0.9` |
+| `CONTEXT_CHAR_BUDGET` | Ceiling on retrieved context in a prompt | `12000` |
+| `RERANK_ENABLED` | Legacy heuristic re-ranker, used when `HYBRID_ENABLED=false` | `true` |
 | **Database** | | |
 | `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/opennotebook.db` |
 | **Auth** | | |
@@ -386,6 +447,15 @@ Stated plainly, because several of these look like features until you hit them:
 - **Studio's video summary and mind map are not implemented.** They are visible
   but disabled, and generating either needs backend work.
 - **No WebSockets.** Ingest progress is polled, not pushed.
+- **Cross-lingual retrieval is only partly there.** A question in one language
+  finds passages in the other when they share a proper noun, because BM25 matches
+  it. When the vocabulary does not overlap at all — an English question whose
+  answer exists only in Chinese prose — `multilingual-e5-base` does not reliably
+  bridge the gap. `BAAI/bge-m3` is the stronger multilingual model and would
+  likely close it, but needs roughly 4.85 GB of RSS against this one's 2.69 GB.
+- **Retrieval scans the whole scope on every question.** Both halves are linear
+  in the number of chunks in the project; `sqlite-vec` and `faiss-cpu` are
+  installed but not wired up, so `EMB_BACKEND` has no effect.
 
 ## License
 
