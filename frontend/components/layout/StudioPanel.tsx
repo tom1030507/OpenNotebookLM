@@ -41,6 +41,8 @@ export default function StudioPanel({
 }: StudioPanelProps) {
   const availabilityLabel = 'coming soon';
   const currentProject = useStore((state) => state.currentProject);
+  const documents = useStore((state) => state.documents);
+  const loadingDocuments = useStore((state) => state.loadingDocuments);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState('');
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
@@ -161,15 +163,18 @@ export default function StudioPanel({
     return undefined;
   };
 
+  // A video summary of nothing is two empty slides, so the panel says so
+  // instead of playing them. The project's own `document_count` is a snapshot
+  // from the last project fetch and goes stale the moment a source is added or
+  // removed, so read the list the rest of the workspace reads. An empty list
+  // while it is still arriving means "not known yet", not "nothing to play".
+  const hasNoSources = !loadingDocuments && documents.length === 0;
+
   const optionDisabled = (option: StudioOption) => {
     if (!option.available || !currentProject) return true;
     if (option.action === 'audio') return !speechSupported || isPreparingAudio;
     if (option.action === 'mindmap') return isBuildingMindMap;
-    // A video summary of nothing is two empty slides. The panel knows the
-    // source count, so it can say so instead of playing them.
-    if (option.action === 'video') {
-      return isPreparingVideo || currentProject.document_count === 0;
-    }
+    if (option.action === 'video') return isPreparingVideo || hasNoSources;
     return isGeneratingReport;
   };
 
@@ -218,7 +223,7 @@ export default function StudioPanel({
     }
 
     if (option.action === 'video') {
-      if (currentProject.document_count === 0) return 'Add a source first';
+      if (hasNoSources) return 'Add a source first';
       if (isPreparingVideo) return 'Preparing the script…';
       return 'Watch a walkthrough of this project';
     }

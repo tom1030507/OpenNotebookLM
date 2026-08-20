@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import StudioPanel from './StudioPanel';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
-import type { Project } from '@/lib/api';
+import type { Document, Project } from '@/lib/api';
 
 const project: Project = {
   id: 'project-1',
@@ -19,10 +19,27 @@ const project: Project = {
   conversation_count: 1,
 };
 
+const source: Document = {
+  id: 'doc-1',
+  name: 'Example Domain',
+  type: 'url',
+  url: 'https://example.com',
+  meta: {},
+  status: 'ready',
+  created_at: '2026-08-13T00:00:00Z',
+  updated_at: '2026-08-13T00:00:00Z',
+  chunk_count: 3,
+};
+
 const initialState = useStore.getState();
 
 beforeEach(() => {
-  useStore.setState({ currentProject: project, projects: [project] });
+  useStore.setState({
+    currentProject: project,
+    projects: [project],
+    // The project has two sources, so the list the panel reads holds two.
+    documents: [source, { ...source, id: 'doc-2', name: 'Rainfall report' }],
+  });
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn(() => 'blob:report'),
