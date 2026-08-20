@@ -137,3 +137,29 @@ def authenticated_client(
         A client whose every request carries the bearer token
     """
     return TestClient(app, headers=authorize(app, db, username))
+
+
+class OfflineLLM:
+    """LLM stand-in that answers the way the unconfigured service does.
+
+    `LLM_MODE` defaults to `auto`, so a real `LLMService` built in a test points
+    at a local provider and every call opens a socket to it. Injecting this
+    instead keeps the suite offline; what it returns is the extractive fallback
+    shape, so callers take their structural path.
+    """
+
+    def generate(self, prompt: str, **kwargs) -> dict:
+        """Return the fallback shape, ignoring the prompt.
+
+        Args:
+            prompt: Ignored.
+            **kwargs: Ignored.
+
+        Returns:
+            The same keys the real service returns, with model "fallback".
+        """
+        return {
+            "text": "Configure an LLM for better answers.",
+            "model": "fallback",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }

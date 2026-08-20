@@ -28,7 +28,8 @@ a local model too.
 | Register / sign in; the API refuses every request without a bearer token | ✅ |
 | Export a conversation, a project, or a project summary | ✅ |
 | Studio: audio summary (browser speech), Markdown report | ✅ |
-| Studio: video summary, mind map | ❌ not implemented — marked as unavailable in the UI |
+| Studio: mind map of a project's sources and their topics | ✅ **topics are named by the LLM when one is configured**, otherwise taken from document structure |
+| Studio: video summary | ❌ not implemented — marked as unavailable in the UI |
 | Per-user isolation: your projects, documents and conversations are yours alone | ✅ |
 
 **Without an LLM provider configured, question answering still returns a
@@ -372,6 +373,7 @@ directory as `metrics.json` and `report.md`.
 | `GET` | `/api/export/conversation/{id}` | Export one conversation (markdown, json, txt) |
 | `GET` | `/api/export/project/{id}` | Export a project (markdown, json) |
 | `GET` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
+| `GET` | `/api/projects/{id}/mindmap` | Mind map of a project; returns `root`, `node_count`, `model_used` |
 | `GET`/`DELETE` | `/api/cache/*` | Cache stats, health, clear, invalidate, warm up |
 
 Every path except `/healthz`, `/ready` and the two `/api/auth` credential
@@ -493,8 +495,14 @@ Stated plainly, because several of these look like features until you hit them:
   `youtube-transcript-api==0.6.1` scrapes the watch page, and YouTube rate-limits
   it — imports can fail with an XML parse error on a blocked response even
   though the code is correct.
-- **Studio's video summary and mind map are not implemented.** They are visible
-  but disabled, and generating either needs backend work.
+- **Studio's video summary is not implemented.** It is visible but disabled;
+  generating video needs backend work.
+- **A mind map's topics are only as good as its inputs.** With no LLM
+  configured they come from the documents' own heading structure, and for a
+  PDF with no headings from word frequency — useful, but a keyword list rather
+  than a reading of the text. `model_used` on the response says which
+  happened, and the dialog repeats it, so an extracted map is never presented
+  as a generated one.
 - **No WebSockets.** Ingest progress is polled, not pushed.
 - **Cross-lingual retrieval is only partly there.** A question in one language
   finds passages in the other when they share a proper noun, because BM25 matches

@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
+import type { MindMap } from '@/lib/api';
+import MindMapDialog from '@/components/MindMapDialog';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
 
 interface StudioOption {
@@ -24,7 +26,7 @@ interface StudioOption {
   /** Outputs with no backend endpoint stay unavailable. */
   available?: boolean;
   /** Distinguishes the live actions from one another. */
-  action?: 'report' | 'audio';
+  action?: 'report' | 'audio' | 'mindmap';
 }
 
 interface StudioPanelProps {
@@ -41,6 +43,8 @@ export default function StudioPanel({
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState('');
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
+  const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
+  const [mindMap, setMindMap] = useState<MindMap | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   // Identifies the reading in progress. Stopping retires it, so anything the
@@ -94,8 +98,23 @@ export default function StudioPanel({
     setIsSpeaking(false);
   };
 
-  // The backend exposes a project summary, so Report is a real action. Audio,
-  // video and mind maps have no endpoint yet, so they stay unavailable.
+  const buildMindMap = async () => {
+    if (!currentProject) return;
+
+    setIsBuildingMindMap(true);
+    setReportError('');
+
+    try {
+      setMindMap(await api.fetchProjectMindMap(currentProject.id));
+    } catch {
+      setReportError('The mind map could not be built. Please try again.');
+    } finally {
+      setIsBuildingMindMap(false);
+    }
+  };
+
+  // Report and mind map both have a backend endpoint. Video summary does not,
+  // so it stays unavailable.
   const generateReport = async () => {
     if (!currentProject) return;
 
@@ -120,6 +139,7 @@ export default function StudioPanel({
   };
   const optionAction = (option: StudioOption) => {
     if (option.action === 'report') return generateReport;
+    if (option.action === 'mindmap') return buildMindMap;
     if (option.action === 'audio') return isSpeaking ? stopAudioSummary : playAudioSummary;
     return undefined;
   };
@@ -127,6 +147,7 @@ export default function StudioPanel({
   const optionDisabled = (option: StudioOption) => {
     if (!option.available || !currentProject) return true;
     if (option.action === 'audio') return !speechSupported || isPreparingAudio;
+    if (option.action === 'mindmap') return isBuildingMindMap;
     return isGeneratingReport;
   };
 
@@ -147,6 +168,10 @@ export default function StudioPanel({
       return <Loader2 className="w-5 h-5 animate-spin" />;
     }
 
+    if (option.action === 'mindmap' && isBuildingMindMap) {
+      return <Loader2 className="w-5 h-5 animate-spin" />;
+    }
+
     return option.icon;
   };
 
@@ -159,6 +184,11 @@ export default function StudioPanel({
       if (isPreparingAudio) return 'Preparing audio…';
       if (isSpeaking) return 'Playing — select to stop';
       return 'Listen to this project';
+    }
+
+    if (option.action === 'mindmap') {
+      if (isBuildingMindMap) return 'Building the map…';
+      return 'See how this project connects';
     }
 
     return 'Summarise this project';
@@ -181,6 +211,8 @@ export default function StudioPanel({
     },
     {
       id: 'mindmap',
+      available: true,
+      action: 'mindmap',
       title: 'Mind map',
       description: '',
       icon: <Brain className="w-5 h-5" />
@@ -286,14 +318,18 @@ export default function StudioPanel({
                   Studio outputs
                 </h4>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Audio summaries and reports are available now. Video and mind
-                  maps are still in preparation.
+                  Audio summaries, reports and mind maps are available now. Video
+                  summaries are still in preparation.
                 </p>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {mindMap && (
+        <MindMapDialog map={mindMap} onClose={() => setMindMap(null)} />
+      )}
     </aside>
   );
 }
