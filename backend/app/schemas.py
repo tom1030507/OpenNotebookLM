@@ -250,3 +250,41 @@ class ReadyResponse(BaseModel):
     """Schema for readiness check response."""
     ready: bool
     reason: Optional[str] = None
+
+
+# Mind map schemas
+class MindMapNode(BaseModel):
+    """One node of a project's mind map.
+
+    The same shape at every level — project, document, topic — so the browser can
+    draw the tree with one recursive renderer instead of three.
+    """
+    id: str
+    label: str
+    kind: str = Field(..., pattern="^(project|document|topic)$")
+    # Source type for a document node; nothing for the others so far.
+    detail: Optional[str] = None
+    # Set on a document node and on its topics, so selecting a topic can open
+    # the source it came from.
+    document_id: Optional[str] = None
+    children: List["MindMapNode"] = []
+
+
+class MindMapResponse(BaseModel):
+    """Schema for a generated mind map."""
+
+    # `model_used` collides with pydantic's reserved `model_` prefix, and the
+    # pinned pydantic 2.5.0 warns about every such field at import time. The name
+    # is kept because a query answer already reports `model_used` and the browser
+    # reads that key; the guard is waived rather than the field renamed.
+    model_config = {"protected_namespaces": ()}
+
+    project_id: str
+    project_name: str
+    generated_at: UtcDatetime
+    # Which model named the topics, or "fallback" when the document structure
+    # did. Mirrors `model_used` on a query answer: the caller has to be able to
+    # tell a generated map from an extracted one.
+    model_used: str
+    node_count: int
+    root: MindMapNode

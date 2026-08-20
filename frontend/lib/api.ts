@@ -71,6 +71,30 @@ export interface QueryResponse {
 export type ConversationExportFormat = 'markdown' | 'json' | 'txt';
 export type ProjectExportFormat = 'markdown' | 'json';
 
+/** One node of a project's mind map. The shape is the same at every level. */
+export interface MindMapNode {
+  id: string;
+  label: string;
+  kind: 'project' | 'document' | 'topic';
+  detail: string | null;
+  document_id: string | null;
+  children: MindMapNode[];
+}
+
+export interface MindMap {
+  project_id: string;
+  project_name: string;
+  generated_at: string;
+  /**
+   * Which model named the topics, or `fallback` when the documents' own
+   * structure did. The panel says which, rather than presenting an extracted
+   * map as a generated one.
+   */
+  model_used: string;
+  node_count: number;
+  root: MindMapNode;
+}
+
 interface ProjectListResponse {
   projects: Project[];
   total: number;
@@ -612,6 +636,10 @@ const api = {
     return requestBlob(
       `/export/project/${projectId}?format=${encodeURIComponent(format)}`,
     );
+  },
+
+  fetchProjectMindMap(projectId: string): Promise<MindMap> {
+    return requestJson<MindMap>(`/projects/${projectId}/mindmap`);
   },
 
   exportProjectSummary(projectId: string): Promise<Blob> {

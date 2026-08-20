@@ -265,14 +265,16 @@ describe('unavailable workspace controls', () => {
     render(<StudioPanel />);
 
     expect(screen.getByText('Studio outputs')).not.toBeNull();
-    expect(screen.getByText(/Audio summaries and reports are available now/)).not.toBeNull();
-    expect(screen.getByText(/Video and mind\s+maps are still in preparation/)).not.toBeNull();
+    expect(
+      screen.getByText(/Audio summaries, reports and mind\s+maps are available now/),
+    ).not.toBeNull();
+    expect(screen.getByText(/Video\s+summaries are still in preparation/)).not.toBeNull();
 
-    // The two without a backend stay marked.
-    for (const name of ['Video summary', 'Mind map']) {
-      expect(
-        (screen.getByRole('button', { name: `${name} (coming soon)` }) as HTMLButtonElement).disabled,
-      ).toBe(true);
-    }
+    // Video summary is the one still without a backend, so it stays marked.
+    expect(
+      (screen.getByRole('button', {
+        name: 'Video summary (coming soon)',
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });

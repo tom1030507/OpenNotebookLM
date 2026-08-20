@@ -85,7 +85,8 @@ describe('Studio report', () => {
   it('leaves the outputs without backend support disabled', () => {
     render(<StudioPanel />);
 
-    for (const name of ['Audio summary', 'Video summary', 'Mind map']) {
+    // Audio has an endpoint but needs the Web Speech API, which jsdom has not.
+    for (const name of ['Audio summary', 'Video summary']) {
       const button = screen.getByRole('button', { name: new RegExp(`^${name}`) });
       expect((button as HTMLButtonElement).disabled).toBe(true);
     }

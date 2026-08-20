@@ -38,7 +38,9 @@ rag_module.RAGService = StubRAGService
 sys.modules["app.services.rag"] = rag_module
 
 from app.main import app as production_app  # noqa: E402
-from conftest import authenticated_client  # noqa: E402
+from app.routers.mindmap import get_mindmap_service  # noqa: E402
+from app.services.mindmap import MindMapService  # noqa: E402
+from conftest import OfflineLLM, authenticated_client  # noqa: E402
 
 MISSING_ID = str(uuid.uuid4())
 
@@ -85,6 +87,12 @@ def env():
         yield session
 
     production_app.dependency_overrides[get_db] = override_get_db
+    # The mind map asks the configured LLM to name topics, and LLM_MODE
+    # defaults to a local provider. Injecting an offline one keeps these
+    # tests from opening a socket to a model server that is not there.
+    production_app.dependency_overrides[get_mindmap_service] = (
+        lambda: MindMapService(llm_service=OfflineLLM())
+    )
 
     alice = authenticated_client(production_app, session, "alice")
     bob = authenticated_client(production_app, session, "bob")
@@ -385,6 +393,23 @@ class TestExportIsolation:
             "/api/export/batch", json=[bob_conversation, alice_conversation])
 
         assert response.status_code == 404
+
+
+class TestMindMapIsolation:
+    """A mind map reads every source in a project, so it is scoped too."""
+
+    def test_mapping_someone_elses_project_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        assert env.bob.get("/api/projects/%s/mindmap" % project_id).status_code == 404
+
+    def test_your_own_project_can_be_mapped(self, env):
+        """Pins that the route exists: an unmounted route also answers 404."""
+        project_id = make_project(env.alice)
+
+        response = env.alice.get("/api/projects/%s/mindmap" % project_id)
+
+        assert response.status_code == 200
+        assert response.json()["root"]["label"] == ALICE_PROJECT
 
 
 class TestCacheIsolation:
