@@ -95,6 +95,42 @@ export interface MindMap {
   root: MindMapNode;
 }
 
+/** One scene of a project's video summary. The shape is the same for all kinds. */
+export interface VideoScene {
+  id: string;
+  kind: 'title' | 'source' | 'closing';
+  headline: string;
+  bullets: string[];
+  /** Read aloud over the slide. Never empty — the scene advances when it ends. */
+  narration: string;
+  document_id: string | null;
+  /**
+   * The source's own title, shown as the citation. Distinct from `headline`,
+   * which may be a sentence a model wrote about it.
+   */
+  source_label: string | null;
+}
+
+export interface VideoSummary {
+  project_id: string;
+  project_name: string;
+  generated_at: string;
+  /**
+   * Which model wrote the narration, or `fallback` when the documents' own
+   * structure did. The player says which, rather than presenting an extracted
+   * script as a written one.
+   */
+  model_used: string;
+  scene_count: number;
+  /**
+   * How long the script takes to read out. The player computes its own timeline
+   * rather than using this, because the progress bar has to agree with the scene
+   * boundaries it is drawn from.
+   */
+  estimated_seconds: number;
+  scenes: VideoScene[];
+}
+
 interface ProjectListResponse {
   projects: Project[];
   total: number;
@@ -640,6 +676,10 @@ const api = {
 
   fetchProjectMindMap(projectId: string): Promise<MindMap> {
     return requestJson<MindMap>(`/projects/${projectId}/mindmap`);
+  },
+
+  fetchProjectVideoSummary(projectId: string): Promise<VideoSummary> {
+    return requestJson<VideoSummary>(`/projects/${projectId}/video-summary`);
   },
 
   exportProjectSummary(projectId: string): Promise<Blob> {

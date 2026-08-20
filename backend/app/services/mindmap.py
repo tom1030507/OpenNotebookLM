@@ -17,16 +17,24 @@ one instead of guessing.
 """
 from __future__ import annotations
 
-import json
-import re
-from collections import Counter
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 from sqlalchemy.orm import Session
 
-from app.db.models import Document, Project, ProjectDocument
+from app.db.models import Project
 from app.services.llm import FALLBACK_MODEL, LLMService
+# Reading a project's sources and naming what is in them is shared with the
+# video summary, which derives a different view from the same material. The
+# names are re-exported here because this module's callers and tests already
+# import them from it.
+from app.services.source_digest import (
+    document_excerpt as _document_excerpt,
+    load_json_object as _load_json_object,
+    project_documents,
+    topics_from_headings,
+    topics_from_keywords,
+)
 from app.utils.time import utc_now
 
 logger = structlog.get_logger()
@@ -34,10 +42,6 @@ logger = structlog.get_logger()
 # A branch wider than this stops being readable, and the LLM prompt that asks
 # for it stops being cheap.
 MAX_TOPICS_PER_DOCUMENT = 6
-
-# How much of each document the model is shown. The whole corpus would not fit,
-# and the opening of a document is where its subject is stated.
-DOCUMENT_EXCERPT_CHARS = 1200
 
 # The topic call's token budget. A reasoning model writes its thinking into this
 # same budget before any content, so the floor has to clear the thinking or the
@@ -53,23 +57,6 @@ TOPIC_TOKEN_BUDGET_PER_DOCUMENT = 512
 # One mind map is one request; a 200-source project must not make it unbounded.
 TOPIC_TOKEN_BUDGET_CAP = 16384
 
-# Words that are frequent in every English document and therefore say nothing
-# about this one. Short tokens are dropped by length, so this only needs the
-# three-letter-and-longer offenders.
-STOPWORDS = frozenset({
-    "the", "and", "for", "that", "this", "with", "from", "have", "has", "had",
-    "was", "were", "are", "not", "but", "you", "your", "they", "them", "their",
-    "its", "his", "her", "our", "out", "who", "which", "what", "when", "where",
-    "how", "why", "all", "any", "can", "will", "would", "could", "should",
-    "may", "might", "must", "into", "over", "than", "then", "there", "these",
-    "those", "such", "some", "more", "most", "other", "also", "been", "being",
-    "about", "after", "before", "between", "because", "while", "does", "did",
-    "each", "only", "same", "very", "just", "much", "many", "one", "two",
-    "three", "use", "used", "using", "make", "made", "way", "well", "get",
-    "see", "new", "now", "may", "per", "via", "etc",
-})
-
-WORD_PATTERN = re.compile(r"[A-Za-z][A-Za-z'-]{2,}")
 
 TOPIC_SYSTEM_PROMPT = (
     "You organize study notes into mind maps. Answer with a single JSON object "
@@ -91,71 +78,6 @@ def topic_token_budget(document_count: int) -> int:
 
     return min(budget, TOPIC_TOKEN_BUDGET_CAP)
 
-
-def topics_from_headings(
-    heading_paths: Iterable[Optional[str]],
-    limit: int = MAX_TOPICS_PER_DOCUMENT,
-) -> List[str]:
-    """Read topic labels off the heading path of a document's chunks.
-
-    A heading path names every ancestor ("Guide/Setup/Install"), so only the
-    last segment is the topic; the ancestors are the document itself. Every
-    chunk of one section carries that section's path, so repeats are the norm
-    and first-occurrence order is the document's own order.
-
-    Args:
-        heading_paths: The `heading_path` of each chunk, in document order.
-            Missing and blank values are expected — PDF and video chunks have
-            none.
-        limit: Most topics to return.
-
-    Returns:
-        Distinct topic labels, in the order they first appear.
-    """
-    topics: List[str] = []
-    for path in heading_paths:
-        if not path or not path.strip():
-            continue
-        label = path.strip().rstrip("/").split("/")[-1].strip()
-        if label and label not in topics:
-            topics.append(label)
-            if len(topics) == limit:
-                break
-    return topics
-
-
-def topics_from_keywords(
-    text: Optional[str],
-    limit: int = MAX_TOPICS_PER_DOCUMENT,
-) -> List[str]:
-    """Pick the most frequent meaningful words in a document.
-
-    The last resort, for a document with no headings and no model to read it.
-    Frequency across the whole document is the only signal available without
-    either.
-
-    Args:
-        text: Document text, or None for a document not yet extracted.
-        limit: Most keywords to return.
-
-    Returns:
-        Lowercased keywords, most frequent first. Ties keep the order the words
-        appear in, so the same document always produces the same map.
-    """
-    if not text:
-        return []
-
-    counts: Counter = Counter()
-    first_seen: Dict[str, int] = {}
-    for position, match in enumerate(WORD_PATTERN.finditer(text)):
-        word = match.group(0).lower()
-        if word in STOPWORDS:
-            continue
-        counts[word] += 1
-        first_seen.setdefault(word, position)
-
-    ranked = sorted(counts, key=lambda word: (-counts[word], first_seen[word]))
-    return ranked[:limit]
 
 
 def parse_llm_topics(text: str, document_count: int) -> Dict[int, List[str]]:
@@ -199,33 +121,6 @@ def parse_llm_topics(text: str, document_count: int) -> Dict[int, List[str]]:
 
     return topics_by_index
 
-
-def _load_json_object(text: str) -> Optional[Dict[str, Any]]:
-    """Parse the first JSON object in a reply, ignoring anything around it.
-
-    Args:
-        text: The model's raw reply.
-
-    Returns:
-        The decoded object, or None if there is no readable one.
-    """
-    if not text:
-        return None
-
-    candidates = [text]
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(text[start:end + 1])
-
-    for candidate in candidates:
-        try:
-            payload = json.loads(candidate)
-        except (ValueError, TypeError):
-            continue
-        if isinstance(payload, dict):
-            return payload
-
-    return None
 
 
 def _clean_topics(topics: Any) -> List[str]:
@@ -281,7 +176,7 @@ class MindMapService:
             The tree plus the metadata the API exposes: which model named the
             topics, when it was built, and how many nodes it holds.
         """
-        documents = self._project_documents(db, project)
+        documents = project_documents(db, project)
         root = self.build_tree(project.name, documents)
 
         return {
@@ -436,43 +331,6 @@ class MindMapService:
         text = document.content or "\n".join(chunk.text or "" for chunk in chunks)
         return topics_from_keywords(text)
 
-    def _project_documents(self, db: Session, project: Project) -> List[Document]:
-        """List the documents attached to a project, in a stable order.
-
-        Args:
-            db: Database session.
-            project: The project.
-
-        Returns:
-            The documents. Ordered by title after `added_at`, because
-            `added_at` comes from SQLite's second-resolution clock and every
-            document of one upload ties.
-        """
-        return db.query(Document).join(
-            ProjectDocument,
-            ProjectDocument.document_id == Document.id,
-        ).filter(
-            ProjectDocument.project_id == project.id,
-        ).order_by(
-            ProjectDocument.added_at,
-            Document.title,
-        ).all()
-
-
-def _document_excerpt(document: Any) -> str:
-    """Take the opening of a document, for the topic prompt.
-
-    Args:
-        document: A document with its chunks loaded.
-
-    Returns:
-        At most `DOCUMENT_EXCERPT_CHARS` characters of text.
-    """
-    text = document.content
-    if not text:
-        text = "\n".join(chunk.text or "" for chunk in (document.chunks or []))
-
-    return (text or "").strip()[:DOCUMENT_EXCERPT_CHARS]
 
 
 def _count_nodes(node: Dict[str, Any]) -> int:

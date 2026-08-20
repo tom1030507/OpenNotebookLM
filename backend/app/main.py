@@ -9,7 +9,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.db.database import init_db
 from app.routers import (
-    auth, projects, ingest, query, export, health, files, mindmap
+    auth, projects, ingest, query, export, health, files, mindmap, video
 )
 from app.api import cache
 from app.utils.logging import setup_logging
@@ -69,6 +69,7 @@ app.include_router(files.router, prefix="/api", tags=["files"])
 app.include_router(query.router, prefix="/api", tags=["query"])
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(mindmap.router, prefix="/api", tags=["mindmap"])
+app.include_router(video.router, prefix="/api", tags=["video summary"])
 app.include_router(cache.router)  # Cache management endpoints
 
 

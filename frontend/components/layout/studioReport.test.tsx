@@ -82,13 +82,19 @@ describe('Studio report', () => {
     ).toBe(false));
   });
 
-  it('leaves the outputs without backend support disabled', () => {
+  it('leaves an output the browser cannot produce disabled', () => {
     render(<StudioPanel />);
 
     // Audio has an endpoint but needs the Web Speech API, which jsdom has not.
-    for (const name of ['Audio summary', 'Video summary']) {
+    // Every other output is produced by the backend, so every other output is
+    // usable here.
+    expect((screen.getByRole('button', {
+      name: /^Audio summary/,
+    }) as HTMLButtonElement).disabled).toBe(true);
+
+    for (const name of ['Video summary', 'Mind map', 'Report']) {
       const button = screen.getByRole('button', { name: new RegExp(`^${name}`) });
-      expect((button as HTMLButtonElement).disabled).toBe(true);
+      expect((button as HTMLButtonElement).disabled).toBe(false);
     }
   });
 });

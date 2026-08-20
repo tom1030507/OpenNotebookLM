@@ -261,20 +261,27 @@ describe('unavailable workspace controls', () => {
     expect((screen.getByRole('button', { name: 'Sign out' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('separates the available Studio outputs from the ones still in preparation', () => {
+  it('offers every Studio output now that each one has a backend', () => {
     render(<StudioPanel />);
 
     expect(screen.getByText('Studio outputs')).not.toBeNull();
     expect(
-      screen.getByText(/Audio summaries, reports and mind\s+maps are available now/),
+      screen.getByText(/Audio summaries, video summaries, reports and mind maps are\s+all available/),
     ).not.toBeNull();
-    expect(screen.getByText(/Video\s+summaries are still in preparation/)).not.toBeNull();
 
-    // Video summary is the one still without a backend, so it stays marked.
+    // Nothing in the Studio track is marked as unbuilt any more. "More options"
+    // is still disabled, but it is not one of the outputs.
+    for (const name of ['Audio summary', 'Video summary', 'Mind map', 'Report']) {
+      expect(screen.getByRole('button', { name: new RegExp(`^${name}`) }).getAttribute(
+        'aria-label',
+      )).not.toContain('coming soon');
+    }
+
+    // This fixture's project has no sources, so the video summary is held back
+    // by the empty project rather than by a missing endpoint — and says so.
     expect(
-      (screen.getByRole('button', {
-        name: 'Video summary (coming soon)',
-      }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Video summary' }) as HTMLButtonElement).disabled,
     ).toBe(true);
+    expect(screen.getByText('Add a source first')).not.toBeNull();
   });
 });

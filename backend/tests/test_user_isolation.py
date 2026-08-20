@@ -39,7 +39,9 @@ sys.modules["app.services.rag"] = rag_module
 
 from app.main import app as production_app  # noqa: E402
 from app.routers.mindmap import get_mindmap_service  # noqa: E402
+from app.routers.video import get_video_summary_service  # noqa: E402
 from app.services.mindmap import MindMapService  # noqa: E402
+from app.services.video_summary import VideoSummaryService  # noqa: E402
 from conftest import OfflineLLM, authenticated_client  # noqa: E402
 
 MISSING_ID = str(uuid.uuid4())
@@ -92,6 +94,10 @@ def env():
     # tests from opening a socket to a model server that is not there.
     production_app.dependency_overrides[get_mindmap_service] = (
         lambda: MindMapService(llm_service=OfflineLLM())
+    )
+    # The video summary asks the same configured LLM to write its narration.
+    production_app.dependency_overrides[get_video_summary_service] = (
+        lambda: VideoSummaryService(llm_service=OfflineLLM())
     )
 
     alice = authenticated_client(production_app, session, "alice")
@@ -410,6 +416,24 @@ class TestMindMapIsolation:
 
         assert response.status_code == 200
         assert response.json()["root"]["label"] == ALICE_PROJECT
+
+
+class TestVideoSummaryIsolation:
+    """A video summary narrates every source in a project, so it is scoped too."""
+
+    def test_summarising_someone_elses_project_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        assert env.bob.get(
+            "/api/projects/%s/video-summary" % project_id).status_code == 404
+
+    def test_your_own_project_can_be_summarised(self, env):
+        """Pins that the route exists: an unmounted route also answers 404."""
+        project_id = make_project(env.alice)
+
+        response = env.alice.get("/api/projects/%s/video-summary" % project_id)
+
+        assert response.status_code == 200
+        assert response.json()["scenes"][0]["headline"] == ALICE_PROJECT
 
 
 class TestCacheIsolation:
