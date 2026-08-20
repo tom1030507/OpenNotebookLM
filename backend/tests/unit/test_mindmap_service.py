@@ -10,10 +10,8 @@ import pytest
 
 from app.services.mindmap import (
     MAX_TOPICS_PER_DOCUMENT,
-    TOPIC_TOKEN_BUDGET_CAP,
     MindMapService,
     parse_llm_topics,
-    topic_token_budget,
     topics_from_headings,
     topics_from_keywords,
 )
@@ -105,28 +103,6 @@ def _json(value):
     import json
 
     return json.dumps(value)
-
-
-class TestTopicTokenBudget:
-    """How much room the topic call asks for.
-
-    Measured against Groq's qwen3.6-27b, which writes hidden reasoning into this
-    same budget: at 2048 tokens — the provider's configured floor — it spent the
-    lot on thinking and returned empty content, so the mind map silently fell
-    back to keywords on a working provider. Two documents needed 2916.
-    """
-
-    def test_leaves_a_reasoning_model_room_to_answer(self):
-        """Below roughly 3k a reasoning model returns nothing at all."""
-        assert topic_token_budget(1) >= 3072
-
-    def test_grows_with_the_number_of_documents(self):
-        """More sources means more to think about and more to write."""
-        assert topic_token_budget(8) > topic_token_budget(2)
-
-    def test_is_capped(self):
-        """A large project must not turn one map into an unbounded request."""
-        assert topic_token_budget(500) == TOPIC_TOKEN_BUDGET_CAP
 
 
 class StubLLM:
@@ -285,14 +261,15 @@ class TestGeneratedTopics:
 
         assert service.last_model == "fallback"
 
-    def test_the_call_asks_for_the_budget_the_document_count_needs(self):
-        """A too-small budget is spent on reasoning and returns no content."""
+    def test_the_call_asks_for_as_much_as_the_model_will_give(self):
+        """A reply cut off mid-JSON parses to nothing, so a smaller budget buys
+        nothing. The provider clamps it to what one request may actually use."""
         stub = StubLLM('{"documents": []}')
         service = MindMapService(llm_service=stub)
 
         service.build_tree("Notebook", [FakeDocument("d1", "One")])
 
-        assert stub.calls[0]["max_tokens"] == topic_token_budget(1)
+        assert stub.calls[0]["max_tokens"] is None
 
     def test_no_llm_call_is_made_for_an_empty_project(self):
         """There is nothing to ask about, and the call is not free."""

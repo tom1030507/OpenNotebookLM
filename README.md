@@ -29,7 +29,7 @@ a local model too.
 | Export a conversation, a project, or a project summary | ✅ |
 | Studio: audio summary (browser speech), Markdown report | ✅ |
 | Studio: mind map of a project's sources and their topics | ✅ **topics are named by the LLM when one is configured**, otherwise taken from document structure |
-| Studio: video summary | ❌ not implemented — marked as unavailable in the UI |
+| Studio: video summary | ✅ **a narrated slideshow played in the browser**, not a video file; narration written by the LLM when one is configured |
 | Per-user isolation: your projects, documents and conversations are yours alone | ✅ |
 
 **Without an LLM provider configured, question answering still returns a
@@ -374,6 +374,7 @@ directory as `metrics.json` and `report.md`.
 | `GET` | `/api/export/project/{id}` | Export a project (markdown, json) |
 | `GET` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
 | `GET` | `/api/projects/{id}/mindmap` | Mind map of a project; returns `root`, `node_count`, `model_used` |
+| `GET` | `/api/projects/{id}/video-summary` | Scene script for Studio's video summary; returns `scenes`, `estimated_seconds`, `model_used` |
 | `GET`/`DELETE` | `/api/cache/*` | Cache stats, health, clear, invalidate, warm up |
 
 Every path except `/healthz`, `/ready` and the two `/api/auth` credential
@@ -495,8 +496,26 @@ Stated plainly, because several of these look like features until you hit them:
   `youtube-transcript-api==0.6.1` scrapes the watch page, and YouTube rate-limits
   it — imports can fail with an XML parse error on a blocked response even
   though the code is correct.
-- **Studio's video summary is not implemented.** It is visible but disabled;
-  generating video needs backend work.
+- **Studio's video summary is not a video file.** The backend returns a scene
+  script and the browser plays it as a narrated slideshow, reading the narration
+  out with the Web Speech API — the same split the audio summary uses. There is
+  nothing to download but the script, as Markdown. Rendering an MP4 would mean
+  adding a drawing library, a speech engine and ffmpeg to the image; recording
+  the slideshow in the browser is no substitute, because Web Speech output cannot
+  be captured into a `MediaStream` and the file would come out silent.
+- **A video summary's narration is only as good as its inputs.** With no LLM
+  configured each source scene is extracted instead — heading structure first,
+  then the document's opening sentences, then word frequency — and `model_used`
+  says so, in the response and in the player.
+- **A small provider tier costs one refused request per feature.** The mind map
+  and the video summary ask for as much output as the model will give, because a
+  reply cut off mid-JSON parses to nothing. Providers count the prompt and
+  `max_tokens` together against a rate limit — Groq's on-demand tier allows 8000
+  a minute, under which qwen3.6-27b's own 16384-token limit does not fit — so the
+  first such request is refused, the ceiling is read out of the refusal, and the
+  request is retried inside it. Each feature holds its own provider and so pays
+  that once. Set `LLM_MAX_REQUEST_TOKENS` to skip it entirely. A project large enough that its prompt alone approaches the ceiling
+  still falls back to extraction.
 - **A mind map's topics are only as good as its inputs.** With no LLM
   configured they come from the documents' own heading structure, and for a
   PDF with no headings from word frequency — useful, but a keyword list rather

@@ -288,3 +288,53 @@ class MindMapResponse(BaseModel):
     model_used: str
     node_count: int
     root: MindMapNode
+
+
+# Video summary schemas
+class VideoScene(BaseModel):
+    """One scene of a project's video summary.
+
+    The same shape for all three kinds — title card, source, closing recap — so
+    the browser plays them with one renderer instead of three.
+    """
+    id: str
+    kind: str = Field(..., pattern="^(title|source|closing)$")
+    # One clause naming what this scene is about.
+    headline: str
+    # The lines on the slide. Empty for a source whose text is not extracted yet.
+    bullets: List[str] = []
+    # Read aloud over the slide. Never empty: a silent scene is a gap in the
+    # video, and the scene advances when the voice finishes.
+    narration: str
+    # Set on a source scene, so a listener can open the source it came from.
+    document_id: Optional[str] = None
+    # The source's own title, shown as the citation on the slide. Distinct from
+    # `headline`, which may be a sentence a model wrote about it.
+    source_label: Optional[str] = None
+
+
+class VideoSummaryResponse(BaseModel):
+    """Schema for a generated video summary script."""
+
+    # `model_used` collides with pydantic's reserved `model_` prefix, and the
+    # pinned pydantic 2.5.0 warns about every such field at import time. The name
+    # is kept because a query answer and a mind map already report `model_used`
+    # and the browser reads that key; the guard is waived rather than the field
+    # renamed.
+    model_config = {"protected_namespaces": ()}
+
+    project_id: str
+    project_name: str
+    generated_at: UtcDatetime
+    # Which model wrote the source scenes, or "fallback" when the documents' own
+    # structure did. Mirrors `model_used` on a query answer and a mind map: a
+    # written script and an extracted one sound alike, so the caller has to be
+    # able to tell them apart.
+    model_used: str
+    scene_count: int
+    # How long the script takes to read out, so a caller knows the length without
+    # counting words itself. The player derives its own timeline from the same
+    # pace, because its progress bar has to agree with its scene boundaries; keep
+    # `WORDS_PER_SECOND` here and in `videoSummaryTiming.ts` the same.
+    estimated_seconds: int
+    scenes: List[VideoScene]

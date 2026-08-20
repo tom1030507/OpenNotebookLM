@@ -27,3 +27,29 @@ def test_example_env_file_loads_into_settings(example):
 
     # Raises ValidationError on any key Settings does not declare.
     Settings(_env_file=example)
+
+
+def test_a_blank_optional_number_reads_as_unset(tmp_path):
+    """The natural way to leave an optional setting out is to leave it blank.
+
+    For a string field pydantic accepts that already. For a number it is a
+    validation error, and `.env.example` documents two optional numbers — so a
+    copied example file would stop the process from starting.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "LLM_MAX_OUTPUT_TOKENS=\nLLM_MAX_REQUEST_TOKENS=   \n", encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.llm_max_output_tokens is None
+    assert settings.llm_max_request_tokens is None
+
+
+def test_a_set_optional_number_is_still_read(tmp_path):
+    """Tolerating a blank must not mean ignoring a value."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_MAX_REQUEST_TOKENS=8000\n", encoding="utf-8")
+
+    assert Settings(_env_file=env_file).llm_max_request_tokens == 8000

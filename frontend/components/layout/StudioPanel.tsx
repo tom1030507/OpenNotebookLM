@@ -14,8 +14,9 @@ import {
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
-import type { MindMap } from '@/lib/api';
+import type { MindMap, VideoSummary } from '@/lib/api';
 import MindMapDialog from '@/components/MindMapDialog';
+import VideoSummaryDialog from '@/components/VideoSummaryDialog';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
 
 interface StudioOption {
@@ -26,7 +27,7 @@ interface StudioOption {
   /** Outputs with no backend endpoint stay unavailable. */
   available?: boolean;
   /** Distinguishes the live actions from one another. */
-  action?: 'report' | 'audio' | 'mindmap';
+  action?: 'report' | 'audio' | 'mindmap' | 'video';
 }
 
 interface StudioPanelProps {
@@ -45,6 +46,8 @@ export default function StudioPanel({
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
   const [mindMap, setMindMap] = useState<MindMap | null>(null);
+  const [isPreparingVideo, setIsPreparingVideo] = useState(false);
+  const [videoSummary, setVideoSummary] = useState<VideoSummary | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   // Identifies the reading in progress. Stopping retires it, so anything the
@@ -113,8 +116,21 @@ export default function StudioPanel({
     }
   };
 
-  // Report and mind map both have a backend endpoint. Video summary does not,
-  // so it stays unavailable.
+  const playVideoSummary = async () => {
+    if (!currentProject) return;
+
+    setIsPreparingVideo(true);
+    setReportError('');
+
+    try {
+      setVideoSummary(await api.fetchProjectVideoSummary(currentProject.id));
+    } catch {
+      setReportError('The video summary could not be prepared. Please try again.');
+    } finally {
+      setIsPreparingVideo(false);
+    }
+  };
+
   const generateReport = async () => {
     if (!currentProject) return;
 
@@ -140,6 +156,7 @@ export default function StudioPanel({
   const optionAction = (option: StudioOption) => {
     if (option.action === 'report') return generateReport;
     if (option.action === 'mindmap') return buildMindMap;
+    if (option.action === 'video') return playVideoSummary;
     if (option.action === 'audio') return isSpeaking ? stopAudioSummary : playAudioSummary;
     return undefined;
   };
@@ -148,6 +165,11 @@ export default function StudioPanel({
     if (!option.available || !currentProject) return true;
     if (option.action === 'audio') return !speechSupported || isPreparingAudio;
     if (option.action === 'mindmap') return isBuildingMindMap;
+    // A video summary of nothing is two empty slides. The panel knows the
+    // source count, so it can say so instead of playing them.
+    if (option.action === 'video') {
+      return isPreparingVideo || currentProject.document_count === 0;
+    }
     return isGeneratingReport;
   };
 
@@ -172,6 +194,10 @@ export default function StudioPanel({
       return <Loader2 className="w-5 h-5 animate-spin" />;
     }
 
+    if (option.action === 'video' && isPreparingVideo) {
+      return <Loader2 className="w-5 h-5 animate-spin" />;
+    }
+
     return option.icon;
   };
 
@@ -191,6 +217,12 @@ export default function StudioPanel({
       return 'See how this project connects';
     }
 
+    if (option.action === 'video') {
+      if (currentProject.document_count === 0) return 'Add a source first';
+      if (isPreparingVideo) return 'Preparing the script…';
+      return 'Watch a walkthrough of this project';
+    }
+
     return 'Summarise this project';
   };
 
@@ -204,7 +236,9 @@ export default function StudioPanel({
       icon: <Mic className="w-5 h-5" />
     },
     {
-      id: 'video', 
+      id: 'video',
+      available: true,
+      action: 'video',
       title: 'Video summary',
       description: '',
       icon: <Video className="w-5 h-5" />
@@ -318,8 +352,9 @@ export default function StudioPanel({
                   Studio outputs
                 </h4>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Audio summaries, reports and mind maps are available now. Video
-                  summaries are still in preparation.
+                  Audio summaries, video summaries, reports and mind maps are
+                  all available. Select one to generate it from the sources in
+                  this project.
                 </p>
               </div>
             </div>
@@ -329,6 +364,13 @@ export default function StudioPanel({
 
       {mindMap && (
         <MindMapDialog map={mindMap} onClose={() => setMindMap(null)} />
+      )}
+
+      {videoSummary && (
+        <VideoSummaryDialog
+          summary={videoSummary}
+          onClose={() => setVideoSummary(null)}
+        />
       )}
     </aside>
   );

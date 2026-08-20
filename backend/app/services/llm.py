@@ -6,7 +6,8 @@ configured the service still answers, but extractively — see
 :meth:`LLMService._fallback_response` — and reports ``model`` as ``"fallback"``
 so callers can tell a real answer from a passage of the source text.
 """
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -18,6 +19,70 @@ settings = get_settings()
 # The model name reported when no provider answered. Callers (and the API's
 # `model_used` field) rely on this to distinguish generated from extracted text.
 FALLBACK_MODEL = "fallback"
+
+# Used only when a caller asks for the model's limit, nothing is configured, and
+# the provider will not say what its limit is. Large enough to clear the hidden
+# reasoning a thinking model spends before it writes anything, which is the
+# failure this whole mechanism exists to avoid.
+DEFAULT_MAX_OUTPUT_TOKENS = 4096
+
+# Rough tokens-per-character for the clamp below. Only ever used to leave room
+# under a request ceiling, so erring high is the safe direction: a slightly
+# over-estimated prompt asks for slightly fewer output tokens.
+CHARS_PER_TOKEN = 4
+
+# A provider that refuses an oversized request names the ceiling it applied.
+# Groq: "... on tokens per minute (TPM): Limit 8000, Requested 10139".
+_TOKEN_LIMIT_PATTERN = re.compile(r"\bLimit[\s:]+(\d{3,})", re.IGNORECASE)
+_TOKEN_REFUSAL_MARKERS = ("token", "too large", "rate_limit", "rate limit")
+
+
+def estimate_prompt_tokens(messages: List[Dict[str, Any]]) -> int:
+    """Estimate what a request's messages will cost, before sending it.
+
+    There is no local tokenizer here and adding one to clamp a budget would be
+    out of proportion. Character count is close enough: measured against Groq's
+    qwen3.6-27b, a two-source script prompt of 3100 characters counted 667
+    tokens, which this over-estimates by about a sixth — the direction that
+    leaves room rather than taking it.
+
+    Args:
+        messages: The chat messages about to be sent.
+
+    Returns:
+        An estimated prompt token count.
+    """
+    characters = sum(len(str(message.get("content") or "")) for message in messages)
+
+    return characters // CHARS_PER_TOKEN + 1
+
+
+def token_ceiling_from_error(error: Exception) -> Optional[int]:
+    """Read the per-request token ceiling out of a provider's refusal.
+
+    A provider that counts the prompt and `max_tokens` together against a rate
+    limit refuses the whole request before the model sees it, and says what the
+    limit was. Learning it from the refusal means asking for the model's own
+    limit can be the default: the ceiling does not have to be known in advance,
+    or configured per tier.
+
+    Args:
+        error: The exception the provider raised.
+
+    Returns:
+        The ceiling in tokens, or None if this was not a size or rate refusal.
+    """
+    message = str(error)
+    if not any(marker in message.lower() for marker in _TOKEN_REFUSAL_MARKERS):
+        return None
+
+    match = _TOKEN_LIMIT_PATTERN.search(message)
+    if not match:
+        return None
+
+    ceiling = int(match.group(1))
+
+    return ceiling if ceiling > 0 else None
 
 
 class ClaudeProvider:
@@ -40,7 +105,7 @@ class ClaudeProvider:
         self,
         prompt: str,
         temperature: float,
-        max_tokens: int,
+        max_tokens: Optional[int],
         system_prompt: Optional[str],
     ) -> Dict[str, Any]:
         """Generate an answer with Claude.
@@ -48,12 +113,22 @@ class ClaudeProvider:
         `temperature` is accepted for interface parity and deliberately not
         forwarded: current Claude models reject sampling parameters. Depth is
         controlled by `claude_effort` instead.
+
+        `max_tokens` of None means the model's limit, which here is
+        `claude_max_output_tokens` rather than anything discovered: the Messages
+        API requires the field, and the headline 128k needs streaming to stay
+        inside the SDK's HTTP timeout.
         """
+        budget = (
+            max_tokens if max_tokens is not None
+            else settings.claude_max_output_tokens
+        )
+
         request: Dict[str, Any] = {
             "model": self.model,
             # Thinking is on by default and shares this budget with the answer,
             # so too small a value truncates the reply rather than the thinking.
-            "max_tokens": max(max_tokens, settings.claude_min_max_tokens),
+            "max_tokens": max(budget, settings.claude_min_max_tokens),
             "output_config": {"effort": settings.claude_effort},
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -91,6 +166,8 @@ class OpenAICompatibleProvider:
         base_url: Optional[str],
         reasoning_format: Optional[str] = None,
         min_max_tokens: int = 0,
+        max_output_tokens: Optional[int] = None,
+        max_request_tokens: Optional[int] = None,
     ):
         from openai import OpenAI  # imported lazily, as above
 
@@ -98,6 +175,13 @@ class OpenAICompatibleProvider:
         self.model = model
         self.reasoning_format = reasoning_format
         self.min_max_tokens = min_max_tokens
+        self._configured_max_output = max_output_tokens
+        # The model's own limit, asked of the provider the first time a caller
+        # wants it. False means "asked, and it would not say".
+        self._model_max_output: Any = None
+        # Learned from a refusal, or configured. Applies to prompt + max_tokens
+        # together, which is what the provider counts.
+        self._max_request_tokens = max_request_tokens
         self._client = (
             OpenAI(api_key=api_key, base_url=base_url)
             if base_url
@@ -108,15 +192,106 @@ class OpenAICompatibleProvider:
         """Raise if the server is unreachable or the key is rejected."""
         self._client.models.list()
 
+    def max_output_tokens(self) -> int:
+        """How much output to ask for when the caller wants the model's limit.
+
+        Read from the provider rather than tabulated here: OpenAI-compatible
+        `/v1/models` reports `max_completion_tokens`, so a new model needs no
+        code change. Asked once and remembered, including the failure — a
+        provider that does not report it must not be re-asked on every call.
+
+        Returns:
+            The configured limit, the model's reported limit, or
+            `DEFAULT_MAX_OUTPUT_TOKENS` when neither is available.
+        """
+        if self._configured_max_output:
+            return self._configured_max_output
+
+        if self._model_max_output is None:
+            self._model_max_output = self._discover_max_output_tokens() or False
+
+        if self._model_max_output:
+            return self._model_max_output
+
+        return DEFAULT_MAX_OUTPUT_TOKENS
+
+    def _discover_max_output_tokens(self) -> Optional[int]:
+        """Ask the provider what this model's output limit is.
+
+        Returns:
+            The limit, or None if the provider does not report one or could not
+            be reached. Not an error: the caller has a default.
+        """
+        try:
+            described = self._client.models.retrieve(self.model).model_dump()
+        except Exception as e:
+            logger.info(
+                "Provider did not describe the model; using the default output budget",
+                provider=self.name,
+                model=self.model,
+                error_type=type(e).__name__,
+            )
+            return None
+
+        # `max_completion_tokens` is Groq's name for it; `max_output_length`
+        # appears alongside it. Neither is in the OpenAI schema, so they arrive
+        # as extra fields and are read from the dump rather than as attributes.
+        for field in ("max_completion_tokens", "max_output_length"):
+            value = described.get(field)
+            if isinstance(value, int) and value > 0:
+                logger.info(
+                    "Read the model's output limit from the provider",
+                    provider=self.name,
+                    model=self.model,
+                    max_output_tokens=value,
+                )
+                return value
+
+        return None
+
+    def _budget(
+        self,
+        max_tokens: Optional[int],
+        messages: List[Dict[str, Any]],
+    ) -> int:
+        """Decide the `max_tokens` to send.
+
+        Args:
+            max_tokens: What the caller asked for, or None for the model's limit.
+            messages: The messages about to be sent, for the clamp below.
+
+        Returns:
+            A positive token budget.
+
+        The floor is applied before the ceiling, and the ceiling wins. Both
+        failures end in the same place — an unparseable reply falls back — but a
+        truncated answer at least arrives, where a request refused for being too
+        large returns nothing at all.
+        """
+        budget = max_tokens if max_tokens is not None else self.max_output_tokens()
+        budget = max(budget, self.min_max_tokens)
+
+        if self._max_request_tokens:
+            room = self._max_request_tokens - estimate_prompt_tokens(messages)
+            budget = min(budget, room)
+
+        return max(budget, 1)
+
     def generate(
         self,
         prompt: str,
         temperature: float,
-        max_tokens: int,
+        max_tokens: Optional[int],
         system_prompt: Optional[str],
     ) -> Dict[str, Any]:
-        """Generate an answer through the chat-completions API."""
-        messages = []
+        """Generate an answer through the chat-completions API.
+
+        `max_tokens` of None means the model's own limit. Omitting the parameter
+        instead does *not* mean that — Groq applies its own 2048 default and the
+        reply comes back cut off with `finish_reason: length` — so a number is
+        always sent.
+        """
+        messages: List[Dict[str, Any]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
@@ -127,7 +302,7 @@ class OpenAICompatibleProvider:
             "temperature": temperature,
             # A reasoning model writes its thinking into this budget first, so
             # the floor is what keeps the ceiling from cutting off the answer.
-            "max_tokens": max(max_tokens, self.min_max_tokens),
+            "max_tokens": self._budget(max_tokens, messages),
         }
         if self.reasoning_format:
             # Not part of the OpenAI API. It travels in extra_body, and only
@@ -135,7 +310,7 @@ class OpenAICompatibleProvider:
             # recognise — which would take down the default path.
             request["extra_body"] = {"reasoning_format": self.reasoning_format}
 
-        response = self._client.chat.completions.create(**request)
+        response = self._create(request, max_tokens, messages)
         usage = response.usage
         return {
             "text": response.choices[0].message.content,
@@ -146,6 +321,54 @@ class OpenAICompatibleProvider:
                 "total_tokens": usage.total_tokens if usage else 0,
             },
         }
+
+    def _create(
+        self,
+        request: Dict[str, Any],
+        max_tokens: Optional[int],
+        messages: List[Dict[str, Any]],
+    ) -> Any:
+        """Send the request, learning the provider's ceiling if it refuses.
+
+        Asking for the model's limit is only a usable default because of this:
+        a provider that counts the prompt and `max_tokens` together against a
+        rate limit refuses before the model sees anything, and says what the
+        limit was. Remembering it costs one refused request per provider
+        instance — the mind map and the video summary hold one each — and the
+        request that provoked it is retried at a budget that fits, so nothing is
+        lost but a round trip.
+
+        Args:
+            request: The request to send. Its `max_tokens` may be rewritten.
+            max_tokens: What the caller asked for, for recomputing the budget.
+            messages: The messages, for the clamp.
+
+        Returns:
+            The provider's response.
+
+        Raises:
+            Exception: whatever the provider raised, when the refusal named no
+                ceiling or a ceiling was already known — in which case the
+                budget was already clamped and retrying would change nothing.
+        """
+        try:
+            return self._client.chat.completions.create(**request)
+        except Exception as e:
+            ceiling = token_ceiling_from_error(e)
+            if ceiling is None or self._max_request_tokens:
+                raise
+
+            self._max_request_tokens = ceiling
+            request["max_tokens"] = self._budget(max_tokens, messages)
+            logger.warning(
+                "Provider refused the request size; retrying inside its ceiling",
+                provider=self.name,
+                model=self.model,
+                request_ceiling=ceiling,
+                max_tokens=request["max_tokens"],
+            )
+
+            return self._client.chat.completions.create(**request)
 
 
 def _build_provider():
@@ -170,6 +393,8 @@ def _build_provider():
             base_url=settings.openai_base_url,
             reasoning_format=settings.openai_reasoning_format,
             min_max_tokens=settings.openai_min_max_tokens,
+            max_output_tokens=settings.llm_max_output_tokens,
+            max_request_tokens=settings.llm_max_request_tokens,
         )
 
     if mode in ("local", "auto"):
@@ -178,6 +403,8 @@ def _build_provider():
             model=settings.ollama_model,
             api_key="not-needed",  # local servers ignore it
             base_url=settings.ollama_base_url,
+            max_output_tokens=settings.llm_max_output_tokens,
+            max_request_tokens=settings.llm_max_request_tokens,
         )
 
     return None
@@ -266,7 +493,7 @@ class LLMService:
         self,
         prompt: str,
         temperature: float = 0.7,
-        max_tokens: int = 512,
+        max_tokens: Optional[int] = 512,
         system_prompt: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate text using LLM.
@@ -274,7 +501,11 @@ class LLMService:
         Args:
             prompt: User prompt
             temperature: Sampling temperature (ignored by Claude)
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate, or None to ask for as much
+                as the model will give. The default stays a modest number so an
+                existing caller's behaviour is unchanged; a caller whose reply
+                has to be complete to be usable at all — anything parsing JSON
+                back — should pass None.
             system_prompt: Optional system prompt
 
         Returns:

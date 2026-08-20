@@ -1,5 +1,6 @@
 """Application configuration."""
-from typing import List, Optional
+from typing import Any, List, Optional
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -62,6 +63,22 @@ class Settings(BaseSettings):
     # max_tokens is raised to this floor, never lowered to it, and a
     # non-reasoning model is unaffected: it stops when the answer ends.
     openai_min_max_tokens: int = 2048
+    # What a caller gets when it asks for as much as the model will give rather
+    # than naming a number. Left unset, the limit is read from the provider —
+    # OpenAI-compatible `/v1/models` reports `max_completion_tokens`, so this
+    # never becomes a table of model sizes maintained by hand. Omitting
+    # max_tokens from the request is not the same thing and is not the answer:
+    # Groq then applies its own 2048 default and truncates the reply.
+    llm_max_output_tokens: Optional[int] = None
+    # Ceiling on one request's prompt *plus* its max_tokens. Providers count
+    # both against a rate limit and refuse the whole request before the model
+    # sees it: Groq's on-demand tier allows 8000 a minute, which qwen3.6-27b's
+    # own 16384-token output limit cannot fit under, so asking for the model's
+    # limit there is a 413 every time. Left unset, the ceiling is learned from
+    # the first refusal that names one, so the default needs no tuning. Set it
+    # to skip that refusal, which each feature otherwise pays once.
+    llm_max_request_tokens: Optional[int] = None
+
     claude_api_key: Optional[str] = None
     claude_model: str = "claude-opus-5"
     # Answering from retrieved chunks is not a reasoning-heavy task, so the
@@ -70,6 +87,13 @@ class Settings(BaseSettings):
     # Thinking is on by default on current Claude models and shares the output
     # budget with the answer, so a caller's max_tokens is raised to this floor.
     claude_min_max_tokens: int = 2048
+    # What a caller asking for the model's limit gets on the Claude path, which
+    # cannot discover it the way the OpenAI path does: the Messages API requires
+    # max_tokens, and while current models accept up to 128k, the SDK needs
+    # streaming above roughly this to stay inside its HTTP timeout — and nothing
+    # here streams. So this is the practical non-streaming ceiling, not the
+    # model's headline figure.
+    claude_max_output_tokens: int = 16000
     
     # YouTube
     enable_yt_transcription: bool = True
@@ -132,7 +156,32 @@ class Settings(BaseSettings):
     # in characters rather than tokens on purpose: it needs no tokenizer and
     # is conservative for Latin text, where a character is well under a token.
     context_char_budget: int = 12000
-    
+
+    @field_validator(
+        "llm_max_output_tokens", "llm_max_request_tokens", mode="before",
+    )
+    @classmethod
+    def _blank_means_unset(cls, value: Any) -> Any:
+        """Read a blank value as unset rather than as a broken number.
+
+        These two are documented in `.env.example` as optional, and the natural
+        way to write an optional setting in a dotenv file is to leave the key
+        with nothing after the `=`. For a string field pydantic accepts that; for
+        a number it is a validation error, which stops the process from starting
+        over a blank line nobody would read as a mistake.
+
+        Args:
+            value: The raw environment value.
+
+        Returns:
+            None for a blank value, otherwise the value unchanged, for the
+            normal parsing to handle.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+
+        return value
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

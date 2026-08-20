@@ -109,3 +109,27 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
 }
+
+/* Studio's video summary fades each scene in as it starts.
+   The guard is not decoration: a player that changes slide every few seconds is
+   exactly the motion a reader who has asked for less of it wants less of. */
+@keyframes scene-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.scene-in {
+  animation: scene-in 0.25s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-in {
+    animation: none;
+  }
+}
