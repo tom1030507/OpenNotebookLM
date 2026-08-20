@@ -507,6 +507,15 @@ Stated plainly, because several of these look like features until you hit them:
   configured each source scene is extracted instead — heading structure first,
   then the document's opening sentences, then word frequency — and `model_used`
   says so, in the response and in the player.
+- **A small provider tier costs one refused request per feature.** The mind map
+  and the video summary ask for as much output as the model will give, because a
+  reply cut off mid-JSON parses to nothing. Providers count the prompt and
+  `max_tokens` together against a rate limit — Groq's on-demand tier allows 8000
+  a minute, under which qwen3.6-27b's own 16384-token limit does not fit — so the
+  first such request is refused, the ceiling is read out of the refusal, and the
+  request is retried inside it. Each feature holds its own provider and so pays
+  that once. Set `LLM_MAX_REQUEST_TOKENS` to skip it entirely. A project large enough that its prompt alone approaches the ceiling
+  still falls back to extraction.
 - **A mind map's topics are only as good as its inputs.** With no LLM
   configured they come from the documents' own heading structure, and for a
   PDF with no headings from word frequency — useful, but a keyword list rather

@@ -43,41 +43,10 @@ logger = structlog.get_logger()
 # for it stops being cheap.
 MAX_TOPICS_PER_DOCUMENT = 6
 
-# The topic call's token budget. A reasoning model writes its thinking into this
-# same budget before any content, so the floor has to clear the thinking or the
-# reply comes back empty and the map silently falls back to keywords — which is
-# exactly what Groq's qwen3.6-27b did at the provider's configured 2048-token
-# floor, spending all of it on hidden reasoning and returning nothing.
-#
-# Measured against that model: 2 documents spent 2916, 4 spent 4121, 6 spent
-# 5126. The marginal cost is roughly 550 per document, so 512 keeps a margin of
-# about 1000 that neither grows nor shrinks across that range.
-TOPIC_TOKEN_BUDGET_BASE = 3072
-TOPIC_TOKEN_BUDGET_PER_DOCUMENT = 512
-# One mind map is one request; a 200-source project must not make it unbounded.
-TOPIC_TOKEN_BUDGET_CAP = 16384
-
-
 TOPIC_SYSTEM_PROMPT = (
     "You organize study notes into mind maps. Answer with a single JSON object "
     "and nothing else."
 )
-
-
-def topic_token_budget(document_count: int) -> int:
-    """Size the topic call's token budget for the project.
-
-    Args:
-        document_count: How many documents the one call covers.
-
-    Returns:
-        A `max_tokens` value with room for a reasoning model's thinking as well
-        as the JSON, capped so a large project stays one bounded request.
-    """
-    budget = TOPIC_TOKEN_BUDGET_BASE + TOPIC_TOKEN_BUDGET_PER_DOCUMENT * document_count
-
-    return min(budget, TOPIC_TOKEN_BUDGET_CAP)
-
 
 
 def parse_llm_topics(text: str, document_count: int) -> Dict[int, List[str]]:
@@ -258,7 +227,10 @@ class MindMapService:
             result = self.llm.generate(
                 prompt=self._topic_prompt(documents),
                 temperature=0.2,
-                max_tokens=topic_token_budget(len(documents)),
+                # As much as the model will give. A reply cut off mid-JSON parses
+                # to nothing, so a smaller budget buys nothing; the provider
+                # layer clamps this to what one request may actually use.
+                max_tokens=None,
                 system_prompt=TOPIC_SYSTEM_PROMPT,
             )
         except Exception as e:

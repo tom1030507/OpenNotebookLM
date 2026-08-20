@@ -9,9 +9,13 @@ map uses for its tree.
 
 The scene skeleton is decided here and not by the model: a title card, one
 scene per source in project order, and a closing recap. That keeps the length
-predictable, keeps the token budget a function of the source count, and keeps
-the script playable when there is no model at all — the model only writes the
-source scenes.
+predictable and keeps the script playable when there is no model at all — the
+model only writes the source scenes.
+
+The one model call asks for as much output as the model will give. A script cut
+off mid-JSON parses to nothing, so there is no partial credit to trade against a
+smaller budget; sizing the request is the provider layer's job, and it is the
+only layer that knows what one request may actually use.
 
 Without a usable model, each source scene is extracted instead, in descending
 order of quality:
@@ -60,35 +64,6 @@ BULLET_MAX_CHARS = 120
 # shorter than this many words is one of those, not a sentence.
 MIN_SENTENCE_WORDS = 3
 
-# The script call's token budget, which has to satisfy two limits at once.
-#
-# From below: a reasoning model writes its thinking into this same budget before
-# any content, so the floor has to clear the thinking or the reply comes back
-# empty and the script silently falls back to extraction — which is what Groq's
-# qwen3.6-27b did to the mind map at the provider's configured 2048-token floor.
-#
-# From above: a provider counts the prompt and `max_tokens` together against its
-# rate limit and refuses the whole request before the model sees it. Groq's
-# on-demand tier allows 8000 per minute, and a generous budget is what pushes a
-# six-source project over it — a 413 that costs the narration entirely.
-#
-# So the budget is fitted to measured use rather than padded. Against
-# qwen3.6-27b, completions were 2757 for one document; 2555, 3272, 3663 and
-# 4022 across four runs at two; 4263 at four; 4271 at six. Almost all of it is
-# fixed reasoning cost, and run-to-run variance at one document count exceeds
-# the difference between counts, so the base is large and the slope small.
-#
-# 4352 + 256 leaves the worst run measured at each count between 840 and 1850
-# tokens spare, and keeps a six-document request at 7555 including its prompt —
-# inside the 8000 ceiling, where the previous 900-per-document slope asked for
-# 10139 and was refused.
-NARRATION_TOKEN_BUDGET_BASE = 4352
-NARRATION_TOKEN_BUDGET_PER_DOCUMENT = 256
-# One script is one request; a 200-source project must not make it unbounded.
-# Well past the point where a small tier's per-minute ceiling refuses the call,
-# which is why a large project can still fall back to extraction on one.
-NARRATION_TOKEN_BUDGET_CAP = 16384
-
 # Reading pace used to size the progress bar only. Playback is driven by the
 # voice finishing a scene, not by this estimate, so being out by a few seconds
 # costs nothing.
@@ -103,24 +78,6 @@ SCRIPT_SYSTEM_PROMPT = (
     "You write short spoken walkthroughs of study material. Answer with a "
     "single JSON object and nothing else."
 )
-
-
-def narration_token_budget(document_count: int) -> int:
-    """Size the script call's token budget for the project.
-
-    Args:
-        document_count: How many documents the one call covers.
-
-    Returns:
-        A `max_tokens` value with room for a reasoning model's thinking as well
-        as the JSON, capped so a large project stays one bounded request.
-    """
-    budget = (
-        NARRATION_TOKEN_BUDGET_BASE
-        + NARRATION_TOKEN_BUDGET_PER_DOCUMENT * document_count
-    )
-
-    return min(budget, NARRATION_TOKEN_BUDGET_CAP)
 
 
 def shorten(text: str, limit: int = BULLET_MAX_CHARS) -> str:
@@ -612,7 +569,16 @@ class VideoSummaryService:
             result = self.llm.generate(
                 prompt=self._script_prompt(documents),
                 temperature=0.3,
-                max_tokens=narration_token_budget(len(documents)),
+                # As much as the model will give. A reasoning model spends this
+                # budget on thinking before it writes anything, and a script cut
+                # off mid-JSON is worth nothing at all — there is no partial
+                # credit here, so there is no reason to ask for less than the
+                # model's limit. Fitting a budget to measured use looked thrifty
+                # and was wrong twice over: it was still too large for a small
+                # tier at twelve sources, and too small to be safe at two. The
+                # provider layer clamps this to whatever one request may
+                # actually use.
+                max_tokens=None,
                 system_prompt=SCRIPT_SYSTEM_PROMPT,
             )
         except Exception as e:

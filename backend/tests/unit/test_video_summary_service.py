@@ -13,36 +13,12 @@ import pytest
 from app.services.video_summary import (
     BULLET_MAX_CHARS,
     MAX_BULLETS_PER_SCENE,
-    NARRATION_TOKEN_BUDGET_CAP,
     VideoSummaryService,
     estimate_seconds,
     leading_sentences,
-    narration_token_budget,
     parse_llm_scenes,
 )
 from app.utils.time import utc_now
-
-
-class TestNarrationTokenBudget:
-    """How much room the script call asks for.
-
-    Sized like the mind map's topic call and for the same reason: a reasoning
-    model writes its thinking into this same budget before any content, so a
-    floor that only fits the answer comes back empty. Narration is far longer
-    than a topic label, so the per-document share is larger.
-    """
-
-    def test_leaves_a_reasoning_model_room_to_answer(self):
-        """Below roughly 3k a reasoning model returns nothing at all."""
-        assert narration_token_budget(1) >= 3072
-
-    def test_grows_with_the_number_of_documents(self):
-        """Every source adds a headline, bullets and a paragraph of narration."""
-        assert narration_token_budget(8) > narration_token_budget(2)
-
-    def test_is_capped(self):
-        """A large project must not turn one script into an unbounded request."""
-        assert narration_token_budget(500) == NARRATION_TOKEN_BUDGET_CAP
 
 
 class TestLeadingSentences:
@@ -415,14 +391,16 @@ class TestGeneratedScenes:
         assert len(scenes) == 3
         assert service.last_model == "fallback"
 
-    def test_the_call_asks_for_the_budget_the_document_count_needs(self):
-        """A too-small budget is spent on reasoning and returns no content."""
+    def test_the_call_asks_for_as_much_as_the_model_will_give(self):
+        """A script cut off mid-JSON parses to nothing, so there is no reason to
+        ask for less. Sizing the request belongs to the provider, which is the
+        only layer that knows what one request may actually use."""
         stub = StubLLM('{"scenes": []}')
         service = VideoSummaryService(llm_service=stub)
 
         service.build_scenes("Notebook", [FakeDocument("d1", "One")], utc_now())
 
-        assert stub.calls[0]["max_tokens"] == narration_token_budget(1)
+        assert stub.calls[0]["max_tokens"] is None
 
     def test_no_llm_call_is_made_for_an_empty_project(self):
         """There is nothing to ask about, and the call is not free."""
