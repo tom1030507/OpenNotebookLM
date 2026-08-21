@@ -16,9 +16,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.services import llm as llm_module
 from app.services.llm import (
     DEFAULT_MAX_OUTPUT_TOKENS,
+    FALLBACK_MODEL,
+    LLMService,
     OpenAICompatibleProvider,
+    TokenBudgetTooSmallError,
     estimate_prompt_tokens,
     token_ceiling_from_error,
 )
@@ -293,28 +297,73 @@ class TestBudget:
             [{"role": "user", "content": "x" * 4000}],
         ) <= 8000
 
-    def test_the_ceiling_wins_over_the_floor(self):
-        """Both failures end in a fallback, but a truncated answer at least
-        arrives where a refused request returns nothing."""
+    def test_a_ceiling_below_the_floor_sends_nothing(self):
+        """Under the floor there is no answer left to truncate: the whole budget
+        goes on hidden thinking and `content` comes back null. The request is
+        still billed, so not asking beats paying for an empty reply."""
         provider = build(
             described={"max_completion_tokens": 16384},
             min_max_tokens=2048, max_request_tokens=1000,
         )
 
-        provider.generate("x" * 2000, 0.3, None, None)
+        with pytest.raises(TokenBudgetTooSmallError):
+            provider.generate("x" * 2000, 0.3, None, None)
 
-        assert provider.completions.requests[0]["max_tokens"] < 2048
+        assert provider.completions.requests == []
 
-    def test_never_asks_for_nothing(self):
-        """A ceiling smaller than the prompt would otherwise go negative."""
+    def test_a_prompt_larger_than_the_ceiling_sends_nothing(self):
+        """Room is negative here, and asking for the one token that clamping to
+        a positive number leaves buys precisely nothing."""
         provider = build(
             described={"max_completion_tokens": 16384},
             max_request_tokens=10,
         )
 
-        provider.generate("x" * 4000, 0.3, None, None)
+        with pytest.raises(TokenBudgetTooSmallError):
+            provider.generate("x" * 4000, 0.3, None, None)
 
-        assert provider.completions.requests[0]["max_tokens"] >= 1
+        assert provider.completions.requests == []
+
+    def test_room_exactly_at_the_floor_is_not_enough(self):
+        """One condition covers two cases, so it has to hold at the boundary:
+        a floor the clamp would have to cut into, and — where no floor is
+        configured — a ceiling with nothing at all left under it."""
+        prompt = "x" * 4000
+        room_for = estimate_prompt_tokens([{"role": "user", "content": prompt}])
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048, max_request_tokens=room_for + 2048,
+        )
+
+        with pytest.raises(TokenBudgetTooSmallError):
+            provider.generate(prompt, 0.3, None, None)
+
+    def test_a_ceiling_the_prompt_exactly_fills_sends_nothing(self):
+        """A provider with no floor configured — the local one — has the same
+        problem in its degenerate form: a budget of zero."""
+        prompt = "x" * 4000
+        room_for = estimate_prompt_tokens([{"role": "user", "content": prompt}])
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            max_request_tokens=room_for,
+        )
+
+        with pytest.raises(TokenBudgetTooSmallError):
+            provider.generate(prompt, 0.3, None, None)
+
+    def test_headroom_above_the_floor_is_still_clamped_and_used(self):
+        """Refusing to send is for the cases that cannot work; the clamp keeps
+        doing its job everywhere else."""
+        prompt = "x" * 4000
+        room_for = estimate_prompt_tokens([{"role": "user", "content": prompt}])
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048, max_request_tokens=room_for + 2049,
+        )
+
+        provider.generate(prompt, 0.3, None, None)
+
+        assert provider.completions.requests[0]["max_tokens"] == 2049
 
 
 class TestLearningTheCeiling:
@@ -372,3 +421,58 @@ class TestLearningTheCeiling:
             provider.generate("hello", 0.3, None, None)
 
         assert len(provider.completions.requests) == 1
+
+    def test_a_ceiling_too_tight_for_the_floor_is_not_retried_under(self):
+        """The refused request cost a round trip; retrying it at a budget that
+        can only answer with silence would cost a billed one."""
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048,
+            refuse_first_with=Exception(GROQ_413),
+        )
+
+        with pytest.raises(TokenBudgetTooSmallError):
+            provider.generate("x" * 28000, 0.3, None, None)
+
+        assert len(provider.completions.requests) == 1
+
+    def test_a_ceiling_too_tight_to_retry_under_is_still_remembered(self):
+        """This prompt cannot be answered, but the next one is smaller — and it
+        should not have to pay for the same refusal again to find that out."""
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048,
+            refuse_first_with=Exception(GROQ_413),
+        )
+
+        with pytest.raises(TokenBudgetTooSmallError):
+            provider.generate("x" * 28000, 0.3, None, None)
+        provider.generate("hello", 0.3, None, None)
+
+        sent = provider.completions.requests[-1]
+        assert sent["max_tokens"] < 16384
+        assert sent["max_tokens"] + estimate_prompt_tokens(
+            sent["messages"],
+        ) <= 8000
+
+
+class TestTheServiceFallsBack:
+    """A budget too small to send must read as 'this provider could not answer'."""
+
+    def test_a_request_not_worth_sending_is_answered_extractively(
+        self, monkeypatch,
+    ):
+        """Not an API error: the caller asked a question and gets the extracted
+        passage, exactly as it would if the provider had refused."""
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048, max_request_tokens=1000,
+        )
+        monkeypatch.setattr(llm_module, "_build_provider", lambda: provider)
+        service = LLMService()
+
+        result = service.generate("x" * 2000, max_tokens=None)
+
+        assert result["model"] == FALLBACK_MODEL
+        assert provider.completions.requests == []
+        assert service.is_available() is False

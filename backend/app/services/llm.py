@@ -155,6 +155,16 @@ class ClaudeProvider:
         }
 
 
+class TokenBudgetTooSmallError(RuntimeError):
+    """Raised instead of sending a request with no room left to answer in.
+
+    A reasoning model writes its thinking into the same budget as the reply, so
+    a budget under the floor is spent before a word of the answer is written:
+    the reply comes back empty, and the request is billed all the same. Raising
+    means the caller sees a provider that could not answer, and falls back.
+    """
+
+
 class OpenAICompatibleProvider:
     """OpenAI, or any server speaking the same chat-completions API."""
 
@@ -256,26 +266,41 @@ class OpenAICompatibleProvider:
     ) -> int:
         """Decide the `max_tokens` to send.
 
+        The ceiling clamps the budget down, but never through the floor. A
+        reasoning model spends the budget on thinking before it writes anything,
+        so under the floor there is no truncated answer to salvage — the reply
+        comes back empty, and the request is billed regardless. Refusing to send
+        it is the cheaper failure, and the honest one: the caller falls back to
+        extraction instead of returning an empty answer as if it were one.
+
         Args:
             max_tokens: What the caller asked for, or None for the model's limit.
             messages: The messages about to be sent, for the clamp below.
 
         Returns:
-            A positive token budget.
+            A positive token budget that leaves the prompt room under any known
+            request ceiling.
 
-        The floor is applied before the ceiling, and the ceiling wins. Both
-        failures end in the same place — an unparseable reply falls back — but a
-        truncated answer at least arrives, where a request refused for being too
-        large returns nothing at all.
+        Raises:
+            TokenBudgetTooSmallError: when the ceiling leaves no more room than
+                the floor — including when the prompt alone overruns it.
         """
         budget = max_tokens if max_tokens is not None else self.max_output_tokens()
-        budget = max(budget, self.min_max_tokens)
+        budget = max(budget, self.min_max_tokens, 1)
 
         if self._max_request_tokens:
             room = self._max_request_tokens - estimate_prompt_tokens(messages)
+            # `<=` rather than `<` so a provider with no floor configured is
+            # covered too: for it, room that has run out means room of zero.
+            if room <= self.min_max_tokens:
+                raise TokenBudgetTooSmallError(
+                    f"a {self._max_request_tokens}-token request ceiling leaves "
+                    f"{room} tokens for the answer, which will not clear the "
+                    f"{self.min_max_tokens}-token floor"
+                )
             budget = min(budget, room)
 
-        return max(budget, 1)
+        return budget
 
     def generate(
         self,
@@ -350,6 +375,9 @@ class OpenAICompatibleProvider:
             Exception: whatever the provider raised, when the refusal named no
                 ceiling or a ceiling was already known — in which case the
                 budget was already clamped and retrying would change nothing.
+            TokenBudgetTooSmallError: when the ceiling just learned leaves this
+                prompt no room to be answered in. The refusal cost a round trip;
+                a retry that can only come back empty would cost a billed one.
         """
         try:
             return self._client.chat.completions.create(**request)
@@ -358,6 +386,8 @@ class OpenAICompatibleProvider:
             if ceiling is None or self._max_request_tokens:
                 raise
 
+            # Remembered before the retry is sized, so that a ceiling too tight
+            # for this prompt still spares the next one the same refusal.
             self._max_request_tokens = ceiling
             request["max_tokens"] = self._budget(max_tokens, messages)
             logger.warning(
