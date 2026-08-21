@@ -31,10 +31,17 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4096
 # over-estimated prompt asks for slightly fewer output tokens.
 CHARS_PER_TOKEN = 4
 
-# A provider that refuses an oversized request names the ceiling it applied.
-# Groq: "... on tokens per minute (TPM): Limit 8000, Requested 10139".
+# A provider that refuses an oversized request names the ceiling it applied, but
+# a provider whose request quota is spent refuses in the same words, with the
+# same code, and names a limit that counts requests. So a refusal is only read
+# as a token ceiling when nothing in it points at a request-counting metric.
+#   learn:  "... on tokens per minute (TPM): Limit 8000, Requested 10139"
+#   ignore: "... on requests per day (RPD): Limit 1000, Used 1000, Requested 1"
 _TOKEN_LIMIT_PATTERN = re.compile(r"\bLimit[\s:]+(\d{3,})", re.IGNORECASE)
 _TOKEN_REFUSAL_MARKERS = ("token", "too large", "rate_limit", "rate limit")
+# The size of the number cannot separate the two: a higher tier's requests-per-
+# minute allowance runs into the hundreds, the same range as a small TPM.
+_REQUEST_COUNT_MARKERS = ("requests per", "request per", "(rpm)", "(rpd)")
 
 
 def estimate_prompt_tokens(messages: List[Dict[str, Any]]) -> int:
@@ -66,14 +73,27 @@ def token_ceiling_from_error(error: Exception) -> Optional[int]:
     limit can be the default: the ceiling does not have to be known in advance,
     or configured per tier.
 
+    Only a refusal that is genuinely about size counts. A provider also refuses
+    once the tier's allowance of *requests* is spent, and says so in the same
+    words: Groq's daily quota reports "Limit 1000" meaning a thousand requests,
+    not a thousand tokens. Read as a ceiling that number sits below any real
+    prompt, so every later request would be clamped to a single token — and it
+    would outlast the window it came from, because the provider is held for the
+    life of the process and only a restart would clear it.
+
     Args:
         error: The exception the provider raised.
 
     Returns:
-        The ceiling in tokens, or None if this was not a size or rate refusal.
+        The ceiling in tokens, or None if this was not a size or rate refusal,
+        or was one whose limit counts requests rather than tokens.
     """
     message = str(error)
-    if not any(marker in message.lower() for marker in _TOKEN_REFUSAL_MARKERS):
+    lowered = message.lower()
+    if not any(marker in lowered for marker in _TOKEN_REFUSAL_MARKERS):
+        return None
+
+    if any(marker in lowered for marker in _REQUEST_COUNT_MARKERS):
         return None
 
     match = _TOKEN_LIMIT_PATTERN.search(message)

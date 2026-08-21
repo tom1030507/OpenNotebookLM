@@ -33,6 +33,24 @@ GROQ_413 = (
     "'rate_limit_exceeded'}}"
 )
 
+# What Groq answers with when the tier's daily allowance of *requests* is spent.
+# Copied from a real refusal. Same wording and the same `rate_limit_exceeded`
+# code as the size refusal above, but "Limit 1000" counts requests, not tokens.
+GROQ_429_RPD = (
+    "Error code: 429 - {'error': {'message': 'Rate limit reached for model "
+    "`qwen/qwen3.6-27b` in organization `org_01k7` service tier `on_demand` on "
+    "requests per day (RPD): Limit 1000, Used 1000, Requested 1. Please try "
+    "again in 5m3.6s.', 'type': 'requests', 'code': 'rate_limit_exceeded'}}"
+)
+
+# The per-minute variant. Its limit only happens to be two digits.
+GROQ_429_RPM = (
+    "Error code: 429 - {'error': {'message': 'Rate limit reached for model "
+    "`qwen/qwen3.6-27b` in organization `org_01k7` service tier `on_demand` on "
+    "requests per minute (RPM): Limit 30, Used 30, Requested 1. Please try "
+    "again in 2.4s.', 'type': 'requests', 'code': 'rate_limit_exceeded'}}"
+)
+
 
 class TestTokenCeilingFromError:
     """Learning the ceiling is what makes the model's limit a usable default."""
@@ -40,6 +58,22 @@ class TestTokenCeilingFromError:
     def test_reads_the_limit_out_of_a_size_refusal(self):
         """The provider says what it applied; there is no need to guess it."""
         assert token_ceiling_from_error(Exception(GROQ_413)) == 8000
+
+    def test_ignores_a_daily_request_quota(self):
+        """The limit it names is a request count. Read as tokens it lands below
+        any real prompt, so every later call asks for a single token."""
+        assert token_ceiling_from_error(Exception(GROQ_429_RPD)) is None
+
+    def test_ignores_a_per_minute_request_quota(self):
+        """The same message with a different window, and just as not-a-budget."""
+        assert token_ceiling_from_error(Exception(GROQ_429_RPM)) is None
+
+    def test_ignores_a_request_quota_that_is_large_enough_to_look_like_tokens(self):
+        """A higher tier's RPM runs into the hundreds, so the number's size
+        cannot be what tells a request count from a token count."""
+        message = GROQ_429_RPM.replace("Limit 30, Used 30", "Limit 500, Used 500")
+
+        assert token_ceiling_from_error(Exception(message)) is None
 
     def test_ignores_an_unrelated_failure(self):
         """A dead socket says nothing about how large a request may be."""
@@ -359,6 +393,25 @@ class TestLearningTheCeiling:
             provider.generate("hello", 0.3, None, None)
 
         assert len(provider.completions.requests) == 1
+
+    def test_a_spent_request_quota_does_not_become_a_ceiling(self):
+        """Providers are module-level singletons, so a ceiling learned from a
+        daily quota outlives the quota itself: every answer would fall back to
+        extraction until the process restarts."""
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            refuse_first_with=Exception(GROQ_429_RPD),
+        )
+
+        with pytest.raises(Exception):
+            provider.generate("x" * 4000, 0.3, None, None)
+
+        assert len(provider.completions.requests) == 1
+
+        # The stand-in refuses the first call only, so this one goes through.
+        provider.generate("x" * 4000, 0.3, None, None)
+
+        assert provider.completions.requests[-1]["max_tokens"] == 16384
 
     def test_a_refusal_with_the_ceiling_already_known_is_not_retried(self):
         """The budget was already clamped, so retrying would change nothing."""
