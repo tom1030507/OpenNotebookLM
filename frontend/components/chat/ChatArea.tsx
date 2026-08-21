@@ -21,13 +21,22 @@ interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
 }
 
+interface PendingQuery {
+  requestId: number;
+  content: string;
+  projectId: string;
+  conversationId: string | null;
+}
+
 export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [pendingQuery, setPendingQuery] = useState<PendingQuery | null>(null);
+  const nextRequestIdRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const {
     currentProject,
+    currentConversation,
     messages,
     documents,
     sendQuery,
@@ -46,15 +55,30 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
     if (!inputValue.trim() || !currentProject) return;
     
     const query = inputValue.trim();
+    const requestId = nextRequestIdRef.current + 1;
+    nextRequestIdRef.current = requestId;
     setInputValue('');
-    setIsStreaming(true);
+    setPendingQuery({
+      requestId,
+      content: query,
+      projectId: currentProject.id,
+      conversationId: currentConversation?.id ?? null,
+    });
     
     try {
-      await sendQuery(query);
+      await sendQuery(query, false, (conversationId) => {
+        setPendingQuery((pending) => (
+          pending?.requestId === requestId
+            ? { ...pending, conversationId }
+            : pending
+        ));
+      });
     } catch (error) {
       console.error('Failed to send query:', error);
     } finally {
-      setIsStreaming(false);
+      setPendingQuery((pending) => (
+        pending?.requestId === requestId ? null : pending
+      ));
     }
   };
   
@@ -73,6 +97,21 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const canChat = currentProject && hasDocuments;
   const canAddSources = Boolean(currentProject);
   const sourceActionHelperText = 'Select or create a project before adding sources';
+  const pendingQueryIsActive = pendingQuery !== null
+    && pendingQuery.projectId === currentProject?.id
+    && pendingQuery.conversationId === (currentConversation?.id ?? null);
+  const isStreaming = pendingQueryIsActive;
+  const visibleMessages = !pendingQueryIsActive
+    ? messages
+    : [
+        ...messages,
+        {
+          id: 'pending-query',
+          role: 'user' as const,
+          content: pendingQuery.content,
+          citations: [],
+        },
+      ];
 
   const handleRequestAddSources = () => {
     requestAddSources(canAddSources, onAddSourcesOpenChange);
@@ -86,7 +125,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
     >
       {/* Chat Messages Area */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {messages.length === 0 ? (
+        {visibleMessages.length === 0 ? (
           <div
             className="h-full flex flex-col items-center justify-center py-8"
             style={welcomeHeroStyles.frame}
@@ -161,7 +200,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
         ) : (
           <div className="px-4 py-6">
             <div className="max-w-3xl mx-auto space-y-6">
-              {messages.map((message) => (
+              {visibleMessages.map((message) => (
                 <div
                   key={message.id}
                   className={`flex gap-3 ${

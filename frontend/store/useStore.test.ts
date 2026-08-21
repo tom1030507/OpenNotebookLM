@@ -343,6 +343,44 @@ describe('application store', () => {
     }));
   });
 
+  it('does not replace a conversation selected while a query conversation is being created', async () => {
+    const creation = deferred<Conversation>();
+    const existingConversation = conversation('conversation-1', 'project-1');
+    const createdConversation = conversation('conversation-2', 'project-1');
+    const onConversationReady = vi.fn();
+    useStore.setState({
+      currentProject: project('project-1'),
+      conversations: [existingConversation],
+      currentConversation: null,
+    });
+    apiMock.createConversation.mockReturnValue(creation.promise);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: 'conversation-2',
+    });
+    apiMock.getMessages.mockResolvedValue([]);
+
+    const pendingQuery = useStore.getState().sendQuery(
+      'Question',
+      false,
+      onConversationReady,
+    );
+    useStore.setState({ currentConversation: existingConversation });
+    creation.resolve(createdConversation);
+    await pendingQuery;
+
+    expect(onConversationReady).toHaveBeenCalledWith('conversation-2');
+    expect(useStore.getState().currentConversation).toEqual(existingConversation);
+    expect(useStore.getState().conversations).toEqual([
+      existingConversation,
+      createdConversation,
+    ]);
+  });
+
   it('ignores stale messages after selecting another conversation', async () => {
     const messages = deferred<Message[]>();
     const firstConversation = conversation('conversation-1', 'project-1');

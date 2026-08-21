@@ -50,13 +50,21 @@ interface AppState {
   // Actions - Conversations
   fetchConversations: (projectId: string) => Promise<void>;
   selectConversation: (conversation: Conversation) => Promise<void>;
-  createConversation: (projectId: string, title?: string) => Promise<Conversation>;
+  createConversation: (
+    projectId: string,
+    title?: string,
+    select?: boolean,
+  ) => Promise<Conversation>;
   updateConversation: (conversationId: string, title: string) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<void>;
   
   // Actions - Query
-  sendQuery: (query: string, stream?: boolean) => Promise<void>;
+  sendQuery: (
+    query: string,
+    stream?: boolean,
+    onConversationReady?: (conversationId: string) => void,
+  ) => Promise<void>;
   
   // Actions - UI
   toggleSidebar: () => void;
@@ -323,14 +331,16 @@ const useStore = create<AppState>()(
           await get().fetchMessages(conversation.id);
         },
         
-        createConversation: async (projectId, title) => {
+        createConversation: async (projectId, title, select = true) => {
           try {
             const conversation = await api.createConversation(projectId, title);
             if (get().currentProject?.id === projectId) {
               set((state) => ({
                 conversations: [...state.conversations, conversation],
-                currentConversation: conversation,
-                messages: [],
+                ...(select ? {
+                  currentConversation: conversation,
+                  messages: [],
+                } : {}),
               }));
             }
             return conversation;
@@ -394,29 +404,47 @@ const useStore = create<AppState>()(
         },
         
         // Query
-        sendQuery: async (query, stream = false) => {
+        sendQuery: async (query, stream = false, onConversationReady) => {
           void stream;
           const state = get();
           if (!state.currentProject) {
             throw new Error('No project selected');
           }
+
+          const projectId = state.currentProject.id;
+          const startingConversationId = state.currentConversation?.project_id
+            === projectId
+            ? state.currentConversation.id
+            : null;
           
           // Create or use existing conversation
-          let conversationId = state.currentConversation?.project_id
-            === state.currentProject.id
-            ? state.currentConversation.id
-            : undefined;
+          let conversationId = startingConversationId ?? undefined;
           if (!conversationId) {
             const conversation = await state.createConversation(
-              state.currentProject.id,
-              query.substring(0, 50) + '...'
+              projectId,
+              query.substring(0, 50) + '...',
+              false,
             );
             conversationId = conversation.id;
+
+            const activeState = get();
+            const activeConversationId = activeState.currentConversation?.project_id
+              === projectId
+              ? activeState.currentConversation.id
+              : null;
+            if (
+              activeState.currentProject?.id === projectId
+              && activeConversationId === startingConversationId
+            ) {
+              set({ currentConversation: conversation, messages: [] });
+            }
           }
+
+          onConversationReady?.(conversationId);
           
           try {
             await api.query({
-              project_id: state.currentProject.id,
+              project_id: projectId,
               query,
               conversation_id: conversationId,
             });
