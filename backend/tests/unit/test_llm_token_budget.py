@@ -95,6 +95,13 @@ class TestTokenCeilingFromError:
 class TestEstimatePromptTokens:
     """Only ever used to leave room, so over-estimating is the safe direction."""
 
+    # Measured against Groq's qwen3.6-27b, prompt_tokens per character: English
+    # prose costs 0.18, the same passage in Chinese 0.63. A Han character is
+    # nearly a token on its own, so one rate for both scripts cannot err high
+    # for both.
+    LATIN_TOKENS_PER_CHAR = 0.18
+    CJK_TOKENS_PER_CHAR = 0.63
+
     def test_grows_with_the_prompt(self):
         """A longer prompt leaves less room for the answer."""
         short = estimate_prompt_tokens([{"role": "user", "content": "hello"}])
@@ -119,6 +126,67 @@ class TestEstimatePromptTokens:
         # Over-estimating is deliberate; being wildly out would make the clamp
         # either useless or crippling.
         assert 667 <= estimate <= 667 * 1.5
+
+    def test_latin_prose_still_errs_high(self):
+        """The English calibration is the one already in production; a
+        script-aware estimate must not buy Chinese safety with its accuracy."""
+        text = "the quick brown fox jumps over the lazy dog. " * 70
+
+        estimate = estimate_prompt_tokens([{"role": "user", "content": text}])
+
+        assert estimate > len(text) * self.LATIN_TOKENS_PER_CHAR
+
+    def test_chinese_errs_high_as_well(self):
+        """The bug: charging a Han character a quarter of a token promised room
+        that did not exist, so the request was refused anyway — and by then the
+        ceiling was known, which is exactly when the retry gives up."""
+        text = "檢索增強生成的筆記本系統會把來源切成段落。" * 150
+
+        estimate = estimate_prompt_tokens([{"role": "user", "content": text}])
+
+        assert estimate > len(text) * self.CJK_TOKENS_PER_CHAR
+
+    def test_is_not_wildly_over_for_chinese(self):
+        """Erring high is the point, but doubling the real cost would clamp the
+        answer down to nothing on a Chinese project."""
+        text = "檢索增強生成的筆記本系統會把來源切成段落。" * 150
+
+        estimate = estimate_prompt_tokens([{"role": "user", "content": text}])
+
+        assert estimate <= len(text) * self.CJK_TOKENS_PER_CHAR * 2
+
+    def test_chinese_costs_more_than_the_same_length_of_latin(self):
+        """Length alone does not price a prompt; the script it is written in
+        does."""
+        chinese = estimate_prompt_tokens([{"role": "user", "content": "語" * 300}])
+        latin = estimate_prompt_tokens([{"role": "user", "content": "a" * 300}])
+
+        assert chinese > latin
+
+    def test_mixed_scripts_are_charged_at_their_own_rates(self):
+        """The normal prompt here: an English instruction over Chinese sources."""
+        mixed = estimate_prompt_tokens([
+            {"role": "user", "content": "文" * 100 + "a" * 100},
+        ])
+        all_latin = estimate_prompt_tokens([{"role": "user", "content": "a" * 200}])
+        all_chinese = estimate_prompt_tokens([{"role": "user", "content": "文" * 200}])
+
+        assert all_latin < mixed < all_chinese
+
+    def test_full_width_punctuation_is_charged_as_cjk(self):
+        """Chinese prose carries a full-width mark every dozen characters, and
+        each is its own token rather than a quarter of one."""
+        full_width = estimate_prompt_tokens([{"role": "user", "content": "。" * 200}])
+        ascii_stops = estimate_prompt_tokens([{"role": "user", "content": "." * 200}])
+
+        assert full_width > ascii_stops
+
+    def test_tolerates_a_message_carrying_no_text(self):
+        """Callers build the message list by hand, so a missing or null content
+        must cost something rather than raise."""
+        assert estimate_prompt_tokens([{"role": "user"}]) >= 1
+        assert estimate_prompt_tokens([{"role": "user", "content": None}]) >= 1
+        assert estimate_prompt_tokens([]) >= 1
 
 
 class FakeModels:

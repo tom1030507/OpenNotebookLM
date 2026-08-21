@@ -26,10 +26,29 @@ FALLBACK_MODEL = "fallback"
 # failure this whole mechanism exists to avoid.
 DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
-# Rough tokens-per-character for the clamp below. Only ever used to leave room
-# under a request ceiling, so erring high is the safe direction: a slightly
-# over-estimated prompt asks for slightly fewer output tokens.
+# Rough characters-per-token for the clamp below, one rate per script: four
+# Latin characters share a token where a Han character is nearly a token by
+# itself. Only ever used to leave room under a request ceiling, so erring high
+# is the safe direction: a slightly over-estimated prompt asks for slightly
+# fewer output tokens. See :func:`estimate_prompt_tokens` for the measurements.
 CHARS_PER_TOKEN = 4
+CJK_CHARS_PER_TOKEN = 1
+
+# Han, Hiragana, Katakana, Hangul, and the full-width punctuation that separates
+# them — everything charged at `CJK_CHARS_PER_TOKEN`. Whole runs are matched
+# rather than single characters so a Chinese prompt costs one match instead of
+# one per character; this runs on every request.
+_CJK_PATTERN = re.compile(
+    "["
+    "\u3000-\u303f"  # CJK symbols and punctuation
+    "\u3040-\u30ff"  # Hiragana, Katakana
+    "\u3400-\u4dbf"  # CJK unified ideographs, extension A
+    "\u4e00-\u9fff"  # CJK unified ideographs
+    "\uac00-\ud7af"  # Hangul syllables
+    "\uf900-\ufaff"  # CJK compatibility ideographs
+    "\uff00-\uffef"  # Halfwidth and fullwidth forms
+    "]+"
+)
 
 # A provider that refuses an oversized request names the ceiling it applied, but
 # a provider whose request quota is spent refuses in the same words, with the
@@ -48,20 +67,40 @@ def estimate_prompt_tokens(messages: List[Dict[str, Any]]) -> int:
     """Estimate what a request's messages will cost, before sending it.
 
     There is no local tokenizer here and adding one to clamp a budget would be
-    out of proportion. Character count is close enough: measured against Groq's
-    qwen3.6-27b, a two-source script prompt of 3100 characters counted 667
-    tokens, which this over-estimates by about a sixth — the direction that
-    leaves room rather than taking it.
+    out of proportion. Character count is close enough — but not at one rate for
+    every script. Measured against Groq's qwen3.6-27b: a two-source script
+    prompt of 3100 English characters counted 667 tokens, 0.22 a character,
+    while the same prose written in Chinese costs 0.63, because a Han character
+    is nearly a token by itself.
+
+    Charging a Chinese prompt a quarter-token a character therefore under-counts
+    it two and a half times over, and under-counting is the one direction that
+    hurts: the budget leaves room that was never there, the provider refuses the
+    request for its size anyway, and by then the ceiling is known — which is
+    exactly the case where `_create` re-raises instead of retrying. So CJK
+    codepoints are counted at `CJK_CHARS_PER_TOKEN` and the rest at
+    `CHARS_PER_TOKEN`, which over-estimates both scripts — Chinese by about
+    three fifths, that English prompt by about a sixth — and keeps erring in the
+    direction that leaves room rather than taking it.
 
     Args:
         messages: The chat messages about to be sent.
 
     Returns:
-        An estimated prompt token count.
+        An estimated prompt token count, erring high for CJK and Latin alike.
     """
-    characters = sum(len(str(message.get("content") or "")) for message in messages)
+    contents = [str(message.get("content") or "") for message in messages]
 
-    return characters // CHARS_PER_TOKEN + 1
+    cjk_characters = sum(
+        len(run) for content in contents for run in _CJK_PATTERN.findall(content)
+    )
+    other_characters = sum(len(content) for content in contents) - cjk_characters
+
+    return (
+        cjk_characters // CJK_CHARS_PER_TOKEN
+        + other_characters // CHARS_PER_TOKEN
+        + 1
+    )
 
 
 def token_ceiling_from_error(error: Exception) -> Optional[int]:
