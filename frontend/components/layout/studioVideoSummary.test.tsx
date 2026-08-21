@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import StudioPanel from './StudioPanel';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
-import type { Project, VideoSummary } from '@/lib/api';
+import type { Document, Project, VideoSummary } from '@/lib/api';
 
 const project: Project = {
   id: 'project-1',
@@ -17,6 +17,18 @@ const project: Project = {
   updated_at: '2026-08-20T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+};
+
+const source: Document = {
+  id: 'doc-1',
+  name: 'Only source',
+  type: 'url',
+  url: 'https://example.com',
+  meta: {},
+  status: 'ready',
+  created_at: '2026-08-20T00:00:00Z',
+  updated_at: '2026-08-20T00:00:00Z',
+  chunk_count: 4,
 };
 
 const summary = (modelUsed = 'test-model'): VideoSummary => ({
@@ -110,7 +122,11 @@ const finishSpeaking = async (utterance: Utterance) => {
 };
 
 beforeEach(() => {
-  useStore.setState({ currentProject: project, projects: [project] });
+  useStore.setState({
+    currentProject: project,
+    projects: [project],
+    documents: [source],
+  });
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn(() => 'blob:video-summary'),
@@ -350,11 +366,27 @@ describe('Studio video summary', () => {
     ).toBe(true);
   });
 
-  it('will not play a summary of a project with no sources', async () => {
-    // Two empty slides are not worth playing, and the panel knows the count.
+  it('plays a summary of a source added since the project loaded', () => {
+    // The project's own count was read when the project list arrived and says
+    // nothing about the source uploaded a moment ago.
     useStore.setState({
       currentProject: { ...project, document_count: 0 },
-      projects: [project],
+      documents: [source],
+    });
+    render(<StudioPanel />);
+
+    expect(
+      (screen.getByRole('button', { name: 'Video summary' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(screen.getByText('Watch a walkthrough of this project')).toBeTruthy();
+  });
+
+  it('will not play a summary once the last source is removed', () => {
+    // Two empty slides are not worth playing, however many sources the
+    // project's stale count still claims.
+    useStore.setState({
+      currentProject: { ...project, document_count: 3 },
+      documents: [],
     });
     render(<StudioPanel />);
 
@@ -362,6 +394,17 @@ describe('Studio video summary', () => {
       (screen.getByRole('button', { name: 'Video summary' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(screen.getByText('Add a source first')).toBeTruthy();
+  });
+
+  it('does not call a project empty while its sources are still loading', () => {
+    // An empty list mid-fetch means "not known yet", not "nothing to play".
+    useStore.setState({ documents: [], loadingDocuments: true });
+    render(<StudioPanel />);
+
+    expect(
+      (screen.getByRole('button', { name: 'Video summary' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(screen.queryByText('Add a source first')).toBeNull();
   });
 
   it('surfaces a failure instead of opening an empty player', async () => {
