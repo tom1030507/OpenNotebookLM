@@ -1,6 +1,7 @@
 """Conversation API contract tests."""
 from __future__ import annotations
 
+import inspect
 import sys
 from types import ModuleType
 
@@ -272,3 +273,27 @@ def test_query_rejects_a_conversation_from_another_project(client):
     assert response.json() == {
         "detail": "Conversation does not belong to the selected project",
     }
+
+
+def test_no_route_in_this_router_is_a_coroutine():
+    """These routes await nothing, so none of them may claim to.
+
+    `/query` embeds the question and then blocks on the LLM; on the event loop
+    that stalls every other request for the whole call, and the container runs a
+    single uvicorn worker. The conversation routes are cheap by comparison, but
+    they hold the same rule so that the next route added here does not have to
+    relitigate it.
+    """
+    routes = (
+        query.query,
+        query.create_conversation,
+        query.get_conversation,
+        query.update_conversation,
+        query.list_project_conversations,
+        query.delete_conversation,
+    )
+
+    assert [
+        route.__name__ for route in routes
+        if inspect.iscoroutinefunction(route)
+    ] == []

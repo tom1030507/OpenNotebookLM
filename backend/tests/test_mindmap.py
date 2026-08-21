@@ -5,6 +5,8 @@ never reach for a model server. With `LLM_MODE` defaulting to `auto` a
 module-level service would point at a local provider and every request here
 would open a socket to it.
 """
+import inspect
+
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import create_engine
@@ -204,3 +206,15 @@ def test_an_anonymous_caller_is_refused():
     assert client.__class__(
         app, headers=auth_headers(),
     ).get("/api/projects/project-a/mindmap").status_code in (200, 404)
+
+
+def test_the_route_is_not_a_coroutine():
+    """A blocking route has to run in the threadpool, not on the event loop.
+
+    Building a map calls the LLM, which blocks for as long as the model takes.
+    The container runs a single uvicorn worker, so an `async def` here that
+    never awaits stalls every other request for that whole time — `/healthz`
+    included, which the compose healthcheck gives ten seconds. FastAPI hands a
+    plain `def` handler to its threadpool, which is where that work belongs.
+    """
+    assert not inspect.iscoroutinefunction(mindmap.project_mindmap)

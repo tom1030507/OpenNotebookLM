@@ -3,6 +3,12 @@
 Studio's video summary is a derived view of a project rather than a download —
 the browser plays the script it returns — so it answers JSON and lives beside
 the project it describes instead of under `/export`.
+
+The route is a plain `def`. Writing the script blocks on the LLM for as long as
+the model takes, and the container runs a single uvicorn worker: on the event
+loop that stalls every other request for the whole call, `/healthz` included,
+which the compose healthcheck gives ten seconds. FastAPI runs a sync handler in
+its threadpool, which is where blocking work belongs.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -23,7 +29,10 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
 
 # Built once: `LLMService` selects a provider without any network I/O, and
-# rebuilding it per request would repeat that selection and its logging.
+# rebuilding it per request would repeat that selection and its logging. Safe to
+# share now that requests are handled in a threadpool because the service keeps
+# nothing about one script on itself — what wrote the scenes comes back from
+# `generate`, so two scripts being built at once cannot read each other's answer.
 _service = VideoSummaryService()
 
 
@@ -44,7 +53,7 @@ def get_video_summary_service() -> VideoSummaryService:
     "/projects/{project_id}/video-summary",
     response_model=VideoSummaryResponse,
 )
-async def project_video_summary(
+def project_video_summary(
     project_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
