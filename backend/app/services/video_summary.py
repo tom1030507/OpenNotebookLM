@@ -277,7 +277,14 @@ def _plural(count: int) -> str:
 
 
 class VideoSummaryService:
-    """Build the scene script Studio's video summary plays."""
+    """Build the scene script Studio's video summary plays.
+
+    One instance serves every request — see `routers.video` — and requests are
+    handled in a threadpool, so nothing about the script being built may be kept
+    on the instance. What wrote the scenes travels out through the return values
+    below instead; parked on `self` it would be overwritten by whichever script
+    finished asking its model last, and answered to the wrong caller.
+    """
 
     def __init__(self, llm_service: Optional[Any] = None):
         """Wire up the model used to write the source scenes.
@@ -287,10 +294,6 @@ class VideoSummaryService:
                 `LLMService`, whose construction performs no network I/O.
         """
         self.llm = llm_service if llm_service is not None else LLMService()
-        # What wrote the source scenes of the script built most recently. Read
-        # by the route to fill `model_used`, so a listener can tell a written
-        # script from an extracted one.
-        self.last_model: str = FALLBACK_MODEL
 
     def generate(self, db: Session, project: Project) -> Dict[str, Any]:
         """Build the video summary script for a project.
@@ -306,13 +309,15 @@ class VideoSummaryService:
         """
         documents = project_documents(db, project)
         generated_at = utc_now()
-        scenes = self.build_scenes(project.name, documents, generated_at)
+        scenes, model_used = self.build_scenes(
+            project.name, documents, generated_at,
+        )
 
         return {
             "project_id": project.id,
             "project_name": project.name,
             "generated_at": generated_at,
-            "model_used": self.last_model,
+            "model_used": model_used,
             "scene_count": len(scenes),
             "estimated_seconds": estimate_seconds(
                 scene["narration"] for scene in scenes
@@ -325,7 +330,7 @@ class VideoSummaryService:
         project_name: str,
         documents: List[Any],
         generated_at: datetime,
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], str]:
         """Assemble the title, source and closing scenes.
 
         Args:
@@ -334,11 +339,12 @@ class VideoSummaryService:
             generated_at: When the script was built, for the title card.
 
         Returns:
-            The scenes in playback order. `last_model` is updated as a side
-            effect.
+            The scenes in playback order, and what wrote the source ones — the
+            model's name, or `FALLBACK_MODEL` for a script extracted from the
+            documents themselves. Returned together rather than recorded on the
+            service, which two concurrent scripts share.
         """
-        written, model = self._written_scenes(documents)
-        self.last_model = model
+        written, model_used = self._written_scenes(documents)
 
         source_scenes = [
             self._source_scene(document, written.get(index))
@@ -349,7 +355,7 @@ class VideoSummaryService:
             self._title_scene(project_name, len(documents), generated_at),
             *source_scenes,
             self._closing_scene(project_name, source_scenes),
-        ]
+        ], model_used
 
     def _title_scene(
         self,

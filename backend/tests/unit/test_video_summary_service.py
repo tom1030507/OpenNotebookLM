@@ -7,6 +7,8 @@ always available, and the model's writing layered onto them.
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -198,7 +200,7 @@ class FakeDocument:
 
 def _scenes(service, documents, project_name="Notebook"):
     """Build a script and return just its scenes."""
-    return service.build_scenes(project_name, documents, utc_now())
+    return service.build_scenes(project_name, documents, utc_now())[0]
 
 
 class TestSkeleton:
@@ -368,28 +370,32 @@ class TestGeneratedScenes:
             llm_service=StubLLM(self._reply(narration="A sentence.")),
         )
 
-        service.build_scenes("Notebook", [FakeDocument("d1", "Guide")], utc_now())
+        _, model_used = service.build_scenes(
+            "Notebook", [FakeDocument("d1", "Guide")], utc_now(),
+        )
 
-        assert service.last_model == "stub-model"
+        assert model_used == "stub-model"
 
     def test_the_fallback_is_reported_when_the_reply_is_unusable(self):
         """Then the document's own structure did the work, not the model."""
         service = VideoSummaryService(llm_service=StubLLM("sorry, no"))
 
-        service.build_scenes("Notebook", [FakeDocument("d1", "Guide")], utc_now())
+        _, model_used = service.build_scenes(
+            "Notebook", [FakeDocument("d1", "Guide")], utc_now(),
+        )
 
-        assert service.last_model == "fallback"
+        assert model_used == "fallback"
 
     def test_a_dead_provider_does_not_fail_the_script(self):
         """The extracted script is still worth playing."""
         service = VideoSummaryService(llm_service=ExplodingLLM())
 
-        scenes = service.build_scenes(
+        scenes, model_used = service.build_scenes(
             "Notebook", [FakeDocument("d1", "Guide")], utc_now(),
         )
 
         assert len(scenes) == 3
-        assert service.last_model == "fallback"
+        assert model_used == "fallback"
 
     def test_the_call_asks_for_as_much_as_the_model_will_give(self):
         """A script cut off mid-JSON parses to nothing, so there is no reason to
@@ -422,3 +428,161 @@ class TestGeneratedScenes:
         assert len(stub.prompts) == 1
         assert "Alpha" in stub.prompts[0]
         assert "Beta" in stub.prompts[0]
+
+
+# How long a thread in these tests waits for its counterpart before giving up.
+# Generous, because it is only ever reached when the interleaving under test has
+# broken; a passing run never waits this long.
+HANDOFF_TIMEOUT_SECONDS = 5
+
+
+class FakeProject:
+    """Minimal stand-in for a Project row."""
+
+    def __init__(self, name: str, project_id: str = None):
+        """Store the two fields the script reads."""
+        self.id = project_id or "project-%s" % name.lower()
+        self.name = name
+
+
+class PairedLLM:
+    """LLM stand-in that answers two concurrent callers differently.
+
+    Which reply a caller gets is keyed off the source title in its prompt, so a
+    thread can assert on the model it was itself promised rather than on
+    whichever reply happened to arrive. A reply can also be held back until the
+    other thread reaches a known point, which is what turns a race into a fixed
+    order the test can assert on.
+    """
+
+    def __init__(self, models_by_source: dict, hold_until: dict = None):
+        """Script one reply per source, and any gate that reply waits on.
+
+        Args:
+            models_by_source: Source title -> model name to report for it. The
+                title is matched against the prompt.
+            hold_until: Source title -> event that must be set before that
+                source's reply is returned.
+        """
+        self.models_by_source = dict(models_by_source)
+        self.hold_until = dict(hold_until or {})
+
+    def generate(self, prompt: str, **kwargs) -> dict:
+        """Return the reply scripted for whichever source this prompt covers."""
+        source = next(
+            title for title in self.models_by_source if title in prompt
+        )
+
+        gate = self.hold_until.get(source)
+        if gate is not None:
+            assert gate.wait(timeout=HANDOFF_TIMEOUT_SECONDS), (
+                "the other script never reached the handoff point"
+            )
+
+        return {
+            "text": json.dumps({"scenes": [{
+                "index": 1,
+                "headline": source,
+                "bullets": [source],
+                "narration": "This source is %s." % source,
+            }]}),
+            "model": self.models_by_source[source],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
+
+class PausingDocument:
+    """A document that stops the script that reads it, once.
+
+    The gap this aims at — between a script learning which model wrote it and
+    that answer reaching the response — is microseconds wide, so two threads
+    left to collide on their own would make the test lucky rather than correct.
+    `build_scenes` reads a document's `id` only after the model has answered, so
+    pausing there holds the gap open for exactly as long as the other thread
+    needs.
+    """
+
+    def __init__(self, doc_id: str, title: str, on_first_read):
+        """Store the fields the script reads, plus the pause to take.
+
+        Args:
+            doc_id: The document id, handed out by the property below.
+            title: Document title. Also how `PairedLLM` recognises the prompt.
+            on_first_read: Called the first time `id` is read, and only then —
+                a scene reads it twice.
+        """
+        self._id = doc_id
+        self.title = title
+        self.source_type = "pdf"
+        self.content = ""
+        self.chunks = []
+        self._on_first_read = on_first_read
+        self._read = False
+
+    @property
+    def id(self) -> str:
+        """The document id, pausing the script the first time it is asked for."""
+        if not self._read:
+            self._read = True
+            self._on_first_read()
+
+        return self._id
+
+
+class TestConcurrentGeneration:
+    """One service instance serves every request, from a threadpool.
+
+    The route is a plain `def`, so FastAPI runs it in a worker thread and two
+    projects can be summarised at the same time. Anything a script records on
+    the service itself is therefore visible to the other script.
+    """
+
+    def test_each_script_reports_the_model_that_wrote_it(self, monkeypatch):
+        """Two overlapping scripts must not swap model names.
+
+        The first script is held partway through its scenes until the second
+        has finished asking its own model, which pins the interleaving to the
+        one order that matters: the second script's answer is the most recent
+        thing written when the first assembles its response.
+        """
+        first_script_started_scenes = threading.Event()
+        second_script_has_its_model = threading.Event()
+
+        def hold_first_script():
+            """Let the second script overtake, then carry on."""
+            first_script_started_scenes.set()
+            assert second_script_has_its_model.wait(
+                timeout=HANDOFF_TIMEOUT_SECONDS
+            ), "the second script never asked its model"
+
+        documents = {
+            "Alpha": [PausingDocument("d1", "Alpha", hold_first_script)],
+            "Beta": [
+                PausingDocument("d2", "Beta", second_script_has_its_model.set),
+            ],
+        }
+        service = VideoSummaryService(
+            llm_service=PairedLLM(
+                {"Alpha": "model-alpha", "Beta": "model-beta"},
+                # The second script may not answer until the first is past the
+                # point where it recorded its own model.
+                hold_until={"Beta": first_script_started_scenes},
+            ),
+        )
+        monkeypatch.setattr(
+            "app.services.video_summary.project_documents",
+            lambda db, project: documents[project.name],
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            scripts = {
+                name: pool.submit(service.generate, None, FakeProject(name))
+                for name in ("Alpha", "Beta")
+            }
+            summaries = {
+                name: script.result(timeout=HANDOFF_TIMEOUT_SECONDS * 2)
+                for name, script in scripts.items()
+            }
+
+        assert summaries["Alpha"]["model_used"] == "model-alpha"
+        assert summaries["Beta"]["model_used"] == "model-beta"

@@ -1,4 +1,19 @@
-"""Query and RAG router."""
+"""Query and RAG router.
+
+Every route here is a plain `def`. Answering a question embeds it, searches, and
+then blocks on the LLM for as long as the model takes; the container runs a
+single uvicorn worker, so on the event loop one question stalls every other
+request for that whole time — `/healthz` included, which the compose healthcheck
+gives ten seconds. FastAPI runs a sync handler in its threadpool, which is where
+blocking work belongs, and it is what the ingest path already does with its own
+heavy work.
+
+The conversation routes below are cheap by comparison, but they await nothing
+either and are sync for the same reason, so that a route added here does not have
+to relitigate the question. Anything that does start awaiting has to become
+`async def` again — a sync handler that blocks the thread it was given is fine,
+an async one that blocks the loop is not.
+"""
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -75,7 +90,7 @@ class ConversationUpdateRequest(BaseModel):
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query(
+def query(
     request: QueryRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -184,7 +199,7 @@ async def query(
     "/projects/{project_id}/conversations",
     response_model=ConversationResponse,
 )
-async def create_conversation(
+def create_conversation(
     project_id: str,
     request: ConversationCreateRequest,
     db: Session = Depends(get_db),
@@ -213,7 +228,7 @@ async def create_conversation(
 
 
 @router.get("/conversations/{conversation_id}")
-async def get_conversation(
+def get_conversation(
     conversation_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -246,7 +261,7 @@ async def get_conversation(
     "/conversations/{conversation_id}",
     response_model=ConversationResponse,
 )
-async def update_conversation(
+def update_conversation(
     conversation_id: str,
     request: ConversationUpdateRequest,
     db: Session = Depends(get_db),
@@ -273,7 +288,7 @@ async def update_conversation(
     "/projects/{project_id}/conversations",
     response_model=list[ConversationResponse],
 )
-async def list_project_conversations(
+def list_project_conversations(
     project_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -299,7 +314,7 @@ async def list_project_conversations(
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(
+def delete_conversation(
     conversation_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

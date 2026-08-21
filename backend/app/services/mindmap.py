@@ -118,7 +118,14 @@ def _clean_topics(topics: Any) -> List[str]:
 
 
 class MindMapService:
-    """Build the mind map a project's Studio panel draws."""
+    """Build the mind map a project's Studio panel draws.
+
+    One instance serves every request — see `routers.mindmap` — and requests are
+    handled in a threadpool, so nothing about the map being built may be kept on
+    the instance. What named the topics travels out through the return values
+    below instead; parked on `self` it would be overwritten by whichever map
+    finished asking its model last, and answered to the wrong caller.
+    """
 
     def __init__(self, llm_service: Optional[Any] = None):
         """Wire up the model used to name topics.
@@ -128,10 +135,6 @@ class MindMapService:
                 `LLMService`, whose construction performs no network I/O.
         """
         self.llm = llm_service if llm_service is not None else LLMService()
-        # What produced the topics in the tree built most recently. Read by the
-        # route to fill `model_used`, so a caller can tell a generated map from
-        # an extracted one.
-        self.last_model: str = FALLBACK_MODEL
 
     def generate(self, db: Session, project: Project) -> Dict[str, Any]:
         """Build the mind map for a project.
@@ -146,18 +149,22 @@ class MindMapService:
             topics, when it was built, and how many nodes it holds.
         """
         documents = project_documents(db, project)
-        root = self.build_tree(project.name, documents)
+        root, model_used = self.build_tree(project.name, documents)
 
         return {
             "project_id": project.id,
             "project_name": project.name,
             "generated_at": utc_now(),
-            "model_used": self.last_model,
+            "model_used": model_used,
             "node_count": _count_nodes(root),
             "root": root,
         }
 
-    def build_tree(self, project_name: str, documents: List[Any]) -> Dict[str, Any]:
+    def build_tree(
+        self,
+        project_name: str,
+        documents: List[Any],
+    ) -> tuple[Dict[str, Any], str]:
         """Assemble the project/document/topic tree.
 
         Args:
@@ -165,11 +172,12 @@ class MindMapService:
             documents: The project's documents, in the order to draw them.
 
         Returns:
-            The root node. `last_model` is updated as a side effect.
+            The root node, and what produced its topics — the model's name, or
+            `FALLBACK_MODEL` for a tree built from the documents' own
+            structure. Returned together rather than recorded on the service,
+            which two concurrent builds share.
         """
-        generated = self._generated_topics(documents)
-        self.last_model = generated[1]
-        topics_by_index = generated[0]
+        topics_by_index, model_used = self._generated_topics(documents)
 
         children = []
         for index, document in enumerate(documents, start=1):
@@ -203,7 +211,7 @@ class MindMapService:
             "detail": None,
             "document_id": None,
             "children": children,
-        }
+        }, model_used
 
     def _generated_topics(
         self,
