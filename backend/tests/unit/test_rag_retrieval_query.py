@@ -29,6 +29,9 @@ def real_rag_module():
     That replacement outlives their module, so this test has to ask for the real
     thing explicitly rather than trusting the import.
 
+    Args:
+        None.
+
     Returns:
         The genuine module.
     """

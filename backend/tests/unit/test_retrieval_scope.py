@@ -38,6 +38,9 @@ def real_rag_module():
     so importing the query router does not load the embedding model, and that
     replacement outlives their module.
 
+    Args:
+        None.
+
     Returns:
         The genuine module.
     """
