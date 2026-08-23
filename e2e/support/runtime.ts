@@ -51,27 +51,53 @@ export function prepareRuntimeDirectory(
   candidateOutputRoot: string,
   candidateRoot: string,
 ): boolean {
-  const realRepository = realpathSync(repositoryPath);
-  const outputParent = path.dirname(candidateOutputRoot);
-  mkdirSync(outputParent, { recursive: true });
-  const realOutputParent = realpathSync(outputParent);
+  const lexicalRepository = path.resolve(repositoryPath);
+  const lexicalOutput = path.resolve(candidateOutputRoot);
+  const expectedLexicalOutput = path.join(lexicalRepository, 'output', 'e2e');
+  if (!pathsEqual(expectedLexicalOutput, lexicalOutput)) {
+    throw new Error(`Unsafe E2E output root: ${lexicalOutput}`);
+  }
+  const lexicalRoot = path.resolve(candidateRoot);
+  const lexicalRelative = path.relative(lexicalOutput, lexicalRoot);
+  if (
+    !lexicalRelative
+    || lexicalRelative === '..'
+    || lexicalRelative.startsWith(`..${path.sep}`)
+    || path.isAbsolute(lexicalRelative)
+    || path.dirname(lexicalRelative) !== '.'
+  ) {
+    throw new Error(`Unsafe E2E run root: ${lexicalRoot}`);
+  }
+
+  const realRepository = realpathSync(lexicalRepository);
+  const outputParent = path.dirname(lexicalOutput);
   const expectedOutputParent = path.join(realRepository, 'output');
+  if (!existsSync(outputParent)) {
+    const realOutputParentParent = realpathSync(path.dirname(outputParent));
+    if (!pathsEqual(realRepository, realOutputParentParent)) {
+      throw new Error(
+        `E2E output parent crosses a symbolic link or junction: ${realOutputParentParent}`,
+      );
+    }
+    mkdirSync(outputParent);
+  }
+  const realOutputParent = realpathSync(outputParent);
   if (!pathsEqual(expectedOutputParent, realOutputParent)) {
     throw new Error(`E2E output parent crosses a symbolic link or junction: ${realOutputParent}`);
   }
-  if (!existsSync(candidateOutputRoot)) {
-    mkdirSync(candidateOutputRoot);
+  if (!existsSync(lexicalOutput)) {
+    mkdirSync(lexicalOutput);
   }
-  const realOutput = realpathSync(candidateOutputRoot);
+  const realOutput = realpathSync(lexicalOutput);
   const expectedOutput = path.join(realRepository, 'output', 'e2e');
   if (!pathsEqual(expectedOutput, realOutput)) {
     throw new Error(`E2E output root crosses a symbolic link or junction: ${realOutput}`);
   }
-  const existed = existsSync(candidateRoot);
+  const existed = existsSync(lexicalRoot);
   if (!existed) {
-    mkdirSync(candidateRoot);
+    mkdirSync(lexicalRoot);
   }
-  const realRoot = realpathSync(candidateRoot);
+  const realRoot = realpathSync(lexicalRoot);
   const realRelative = path.relative(realOutput, realRoot);
   if (!realRelative || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) {
     throw new Error(`Unsafe real E2E runtime path: ${realRoot}`);

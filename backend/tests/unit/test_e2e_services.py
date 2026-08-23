@@ -15,7 +15,11 @@ from sqlalchemy.pool import StaticPool
 from app.db.models import Base, Chunk, Document, Embedding
 from app.routers.ingest import get_document_service
 from app.routers.query import get_rag_service
-from scripts.e2e_server import install_fast_overrides, resolve_runtime_root
+from scripts.e2e_server import (
+    install_fast_overrides,
+    resolve_frontend_url,
+    resolve_runtime_root,
+)
 from scripts.e2e_services import (
     DeterministicEmbeddingService,
     FixedURLAdapter,
@@ -251,6 +255,46 @@ def test_runtime_root_accepts_only_a_named_child(tmp_path):
     accepted = repo / "output" / "e2e" / "run-123"
 
     assert resolve_runtime_root(str(accepted), repo) == accepted.resolve()
+
+
+def test_frontend_url_defaults_to_the_task_2_loopback_origin():
+    """Direct Task 2 launches must retain their original safe CORS origin."""
+    assert resolve_frontend_url(None) == "http://127.0.0.1:3100"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:3100",
+        "http://127.0.0.1:3100",
+        "http://[::1]:3100",
+    ],
+)
+def test_frontend_url_accepts_only_supported_loopback_hosts(origin):
+    """The browser origin may use a supported loopback spelling."""
+    assert resolve_frontend_url(origin) == origin
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "",
+        " http://localhost:3100",
+        "http://localhost:3100 ",
+        "https://localhost:3100",
+        "http://example.com:3100",
+        "http://localhost",
+        "http://localhost:31000",
+        "http://localhost:3100/path",
+        "http://localhost:3100?query=yes",
+        "http://localhost:3100#fragment",
+        "http://user:password@localhost:3100",
+    ],
+)
+def test_frontend_url_rejects_non_origin_or_non_e2e_values(origin):
+    """Untrusted or malformed values must not enter the CORS allowlist."""
+    with pytest.raises(ValueError, match="frontend URL"):
+        resolve_frontend_url(origin)
 
 
 @pytest.mark.parametrize(

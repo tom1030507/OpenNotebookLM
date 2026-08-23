@@ -1,9 +1,17 @@
-import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
+import type {
+  FullResult,
+  Reporter,
+  TestCase,
+  TestError,
+  TestResult,
+  WorkerInfo,
+} from '@playwright/test/reporter';
 
 import { runtime, safeRemoveRuntime } from './runtime.js';
 
 export default class CleanupReporter implements Reporter {
   private hadFailedAttempt = false;
+  private hadReporterError = false;
   private succeeded = false;
 
   onTestEnd(_test: TestCase, result: TestResult): void {
@@ -13,7 +21,16 @@ export default class CleanupReporter implements Reporter {
   }
 
   onEnd(result: FullResult): void {
-    this.succeeded = result.status === 'passed' && !this.hadFailedAttempt;
+    this.succeeded = (
+      result.status === 'passed'
+      && !this.hadFailedAttempt
+      && !this.hadReporterError
+    );
+  }
+
+  onError(_error: TestError, _workerInfo?: WorkerInfo): void {
+    this.hadReporterError = true;
+    this.succeeded = false;
   }
 
   async onExit(): Promise<void> {

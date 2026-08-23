@@ -15,4 +15,18 @@ test('serves the isolated backend and protects the workspace', async ({ page, re
   await page.goto('/');
   await expect(page).toHaveURL(`${runtime.frontendUrl}/login`);
   await expect(page.getByRole('button', { name: 'Login' })).toBeVisible();
+
+  const browserHealth = await page.evaluate(async () => {
+    const response = await fetch('http://127.0.0.1:8100/healthz');
+    return {
+      body: await response.json(),
+      ok: response.ok,
+      status: response.status,
+    };
+  });
+  expect(browserHealth).toMatchObject({
+    ok: true,
+    status: 200,
+    body: { ok: true, environment: 'test' },
+  });
 });

@@ -4,6 +4,43 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+
+DEFAULT_FRONTEND_URL = "http://127.0.0.1:3100"
+SUPPORTED_FRONTEND_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def resolve_frontend_url(raw_url: str | None) -> str:
+    """Validate the single browser origin allowed to call the E2E backend.
+
+    Args:
+        raw_url: Candidate origin from E2E_FRONTEND_URL, or None for the
+            direct Task 2 default.
+
+    Returns:
+        A safe HTTP origin on the fixed E2E frontend port.
+    """
+    candidate = DEFAULT_FRONTEND_URL if raw_url is None else raw_url
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError(f"Unsafe E2E frontend URL: {candidate}") from error
+    if (
+        not candidate
+        or candidate != candidate.strip()
+        or parsed.scheme != "http"
+        or parsed.hostname not in SUPPORTED_FRONTEND_HOSTS
+        or port != 3100
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"Unsafe E2E frontend URL: {candidate}")
+    return candidate
 
 
 def resolve_runtime_root(raw_path: str, repo_root: Path) -> Path:
@@ -96,6 +133,7 @@ def create_application() -> tuple[Any, Any]:
     runtime_root = resolve_runtime_root(
         os.environ.get("E2E_RUNTIME_ROOT", ""), repo_root
     )
+    frontend_url = resolve_frontend_url(os.environ.get("E2E_FRONTEND_URL"))
     runtime_root.mkdir(parents=True, exist_ok=True)
     os.chdir(runtime_root)
     database = runtime_root / "opennotebook.db"
@@ -112,7 +150,7 @@ def create_application() -> tuple[Any, Any]:
             "CLAUDE_API_KEY": "",
             "YT_API_KEY": "",
             "RATE_LIMIT_ENABLED": "false",
-            "CORS_ORIGINS": "http://127.0.0.1:3100",
+            "CORS_ORIGINS": frontend_url,
             "ENABLE_YT_TRANSCRIPTION": "true",
         }
     )

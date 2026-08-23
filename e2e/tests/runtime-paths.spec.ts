@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -57,4 +57,52 @@ test('rejects an output link before creating a run outside its repository', ({},
     path.join(linkedOutput, 'must-not-exist'),
   )).toThrow(/symbolic link|junction/i);
   expect(existsSync(escapedRun)).toBe(false);
+});
+
+test('rejects an arbitrary output root before creating its parent', ({}, testInfo) => {
+  const sandbox = testInfo.outputPath('outside-output-root');
+  const repository = path.join(sandbox, 'repo');
+  const outsideParent = path.join(sandbox, 'must-not-create');
+  const outsideOutput = path.join(outsideParent, 'e2e');
+  mkdirSync(repository, { recursive: true });
+
+  try {
+    expect(() => prepareRuntimeDirectory(
+      repository,
+      outsideOutput,
+      path.join(outsideOutput, 'run-unsafe'),
+    )).toThrow(/unsafe|output/i);
+    expect(existsSync(outsideParent)).toBe(false);
+  } finally {
+    rmSync(outsideParent, { recursive: true, force: true });
+  }
+});
+
+test('rejects a nested junction before creating its escaped child', ({}, testInfo) => {
+  const sandbox = testInfo.outputPath('nested-output-link');
+  const repository = path.join(sandbox, 'repo');
+  const trustedOutput = path.join(repository, 'output', 'e2e');
+  const outside = path.join(sandbox, 'outside');
+  const nestedLink = path.join(trustedOutput, 'nested-link');
+  const escapedChild = path.join(outside, 'must-not-create');
+  mkdirSync(trustedOutput, { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  try {
+    symlinkSync(outside, nestedLink, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    test.skip(true, `This host cannot create a directory link: ${String(error)}`);
+    return;
+  }
+
+  try {
+    expect(() => prepareRuntimeDirectory(
+      repository,
+      trustedOutput,
+      path.join(nestedLink, 'must-not-create'),
+    )).toThrow(/unsafe|symbolic link|junction/i);
+    expect(existsSync(escapedChild)).toBe(false);
+  } finally {
+    rmSync(escapedChild, { recursive: true, force: true });
+    rmSync(nestedLink, { recursive: true, force: true });
+  }
 });
