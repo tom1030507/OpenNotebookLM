@@ -64,12 +64,61 @@ def _require_supported_requests_transport() -> None:
         )
 
 
+class _SocketCancellationHandle:
+    """Own one socket reference and close or abort it exactly once."""
+
+    def __init__(self, owned_socket):
+        """Retain the sole cleanup claim for a socket reference.
+
+        Args:
+            owned_socket: Real or duplicated socket this handle must release.
+        """
+        self._socket = owned_socket
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        """Interrupt blocking socket work, then release this handle.
+
+        Returns:
+            None after this caller or an earlier cleanup retires the handle.
+        """
+        owned_socket = self._claim()
+        if owned_socket is None:
+            return
+        try:
+            owned_socket.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            # A peer may race the deadline and close first. The descriptor is
+            # still ours to close, but that race does not change the outcome.
+            pass
+        finally:
+            owned_socket.close()
+
+    def close(self) -> None:
+        """Release this handle without aborting a live shared connection.
+
+        Returns:
+            None after this caller or an earlier cleanup retires the handle.
+        """
+        owned_socket = self._claim()
+        if owned_socket is not None:
+            owned_socket.close()
+
+    def _claim(self):
+        """Return the socket to one cleanup caller and retire the handle."""
+        with self._lock:
+            owned_socket = self._socket
+            self._socket = None
+        return owned_socket
+
+
 class _FetchControl:
     """Thread-safe cancellation and active transport registry for one fetch."""
 
     def __init__(self):
         self._cancelled = False
         self._closeables = []
+        self._socket_handles = []
         self._lock = threading.Lock()
 
     def register(self, closeable) -> None:
@@ -89,11 +138,50 @@ class _FetchControl:
             if closeable in self._closeables:
                 self._closeables.remove(closeable)
 
+    def register_socket_handle(self, handle: _SocketCancellationHandle) -> None:
+        """Register an OS-level socket handle for prompt interruption.
+
+        Args:
+            handle: Exact-once handle for an active socket reference.
+
+        Returns:
+            None after registration or immediate cancellation.
+        """
+        should_cancel = False
+        with self._lock:
+            if self._cancelled:
+                should_cancel = True
+            elif handle not in self._socket_handles:
+                self._socket_handles.append(handle)
+        if should_cancel:
+            handle.cancel()
+
+    def unregister_socket_handle(self, handle: _SocketCancellationHandle) -> None:
+        """Stop retaining a socket handle whose connection is complete.
+
+        Args:
+            handle: Exact-once handle no longer needed for interruption.
+
+        Returns:
+            None after removing the handle if it remained registered.
+        """
+        with self._lock:
+            if handle in self._socket_handles:
+                self._socket_handles.remove(handle)
+
     def cancel(self) -> None:
         """Close active transports and prevent a later one from opening."""
         with self._lock:
             self._cancelled = True
+            socket_handles = list(reversed(self._socket_handles))
             closeables = list(reversed(self._closeables))
+            self._socket_handles.clear()
+            self._closeables.clear()
+        # Shutdown the OS connection before asking higher-level response and
+        # session objects to clean up. Those objects may not own the checked-out
+        # pool connection while Requests is blocked in TLS or response headers.
+        for handle in socket_handles:
+            handle.cancel()
         for closeable in closeables:
             self._close(closeable)
 
@@ -203,6 +291,9 @@ class _PinnedConnectionMixin:
         """
         self._pinned_address = pinned_address
         self._fetch_control = fetch_control
+        self._transport_lock = threading.Lock()
+        self._handshake_handle = None
+        self._connected_handle = None
         super().__init__(*args, **kwargs)
 
     def _new_conn(self):
@@ -219,8 +310,22 @@ class _PinnedConnectionMixin:
                 socket_options=self.socket_options,
             )
             if self._fetch_control is not None:
-                self._fetch_control.register(connected_socket)
-                self._fetch_control.raise_if_cancelled()
+                # CPython detaches this raw socket while constructing an
+                # SSLSocket. A duplicate descriptor still refers to the same
+                # OS connection, so shutdown interrupts a handshake even while
+                # neither the old raw object nor urllib3 owns the final wrapper.
+                handshake_handle = _SocketCancellationHandle(
+                    connected_socket.dup()
+                )
+                with self._transport_lock:
+                    self._handshake_handle = handshake_handle
+                self._fetch_control.register_socket_handle(handshake_handle)
+                try:
+                    self._fetch_control.raise_if_cancelled()
+                except Exception:
+                    self._release_handshake_handle()
+                    connected_socket.close()
+                    raise
             return connected_socket
         except (TimeoutError, socket.timeout) as exc:
             raise ConnectTimeoutError(
@@ -232,6 +337,63 @@ class _PinnedConnectionMixin:
                 self,
                 "Failed to connect to validated address: %s" % exc,
             ) from exc
+
+    def connect(self) -> None:
+        """Track the final transport across raw-to-TLS socket ownership.
+
+        Returns:
+            None after urllib3 establishes and registers its final socket.
+        """
+        try:
+            super().connect()
+        except BaseException:
+            self._release_handshake_handle()
+            raise
+
+        connected_socket = self.sock
+        if self._fetch_control is not None and connected_socket is not None:
+            connected_handle = _SocketCancellationHandle(connected_socket)
+            with self._transport_lock:
+                self._connected_handle = connected_handle
+            # Register the final socket before releasing the duplicate so there
+            # is no uninterruptible gap at the TLS ownership handoff.
+            self._fetch_control.register_socket_handle(connected_handle)
+        self._release_handshake_handle()
+        if self._fetch_control is not None:
+            self._fetch_control.raise_if_cancelled()
+
+    def close(self) -> None:
+        """Release registered socket ownership without descriptor leaks.
+
+        Returns:
+            None after both cancellation handles and connection state close.
+        """
+        self._release_handshake_handle(cancel=True)
+        with self._transport_lock:
+            connected_handle = self._connected_handle
+            self._connected_handle = None
+        if connected_handle is not None:
+            if self._fetch_control is not None:
+                self._fetch_control.unregister_socket_handle(connected_handle)
+            connected_handle.close()
+            # urllib3's parent close must still reset connection state, but the
+            # exact-once handle already owns and closed this socket.
+            self.sock = None
+        super().close()
+
+    def _release_handshake_handle(self, cancel: bool = False) -> None:
+        """Retire the raw-socket duplicate after TLS adopts the connection."""
+        with self._transport_lock:
+            handshake_handle = self._handshake_handle
+            self._handshake_handle = None
+        if handshake_handle is None:
+            return
+        if self._fetch_control is not None:
+            self._fetch_control.unregister_socket_handle(handshake_handle)
+        if cancel:
+            handshake_handle.cancel()
+        else:
+            handshake_handle.close()
 
 
 class _PinnedHTTPConnection(_PinnedConnectionMixin, urllib3_connection_module.HTTPConnection):
