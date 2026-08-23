@@ -30,6 +30,24 @@ export interface SessionCredentialSnapshot {
   generation: number;
 }
 
+/**
+ * Match cookie names exactly rather than accepting a similarly named cookie.
+ * The middleware can authenticate a cookie-only browser session even when
+ * localStorage is denied, so that cookie is a session credential too.
+ */
+const hasCookie = (name: string): boolean => {
+  if (typeof document === 'undefined') {
+    return false;
+  }
+
+  return document.cookie.split(';').some((entry) => {
+    const trimmed = entry.trim();
+    const separator = trimmed.indexOf('=');
+    const cookieName = separator === -1 ? trimmed : trimmed.slice(0, separator);
+    return cookieName === name;
+  });
+};
+
 const writeCookie = (value: string, maxAgeSeconds: number) => {
   const attributes = [
     `${AUTH_TOKEN_COOKIE}=${encodeURIComponent(value)}`,
@@ -146,11 +164,15 @@ export const snapshotSessionCredential = (
 export const isCurrentSessionCredential = (
   snapshot: SessionCredentialSnapshot,
 ): boolean => {
-  if (!snapshot.authorization || snapshot.generation !== sessionGeneration) {
+  if (snapshot.generation !== sessionGeneration) {
     return false;
   }
 
   const currentToken = readAccessToken();
+  if (snapshot.authorization === null) {
+    return currentToken === null && hasCookie(AUTH_TOKEN_COOKIE);
+  }
+
   return currentToken !== null && snapshot.authorization === `Bearer ${currentToken}`;
 };
 

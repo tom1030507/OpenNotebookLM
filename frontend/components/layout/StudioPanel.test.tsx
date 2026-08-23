@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
 
 import api, { type Document, type MindMap, type Project } from '@/lib/api';
 import useStore from '@/store/useStore';
@@ -43,6 +44,22 @@ function deferred<T>() {
 
   return { promise, resolve };
 }
+
+const mindMapFor = (project: Project): MindMap => ({
+  project_id: project.id,
+  project_name: project.name,
+  generated_at: '2026-08-23T00:00:00Z',
+  model_used: 'fallback',
+  node_count: 1,
+  root: {
+    id: `root-${project.id}`,
+    label: project.name,
+    kind: 'project',
+    detail: null,
+    document_id: null,
+    children: [],
+  },
+});
 
 
 beforeEach(() => {
@@ -89,6 +106,23 @@ describe('StudioPanel', () => {
         },
       });
       await response.promise;
+    });
+
+    expect(screen.queryByRole('dialog', { name: `${projectA.name} mind map` })).toBeNull();
+  });
+
+  it('does not render an already-open project A map in project B\'s commit', async () => {
+    vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMapFor(projectA));
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    expect(await screen.findByRole('dialog', { name: `${projectA.name} mind map` })).toBeTruthy();
+
+    flushSync(() => {
+      useStore.setState({
+        currentProject: projectB,
+        documents: [{ ...readyDocument, id: 'document-b' }],
+      });
     });
 
     expect(screen.queryByRole('dialog', { name: `${projectA.name} mind map` })).toBeNull();

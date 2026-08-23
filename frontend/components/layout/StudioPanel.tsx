@@ -20,6 +20,25 @@ import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/l
 const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
 const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
 
+interface ProjectResult<T> {
+  projectId: string;
+  value: T;
+}
+
+const StudioDialogFallback = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    aria-label="Loading studio result"
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+  >
+    <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--card)] px-4 py-3 text-sm">
+      <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+      Loading studio result…
+    </span>
+  </div>
+);
+
 interface StudioOption {
   id: string;
   title: string;
@@ -48,9 +67,9 @@ export default function StudioPanel({
   const [reportError, setReportError] = useState('');
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
-  const [mindMap, setMindMap] = useState<MindMap | null>(null);
+  const [mindMap, setMindMap] = useState<ProjectResult<MindMap> | null>(null);
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
-  const [videoSummary, setVideoSummary] = useState<VideoSummary | null>(null);
+  const [videoSummary, setVideoSummary] = useState<ProjectResult<VideoSummary> | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   // Identifies the reading in progress. Stopping retires it, so anything the
@@ -142,7 +161,9 @@ export default function StudioPanel({
 
     try {
       const map = await api.fetchProjectMindMap(operation.project.id);
-      if (operation.isCurrent()) setMindMap(map);
+      if (operation.isCurrent()) {
+        setMindMap({ projectId: operation.project.id, value: map });
+      }
     } catch {
       if (operation.isCurrent()) {
         setReportError('The mind map could not be built. Please try again.');
@@ -161,7 +182,9 @@ export default function StudioPanel({
 
     try {
       const summary = await api.fetchProjectVideoSummary(operation.project.id);
-      if (operation.isCurrent()) setVideoSummary(summary);
+      if (operation.isCurrent()) {
+        setVideoSummary({ projectId: operation.project.id, value: summary });
+      }
     } catch {
       if (operation.isCurrent()) {
         setReportError('The video summary could not be prepared. Please try again.');
@@ -211,12 +234,22 @@ export default function StudioPanel({
   // removed, so read the list the rest of the workspace reads. An empty list
   // while it is still arriving means "not known yet", not "nothing to play".
   const hasNoSources = !loadingDocuments && documents.length === 0;
+  // Effects clear old output after commit, but this gate prevents an open A
+  // dialog from being rendered during the B commit that triggered that effect.
+  const currentMindMap = mindMap !== null && mindMap.projectId === currentProject?.id
+    ? mindMap.value
+    : null;
+  const currentVideoSummary = videoSummary !== null && videoSummary.projectId === currentProject?.id
+    ? videoSummary.value
+    : null;
 
   const optionDisabled = (option: StudioOption) => {
     if (!option.available || !currentProject) return true;
     if (option.action === 'audio') return !speechSupported || isPreparingAudio;
-    if (option.action === 'mindmap') return isBuildingMindMap;
-    if (option.action === 'video') return isPreparingVideo || hasNoSources;
+    if (option.action === 'mindmap') return isBuildingMindMap || currentMindMap !== null;
+    if (option.action === 'video') {
+      return isPreparingVideo || currentVideoSummary !== null || hasNoSources;
+    }
     return isGeneratingReport;
   };
 
@@ -409,16 +442,16 @@ export default function StudioPanel({
         </div>
       </div>
 
-      {mindMap && (
-        <React.Suspense fallback={null}>
-          <MindMapDialog map={mindMap} onClose={() => setMindMap(null)} />
+      {currentMindMap && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <MindMapDialog map={currentMindMap} onClose={() => setMindMap(null)} />
         </React.Suspense>
       )}
 
-      {videoSummary && (
-        <React.Suspense fallback={null}>
+      {currentVideoSummary && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
           <VideoSummaryDialog
-            summary={videoSummary}
+            summary={currentVideoSummary}
             onClose={() => setVideoSummary(null)}
           />
         </React.Suspense>

@@ -164,7 +164,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       void (async () => {
         try {
           const refreshed = await fetchMessages(conversationId);
-          if (!refreshed) {
+          if (refreshed === 'failed') {
             throw new Error('The conversation could not be refreshed.');
           }
           setPendingQuery((pending) => (

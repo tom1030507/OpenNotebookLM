@@ -57,6 +57,16 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+        // A language block renders its own fallback/highlighter container.
+        // Keep ReactMarkdown's pre for ordinary fenced code, but unwrap this
+        // case so a fallback owns one valid <pre><code> pair.
+        pre({ children }) {
+          const child = React.Children.toArray(children)[0];
+          const languageBlock = React.isValidElement<{ className?: string }>(child)
+            && /language-\w+/.test(child.props.className || '');
+
+          return languageBlock ? <>{children}</> : <pre>{children}</pre>;
+        },
         // Custom code block rendering
         code({ node, className, children, ...props }) {
           void node;

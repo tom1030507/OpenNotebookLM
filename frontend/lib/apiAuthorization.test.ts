@@ -93,6 +93,25 @@ const seedWorkspace = (account: 'a' | 'b') => {
   return project;
 };
 
+const expectWorkspaceRetired = (state: ReturnType<typeof useStore.getState> | null) => {
+  expect(state).toMatchObject({
+    projects: [],
+    currentProject: null,
+    documents: [],
+    conversations: [],
+    currentConversation: null,
+    messages: [],
+    loadingProjects: false,
+    loadingDocuments: false,
+    loadingConversations: false,
+    loadingMessages: false,
+    uploadProgress: {},
+    sidebarOpen: false,
+    studioOpen: false,
+    notifyOnProcessingComplete: false,
+  });
+};
+
 /** The headers the client put on its most recent request. */
 const sentHeaders = (fetchMock: ReturnType<typeof vi.fn>): Headers => {
   const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
@@ -347,22 +366,7 @@ describe('deferred 401 session boundaries', () => {
       pendingResponse.resolve(jsonResponse({ detail: 'Could not validate credentials' }, 401));
 
       await expect(pendingRequest).rejects.toThrow('Could not validate credentials');
-      expect(stateAtNavigation).toMatchObject({
-        projects: [],
-        currentProject: null,
-        documents: [],
-        conversations: [],
-        currentConversation: null,
-        messages: [],
-        loadingProjects: false,
-        loadingDocuments: false,
-        loadingConversations: false,
-        loadingMessages: false,
-        uploadProgress: {},
-        sidebarOpen: false,
-        studioOpen: false,
-        notifyOnProcessingComplete: false,
-      });
+      expectWorkspaceRetired(stateAtNavigation);
       expect(window.localStorage.getItem('access_token')).toBeNull();
       expect(window.localStorage.getItem('auth_token')).toBeNull();
       expect(window.localStorage.getItem('user')).toBeNull();
@@ -394,4 +398,69 @@ describe('deferred 401 session boundaries', () => {
     expect(useStore.getState().currentProject).toMatchObject({ id: 'project-b' });
     expect(assign).not.toHaveBeenCalled();
   });
+
+  it.each(protectedFetchHelpers)(
+    'retires the current cookie-only session before navigation for a $kind 401 response',
+    async ({ request }) => {
+      document.cookie = `${AUTH_TOKEN_COOKIE}=cookie-only-token; Path=/`;
+      seedWorkspace('a');
+      const pendingResponse = deferred<Response>();
+      vi.stubGlobal('fetch', vi.fn(() => pendingResponse.promise));
+      let stateAtNavigation: ReturnType<typeof useStore.getState> | null = null;
+      const assign = stubLocation('/projects/project-a', () => {
+        stateAtNavigation = useStore.getState();
+      });
+
+      const pendingRequest = request();
+      pendingResponse.resolve(jsonResponse({ detail: 'Could not validate credentials' }, 401));
+
+      await expect(pendingRequest).rejects.toThrow('Could not validate credentials');
+      expectWorkspaceRetired(stateAtNavigation);
+      expect(window.localStorage.getItem('access_token')).toBeNull();
+      expect(window.localStorage.getItem('auth_token')).toBeNull();
+      expect(document.cookie).not.toContain(`${AUTH_TOKEN_COOKIE}=cookie-only-token`);
+      expect(assign).toHaveBeenCalledWith('/login');
+    },
+  );
+
+  it.each(protectedFetchHelpers)(
+    'does not abandon Account B when a cookie-only anonymous $kind response arrives late',
+    async ({ request }) => {
+      document.cookie = `${AUTH_TOKEN_COOKIE}=shared-token; Path=/`;
+      seedWorkspace('a');
+      const pendingResponse = deferred<Response>();
+      vi.stubGlobal('fetch', vi.fn(() => pendingResponse.promise));
+      const assign = stubLocation('/projects/project-b');
+
+      const pendingRequest = request();
+      storeSession('shared-token', {
+        username: 'account-b',
+        email: 'b@example.com',
+      }, useStore.getState().clearAccountState);
+      seedWorkspace('b');
+      pendingResponse.resolve(jsonResponse({ detail: 'Could not validate credentials' }, 401));
+
+      await expect(pendingRequest).rejects.toThrow('Could not validate credentials');
+      expect(window.localStorage.getItem('access_token')).toBe('shared-token');
+      expect(document.cookie).toContain(`${AUTH_TOKEN_COOKIE}=shared-token`);
+      expect(useStore.getState().currentProject).toMatchObject({ id: 'project-b' });
+      expect(assign).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(protectedFetchHelpers)(
+    'leaves a truly signed-out $kind caller on its current page after a 401 response',
+    async ({ request }) => {
+      const assign = stubLocation('/projects');
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(
+        { detail: 'Could not validate credentials' },
+        401,
+      )));
+
+      await expect(request()).rejects.toThrow('Could not validate credentials');
+
+      expect(assign).not.toHaveBeenCalled();
+      expect(document.cookie).not.toContain(`${AUTH_TOKEN_COOKIE}=`);
+    },
+  );
 });

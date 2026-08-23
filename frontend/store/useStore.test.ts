@@ -85,6 +85,19 @@ const readyDocument: Document = {
   chunk_count: 1,
 };
 
+const document = (id: string): Document => ({
+  ...readyDocument,
+  id,
+  name: `Document ${id}`,
+});
+
+const message = (id: string, conversationId: string): Message => ({
+  ...authoritativeMessage,
+  id,
+  conversation_id: conversationId,
+  content: `Message ${id}`,
+});
+
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -94,32 +107,19 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-
-const setEmptyState = () => {
-  useStore.setState({
-    projects: [],
-    currentProject: null,
-    loadingProjects: false,
-    documents: [],
-    loadingDocuments: false,
-    uploadProgress: {},
-    conversations: [],
-    currentConversation: null,
-    messages: [],
-    loadingConversations: false,
-    loadingMessages: false,
-    sidebarOpen: true,
-    studioOpen: true,
-  });
+const settle = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
 };
 
 
 beforeEach(() => {
   vi.clearAllMocks();
   testStorage.clear();
-  setEmptyState();
+  useStore.getState().resetForTests();
   apiMock.getDocuments.mockResolvedValue([]);
   apiMock.getConversations.mockResolvedValue([]);
+  apiMock.getMessages.mockResolvedValue([]);
 });
 
 
@@ -207,6 +207,38 @@ describe('application store', () => {
     }));
   });
 
+  it('retires project loading when selection supersedes a pending project read', async () => {
+    const pendingProjects = deferred<Project[]>();
+    apiMock.getProjects.mockReturnValue(pendingProjects.promise);
+
+    const loadingProjects = useStore.getState().fetchProjects();
+    useStore.getState().selectProject(project('project-b'));
+
+    expect(useStore.getState().loadingProjects).toBe(false);
+    pendingProjects.resolve([project('project-a')]);
+    await loadingProjects;
+    expect(useStore.getState().currentProject).toEqual(project('project-b'));
+  });
+
+  it('retires project loading when project creation supersedes a pending project read', async () => {
+    const pendingProjects = deferred<Project[]>();
+    const createdProject = project('project-created');
+    apiMock.getProjects.mockReturnValue(pendingProjects.promise);
+    apiMock.createProject.mockResolvedValue(createdProject);
+
+    const loadingProjects = useStore.getState().fetchProjects();
+    await expect(
+      useStore.getState().createProject('Created project'),
+    ).resolves.toEqual(createdProject);
+
+    expect(useStore.getState().projects).toEqual([createdProject]);
+    expect(useStore.getState().loadingProjects).toBe(false);
+    pendingProjects.resolve([project('project-stale')]);
+    await loadingProjects;
+    expect(useStore.getState().projects).toEqual([createdProject]);
+    expect(useStore.getState().loadingProjects).toBe(false);
+  });
+
   it('ignores a document response for a project that is no longer selected', async () => {
     useStore.setState({ currentProject: project('project-2') });
     apiMock.getDocuments.mockResolvedValue([readyDocument]);
@@ -214,6 +246,100 @@ describe('application store', () => {
     await useStore.getState().fetchDocuments('project-1');
 
     expect(useStore.getState().documents).toEqual([]);
+  });
+
+  it('keeps newer documents after returning to the same project before an older read resolves', async () => {
+    const projectA = project('project-a');
+    const projectB = project('project-b');
+    const firstAResponse = deferred<Document[]>();
+    const bResponse = deferred<Document[]>();
+    const secondAResponse = deferred<Document[]>();
+    apiMock.getDocuments
+      .mockReturnValueOnce(firstAResponse.promise)
+      .mockReturnValueOnce(bResponse.promise)
+      .mockReturnValueOnce(secondAResponse.promise);
+    useStore.setState({ currentProject: projectA });
+
+    const firstARequest = useStore.getState().fetchDocuments(projectA.id);
+    useStore.getState().selectProject(projectB);
+    useStore.getState().selectProject(projectA);
+
+    secondAResponse.resolve([document('document-a2')]);
+    await settle();
+    bResponse.resolve([document('document-b')]);
+    await settle();
+    firstAResponse.resolve([document('document-a1')]);
+    await firstARequest;
+
+    expect(useStore.getState().documents).toEqual([document('document-a2')]);
+    expect(useStore.getState().loadingDocuments).toBe(false);
+  });
+
+  it('retires document loading when source creation supersedes a pending document read', async () => {
+    const currentProject = project('project-1');
+    const pendingDocuments = deferred<Document[]>();
+    const createdDocument = document('document-created');
+    apiMock.getDocuments.mockReturnValue(pendingDocuments.promise);
+    apiMock.createDocument.mockResolvedValue(createdDocument);
+    useStore.setState({ currentProject, documents: [readyDocument] });
+
+    const loadingDocuments = useStore.getState().fetchDocuments(currentProject.id);
+    await useStore.getState().createDocument(currentProject.id, {
+      name: createdDocument.name,
+      type: 'url',
+      url: 'https://example.com',
+    });
+
+    expect(useStore.getState().documents).toEqual([readyDocument, createdDocument]);
+    expect(useStore.getState().loadingDocuments).toBe(false);
+    pendingDocuments.resolve([document('document-stale')]);
+    await loadingDocuments;
+    expect(useStore.getState().documents).toEqual([readyDocument, createdDocument]);
+    expect(useStore.getState().loadingDocuments).toBe(false);
+  });
+
+  it('keeps a polling document refresh newer than an earlier regular fetch', async () => {
+    const regularResponse = deferred<Document[]>();
+    const pollingResponse = deferred<Document[]>();
+    const currentProject = project('project-1');
+    apiMock.getDocuments
+      .mockReturnValueOnce(regularResponse.promise)
+      .mockReturnValueOnce(pollingResponse.promise);
+    useStore.setState({ currentProject });
+
+    const regularFetch = useStore.getState().fetchDocuments(currentProject.id);
+    const pollingRefresh = useStore.getState().refreshDocuments(currentProject.id);
+    pollingResponse.resolve([document('document-polling')]);
+    await pollingRefresh;
+
+    expect(useStore.getState().documents).toEqual([document('document-polling')]);
+    expect(useStore.getState().loadingDocuments).toBe(false);
+
+    regularResponse.resolve([document('document-regular')]);
+    await regularFetch;
+
+    expect(useStore.getState().documents).toEqual([document('document-polling')]);
+    expect(useStore.getState().loadingDocuments).toBe(false);
+  });
+
+  it('keeps a newer regular document fetch when an earlier polling response arrives late', async () => {
+    const pollingResponse = deferred<Document[]>();
+    const regularResponse = deferred<Document[]>();
+    const currentProject = project('project-1');
+    apiMock.getDocuments
+      .mockReturnValueOnce(pollingResponse.promise)
+      .mockReturnValueOnce(regularResponse.promise);
+    useStore.setState({ currentProject });
+
+    const pollingRefresh = useStore.getState().refreshDocuments(currentProject.id);
+    const regularFetch = useStore.getState().fetchDocuments(currentProject.id);
+    regularResponse.resolve([document('document-regular')]);
+    await regularFetch;
+    pollingResponse.resolve([document('document-polling')]);
+    await pollingRefresh;
+
+    expect(useStore.getState().documents).toEqual([document('document-regular')]);
+    expect(useStore.getState().loadingDocuments).toBe(false);
   });
 
   it('ignores a completed upload after switching projects', async () => {
@@ -327,6 +453,38 @@ describe('application store', () => {
     expect(useStore.getState().messages).toEqual([authoritativeMessage]);
   });
 
+  it('does not report a query refresh failure when a newer message read supersedes it', async () => {
+    const queryRefresh = deferred<Message[]>();
+    const newerRefresh = deferred<Message[]>();
+    const currentProject = project('project-1');
+    const currentConversation = conversation('conversation-1', currentProject.id);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    apiMock.getMessages
+      .mockReturnValueOnce(queryRefresh.promise)
+      .mockReturnValueOnce(newerRefresh.promise);
+    useStore.setState({ currentProject, currentConversation });
+
+    const pendingQuery = useStore.getState().sendQuery('Question');
+    await settle();
+    const newerRead = useStore.getState().fetchMessages(currentConversation.id);
+    newerRefresh.resolve([message('message-newer', currentConversation.id)]);
+    await newerRead;
+    queryRefresh.resolve([message('message-stale', currentConversation.id)]);
+
+    await expect(pendingQuery).resolves.toBeUndefined();
+    expect(useStore.getState().messages).toEqual([
+      message('message-newer', currentConversation.id),
+    ]);
+    expect(useStore.getState().loadingMessages).toBe(false);
+  });
+
   it('does not reuse a conversation owned by another project', async () => {
     useStore.setState({
       currentProject: project('project-2'),
@@ -414,6 +572,53 @@ describe('application store', () => {
     expect(useStore.getState().messages).toEqual([]);
   });
 
+  it('retires conversation loading when selecting a conversation supersedes its list read', async () => {
+    const currentProject = project('project-1');
+    const pendingConversations = deferred<Conversation[]>();
+    apiMock.getConversations.mockReturnValue(pendingConversations.promise);
+    useStore.setState({ currentProject });
+
+    const loadingConversations = useStore.getState().fetchConversations(currentProject.id);
+    await useStore.getState().selectConversation(
+      conversation('conversation-1', currentProject.id),
+    );
+
+    expect(useStore.getState().loadingConversations).toBe(false);
+    pendingConversations.resolve([conversation('conversation-stale', currentProject.id)]);
+    await loadingConversations;
+    expect(useStore.getState().conversations).toEqual([]);
+  });
+
+  it('keeps newer messages after returning to the same conversation before an older read resolves', async () => {
+    const projectA = project('project-a');
+    const conversationA = conversation('conversation-a', projectA.id);
+    const conversationB = conversation('conversation-b', projectA.id);
+    const firstAResponse = deferred<Message[]>();
+    const bResponse = deferred<Message[]>();
+    const secondAResponse = deferred<Message[]>();
+    apiMock.getMessages
+      .mockReturnValueOnce(firstAResponse.promise)
+      .mockReturnValueOnce(bResponse.promise)
+      .mockReturnValueOnce(secondAResponse.promise);
+    useStore.setState({ currentProject: projectA, currentConversation: conversationA });
+
+    const firstARequest = useStore.getState().fetchMessages(conversationA.id);
+    const selectingB = useStore.getState().selectConversation(conversationB);
+    const selectingA = useStore.getState().selectConversation(conversationA);
+    secondAResponse.resolve([message('message-a2', conversationA.id)]);
+    await selectingA;
+    bResponse.resolve([message('message-b', conversationB.id)]);
+    await selectingB;
+    firstAResponse.resolve([message('message-a1', conversationA.id)]);
+    await firstARequest;
+
+    expect(useStore.getState().currentConversation).toEqual(conversationA);
+    expect(useStore.getState().messages).toEqual([
+      message('message-a2', conversationA.id),
+    ]);
+    expect(useStore.getState().loadingMessages).toBe(false);
+  });
+
   it('ignores a created conversation after switching projects', async () => {
     const creation = deferred<Conversation>();
     useStore.setState({ currentProject: project('project-1') });
@@ -452,5 +657,77 @@ describe('application store', () => {
     );
     expect(useStore.getState().conversations).toEqual([renamed]);
     expect(useStore.getState().currentConversation).toEqual(renamed);
+  });
+
+  it('retires conversation loading when a rename supersedes a pending list read', async () => {
+    const currentProject = project('project-1');
+    const originalConversation = conversation('conversation-1', currentProject.id);
+    const renamedConversation = { ...originalConversation, title: 'Renamed chat' };
+    const pendingConversations = deferred<Conversation[]>();
+    apiMock.getConversations.mockReturnValue(pendingConversations.promise);
+    apiMock.updateConversation.mockResolvedValue(renamedConversation);
+    useStore.setState({
+      currentProject,
+      conversations: [originalConversation],
+      currentConversation: originalConversation,
+    });
+
+    const loadingConversations = useStore.getState().fetchConversations(currentProject.id);
+    await useStore.getState().updateConversation(originalConversation.id, 'Renamed chat');
+
+    expect(useStore.getState().conversations).toEqual([renamedConversation]);
+    expect(useStore.getState().loadingConversations).toBe(false);
+    pendingConversations.resolve([conversation('conversation-stale', currentProject.id)]);
+    await loadingConversations;
+    expect(useStore.getState().conversations).toEqual([renamedConversation]);
+    expect(useStore.getState().loadingConversations).toBe(false);
+  });
+
+  it('keeps newer conversations after returning to the same project before an older read resolves', async () => {
+    const projectA = project('project-a');
+    const projectB = project('project-b');
+    const firstAResponse = deferred<Conversation[]>();
+    const bResponse = deferred<Conversation[]>();
+    const secondAResponse = deferred<Conversation[]>();
+    apiMock.getConversations
+      .mockReturnValueOnce(firstAResponse.promise)
+      .mockReturnValueOnce(bResponse.promise)
+      .mockReturnValueOnce(secondAResponse.promise);
+    useStore.setState({ currentProject: projectA });
+
+    const firstARequest = useStore.getState().fetchConversations(projectA.id);
+    useStore.getState().selectProject(projectB);
+    useStore.getState().selectProject(projectA);
+
+    secondAResponse.resolve([conversation('conversation-a2', projectA.id)]);
+    await settle();
+    bResponse.resolve([conversation('conversation-b', projectB.id)]);
+    await settle();
+    firstAResponse.resolve([conversation('conversation-a1', projectA.id)]);
+    await firstARequest;
+
+    expect(useStore.getState().conversations).toEqual([
+      conversation('conversation-a2', projectA.id),
+    ]);
+    expect(useStore.getState().loadingConversations).toBe(false);
+  });
+
+  it('keeps a newer project list when an older same-account refresh resolves last', async () => {
+    const firstResponse = deferred<Project[]>();
+    const secondResponse = deferred<Project[]>();
+    apiMock.getProjects
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockReturnValueOnce(secondResponse.promise);
+
+    const firstRequest = useStore.getState().fetchProjects();
+    const secondRequest = useStore.getState().fetchProjects();
+    secondResponse.resolve([project('project-a2')]);
+    await secondRequest;
+    firstResponse.resolve([project('project-a1')]);
+    await firstRequest;
+
+    expect(useStore.getState().projects).toEqual([project('project-a2')]);
+    expect(useStore.getState().currentProject).toEqual(project('project-a2'));
+    expect(useStore.getState().loadingProjects).toBe(false);
   });
 });
