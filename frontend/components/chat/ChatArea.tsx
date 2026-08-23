@@ -85,6 +85,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const sendQuery = useStore((state) => state.sendQuery);
   const createConversation = useStore((state) => state.createConversation);
   const fetchMessages = useStore((state) => state.fetchMessages);
+  const followMessageRead = useStore((state) => state.followMessageRead);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -164,7 +165,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       void (async () => {
         try {
           const refreshed = await fetchMessages(conversationId);
-          if (refreshed.status === 'failed') {
+          const refreshStatus = await followMessageRead(refreshed);
+          if (refreshStatus === 'failed') {
             throw new Error('The conversation could not be refreshed.');
           }
           setPendingQuery((pending) => (

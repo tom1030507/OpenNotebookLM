@@ -63,6 +63,7 @@ interface AppState {
   updateConversation: (conversationId: string, title: string) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   fetchMessages: (conversationId: string) => Promise<MessageFetchResult>;
+  followMessageRead: (initialResult: MessageFetchResult) => Promise<MessageFetchStatus>;
   
   // Actions - Query
   sendQuery: (
@@ -678,6 +679,34 @@ const useStore = create<AppState>()(
             return complete('failed');
           }
         },
+
+        followMessageRead: async (initialResult) => {
+          const { epoch, projectId, conversationId } = initialResult;
+          const isCurrentContext = () => (
+            projectId !== null
+            && accountEpoch === epoch
+            && get().currentProject?.id === projectId
+            && get().currentConversation?.id === conversationId
+          );
+          let result = initialResult;
+
+          while (result.status === 'stale') {
+            if (!isCurrentContext()) return 'stale';
+            const successor = activeMessageRead;
+            if (
+              !successor
+              || successor.epoch !== epoch
+              || successor.projectId !== projectId
+              || successor.conversationId !== conversationId
+              || successor.generation <= result.generation
+            ) {
+              return 'stale';
+            }
+            result = await successor.completion;
+          }
+
+          return isCurrentContext() ? result.status : 'stale';
+        },
         
         // Query
         sendQuery: async (query, stream = false, onConversationReady) => {
@@ -733,28 +762,6 @@ const useStore = create<AppState>()(
             && get().currentProject?.id === projectId
             && get().currentConversation?.id === conversationId
           );
-          const followMessageRead = async (
-            initialResult: MessageFetchResult,
-          ): Promise<MessageFetchStatus> => {
-            let result = initialResult;
-
-            while (result.status === 'stale') {
-              if (!isCurrentQueryContext()) return 'stale';
-              const successor = activeMessageRead;
-              if (
-                !successor
-                || successor.epoch !== epoch
-                || successor.projectId !== projectId
-                || successor.conversationId !== conversationId
-                || successor.generation <= result.generation
-              ) {
-                return 'stale';
-              }
-              result = await successor.completion;
-            }
-
-            return result.status;
-          };
           
           try {
             await api.query({
@@ -765,7 +772,7 @@ const useStore = create<AppState>()(
             if (!isCurrentAccount()) return;
             const refreshed = await get().fetchMessages(conversationId);
             if (!isCurrentAccount()) return;
-            const refreshStatus = await followMessageRead(refreshed);
+            const refreshStatus = await get().followMessageRead(refreshed);
             if (!isCurrentAccount()) return;
             if (refreshStatus === 'failed') {
               if (!isCurrentQueryContext()) return;
