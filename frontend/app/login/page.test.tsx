@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import LoginPage from './page';
 import api from '@/lib/api';
 import { AUTH_TOKEN_COOKIE } from '@/lib/session';
+import useStore from '@/store/useStore';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -40,6 +41,7 @@ beforeEach(() => {
   push.mockClear();
   window.localStorage.clear();
   document.cookie = `${AUTH_TOKEN_COOKIE}=; Path=/; Max-Age=0`;
+  useStore.getState().resetForTests();
 });
 
 afterEach(() => {
@@ -76,6 +78,180 @@ describe('login page', () => {
     expect(JSON.parse(window.localStorage.getItem('user') as string)).toEqual({
       username: 'ada',
       email: 'ada@example.com',
+    });
+  });
+
+  it('clears account A workspace state before storing account B', async () => {
+    window.localStorage.setItem('user', JSON.stringify({
+      username: 'account-a',
+      email: 'a@example.com',
+    }));
+    useStore.setState({
+      projects: [{
+        id: 'project-a',
+        name: 'Account A project',
+        description: null,
+        meta_json: {},
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        document_count: 1,
+        conversation_count: 1,
+      }],
+      currentProject: {
+        id: 'project-a',
+        name: 'Account A project',
+        description: null,
+        meta_json: {},
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        document_count: 1,
+        conversation_count: 1,
+      },
+      documents: [{
+        id: 'document-a',
+        name: 'Account A document',
+        type: 'text',
+        meta: {},
+        status: 'ready',
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        chunk_count: 1,
+      }],
+      conversations: [{
+        id: 'conversation-a',
+        project_id: 'project-a',
+        title: 'Account A conversation',
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        message_count: 1,
+      }],
+      currentConversation: {
+        id: 'conversation-a',
+        project_id: 'project-a',
+        title: 'Account A conversation',
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        message_count: 1,
+      },
+      messages: [{
+        id: 'message-a',
+        conversation_id: 'conversation-a',
+        role: 'user',
+        content: 'Account A message',
+        citations: [],
+        created_at: '2026-08-23T00:00:00Z',
+      }],
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
+    vi.spyOn(api, 'login').mockResolvedValue({
+      access_token: 'account-b-token',
+      token_type: 'bearer',
+    });
+    vi.spyOn(api, 'getAccount').mockResolvedValue({
+      id: 'user-b',
+      username: 'account-b',
+      email: 'b@example.com',
+      created_at: '2026-08-23T00:00:00Z',
+    });
+
+    render(<LoginPage />);
+    fillIn(/username/i, 'account-b');
+    fillIn(/^password$/i, 'account-b-password');
+    submit();
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect(useStore.getState()).toMatchObject({
+      projects: [],
+      currentProject: null,
+      documents: [],
+      conversations: [],
+      currentConversation: null,
+      messages: [],
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
+  });
+
+  it('clears stale workspace state when the first project fetch fails', async () => {
+    useStore.setState({
+      projects: [{
+        id: 'project-a',
+        name: 'Account A project',
+        description: null,
+        meta_json: {},
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        document_count: 1,
+        conversation_count: 1,
+      }],
+      currentProject: {
+        id: 'project-a',
+        name: 'Account A project',
+        description: null,
+        meta_json: {},
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        document_count: 1,
+        conversation_count: 1,
+      },
+      documents: [{
+        id: 'document-a',
+        name: 'Account A document',
+        type: 'text',
+        meta: {},
+        status: 'ready',
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        chunk_count: 1,
+      }],
+      conversations: [{
+        id: 'conversation-a',
+        project_id: 'project-a',
+        title: 'Account A conversation',
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        message_count: 1,
+      }],
+      currentConversation: {
+        id: 'conversation-a',
+        project_id: 'project-a',
+        title: 'Account A conversation',
+        created_at: '2026-08-23T00:00:00Z',
+        updated_at: '2026-08-23T00:00:00Z',
+        message_count: 1,
+      },
+      messages: [{
+        id: 'message-a',
+        conversation_id: 'conversation-a',
+        role: 'user',
+        content: 'Account A message',
+        citations: [],
+        created_at: '2026-08-23T00:00:00Z',
+      }],
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
+    vi.spyOn(api, 'getProjects').mockRejectedValue(new Error('Network unavailable'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await act(async () => {
+      await useStore.getState().fetchProjects();
+    });
+
+    expect(useStore.getState()).toMatchObject({
+      projects: [],
+      currentProject: null,
+      documents: [],
+      conversations: [],
+      currentConversation: null,
+      messages: [],
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
     });
   });
 

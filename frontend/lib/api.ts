@@ -1,4 +1,9 @@
-import { clearSession, readAccessToken } from './session';
+import {
+  readAccessToken,
+  snapshotSessionCredential,
+  type SessionCredentialSnapshot,
+} from './session';
+import { retireCurrentSession } from './sessionBoundary';
 
 
 export interface Project {
@@ -284,11 +289,41 @@ const LOGIN_PATH = '/login';
 const CREDENTIAL_PATH_PREFIX = '/auth/';
 
 
-/** The Authorization header for the stored session, or nothing when signed out. */
-const authorization = (): Record<string, string> => {
+/** The Authorization value for the stored session, or nothing when signed out. */
+const authorization = (): string | null => {
   const token = readAccessToken();
 
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? `Bearer ${token}` : null;
+};
+
+
+/**
+ * Merge defaults, the stored credential, and caller overrides exactly as the
+ * browser will dispatch them. The resulting Authorization is what the 401
+ * guard snapshots, including an explicit override such as `getAccount` uses.
+ */
+const requestHeaders = (
+  accept: string,
+  init: RequestInit = {},
+  includeJsonContentType = false,
+): Headers => {
+  const headers = new Headers({ Accept: accept });
+  if (includeJsonContentType && init.body) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const storedAuthorization = authorization();
+  if (storedAuthorization) {
+    headers.set('Authorization', storedAuthorization);
+  }
+
+  if (init.headers) {
+    new Headers(init.headers).forEach((value, key) => {
+      headers.set(key, value);
+    });
+  }
+
+  return headers;
 };
 
 
@@ -298,12 +333,14 @@ const authorization = (): Record<string, string> => {
  * Without this the workspace keeps a token every request will be refused for,
  * and each panel fails on its own on a screen with no way back to sign-in.
  */
-const abandonSession = (): void => {
+const abandonSession = (snapshot: SessionCredentialSnapshot): void => {
   if (typeof window === 'undefined') {
     return;
   }
 
-  clearSession();
+  if (!retireCurrentSession(snapshot)) {
+    return;
+  }
 
   if (window.location.pathname !== LOGIN_PATH) {
     window.location.assign(LOGIN_PATH);
@@ -334,13 +371,17 @@ const extractError = async (response: Response): Promise<Error> => {
  * A refused token also ends the local session, so the workspace stops acting
  * signed in the moment the backend says otherwise.
  */
-const guard = async (path: string, response: Response): Promise<void> => {
+const guard = async (
+  path: string,
+  response: Response,
+  snapshot: SessionCredentialSnapshot,
+): Promise<void> => {
   if (response.ok) {
     return;
   }
 
   if (response.status === 401 && !path.startsWith(CREDENTIAL_PATH_PREFIX)) {
-    abandonSession();
+    abandonSession(snapshot);
   }
 
   throw await extractError(response);
@@ -352,17 +393,11 @@ const requestJson = async <T>(
   init: RequestInit = {},
 ): Promise<T> => {
   const isFormData = init.body instanceof FormData;
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    ...(!isFormData && init.body ? { 'Content-Type': 'application/json' } : {}),
-    ...authorization(),
-    // An explicit header wins: `getAccount` checks a token it was handed rather
-    // than the one in storage.
-    ...(init.headers as Record<string, string> | undefined),
-  };
+  const headers = requestHeaders('application/json', init, !isFormData);
+  const snapshot = snapshotSessionCredential(headers.get('Authorization'));
   const response = await fetch(apiUrl(path), { ...init, headers });
 
-  await guard(path, response);
+  await guard(path, response, snapshot);
 
   if (response.status === 204) {
     return undefined as T;
@@ -373,20 +408,24 @@ const requestJson = async <T>(
 
 
 const requestBlob = async (path: string): Promise<Blob> => {
+  const headers = requestHeaders('*/*');
+  const snapshot = snapshotSessionCredential(headers.get('Authorization'));
   const response = await fetch(apiUrl(path), {
-    headers: { Accept: '*/*', ...authorization() },
+    headers,
   });
-  await guard(path, response);
+  await guard(path, response, snapshot);
 
   return response.blob();
 };
 
 
 const requestText = async (path: string): Promise<string> => {
+  const headers = requestHeaders('text/plain, text/markdown, */*');
+  const snapshot = snapshotSessionCredential(headers.get('Authorization'));
   const response = await fetch(apiUrl(path), {
-    headers: { Accept: 'text/plain, text/markdown, */*', ...authorization() },
+    headers,
   });
-  await guard(path, response);
+  await guard(path, response, snapshot);
 
   return response.text();
 };
@@ -546,9 +585,10 @@ const api = {
     return requestBlob(`/docs/${encodeURIComponent(documentId)}/file`);
   },
 
-  async getDocuments(projectId: string): Promise<Document[]> {
+  async getDocuments(projectId: string, signal?: AbortSignal): Promise<Document[]> {
     const documents = await requestJson<BackendDocument[]>(
       `/projects/${projectId}/documents`,
+      { signal },
     );
     return documents.map(normalizeDocument);
   },

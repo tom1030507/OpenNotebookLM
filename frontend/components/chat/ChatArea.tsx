@@ -9,13 +9,14 @@ import {
   ChevronRight,
   Loader2
 } from 'lucide-react';
-import useStore from '@/store/useStore';
+import useStore, { QueryMessageRefreshError } from '@/store/useStore';
 import {
   chatWorkspaceStyle,
   welcomeHeroStyles,
 } from '@/components/desktopLayout';
 import MarkdownRenderer from '../MarkdownRenderer';
 import { requestAddSources } from '../sourceActions';
+import type { Message } from '@/lib/api';
 
 interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
@@ -26,7 +27,50 @@ interface PendingQuery {
   content: string;
   projectId: string;
   conversationId: string | null;
+  error: string | null;
+  retryMode: 'query' | 'refresh';
 }
+
+const MessageRow = React.memo(function MessageRow({ message }: { message: Message }) {
+  return (
+    <div className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+      {message.role === 'assistant' && (
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center flex-shrink-0">
+          <Sparkles className="w-4 h-4 text-white" />
+        </div>
+      )}
+      <div
+        className={`max-w-[70%] ${
+          message.role === 'user'
+            ? 'bg-[var(--primary)] text-white'
+            : 'bg-[var(--card)] border border-[var(--border)]'
+        } rounded-lg px-4 py-3`}
+      >
+        {message.role === 'assistant' ? (
+          <MarkdownRenderer content={message.content} />
+        ) : (
+          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+        )}
+        {message.citations && message.citations.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-[var(--border)]">
+            <p className="text-xs opacity-70 mb-2">Sources: </p>
+            {message.citations.map((citation, index) => (
+              <div key={index} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs">
+                <span className="font-medium">{citation.source}</span>
+                {citation.page && <span className="opacity-70"> - page {citation.page}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {message.role === 'user' && (
+        <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center flex-shrink-0">
+          U
+        </div>
+      )}
+    </div>
+  );
+});
 
 export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
@@ -34,14 +78,14 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const nextRequestIdRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const {
-    currentProject,
-    currentConversation,
-    messages,
-    documents,
-    sendQuery,
-    createConversation,
-  } = useStore();
+  const currentProject = useStore((state) => state.currentProject);
+  const currentConversation = useStore((state) => state.currentConversation);
+  const messages = useStore((state) => state.messages);
+  const documents = useStore((state) => state.documents);
+  const sendQuery = useStore((state) => state.sendQuery);
+  const createConversation = useStore((state) => state.createConversation);
+  const fetchMessages = useStore((state) => state.fetchMessages);
+  const followMessageRead = useStore((state) => state.followMessageRead);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -51,18 +95,18 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || !currentProject) return;
-    
-    const query = inputValue.trim();
+  const submitQuery = async (query: string) => {
+    if (!currentProject) return;
+
     const requestId = nextRequestIdRef.current + 1;
     nextRequestIdRef.current = requestId;
-    setInputValue('');
     setPendingQuery({
       requestId,
       content: query,
       projectId: currentProject.id,
       conversationId: currentConversation?.id ?? null,
+      error: null,
+      retryMode: 'query',
     });
     
     try {
@@ -75,11 +119,75 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       });
     } catch (error) {
       console.error('Failed to send query:', error);
+      const message = error instanceof Error ? error.message : 'Unable to send the question.';
+      setPendingQuery((pending) => (
+        pending?.requestId === requestId
+          ? {
+              ...pending,
+              conversationId: error instanceof QueryMessageRefreshError
+                ? error.conversationId
+                : pending.conversationId,
+              error: message,
+              retryMode: error instanceof QueryMessageRefreshError ? 'refresh' : 'query',
+            }
+          : pending
+      ));
+      if (!(error instanceof QueryMessageRefreshError)) {
+        // A reader can start composing another question while a request fails.
+        // Do not overwrite that newer text with the failed question.
+        setInputValue((value) => value || query);
+      }
     } finally {
       setPendingQuery((pending) => (
-        pending?.requestId === requestId ? null : pending
+        pending?.requestId === requestId && !pending.error ? null : pending
       ));
     }
+  };
+
+  const handleSend = () => {
+    if (!inputValue.trim() || !currentProject) return;
+
+    const query = inputValue.trim();
+    setInputValue('');
+    void submitQuery(query);
+  };
+
+  const retryPendingQuery = () => {
+    if (!pendingQuery || !pendingQuery.error) return;
+
+    if (pendingQuery.retryMode === 'refresh') {
+      const { conversationId, requestId } = pendingQuery;
+      if (!conversationId) return;
+
+      setPendingQuery((pending) => (
+        pending?.requestId === requestId ? { ...pending, error: null } : pending
+      ));
+      void (async () => {
+        try {
+          const refreshed = await fetchMessages(conversationId);
+          const refreshStatus = await followMessageRead(refreshed);
+          if (refreshStatus === 'failed') {
+            throw new Error('The conversation could not be refreshed.');
+          }
+          setPendingQuery((pending) => (
+            pending?.requestId === requestId ? null : pending
+          ));
+        } catch (error) {
+          const message = error instanceof Error
+            ? error.message
+            : 'The conversation could not be refreshed.';
+          setPendingQuery((pending) => (
+            pending?.requestId === requestId
+              ? { ...pending, error: message, retryMode: 'refresh' }
+              : pending
+          ));
+        }
+      })();
+      return;
+    }
+
+    setInputValue('');
+    void submitQuery(pendingQuery.content);
   };
   
   const handleNewConversation = async () => {
@@ -100,16 +208,23 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const pendingQueryIsActive = pendingQuery !== null
     && pendingQuery.projectId === currentProject?.id
     && pendingQuery.conversationId === (currentConversation?.id ?? null);
-  const isStreaming = pendingQueryIsActive;
-  const visibleMessages = !pendingQueryIsActive
+  const isStreaming = pendingQueryIsActive && !pendingQuery.error;
+  const hasPendingMessage = pendingQueryIsActive && !messages.some((message) => (
+    message.role === 'user'
+    && message.content === pendingQuery.content
+    && message.conversation_id === pendingQuery.conversationId
+  ));
+  const visibleMessages = !hasPendingMessage
     ? messages
     : [
         ...messages,
         {
           id: 'pending-query',
+          conversation_id: pendingQuery.conversationId || '',
           role: 'user' as const,
           content: pendingQuery.content,
           citations: [],
+          created_at: '',
         },
       ];
 
@@ -201,58 +316,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
           <div className="px-4 py-6">
             <div className="max-w-3xl mx-auto space-y-6">
               {visibleMessages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex gap-3 ${
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  {message.role === 'assistant' && (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center flex-shrink-0">
-                      <Sparkles className="w-4 h-4 text-white" />
-                    </div>
-                  )}
-                  
-                  <div
-                    className={`max-w-[70%] ${
-                      message.role === 'user'
-                        ? 'bg-[var(--primary)] text-white'
-                        : 'bg-[var(--card)] border border-[var(--border)]'
-                    } rounded-lg px-4 py-3`}
-                  >
-                    {message.role === 'assistant' ? (
-                      <MarkdownRenderer content={message.content} />
-                    ) : (
-                      <p className="text-sm whitespace-pre-wrap">
-                        {message.content}
-                      </p>
-                    )}
-                    
-                    {/* Citations */}
-                    {message.citations && message.citations.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-[var(--border)]">
-                        <p className="text-xs opacity-70 mb-2">Sources: </p>
-                        {message.citations.map((citation, idx) => (
-                          <div
-                            key={idx}
-                            className="mt-1 p-2 bg-[var(--muted)] rounded text-xs"
-                          >
-                            <span className="font-medium">{citation.source}</span>
-                            {citation.page && (
-                              <span className="opacity-70"> - page {citation.page}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  
-                  {message.role === 'user' && (
-                    <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center flex-shrink-0">
-                      U
-                    </div>
-                  )}
-                </div>
+                <MessageRow key={message.id} message={message} />
               ))}
               
               {isStreaming && (
@@ -267,6 +331,18 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                       <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce delay-200" />
                     </div>
                   </div>
+                </div>
+              )}
+              {pendingQueryIsActive && pendingQuery.error && (
+                <div role="alert" className="flex items-center gap-3 text-sm text-[var(--error)]">
+                  <span>{pendingQuery.error}</span>
+                  <button
+                    type="button"
+                    onClick={retryPendingQuery}
+                    className="text-[var(--primary)] hover:underline"
+                  >
+                    {pendingQuery.retryMode === 'refresh' ? 'Refresh response' : 'Retry question'}
+                  </button>
                 </div>
               )}
             </div>

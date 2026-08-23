@@ -19,7 +19,6 @@ const project: Project = {
   conversation_count: 0,
 };
 
-const initialState = useStore.getState();
 
 function documentWith(status: DocumentStatus, error_message?: string): Document {
   return {
@@ -55,7 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('source status', () => {

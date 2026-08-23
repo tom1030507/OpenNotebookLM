@@ -48,6 +48,7 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
 
     try {
       const project = await createProject(name.trim(), description.trim() || undefined);
+      if (!project) return;
       selectProject(project);
       setName('');
       setDescription('');

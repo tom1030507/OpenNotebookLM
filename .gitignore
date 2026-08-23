@@ -41,6 +41,7 @@ dmypy.json
 # IDE
 .vscode/
 .idea/
+.worktrees/
 *.swp
 *.swo
 *~

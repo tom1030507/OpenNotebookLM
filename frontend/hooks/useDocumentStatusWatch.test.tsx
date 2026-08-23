@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useDocumentStatusWatch, { MAX_POLLS, POLL_INTERVAL_MS } from './useDocumentStatusWatch';
 import useStore from '@/store/useStore';
-import type { Document, DocumentStatus, Project } from '@/lib/api';
+import api, { type Document, type DocumentStatus, type Project } from '@/lib/api';
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
@@ -22,7 +22,6 @@ const project: Project = {
   conversation_count: 0,
 };
 
-const initialState = useStore.getState();
 
 function documentWith(status: DocumentStatus, id = 'document-1'): Document {
   return {
@@ -42,6 +41,15 @@ function Watcher() {
   return null;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
+}
+
 const advance = async (ms: number) => {
   await act(async () => {
     vi.advanceTimersByTime(ms);
@@ -58,10 +66,48 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  useStore.setState(initialState, true);
+  vi.restoreAllMocks();
+  useStore.getState().resetForTests();
 });
 
 describe('useDocumentStatusWatch', () => {
+  it('waits for each poll to settle before scheduling another request', async () => {
+    const firstPoll = deferred<void>();
+    const refreshDocuments = vi.fn(() => firstPoll.promise);
+    useStore.setState({ documents: [documentWith('processing')], refreshDocuments });
+    render(<Watcher />);
+
+    await advance(POLL_INTERVAL_MS);
+    expect(refreshDocuments).toHaveBeenCalledTimes(1);
+    await advance(POLL_INTERVAL_MS * 3);
+    expect(refreshDocuments).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstPoll.resolve();
+      await firstPoll.promise;
+    });
+    await advance(POLL_INTERVAL_MS);
+    expect(refreshDocuments).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a polling response that arrives after the document became ready', async () => {
+    const staleResponse = deferred<Document[]>();
+    vi.spyOn(api, 'getDocuments').mockReturnValue(staleResponse.promise);
+    useStore.setState({ documents: [documentWith('processing')] });
+    render(<Watcher />);
+
+    await advance(POLL_INTERVAL_MS);
+    await act(async () => {
+      useStore.setState({ documents: [documentWith('ready')] });
+    });
+    await act(async () => {
+      staleResponse.resolve([documentWith('processing')]);
+      await staleResponse.promise;
+    });
+
+    expect(useStore.getState().documents[0]?.status).toBe('ready');
+  });
+
   it('re-checks a source that is still being indexed', async () => {
     const refreshDocuments = vi.fn(async () => undefined);
     useStore.setState({ documents: [documentWith('processing')], refreshDocuments });
@@ -69,8 +115,9 @@ describe('useDocumentStatusWatch', () => {
 
     expect(refreshDocuments).not.toHaveBeenCalled();
     await advance(POLL_INTERVAL_MS);
-    expect(refreshDocuments).toHaveBeenCalledWith('project-1');
-    await advance(POLL_INTERVAL_MS * 2);
+    expect(refreshDocuments.mock.calls[0]?.[0]).toBe('project-1');
+    await advance(POLL_INTERVAL_MS);
+    await advance(POLL_INTERVAL_MS);
     expect(refreshDocuments).toHaveBeenCalledTimes(3);
   });
 
@@ -115,7 +162,9 @@ describe('useDocumentStatusWatch', () => {
     useStore.setState({ documents: [documentWith('processing')], refreshDocuments });
     render(<Watcher />);
 
-    await advance(POLL_INTERVAL_MS * (MAX_POLLS + 20));
+    for (let poll = 0; poll < MAX_POLLS + 20; poll += 1) {
+      await advance(POLL_INTERVAL_MS);
+    }
     expect(refreshDocuments).toHaveBeenCalledTimes(MAX_POLLS);
   });
 
