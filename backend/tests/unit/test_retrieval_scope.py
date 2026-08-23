@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import sys
 import uuid
-from unittest import mock
 
 import pytest
 from sqlalchemy import create_engine
@@ -33,7 +32,7 @@ PROJECT = "project-shared"
 
 
 def real_rag_module():
-    """Return the real `app.services.rag`, even if a stub is registered.
+    """Return the real module when a route test left its no-file stub behind.
 
     The route-contract tests replace `sys.modules["app.services.rag"]` with a stub
     so importing the query router does not load the embedding model, and that
@@ -43,7 +42,7 @@ def real_rag_module():
         The genuine module.
     """
     module = sys.modules.get("app.services.rag")
-    if module is None or not hasattr(module, "EmbeddingService"):
+    if module is None or getattr(module, "__file__", None) is None:
         sys.modules.pop("app.services.rag", None)
         module = importlib.import_module("app.services.rag")
     return module
@@ -132,9 +131,10 @@ def service():
     """A RAGService with both heavy dependencies replaced."""
     module = real_rag_module()
     embeddings = RecordingEmbeddingService()
-    with mock.patch.object(module, "EmbeddingService", lambda: embeddings), \
-         mock.patch.object(module, "LLMService", RecordingLLMService):
-        instance = module.RAGService()
+    instance = module.RAGService(
+        embedding_service=embeddings,
+        llm_service=RecordingLLMService(),
+    )
     return instance, embeddings
 
 

@@ -14,7 +14,8 @@ to relitigate the question. Anything that does start awaiting has to become
 `async def` again — a sync handler that blocks the thread it was given is fine,
 an async one that blocks the loop is not.
 """
-from typing import Optional, List
+from functools import lru_cache
+from typing import Any, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, field_validator
@@ -23,7 +24,6 @@ import uuid
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.services.rag import RAGService
 from app.services.projects import ProjectService
 from app.db.models import Conversation, User
 from app.schemas import ConversationResponse
@@ -41,8 +41,19 @@ from app.routers.ownership import (
 router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
 
-# Initialize services
-rag_service = RAGService()
+@lru_cache
+def get_rag_service() -> Any:
+    """Return the process-wide RAG service on first use.
+
+    Args:
+        None.
+
+    Returns:
+        The production RAG service.
+    """
+    from app.services.rag import RAGService
+
+    return RAGService()
 
 
 class QueryRequest(BaseModel):
@@ -93,7 +104,8 @@ class ConversationUpdateRequest(BaseModel):
 def query(
     request: QueryRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    rag_service: Any = Depends(get_rag_service),
 ):
     """Process a RAG query.
     
