@@ -1,7 +1,7 @@
 """Document ingestion service."""
 import uuid
 import os
-from typing import Dict, Optional, BinaryIO
+from typing import Any, Dict, Optional, BinaryIO
 from pathlib import Path
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +14,6 @@ from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
 from app.services.chunking import ChunkingService
 from app.services.document_files import UPLOAD_DIR
-from app.services.embeddings import EmbeddingService
 from app.utils.time import utc_now_iso
 
 logger = structlog.get_logger()
@@ -24,20 +23,41 @@ settings = get_settings()
 class DocumentService:
     """Service for document ingestion and processing."""
     
-    def __init__(self, chunking_service=None, embedding_service=None):
-        """Initialize document service.
+    def __init__(
+        self,
+        chunking_service: Any | None = None,
+        embedding_service: Any | None = None,
+        pdf_adapter: Any | None = None,
+        url_adapter: Any | None = None,
+        youtube_adapter: Any | None = None,
+    ):
+        """Initialize document processing dependencies.
 
         Args:
-            chunking_service: Optional chunking service, mainly so tests can
-                run without the embedding model
-            embedding_service: Optional embedding service, same reason
+            chunking_service: Optional chunking implementation.
+            embedding_service: Optional embedding implementation.
+            pdf_adapter: Optional PDF extraction implementation.
+            url_adapter: Optional URL extraction implementation.
+            youtube_adapter: Optional YouTube transcript implementation.
+
+        Returns:
+            None.
         """
-        self.pdf_adapter = PDFAdapter(use_pymupdf=False)  # Use pdfminer for now
-        self.url_adapter = URLAdapter()
-        self.youtube_adapter = None  # Initialize only if needed
+        if embedding_service is None:
+            from app.services.embeddings import EmbeddingService
+
+            embedding_service = EmbeddingService()
+
+        self.pdf_adapter = pdf_adapter if pdf_adapter is not None else PDFAdapter(
+            use_pymupdf=False
+        )
+        self.url_adapter = url_adapter if url_adapter is not None else URLAdapter()
+        self.youtube_adapter = youtube_adapter
         self.executor = ThreadPoolExecutor(max_workers=4)
-        self.chunking_service = chunking_service or ChunkingService()
-        self.embedding_service = embedding_service or EmbeddingService()
+        self.chunking_service = (
+            chunking_service if chunking_service is not None else ChunkingService()
+        )
+        self.embedding_service = embedding_service
 
     def _index_document(self, db: Session, doc_id: str, source_label: str) -> str:
         """Chunk and embed a document, then mark it ready.
@@ -390,7 +410,7 @@ class DocumentService:
         """
         try:
             # Initialize YouTube adapter if needed
-            if not self.youtube_adapter:
+            if self.youtube_adapter is None:
                 self.youtube_adapter = YouTubeAdapter()
             
             # Generate document ID
