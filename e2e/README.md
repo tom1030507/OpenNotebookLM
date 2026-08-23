@@ -1,6 +1,6 @@
 # End-to-end test design
 
-Status: approved in conversation; written review pending.
+Status: approved; implementation planned.
 
 Date: 2026-08-23
 
