@@ -4,7 +4,12 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 
-import api, { type Document, type MindMap, type Project } from '@/lib/api';
+import api, {
+  type Document,
+  type MindMap,
+  type Project,
+  type VideoSummary,
+} from '@/lib/api';
 import useStore from '@/store/useStore';
 import StudioPanel from './StudioPanel';
 
@@ -59,6 +64,24 @@ const mindMapFor = (project: Project): MindMap => ({
     document_id: null,
     children: [],
   },
+});
+
+const videoSummaryFor = (project: Project): VideoSummary => ({
+  project_id: project.id,
+  project_name: project.name,
+  generated_at: '2026-08-23T00:00:00Z',
+  model_used: 'fallback',
+  scene_count: 1,
+  estimated_seconds: 1,
+  scenes: [{
+    id: `title-${project.id}`,
+    kind: 'title',
+    headline: project.name,
+    bullets: [],
+    narration: `A summary of ${project.name}.`,
+    document_id: null,
+    source_label: null,
+  }],
 });
 
 
@@ -126,5 +149,22 @@ describe('StudioPanel', () => {
     });
 
     expect(screen.queryByRole('dialog', { name: `${projectA.name} mind map` })).toBeNull();
+  });
+
+  it('does not render an already-open project A video in project B\'s commit', async () => {
+    vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(videoSummaryFor(projectA));
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
+    expect(await screen.findByRole('dialog', { name: `${projectA.name} video summary` })).toBeTruthy();
+
+    flushSync(() => {
+      useStore.setState({
+        currentProject: projectB,
+        documents: [{ ...readyDocument, id: 'document-b' }],
+      });
+    });
+
+    expect(screen.queryByRole('dialog', { name: `${projectA.name} video summary` })).toBeNull();
   });
 });

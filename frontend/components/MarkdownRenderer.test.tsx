@@ -22,4 +22,17 @@ describe('MarkdownRenderer', () => {
     expect(container.querySelectorAll('pre')).toHaveLength(1);
     expect(pre?.querySelector(':scope > code')?.textContent).toBe('const answer = 42;');
   });
+
+  it('keeps an unlabelled fence and inline code in their separate valid structures', () => {
+    const { container } = render(
+      <MarkdownRenderer content={'Use `inline value` here.\n\n```\nplain fallback\n```'} />,
+    );
+
+    const inlineCode = container.querySelector('p > code');
+    const fencedCode = container.querySelector('pre > code');
+    expect(inlineCode?.textContent).toBe('inline value');
+    expect(inlineCode?.parentElement?.tagName).toBe('P');
+    expect(container.querySelectorAll('pre')).toHaveLength(1);
+    expect(fencedCode?.textContent).toBe('plain fallback\n');
+  });
 });

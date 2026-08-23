@@ -48,11 +48,13 @@ const conversation = (id: string, projectId: string): Conversation => ({
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
 
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 
@@ -184,6 +186,58 @@ describe('ChatArea', () => {
     await waitFor(() => expect(screen.getByText('It explains the source.')).toBeTruthy());
     expect(screen.getAllByText(question)).toHaveLength(1);
     expect(screen.getAllByText('It explains the source.')).toHaveLength(1);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a query pending through a same-conversation refresh superseder and offers retry when it fails', async () => {
+    const question = 'What happens after the second refresh?';
+    const queryRefresh = deferred<Message[]>();
+    const newerRefresh = deferred<Message[]>();
+    const currentConversation = conversation('conversation-1', project.id);
+    const query = vi.spyOn(api, 'query').mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    const getMessages = vi.spyOn(api, 'getMessages')
+      .mockReturnValueOnce(queryRefresh.promise)
+      .mockReturnValueOnce(newerRefresh.promise);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation,
+      messages: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(1));
+    const reselectingConversation = useStore.getState().selectConversation(currentConversation);
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      queryRefresh.resolve([]);
+      await queryRefresh.promise;
+    });
+
+    expect(screen.getByText(question)).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true);
+
+    newerRefresh.reject(new Error('The newer read failed'));
+    await reselectingConversation;
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The question was sent, but the conversation could not be refreshed.',
+    );
+    expect(screen.getByText(question)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Refresh response' })).toBeTruthy();
     expect(query).toHaveBeenCalledTimes(1);
   });
 
