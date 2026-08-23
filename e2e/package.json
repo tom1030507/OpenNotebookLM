@@ -1,0 +1,24 @@
+{
+  "name": "opennotebooklm-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "playwright test --project=chromium-fast",
+    "test:headed": "playwright test --project=chromium-fast --headed",
+    "test:debug": "playwright test --project=chromium-fast --debug",
+    "test:full-rag": "cross-env FULL_RAG_E2E=1 playwright test --project=chromium-full-rag",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "22.20.1",
+    "cross-env": "10.1.0",
+    "pdf-lib": "1.17.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}
