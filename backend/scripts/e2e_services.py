@@ -184,7 +184,7 @@ class DeterministicEmbeddingService:
                     },
                 }
             )
-        ranked.sort(key=lambda item: item["score"], reverse=True)
+        ranked.sort(key=lambda item: (-item["score"], item["chunk_id"]))
         return ranked[:top_k]
 
 

@@ -19,11 +19,28 @@ def resolve_runtime_root(raw_path: str, repo_root: Path) -> Path:
     if not raw_path.strip():
         raise ValueError("E2E runtime root is empty")
     root = repo_root.resolve()
-    allowed_parent = (root / "output" / "e2e").resolve()
-    candidate = Path(raw_path).resolve()
-    if candidate == allowed_parent or allowed_parent not in candidate.parents:
-        raise ValueError(f"Unsafe E2E runtime root: {candidate}")
-    if candidate in {root, Path.home().resolve(), root / "data", root / "uploads"}:
+    expected_parent = root / "output" / "e2e"
+    lexical_candidate = Path(os.path.abspath(raw_path))
+    unsafe_roots = {
+        root,
+        Path.home().resolve(),
+        root / "output",
+        expected_parent,
+        root / "data",
+        root / "uploads",
+    }
+    if (
+        lexical_candidate in unsafe_roots
+        or expected_parent not in lexical_candidate.parents
+    ):
+        raise ValueError(f"Unsafe E2E runtime root: {lexical_candidate}")
+
+    allowed_parent = expected_parent.resolve()
+    if allowed_parent != expected_parent or root not in allowed_parent.parents:
+        raise ValueError(f"Unsafe E2E runtime root: {allowed_parent}")
+
+    candidate = lexical_candidate.resolve()
+    if candidate in unsafe_roots or allowed_parent not in candidate.parents:
         raise ValueError(f"Unsafe E2E runtime root: {candidate}")
     return candidate
 

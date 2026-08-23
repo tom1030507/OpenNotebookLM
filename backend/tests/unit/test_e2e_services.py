@@ -1,6 +1,8 @@
 """Tests for the deterministic E2E service boundary."""
 import math
+import os
 import pickle
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +21,55 @@ from scripts.e2e_services import (
     FixedURLAdapter,
     FixedYouTubeAdapter,
 )
+
+
+def _create_directory_link(link: Path, target: Path) -> None:
+    """Create a directory symlink or Windows junction for a containment test.
+
+    Args:
+        link: Exact link path owned by the current test.
+        target: Existing directory the link should resolve to.
+
+    Returns:
+        None.
+    """
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return
+    except OSError as symlink_error:
+        if os.name != "nt":
+            pytest.skip(f"Directory symlinks are unavailable: {symlink_error}")
+
+    completed = subprocess.run(
+        ["cmd", "/d", "/c", "mklink", "/J", str(link), str(target)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        if os.path.lexists(link):
+            _remove_directory_link(link)
+        pytest.skip(
+            "Directory links are unavailable: "
+            f"{completed.stderr.strip() or completed.stdout.strip()}"
+        )
+
+
+def _remove_directory_link(link: Path) -> None:
+    """Remove only the exact link created by the current test.
+
+    Args:
+        link: Symlink or junction path to unlink without traversing its target.
+
+    Returns:
+        None.
+    """
+    if not os.path.lexists(link):
+        return
+    if link.is_symlink():
+        link.unlink()
+        return
+    link.rmdir()
 
 
 @pytest.fixture
@@ -146,6 +197,54 @@ def test_chunk_embeddings_persist_and_search_with_production_payload(db):
     assert service.search_similar_chunks(db, "ORBIT-7319", document_ids=[]) == []
 
 
+def test_equal_similarity_scores_use_chunk_id_as_a_stable_tiebreaker(db):
+    """Equal dense scores must return the same order on every database backend."""
+    document = Document(
+        id="document-ties",
+        title="Tie Notes",
+        source_type="url",
+        status="processing",
+        meta_json={},
+    )
+    db.add_all(
+        [
+            document,
+            Chunk(
+                id="chunk-zeta",
+                document_id=document.id,
+                text="Identical searchable text.",
+                start_offset=0,
+                end_offset=26,
+                meta_json={},
+            ),
+            Chunk(
+                id="chunk-alpha",
+                document_id=document.id,
+                text="Identical searchable text.",
+                start_offset=1,
+                end_offset=27,
+                meta_json={},
+            ),
+        ]
+    )
+    db.commit()
+    service = DeterministicEmbeddingService()
+    service.embed_chunks(db, document.id)
+
+    results = service.search_similar_chunks(
+        db,
+        query="Identical searchable text.",
+        document_ids=[document.id],
+        top_k=2,
+        threshold=-1.0,
+    )
+
+    assert [result["chunk_id"] for result in results] == [
+        "chunk-alpha",
+        "chunk-zeta",
+    ]
+
+
 def test_runtime_root_accepts_only_a_named_child(tmp_path):
     """A run directory beneath output/e2e is the only valid target."""
     repo = tmp_path / "repo"
@@ -163,6 +262,57 @@ def test_runtime_root_rejects_broad_or_escaped_paths(tmp_path, relative):
 
     with pytest.raises(ValueError, match="runtime root"):
         resolve_runtime_root(str(repo / relative), repo)
+
+
+def test_runtime_root_rejects_linked_allowed_parent(tmp_path):
+    """The trusted output/e2e parent must not resolve outside the repository."""
+    repo = tmp_path / "repo"
+    linked_parent = repo / "output" / "e2e"
+    linked_parent.parent.mkdir(parents=True)
+    external_parent = tmp_path / "external-parent"
+    (external_parent / "run-123").mkdir(parents=True)
+    _create_directory_link(linked_parent, external_parent)
+
+    try:
+        with pytest.raises(ValueError, match="runtime root"):
+            resolve_runtime_root(str(linked_parent / "run-123"), repo)
+    finally:
+        _remove_directory_link(linked_parent)
+    assert (external_parent / "run-123").is_dir()
+
+
+def test_runtime_root_rejects_linked_child(tmp_path):
+    """A named child must not resolve through a link to an external tree."""
+    repo = tmp_path / "repo"
+    allowed_parent = repo / "output" / "e2e"
+    allowed_parent.mkdir(parents=True)
+    external_child = tmp_path / "external-child"
+    external_child.mkdir()
+    linked_child = allowed_parent / "run-linked"
+    _create_directory_link(linked_child, external_child)
+
+    try:
+        with pytest.raises(ValueError, match="runtime root"):
+            resolve_runtime_root(str(linked_child), repo)
+    finally:
+        _remove_directory_link(linked_child)
+    assert external_child.is_dir()
+
+
+def test_runtime_root_rejects_external_alias_to_an_internal_child(tmp_path):
+    """An external raw path must not be trusted because it resolves internally."""
+    repo = tmp_path / "repo"
+    internal_child = repo / "output" / "e2e" / "run-123"
+    internal_child.mkdir(parents=True)
+    external_alias = tmp_path / "external-alias"
+    _create_directory_link(external_alias, internal_child)
+
+    try:
+        with pytest.raises(ValueError, match="runtime root"):
+            resolve_runtime_root(str(external_alias), repo)
+    finally:
+        _remove_directory_link(external_alias)
+    assert internal_child.is_dir()
 
 
 def test_fast_overrides_select_the_deterministic_service_graph():
