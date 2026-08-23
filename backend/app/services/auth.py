@@ -6,8 +6,8 @@ from functools import lru_cache
 from typing import Optional
 
 import bcrypt
+import jwt
 import structlog
-from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -129,7 +129,7 @@ class AuthService:
         """Resolve a token to a live account, or None if it does not."""
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-        except JWTError:
+        except jwt.InvalidTokenError:
             return None
 
         username = payload.get("sub")

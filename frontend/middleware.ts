@@ -10,10 +10,16 @@ const isPublicRoute = (pathname: string) => publicRoutes.some(
   (route) => pathname === route || pathname.startsWith(`${route}/`),
 );
 
+const isApiRoute = (pathname: string) => (
+  pathname === '/api' || pathname.startsWith('/api/')
+);
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (isPublicRoute(pathname)) {
+  // API authentication belongs to FastAPI. Redirecting here turns backend
+  // JSON errors (and signed-out login/register calls) into login-page HTML.
+  if (isApiRoute(pathname) || isPublicRoute(pathname)) {
     return NextResponse.next();
   }
 
@@ -35,8 +41,9 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - API routes (FastAPI owns their authentication)
      * - public files
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\..*|api/health).*)',
+    '/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|.*\\..*).*)',
   ],
 };

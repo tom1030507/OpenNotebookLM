@@ -12,6 +12,17 @@ const requestFor = (path: string, cookie?: string) => new NextRequest(
 
 
 describe('route protection middleware', () => {
+  it.each([
+    '/api',
+    '/api/auth/token',
+    '/api/projects',
+  ])('lets the backend own authentication for signed-out API route %s', (path) => {
+    const response = middleware(requestFor(path));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('location')).toBeNull();
+  });
+
   it('sends a signed-out visitor from the workspace to the login page', () => {
     const response = middleware(requestFor('/'));
 

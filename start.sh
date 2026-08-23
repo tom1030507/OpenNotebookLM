@@ -87,10 +87,10 @@ echo "  • Frontend: http://localhost:3000"
 
 if [ "$PROFILE" != "" ]; then
     if [[ $PROFILE == *"ollama"* ]]; then
-        echo "  • Ollama: http://localhost:11434"
+        echo "  • Ollama: http://ollama:11434 inside Compose (no host port)"
     fi
     if [[ $PROFILE == *"cache"* ]]; then
-        echo "  • Redis: localhost:6379"
+        echo "  • Redis: redis:6379 inside Compose (no host port)"
     fi
 fi
 

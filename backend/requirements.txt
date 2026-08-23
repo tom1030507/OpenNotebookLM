@@ -1,10 +1,10 @@
 # Core
-fastapi==0.104.1
+fastapi==0.141.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.32
-python-dotenv==1.0.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+python-dotenv==1.2.3
+pydantic==2.13.4
+pydantic-settings==2.15.0
 
 # Database
 sqlalchemy==2.0.23
@@ -13,21 +13,25 @@ sqlite-vec==0.1.9
 
 # Document Processing
 PyMuPDF==1.23.8
-pdfminer.six==20221105
+pdfminer.six==20260107
 beautifulsoup4==4.12.2
-lxml==4.9.3
+lxml==6.1.2
 readability-lxml==0.8.1
 youtube-transcript-api==0.6.1
 
 # ML/NLP
 numpy==1.24.3
-sentence-transformers==2.2.2
-# sentence-transformers 2.2.2 still imports cached_download, which was removed
-# from newer huggingface-hub releases despite its open-ended lower-bound pin.
-huggingface-hub==0.25.2
-transformers==4.48.3
+sentence-transformers==5.7.0
+# 5.3.0 fixes GHSA-29pf-2h5f-8g72; 5.5.0 additionally closes the
+# LightGlue remote-code path tracked as PYSEC-2026-2290.
+transformers==5.5.0
+huggingface-hub==1.27.0
+# Pin the official CPU wheels and their hashes per production architecture.
+# The generic PyPI wheel pulls several gigabytes of unused CUDA 13 libraries.
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp310-cp310-manylinux_2_28_aarch64.whl#sha256=f028e428bddee95cdb86e2470254e95c9af629362488550c200ed4793125a817 ; sys_platform == "linux" and platform_machine == "aarch64"
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl#sha256=f5cbb61180a9793d9e12fe115a2310d2600bd449dfb9a01ec5640e21359fa5ea ; sys_platform == "linux" and platform_machine == "x86_64"
+torch==2.13.0 ; sys_platform != "linux"
 faiss-cpu==1.7.4
-llama-cpp-python==0.2.20
 openai==1.3.7
 # 0.8.0 predates the Messages API entirely (no client.messages), so it cannot
 # talk to any current Claude model.
@@ -35,9 +39,10 @@ anthropic==0.122.0
 tiktoken==0.5.1
 
 # Utils
-httpx==0.25.2
+# OpenAI 1.3 still passes the `proxies` keyword removed by httpx 0.28.
+httpx==0.27.2
 aiofiles==23.2.1
-python-jose[cryptography]==3.3.0
+PyJWT[crypto]==2.13.0
 passlib[bcrypt]==1.7.4
 # Password hashing calls bcrypt directly: passlib 1.7.4 cannot drive bcrypt 5.x,
 # because its backend probe hashes an over-long password and raises ValueError.
@@ -45,10 +50,9 @@ bcrypt>=4.0
 psutil==5.9.6
 
 # Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
+pytest==9.1.1
+pytest-asyncio==1.4.0
 pytest-cov==4.1.0
-httpx==0.25.2
 
 # Monitoring
 prometheus-client==0.19.0

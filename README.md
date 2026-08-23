@@ -115,8 +115,9 @@ docker compose up -d --build
 The production Compose file deliberately fails before creating containers when
 `JWT_SECRET_KEY` is missing or empty. Generate one with
 `python -c "import secrets; print(secrets.token_urlsafe(32))"`. It also defaults
-`DEBUG=false` and allows CORS only from `http://localhost:3000`; set
-`CORS_ORIGINS` to a comma-separated list of your deployed frontend origins.
+`DEBUG=false`. The copied `.env.example` allows CORS from
+`http://localhost:3000` and `http://localhost:3001`; set `CORS_ORIGINS` to a
+comma-separated list of your deployed frontend origins.
 
 Browser requests use the same-origin `/api` path. Next proxies that path to
 `BACKEND_INTERNAL_URL` (`http://backend:8000` in Compose), so Docker service

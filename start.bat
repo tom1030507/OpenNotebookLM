@@ -98,11 +98,11 @@ echo   • Frontend: http://localhost:3000
 if not "%PROFILE%"=="" (
     echo %PROFILE% | findstr /C:"ollama" >nul
     if %ERRORLEVEL% EQU 0 (
-        echo   • Ollama: http://localhost:11434
+        echo   • Ollama: http://ollama:11434 inside Compose ^(no host port^)
     )
     echo %PROFILE% | findstr /C:"cache" >nul
     if %ERRORLEVEL% EQU 0 (
-        echo   • Redis: localhost:6379
+        echo   • Redis: redis:6379 inside Compose ^(no host port^)
     )
 )
 

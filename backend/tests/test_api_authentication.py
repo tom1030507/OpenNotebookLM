@@ -19,7 +19,7 @@ from types import ModuleType
 
 import pytest
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -77,25 +77,35 @@ FOREIGN_TOKEN = "Bearer " + jwt.encode(
 
 
 def concrete(path: str) -> str:
-    """Fill a route template's path parameters with an id nothing matches."""
+    """Fill a route template's path parameters with an id nothing matches.
+
+    Args:
+        path: OpenAPI route template to make concrete.
+
+    Returns:
+        The route path with every template parameter replaced.
+    """
     return PATH_PARAMETER.sub("no-such-id", path)
 
 
 def protected_routes() -> list[tuple[str, str]]:
     """List every method and path the production app serves but does not open.
 
+    Args:
+        None.
+
     Returns:
         Sorted ``(method, path)`` pairs, excluding the public allow-list and the
         methods Starlette answers without reaching a handler
     """
     routes = set()
-    for route in production_app.routes:
-        path = getattr(route, "path", None)
-        if not path or path in PUBLIC_PATHS:
+    for path, operations in production_app.openapi()["paths"].items():
+        if path in PUBLIC_PATHS:
             continue
 
-        for method in getattr(route, "methods", None) or set():
-            if method in {"HEAD", "OPTIONS"}:
+        for method in operations:
+            method = method.upper()
+            if method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}:
                 continue
             routes.add((method, path))
 
