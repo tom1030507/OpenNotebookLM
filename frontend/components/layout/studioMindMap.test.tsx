@@ -71,11 +71,10 @@ const openMindMap = async () => {
 
 beforeEach(() => {
   useStore.setState({ currentProject: project, projects: [project] });
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:mindmap'),
-    revokeObjectURL: vi.fn(),
-  });
+  class TestURL extends URL {}
+  TestURL.createObjectURL = vi.fn(() => 'blob:mindmap');
+  TestURL.revokeObjectURL = vi.fn();
+  vi.stubGlobal('URL', TestURL);
 });
 
 afterEach(() => {

@@ -546,9 +546,10 @@ const api = {
     return requestBlob(`/docs/${encodeURIComponent(documentId)}/file`);
   },
 
-  async getDocuments(projectId: string): Promise<Document[]> {
+  async getDocuments(projectId: string, signal?: AbortSignal): Promise<Document[]> {
     const documents = await requestJson<BackendDocument[]>(
       `/projects/${projectId}/documents`,
+      { signal },
     );
     return documents.map(normalizeDocument);
   },

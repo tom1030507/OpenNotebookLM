@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { storeSession, type SessionUser } from '@/lib/session';
+import useStore from '@/store/useStore';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,7 +36,7 @@ export default function LoginPage() {
   // server-side middleware. Every API route refuses a token the backend did not
   // issue, so this is only ever reached with a real one.
   const enterWorkspace = (accessToken: string, user: SessionUser) => {
-    storeSession(accessToken, user);
+    storeSession(accessToken, user, useStore.getState().clearAccountState);
     router.push('/');
   };
 

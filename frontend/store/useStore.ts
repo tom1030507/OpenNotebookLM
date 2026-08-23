@@ -37,7 +37,11 @@ interface AppState {
   
   // Actions - Documents
   fetchDocuments: (projectId: string) => Promise<void>;
-  refreshDocuments: (projectId: string) => Promise<void>;
+  refreshDocuments: (
+    projectId: string,
+    signal?: AbortSignal,
+    shouldApply?: () => boolean,
+  ) => Promise<void>;
   uploadDocument: (projectId: string, file: File) => Promise<void>;
   createDocument: (projectId: string, data: {
     name: string;
@@ -73,8 +77,9 @@ interface AppState {
   // Actions - Preferences
   setNotifyOnProcessingComplete: (enabled: boolean) => void;
 
-  // Reset
-  reset: () => void;
+  // Account boundary
+  clearAccountState: () => void;
+  resetForTests: () => void;
 }
 
 const initialState = {
@@ -134,7 +139,7 @@ const useStore = create<AppState>()(
             }
           } catch (error) {
             console.error('Failed to fetch projects:', error);
-            set({ loadingProjects: false });
+            get().clearAccountState();
           }
         },
         
@@ -210,15 +215,21 @@ const useStore = create<AppState>()(
         // The same fetch without the loading flag, so a source that is still
         // being indexed can be re-checked without flashing a spinner over the
         // list the reader is looking at.
-        refreshDocuments: async (projectId) => {
+        refreshDocuments: async (projectId, signal, shouldApply = () => true) => {
           if (get().currentProject?.id !== projectId) return;
           try {
-            const documents = await api.getDocuments(projectId);
-            if (get().currentProject?.id === projectId) {
+            const documents = await api.getDocuments(projectId, signal);
+            if (
+              !signal?.aborted
+              && shouldApply()
+              && get().currentProject?.id === projectId
+            ) {
               set({ documents });
             }
           } catch (error) {
-            console.error('Failed to refresh documents:', error);
+            if (!signal?.aborted) {
+              console.error('Failed to refresh documents:', error);
+            }
           }
         },
 
@@ -469,8 +480,26 @@ const useStore = create<AppState>()(
           set({ notifyOnProcessingComplete: enabled });
         },
 
-        // Reset
-        reset: () => {
+        // Account boundary
+        clearAccountState: () => {
+          set((state) => ({
+            projects: [],
+            currentProject: null,
+            loadingProjects: false,
+            documents: [],
+            loadingDocuments: false,
+            uploadProgress: {},
+            conversations: [],
+            currentConversation: null,
+            messages: [],
+            loadingConversations: false,
+            loadingMessages: false,
+            sidebarOpen: state.sidebarOpen,
+            studioOpen: state.studioOpen,
+            notifyOnProcessingComplete: state.notifyOnProcessingComplete,
+          }));
+        },
+        resetForTests: () => {
           set(initialState);
         },
       }),

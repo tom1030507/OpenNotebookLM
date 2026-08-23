@@ -15,9 +15,10 @@ import {
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
 import type { MindMap, VideoSummary } from '@/lib/api';
-import MindMapDialog from '@/components/MindMapDialog';
-import VideoSummaryDialog from '@/components/VideoSummaryDialog';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
+
+const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
+const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
 
 interface StudioOption {
   id: string;
@@ -56,6 +57,21 @@ export default function StudioPanel({
   // browser reports about it afterwards cannot disturb the panel — or a reading
   // the listener has since started.
   const playbackRun = useRef(0);
+  const projectGeneration = useRef(0);
+
+  const beginProjectOperation = () => {
+    if (!currentProject) return null;
+
+    const project = currentProject;
+    const generation = projectGeneration.current;
+    return {
+      project,
+      isCurrent: () => (
+        projectGeneration.current === generation
+        && useStore.getState().currentProject?.id === project.id
+      ),
+    };
+  };
 
   // Speech support can only be read in the browser, so check after mount to
   // keep the server-rendered markup stable.
@@ -67,18 +83,32 @@ export default function StudioPanel({
     };
   }, []);
 
+  useEffect(() => {
+    projectGeneration.current += 1;
+    playbackRun.current += 1;
+    stopSpeaking();
+    setIsGeneratingReport(false);
+    setIsPreparingAudio(false);
+    setIsBuildingMindMap(false);
+    setIsPreparingVideo(false);
+    setMindMap(null);
+    setVideoSummary(null);
+    setReportError('');
+  }, [currentProject?.id]);
+
   const playAudioSummary = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     const run = playbackRun.current + 1;
     playbackRun.current = run;
-    const isCurrent = () => playbackRun.current === run;
+    const isCurrent = () => playbackRun.current === run && operation.isCurrent();
 
     setIsPreparingAudio(true);
     setReportError('');
 
     try {
-      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(currentProject.id));
+      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(operation.project.id));
       if (!isCurrent()) return;
 
       setIsPreparingAudio(false);
@@ -104,55 +134,67 @@ export default function StudioPanel({
   };
 
   const buildMindMap = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     setIsBuildingMindMap(true);
     setReportError('');
 
     try {
-      setMindMap(await api.fetchProjectMindMap(currentProject.id));
+      const map = await api.fetchProjectMindMap(operation.project.id);
+      if (operation.isCurrent()) setMindMap(map);
     } catch {
-      setReportError('The mind map could not be built. Please try again.');
+      if (operation.isCurrent()) {
+        setReportError('The mind map could not be built. Please try again.');
+      }
     } finally {
-      setIsBuildingMindMap(false);
+      if (operation.isCurrent()) setIsBuildingMindMap(false);
     }
   };
 
   const playVideoSummary = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     setIsPreparingVideo(true);
     setReportError('');
 
     try {
-      setVideoSummary(await api.fetchProjectVideoSummary(currentProject.id));
+      const summary = await api.fetchProjectVideoSummary(operation.project.id);
+      if (operation.isCurrent()) setVideoSummary(summary);
     } catch {
-      setReportError('The video summary could not be prepared. Please try again.');
+      if (operation.isCurrent()) {
+        setReportError('The video summary could not be prepared. Please try again.');
+      }
     } finally {
-      setIsPreparingVideo(false);
+      if (operation.isCurrent()) setIsPreparingVideo(false);
     }
   };
 
   const generateReport = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     setIsGeneratingReport(true);
     setReportError('');
 
     try {
-      const blob = await api.exportProjectSummary(currentProject.id);
+      const blob = await api.exportProjectSummary(operation.project.id);
+      if (!operation.isCurrent()) return;
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${currentProject.name} report.md`;
+      link.download = `${operation.project.name} report.md`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch {
-      setReportError('The report could not be generated. Please try again.');
+      if (operation.isCurrent()) {
+        setReportError('The report could not be generated. Please try again.');
+      }
     } finally {
-      setIsGeneratingReport(false);
+      if (operation.isCurrent()) setIsGeneratingReport(false);
     }
   };
   const optionAction = (option: StudioOption) => {
@@ -368,14 +410,18 @@ export default function StudioPanel({
       </div>
 
       {mindMap && (
-        <MindMapDialog map={mindMap} onClose={() => setMindMap(null)} />
+        <React.Suspense fallback={null}>
+          <MindMapDialog map={mindMap} onClose={() => setMindMap(null)} />
+        </React.Suspense>
       )}
 
       {videoSummary && (
-        <VideoSummaryDialog
-          summary={videoSummary}
-          onClose={() => setVideoSummary(null)}
-        />
+        <React.Suspense fallback={null}>
+          <VideoSummaryDialog
+            summary={videoSummary}
+            onClose={() => setVideoSummary(null)}
+          />
+        </React.Suspense>
       )}
     </aside>
   );

@@ -39,8 +39,22 @@ const writeCookie = (value: string, maxAgeSeconds: number) => {
 };
 
 /** Record a signed-in session for both the client and the middleware. */
-export const storeSession = (accessToken: string, user: SessionUser): void => {
+export const storeSession = (
+  accessToken: string,
+  user: SessionUser,
+  clearAccountState?: () => void,
+): void => {
   try {
+    const storedUser = window.localStorage.getItem('user');
+    const previousUser = storedUser ? JSON.parse(storedUser) as Partial<SessionUser> : null;
+
+    // This shared browser can move from one account to another without a page
+    // reload. Clear the in-memory workspace before overwriting the identity,
+    // otherwise the next account can briefly read the previous one's data.
+    if (previousUser?.username && previousUser.username !== user.username) {
+      clearAccountState?.();
+    }
+
     window.localStorage.setItem('access_token', accessToken);
     // The API client and TopNav both read this key.
     window.localStorage.setItem('auth_token', accessToken);

@@ -3,12 +3,40 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check } from 'lucide-react';
 
+interface HighlightedCodeProps {
+  code: string;
+  language: string;
+}
 
-const syntaxTheme = vscDarkPlus as { [selector: string]: React.CSSProperties };
+const HighlightedCode = React.lazy(
+  async () => {
+    const [{ Prism }, { vscDarkPlus }] = await Promise.all([
+      import('react-syntax-highlighter'),
+      import('react-syntax-highlighter/dist/esm/styles/prism'),
+    ]);
+
+    return {
+      default: function HighlightedCodeBlock({ code, language }: HighlightedCodeProps) {
+        return (
+          <Prism
+            style={vscDarkPlus as { [selector: string]: React.CSSProperties }}
+            language={language}
+            PreTag="div"
+            customStyle={{
+              margin: 0,
+              borderRadius: '0.375rem',
+              fontSize: '0.875rem',
+            }}
+          >
+            {code}
+          </Prism>
+        );
+      },
+    };
+  },
+);
 
 interface MarkdownRendererProps {
   content: string;
@@ -51,18 +79,11 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
                     <Copy className="w-4 h-4 text-gray-300" />
                   )}
                 </button>
-                <SyntaxHighlighter
-                  style={syntaxTheme}
-                  language={language}
-                  PreTag="div"
-                  customStyle={{
-                    margin: 0,
-                    borderRadius: '0.375rem',
-                    fontSize: '0.875rem',
-                  }}
+                <React.Suspense
+                  fallback={<pre className="m-0 rounded-md text-sm"><code>{codeString}</code></pre>}
                 >
-                  {codeString}
-                </SyntaxHighlighter>
+                  <HighlightedCode code={codeString} language={language} />
+                </React.Suspense>
               </div>
             );
           }

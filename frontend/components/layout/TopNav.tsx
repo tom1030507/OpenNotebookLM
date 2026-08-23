@@ -57,7 +57,10 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const moreActionsRef = useRef<HTMLDivElement>(null);
   const firstOverflowActionRef = useRef<HTMLButtonElement>(null);
 
-  const { currentProject, currentConversation, documents } = useStore();
+  const currentProject = useStore((state) => state.currentProject);
+  const currentConversation = useStore((state) => state.currentConversation);
+  const documents = useStore((state) => state.documents);
+  const clearAccountState = useStore((state) => state.clearAccountState);
   const router = useRouter();
   const { openProjectDialog } = useProjectDialog();
   const isCompact = useMediaQuery(COMPACT_TOP_NAV_MEDIA_QUERY);
@@ -89,6 +92,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const signOut = () => {
     // Clears the stored account and the cookie the middleware gates on, so the
     // workspace is no longer reachable once the user has signed out.
+    clearAccountState();
     clearSession();
 
     setShowUserMenu(false);

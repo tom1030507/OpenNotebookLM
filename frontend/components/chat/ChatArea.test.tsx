@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Conversation, Document, Project } from '@/lib/api';
+import api, { type Conversation, type Document, type Project } from '@/lib/api';
 import useStore from '@/store/useStore';
 import ChatArea from './ChatArea';
 
@@ -62,6 +62,52 @@ afterEach(() => {
 
 
 describe('ChatArea', () => {
+  it('keeps a failed question visible and retries it without duplicate messages', async () => {
+    const question = 'What does this source say?';
+    vi.spyOn(api, 'query')
+      .mockRejectedValueOnce(new Error('Request failed'))
+      .mockResolvedValueOnce({ answer: '', citations: [] });
+    vi.spyOn(api, 'getMessages').mockResolvedValue([
+      {
+        id: 'message-user',
+        conversation_id: 'conversation-1',
+        role: 'user',
+        content: question,
+        citations: [],
+        created_at: '2026-08-23T00:00:00Z',
+      },
+      {
+        id: 'message-assistant',
+        conversation_id: 'conversation-1',
+        role: 'assistant',
+        content: 'It explains the source.',
+        citations: [],
+        created_at: '2026-08-23T00:00:01Z',
+      },
+    ]);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation: conversation('conversation-1', project.id),
+      messages: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Request failed');
+    expect(screen.getAllByText(question)).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry question' }));
+
+    await waitFor(() => expect(screen.getByText('It explains the source.')).toBeTruthy());
+    expect(screen.getAllByText(question)).toHaveLength(1);
+    expect(screen.getAllByText('It explains the source.')).toHaveLength(1);
+  });
+
   it('keeps the first submitted question visible while its answer is pending', async () => {
     const queryRequest = deferred<void>();
     useStore.setState({

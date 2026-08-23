@@ -127,11 +127,10 @@ beforeEach(() => {
     projects: [project],
     documents: [source],
   });
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:video-summary'),
-    revokeObjectURL: vi.fn(),
-  });
+  class TestURL extends URL {}
+  TestURL.createObjectURL = vi.fn(() => 'blob:video-summary');
+  TestURL.revokeObjectURL = vi.fn();
+  vi.stubGlobal('URL', TestURL);
 });
 
 afterEach(() => {

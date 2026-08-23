@@ -124,8 +124,8 @@ beforeEach(() => {
 
 
 describe('application store', () => {
-  it('resets to an empty project state instead of a fake backend id', () => {
-    useStore.getState().reset();
+  it('resets test state to an empty project state instead of a fake backend id', () => {
+    useStore.getState().resetForTests();
 
     expect(useStore.getState().projects).toEqual([]);
     expect(useStore.getState().currentProject).toBeNull();

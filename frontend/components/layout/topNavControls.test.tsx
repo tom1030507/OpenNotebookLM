@@ -79,6 +79,36 @@ afterEach(() => {
 describe('TopNav controls that were previously inert', () => {
   it('signs the user out by clearing credentials and returning to the login page', () => {
     storeSession('demo', { username: 'demo', email: 'demo@example.com' });
+    useStore.setState({
+      currentConversation: {
+        id: 'conversation-1',
+        project_id: project.id,
+        title: 'Account A conversation',
+        created_at: '2026-08-13T00:00:00Z',
+        updated_at: '2026-08-13T00:00:00Z',
+        message_count: 1,
+      },
+      conversations: [{
+        id: 'conversation-1',
+        project_id: project.id,
+        title: 'Account A conversation',
+        created_at: '2026-08-13T00:00:00Z',
+        updated_at: '2026-08-13T00:00:00Z',
+        message_count: 1,
+      }],
+      documents: [processing],
+      messages: [{
+        id: 'message-1',
+        conversation_id: 'conversation-1',
+        role: 'user',
+        content: 'Account A message',
+        citations: [],
+        created_at: '2026-08-13T00:00:00Z',
+      }],
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
     renderTopNav();
 
     fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
@@ -94,6 +124,17 @@ describe('TopNav controls that were previously inert', () => {
     // The middleware gates on the cookie, so signing out has to expire it too.
     expect(document.cookie).not.toContain(AUTH_TOKEN_COOKIE);
     expect(push).toHaveBeenCalledWith('/login');
+    expect(useStore.getState()).toMatchObject({
+      projects: [],
+      currentProject: null,
+      documents: [],
+      conversations: [],
+      currentConversation: null,
+      messages: [],
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
   });
 
   it('shows the signed-in account in the profile dialog', () => {
