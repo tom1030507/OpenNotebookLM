@@ -260,6 +260,26 @@ class TestIndexingFailures:
         assert document.status == "error"
         assert "site unreachable" in document.error_message
 
+    def test_background_failure_releases_the_ingestion_lease(self, db):
+        """A failed background import cannot permanently consume a slot."""
+        service = build_service([])
+        released = []
+
+        class ExplodingURLAdapter:
+            def extract_content(self, url):
+                raise RuntimeError("site unreachable")
+
+        service.url_adapter = ExplodingURLAdapter()
+
+        asyncio.run(service._process_url_async(
+            db,
+            DOC_ID,
+            "https://example.com",
+            completion_callback=lambda: released.append(True),
+        ))
+
+        assert released == [True]
+
 
 class TestProcessingMetadata:
     """meta_json is a plain JSON column, so it has to be reassigned to persist."""

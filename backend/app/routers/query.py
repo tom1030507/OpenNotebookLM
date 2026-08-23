@@ -33,6 +33,13 @@ from app.routers.ownership import (
     require_conversation,
     require_project,
 )
+from app.routers.rate_limit import (
+    acquire_account_lease,
+    enforce_account_rate_limit,
+    get_concurrency_limiter,
+    get_rate_limiter,
+)
+from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -93,14 +100,21 @@ class ConversationUpdateRequest(BaseModel):
 def query(
     request: QueryRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
-    """Process a RAG query.
-    
-    This endpoint:
-    1. Retrieves relevant document chunks
-    2. Uses them as context for the LLM
-    3. Returns an answer with source citations
+    """Process a rate- and concurrency-bounded RAG query.
+
+    Args:
+        request: Query and optional project/conversation scope.
+        db: Database session.
+        current_user: Authenticated caller.
+        request_limiter: Per-account sliding-window limiter.
+        concurrency_limiter: Per-account active-operation limiter.
+
+    Returns:
+        Answer, source, model, usage, and conversation metadata.
     """
     try:
         # Retrieval is confined to the caller's own documents, always, and
@@ -112,8 +126,11 @@ def query(
         if request.project_id:
             require_project(db, request.project_id, current_user)
         
-        # Handle conversation
+        # Resolve every ownership-bearing id before abuse controls. Otherwise a
+        # depleted limiter would turn another account's normally indistinguishable
+        # 404 into a 429 and reveal that the probed id follows a different path.
         conversation_id = request.conversation_id
+        conversation = None
         if request.conversation_id:
             conversation = require_conversation(db, request.conversation_id, current_user)
 
@@ -129,32 +146,22 @@ def query(
             # Use conversation's project if not specified
             if not request.project_id and conversation.project_id:
                 request.project_id = conversation.project_id
-                
-            # Process query with conversation context
-            result = rag_service.query_with_conversation(
-                db=db,
-                query=request.query,
-                conversation_id=conversation_id,
-                project_id=request.project_id,
-                top_k=request.top_k,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                include_sources=request.include_sources,
-                allowed_document_ids=allowed_document_ids
-            )
-        else:
-            # Create new conversation if project is specified
-            if request.project_id:
-                conversation = Conversation(
-                    id=str(uuid.uuid4()),
-                    project_id=request.project_id,
-                    title=request.query[:100]  # Use first 100 chars as title
-                )
-                db.add(conversation)
-                db.commit()
-                conversation_id = conversation.id
-                
-                # Process query with new conversation
+
+        enforce_account_rate_limit(
+            request_limiter,
+            "query",
+            current_user.id,
+            limit=30,
+            window_seconds=60,
+        )
+        lease = acquire_account_lease(
+            concurrency_limiter,
+            "query",
+            current_user.id,
+        )
+        try:
+            if conversation is not None:
+                # Process query with conversation context
                 result = rag_service.query_with_conversation(
                     db=db,
                     query=request.query,
@@ -167,17 +174,41 @@ def query(
                     allowed_document_ids=allowed_document_ids
                 )
             else:
-                # One-off query without conversation
-                result = rag_service.query(
-                    db=db,
-                    query=request.query,
-                    project_id=request.project_id,
-                    top_k=request.top_k,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    include_sources=request.include_sources,
-                    allowed_document_ids=allowed_document_ids
-                )
+                # Create new conversation if project is specified
+                if request.project_id:
+                    conversation = Conversation(
+                        id=str(uuid.uuid4()),
+                        project_id=request.project_id,
+                        title=request.query[:100]
+                    )
+                    db.add(conversation)
+                    db.commit()
+                    conversation_id = conversation.id
+
+                    result = rag_service.query_with_conversation(
+                        db=db,
+                        query=request.query,
+                        conversation_id=conversation_id,
+                        project_id=request.project_id,
+                        top_k=request.top_k,
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                        include_sources=request.include_sources,
+                        allowed_document_ids=allowed_document_ids
+                    )
+                else:
+                    result = rag_service.query(
+                        db=db,
+                        query=request.query,
+                        project_id=request.project_id,
+                        top_k=request.top_k,
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                        include_sources=request.include_sources,
+                        allowed_document_ids=allowed_document_ids
+                    )
+        finally:
+            lease.release()
         
         return QueryResponse(
             answer=result["answer"],

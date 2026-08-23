@@ -1,6 +1,6 @@
 """Application configuration."""
 from typing import Any, List, Optional
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     # File Upload
     max_file_size_mb: int = 50
     allowed_file_types: str = "pdf,txt,md"
+    max_url_download_mb: int = 10
+    max_url_redirects: int = 5
+    url_connect_timeout_seconds: int = 5
+    url_read_timeout_seconds: int = 30
+    url_download_timeout_seconds: int = 30
     
     # Security
     secret_key: str = "change-this-secret-key-in-production"
@@ -113,6 +118,7 @@ class Settings(BaseSettings):
     jwt_secret_key: Optional[str] = None
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 720
+    allow_public_registration: Optional[bool] = None
     
     # Monitoring
     enable_metrics: bool = True
@@ -123,6 +129,8 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 100
     rate_limit_period: int = 60
+    rate_limit_max_keys: int = 10000
+    trust_proxy_headers: bool = False
     
     # Chunking
     chunk_size: int = 512
@@ -181,6 +189,17 @@ class Settings(BaseSettings):
             return None
 
         return value
+
+    @model_validator(mode="after")
+    def _default_registration_by_environment(self):
+        """Open enrollment only for development when no override is supplied.
+
+        Returns:
+            Settings with a concrete public-registration policy.
+        """
+        if self.allow_public_registration is None:
+            self.allow_public_registration = self.app_env == "development"
+        return self
 
     class Config:
         env_file = ".env"
