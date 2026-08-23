@@ -1,0 +1,7 @@
+-r requirements-minimal.txt
+bcrypt==4.3.0
+beautifulsoup4==4.12.2
+numpy==1.24.3
+pdfminer.six==20221105
+python-jose[cryptography]==3.3.0
+requests==2.34.2
