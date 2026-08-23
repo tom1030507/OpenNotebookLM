@@ -6,6 +6,10 @@ every page fell back to `soup.body` and the index filled up with navigation,
 language lists and reference entries.
 """
 import socket
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -154,6 +158,43 @@ class TestPublicURLPolicy:
         with pytest.raises(UnsafeURLError):
             validate_public_http_url("https://example.com", resolver=resolver)
 
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "224.0.0.1",             # IPv4 multicast
+            "240.0.0.1",             # IPv4 reserved
+            "0.0.0.0",               # IPv4 unspecified
+            "127.0.0.1",             # IPv4 loopback
+            "169.254.1.1",           # IPv4 link-local
+            "10.0.0.1",              # IPv4 private
+            "ff02::1",               # IPv6 multicast (is_global on Python 3.10)
+            "100::1",                # IPv6 reserved/discard prefix
+            "::",                    # IPv6 unspecified
+            "::1",                   # IPv6 loopback
+            "fe80::1",               # IPv6 link-local
+            "fc00::1",               # IPv6 private
+            "fec0::1",               # deprecated IPv6 site-local
+            "::ffff:127.0.0.1",      # IPv4-mapped loopback
+            "2002:7f00:1::",         # 6to4 embedding loopback
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",  # Teredo transition
+        ],
+    )
+    def test_explicit_non_public_address_classes_are_rejected(self, address):
+        """Every dangerous address flag and transition form is denied."""
+        with pytest.raises(UnsafeURLError):
+            validate_public_http_url(
+                "https://example.com",
+                resolver=resolver_for(address),
+            )
+
+    @pytest.mark.parametrize("address", ["8.8.8.8", "2606:4700:4700::1111"])
+    def test_plain_public_ipv4_and_ipv6_addresses_are_allowed(self, address):
+        """Explicit denials do not turn the policy into an IPv4-only allowlist."""
+        assert validate_public_http_url(
+            "https://example.com",
+            resolver=resolver_for(address),
+        ) == "https://example.com"
+
     def test_a_public_https_url_is_normalized_without_its_fragment(self):
         normalized = validate_public_http_url(
             "HTTPS://example.com/article?q=1#private-fragment",
@@ -166,7 +207,7 @@ class TestPublicURLPolicy:
         self,
         monkeypatch,
     ):
-        """Socket target cannot rebind while TLS still verifies the URL host."""
+        """Real Session.send pins the socket while TLS retains the URL host."""
         resolver_calls = []
 
         def resolver(host, port, *args, **kwargs):
@@ -178,24 +219,76 @@ class TestPublicURLPolicy:
             resolver=resolver,
         )
         adapter = url_module._PinnedHTTPAdapter(addresses[0])
-        prepared = requests.Request("GET", normalized).prepare()
-        pool = adapter.get_connection_with_tls_context(prepared, verify=True)
-
-        socket_sentinel = object()
+        client_socket, server_socket = socket.socketpair()
         socket_targets = []
+        pool_hosts = []
+        tls_hostnames = []
+        hook_calls = []
 
         def connect(target, *args, **kwargs):
             socket_targets.append(target)
-            return socket_sentinel
+            return client_socket
+
+        original_hook = adapter.get_connection_with_tls_context
+
+        def hook(request, verify, proxies=None, cert=None):
+            hook_calls.append(request.url)
+            pool = original_hook(request, verify, proxies=proxies, cert=cert)
+            pool_hosts.append(pool.host)
+            return pool
+
+        def wrap_tls(sock, **kwargs):
+            tls_hostnames.append(kwargs["server_hostname"])
+            return SimpleNamespace(socket=sock, is_verified=True)
+
+        def serve_one_response():
+            request_bytes = bytearray()
+            while b"\r\n\r\n" not in request_bytes:
+                request_bytes.extend(server_socket.recv(4096))
+            server_socket.sendall(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/plain\r\n"
+                b"Content-Length: 2\r\n"
+                b"Connection: close\r\n\r\nOK"
+            )
+            server_socket.close()
 
         monkeypatch.setattr(url_module.urllib3_connection, "create_connection", connect)
-        connection = pool._new_conn()
+        monkeypatch.setattr(
+            url_module.urllib3_connection_module,
+            "_ssl_wrap_socket_and_match_hostname",
+            wrap_tls,
+        )
+        monkeypatch.setattr(adapter, "get_connection_with_tls_context", hook)
+        server = threading.Thread(target=serve_one_response)
+        server.start()
+        session = requests.Session()
+        session.trust_env = False
+        session.mount("https://", adapter)
+        try:
+            response = session.get(normalized, timeout=1, verify=True)
+            assert response.text == "OK"
+        finally:
+            session.close()
+            server.join(timeout=2)
 
-        assert pool.host == "example.com"
-        assert connection.host == "example.com"
-        assert connection._new_conn() is socket_sentinel
+        assert server.is_alive() is False
+        assert hook_calls == [normalized]
+        assert pool_hosts == ["example.com"]
+        assert tls_hostnames == ["example.com"]
         assert resolver_calls == [("example.com", 443)]
         assert socket_targets == [("93.184.216.34", 443)]
+
+    def test_pinned_adapter_fails_fast_without_required_requests_hook(self, monkeypatch):
+        """Unsupported Requests releases fail at startup, not during a fetch."""
+        monkeypatch.setattr(
+            requests.adapters.HTTPAdapter,
+            "get_connection_with_tls_context",
+            None,
+        )
+
+        with pytest.raises(RuntimeError, match="Requests transport hook"):
+            url_module._PinnedHTTPAdapter("93.184.216.34")
 
 
 class TestSafeURLDownload:
@@ -301,6 +394,23 @@ class TestSafeURLDownload:
         assert response.chunks_read == 0
         assert response.closed is True
 
+    def test_size_error_uses_the_configured_download_cap(self):
+        """A non-default deployment reports its real cap rather than 10MB."""
+        response = FakeResponse(
+            headers={
+                "Content-Type": "text/plain",
+                "Content-Length": str(2 * 1024 * 1024 + 1),
+            },
+        )
+        adapter = URLAdapter(
+            resolver=resolver_for("93.184.216.34"),
+            session=FakeSession([response]),
+            max_download_bytes=2 * 1024 * 1024,
+        )
+
+        with pytest.raises(UnsafeURLError, match="2MB"):
+            adapter.extract_content("https://example.com/large")
+
     def test_download_stops_when_total_time_cap_is_crossed(self):
         response = FakeResponse(chunks=[b"first", b"must not be read"])
         adapter = URLAdapter(
@@ -315,6 +425,144 @@ class TestSafeURLDownload:
 
         assert response.chunks_read == 1
         assert response.closed is True
+
+    def test_wall_deadline_returns_while_dns_worker_is_still_blocked(self):
+        """A stalled resolver cannot hold the caller beyond the global cap."""
+        resolver_started = threading.Event()
+        release_resolver = threading.Event()
+        executor = ThreadPoolExecutor(max_workers=1)
+
+        def delayed_resolver(host, port, *args, **kwargs):
+            resolver_started.set()
+            release_resolver.wait(timeout=2)
+            return resolver_for("93.184.216.34")(host, port, *args, **kwargs)
+
+        adapter = URLAdapter(
+            resolver=delayed_resolver,
+            session=FakeSession([]),
+            max_download_seconds=0.05,
+            executor=executor,
+        )
+        started_at = time.monotonic()
+        try:
+            with pytest.raises(UnsafeURLError, match="time limit"):
+                adapter.extract_content("https://example.com/slow-dns")
+            elapsed = time.monotonic() - started_at
+            assert resolver_started.is_set()
+            assert elapsed < 0.2
+        finally:
+            release_resolver.set()
+            executor.shutdown(wait=True)
+
+    def test_wall_deadline_closes_session_blocked_on_redirect_headers(self):
+        """The same deadline covers a later redirect hop waiting on headers."""
+        class RedirectThenBlockingSession:
+            def __init__(self):
+                self.calls = 0
+                self.closed = threading.Event()
+
+            def get(self, url, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return FakeResponse(status=302, headers={"Location": "/next"})
+                self.closed.wait(timeout=2)
+                raise requests.ConnectionError("closed while waiting for headers")
+
+            def close(self):
+                self.closed.set()
+
+        session = RedirectThenBlockingSession()
+        executor = ThreadPoolExecutor(max_workers=1)
+        adapter = URLAdapter(
+            resolver=resolver_for("93.184.216.34"),
+            session=session,
+            max_download_seconds=0.05,
+            executor=executor,
+        )
+        started_at = time.monotonic()
+        try:
+            with pytest.raises(UnsafeURLError, match="time limit"):
+                adapter.extract_content("https://example.com/start")
+            assert time.monotonic() - started_at < 0.2
+            assert session.closed.wait(timeout=0.2)
+            assert session.calls == 2
+        finally:
+            session.close()
+            executor.shutdown(wait=True)
+
+    def test_wall_deadline_closes_a_slow_trickle_response(self):
+        """Repeated body progress cannot reset the total download deadline."""
+        class SlowResponse(FakeResponse):
+            def __init__(self):
+                super().__init__()
+                self.close_event = threading.Event()
+
+            def iter_content(self, chunk_size):
+                while not self.close_event.wait(timeout=0.01):
+                    yield b"x"
+
+            def close(self):
+                super().close()
+                self.close_event.set()
+
+        response = SlowResponse()
+        executor = ThreadPoolExecutor(max_workers=1)
+        adapter = URLAdapter(
+            resolver=resolver_for("93.184.216.34"),
+            session=FakeSession([response]),
+            max_download_seconds=0.05,
+            executor=executor,
+        )
+        started_at = time.monotonic()
+        try:
+            with pytest.raises(UnsafeURLError, match="time limit"):
+                adapter.extract_content("https://example.com/trickle")
+            assert time.monotonic() - started_at < 0.2
+            assert response.close_event.wait(timeout=0.2)
+        finally:
+            response.close()
+            executor.shutdown(wait=True)
+
+    def test_stalled_dns_is_confined_to_the_configured_worker_bound(self):
+        """Timed-out requests consume no more than the fixed resolver workers."""
+        release_resolvers = threading.Event()
+        state_lock = threading.Lock()
+        active = 0
+        peak = 0
+        executor = ThreadPoolExecutor(max_workers=2)
+
+        def delayed_resolver(host, port, *args, **kwargs):
+            nonlocal active, peak
+            with state_lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                release_resolvers.wait(timeout=2)
+                return resolver_for("93.184.216.34")(host, port, *args, **kwargs)
+            finally:
+                with state_lock:
+                    active -= 1
+
+        adapter = URLAdapter(
+            resolver=delayed_resolver,
+            session=FakeSession([]),
+            max_download_seconds=0.05,
+            executor=executor,
+        )
+
+        def fetch(index):
+            with pytest.raises(UnsafeURLError, match="time limit"):
+                adapter.extract_content("https://example.com/%s" % index)
+
+        try:
+            with ThreadPoolExecutor(max_workers=6) as callers:
+                futures = [callers.submit(fetch, index) for index in range(6)]
+                for future in futures:
+                    future.result(timeout=1)
+            assert peak == 2
+        finally:
+            release_resolvers.set()
+            executor.shutdown(wait=True)
 
 
 # A miniature of the structure that caused the trouble: chrome and a reference

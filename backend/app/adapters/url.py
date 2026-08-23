@@ -1,7 +1,15 @@
 """URL content extraction adapter."""
+import asyncio
 import re
 import socket
+import threading
 import time
+from concurrent.futures import (
+    Executor,
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FutureTimeoutError,
+)
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 import structlog
@@ -34,26 +42,167 @@ MAX_URL_DOWNLOAD_MB = 10
 MAX_URL_DOWNLOAD_BYTES = MAX_URL_DOWNLOAD_MB * 1024 * 1024
 MAX_URL_REDIRECTS = 5
 URL_STREAM_BLOCK_BYTES = 64 * 1024
+URL_DOWNLOAD_WORKERS = 4
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 ACCEPTED_CONTENT_TYPES = frozenset({
     "text/html",
     "application/xhtml+xml",
     "text/plain",
 })
+_URL_DOWNLOAD_EXECUTOR = ThreadPoolExecutor(
+    max_workers=URL_DOWNLOAD_WORKERS,
+    thread_name_prefix="url-download",
+)
+
+
+def _require_supported_requests_transport() -> None:
+    """Fail before serving requests when the DNS-pin hook is unavailable."""
+    if not callable(getattr(HTTPAdapter, "get_connection_with_tls_context", None)):
+        raise RuntimeError(
+            "Requests transport hook get_connection_with_tls_context is unavailable; "
+            "install requests==2.34.2 with urllib3==2.7.0"
+        )
+
+
+class _FetchControl:
+    """Thread-safe cancellation and active transport registry for one fetch."""
+
+    def __init__(self):
+        self._cancelled = False
+        self._closeables = []
+        self._lock = threading.Lock()
+
+    def register(self, closeable) -> None:
+        """Register an active session, response, or socket for cancellation."""
+        should_close = False
+        with self._lock:
+            if self._cancelled:
+                should_close = True
+            elif closeable not in self._closeables:
+                self._closeables.append(closeable)
+        if should_close:
+            self._close(closeable)
+
+    def unregister(self, closeable) -> None:
+        """Stop retaining a transport that has already been closed."""
+        with self._lock:
+            if closeable in self._closeables:
+                self._closeables.remove(closeable)
+
+    def cancel(self) -> None:
+        """Close active transports and prevent a later one from opening."""
+        with self._lock:
+            self._cancelled = True
+            closeables = list(reversed(self._closeables))
+        for closeable in closeables:
+            self._close(closeable)
+
+    def raise_if_cancelled(self) -> None:
+        """Raise the stable deadline error after cancellation."""
+        with self._lock:
+            cancelled = self._cancelled
+        if cancelled:
+            raise UnsafeURLError("URL download exceeded the time limit")
+
+    @staticmethod
+    def _close(closeable) -> None:
+        """Best-effort close without hiding the caller's timeout refusal."""
+        try:
+            closeable.close()
+        except Exception:
+            # Cancellation is already returning a stable timeout. A close race
+            # must not replace it with a transport-specific cleanup exception.
+            pass
+
+
+class URLFetchOperation:
+    """A bounded caller-facing handle for one fixed-pool URL extraction."""
+
+    def __init__(
+        self,
+        future: Future,
+        control: _FetchControl,
+        timeout_seconds: float,
+    ):
+        """Store the underlying worker and its absolute caller deadline.
+
+        Args:
+            future: Actual fixed-pool extraction future.
+            control: Registry used to interrupt active transports.
+            timeout_seconds: Total caller wall-clock allowance from submission.
+        """
+        self.future = future
+        self._control = control
+        self._deadline = time.monotonic() + timeout_seconds
+
+    def result(self):
+        """Wait only until the global deadline and return extracted content.
+
+        Returns:
+            Extracted URL content dictionary.
+
+        Raises:
+            UnsafeURLError: When the global caller deadline expires.
+        """
+        try:
+            return self.future.result(timeout=self._remaining())
+        except FutureTimeoutError as exc:
+            self._abort()
+            raise UnsafeURLError("URL download exceeded the time limit") from exc
+
+    async def wait(self):
+        """Asynchronously wait only until the same global deadline.
+
+        Returns:
+            Extracted URL content dictionary.
+
+        Raises:
+            UnsafeURLError: When the global caller deadline expires.
+            asyncio.CancelledError: When the awaiting request is cancelled.
+        """
+        wrapped = asyncio.wrap_future(self.future)
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(wrapped),
+                timeout=self._remaining(),
+            )
+        except asyncio.TimeoutError as exc:
+            self._abort()
+            raise UnsafeURLError("URL download exceeded the time limit") from exc
+        except asyncio.CancelledError:
+            self._abort()
+            raise
+
+    def _remaining(self) -> float:
+        """Return non-negative caller time remaining."""
+        return max(0.0, self._deadline - time.monotonic())
+
+    def _abort(self) -> None:
+        """Cancel queued work and interrupt active transports where possible."""
+        self._control.cancel()
+        self.future.cancel()
 
 
 class _PinnedConnectionMixin:
     """Connect an urllib3 connection to a pre-validated literal address."""
 
-    def __init__(self, *args, pinned_address: str, **kwargs):
+    def __init__(
+        self,
+        *args,
+        pinned_address: str,
+        fetch_control: Optional[_FetchControl] = None,
+        **kwargs,
+    ):
         """Store the address that DNS validation approved.
 
         Args:
             *args: Positional connection arguments.
             pinned_address: Literal public IP used for the socket.
+            fetch_control: Optional deadline cancellation registry.
             **kwargs: Keyword connection arguments.
         """
         self._pinned_address = pinned_address
+        self._fetch_control = fetch_control
         super().__init__(*args, **kwargs)
 
     def _new_conn(self):
@@ -63,12 +212,16 @@ class _PinnedConnectionMixin:
             A connected socket.
         """
         try:
-            return urllib3_connection.create_connection(
+            connected_socket = urllib3_connection.create_connection(
                 (self._pinned_address, self.port),
                 self.timeout,
                 source_address=self.source_address,
                 socket_options=self.socket_options,
             )
+            if self._fetch_control is not None:
+                self._fetch_control.register(connected_socket)
+                self._fetch_control.raise_if_cancelled()
+            return connected_socket
         except (TimeoutError, socket.timeout) as exc:
             raise ConnectTimeoutError(
                 self,
@@ -104,13 +257,20 @@ class _PinnedHTTPSConnectionPool(connectionpool.HTTPSConnectionPool):
 class _PinnedHTTPAdapter(HTTPAdapter):
     """Requests adapter that connects to one validated address per attempt."""
 
-    def __init__(self, pinned_address: str):
+    def __init__(
+        self,
+        pinned_address: str,
+        fetch_control: Optional[_FetchControl] = None,
+    ):
         """Initialize an adapter for a single literal IP.
 
         Args:
             pinned_address: Public address approved by URL validation.
+            fetch_control: Optional deadline cancellation registry.
         """
+        _require_supported_requests_transport()
         self._pinned_address = pinned_address
+        self._fetch_control = fetch_control
         super().__init__(max_retries=0)
 
     def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
@@ -131,6 +291,7 @@ class _PinnedHTTPAdapter(HTTPAdapter):
             cert,
         )
         pool_kwargs["pinned_address"] = self._pinned_address
+        pool_kwargs["fetch_control"] = self._fetch_control
         pool_class = (
             _PinnedHTTPSConnectionPool
             if host_params["scheme"] == "https"
@@ -238,6 +399,7 @@ class URLAdapter:
         max_redirects: int = MAX_URL_REDIRECTS,
         max_download_seconds: int = 30,
         clock: Callable[[], float] = time.monotonic,
+        executor: Optional[Executor] = None,
     ):
         """Initialize URL adapter.
 
@@ -253,7 +415,11 @@ class URLAdapter:
             max_redirects: Maximum manually validated redirects.
             max_download_seconds: Total wall-clock cap across redirects/body.
             clock: Monotonic seconds provider, injectable for tests.
+            executor: Optional fixed-size executor. Production shares a bounded
+                process-wide pool so stalled DNS cannot create one thread per
+                request.
         """
+        _require_supported_requests_transport()
         self.timeout = timeout
         self.connect_timeout = connect_timeout
         self.use_readability = use_readability and HAS_READABILITY
@@ -263,6 +429,7 @@ class URLAdapter:
         self.max_redirects = max_redirects
         self.max_download_seconds = max_download_seconds
         self.clock = clock
+        self.executor = executor or _URL_DOWNLOAD_EXECUTOR
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -276,8 +443,25 @@ class URLAdapter:
         Returns:
             Dictionary containing extracted content and metadata
         """
+        return self.start_extract_content(url).result()
+
+    def start_extract_content(self, url: str) -> URLFetchOperation:
+        """Submit extraction to the fixed worker pool without waiting.
+
+        Args:
+            url: User-supplied URL to validate and extract.
+
+        Returns:
+            Operation exposing both the bounded wait and actual worker future.
+        """
+        control = _FetchControl()
+        future = self.executor.submit(self._extract_content, url, control)
+        return URLFetchOperation(future, control, self.max_download_seconds)
+
+    def _extract_content(self, url: str, control: _FetchControl) -> Dict[str, any]:
+        """Run validation, download, and parsing inside one bounded worker."""
         try:
-            final_url, body = self._download(url)
+            final_url, body = self._download(url, control)
 
             # Parse with BeautifulSoup
             soup = BeautifulSoup(body, 'html.parser')
@@ -310,11 +494,12 @@ class URLAdapter:
             logger.error("Failed to extract content from URL", url=url, error=str(e))
             raise
 
-    def _download(self, url: str):
+    def _download(self, url: str, control: _FetchControl):
         """Download a validated response while checking every redirect hop.
 
         Args:
             url: Initial user-supplied URL.
+            control: Cancellation registry for this extraction.
 
         Returns:
             A pair of final normalized URL and its capped body bytes.
@@ -328,12 +513,15 @@ class URLAdapter:
         started_at = self.clock()
 
         while True:
+            control.raise_if_cancelled()
             self._ensure_within_time_limit(started_at)
             current_url, addresses = resolve_public_http_url(
                 current_url,
                 resolver=self.resolver,
             )
-            response = self._request(current_url, addresses)
+            control.raise_if_cancelled()
+            response = self._request(current_url, addresses, control)
+            control.register(response)
             try:
                 if response.status_code in REDIRECT_STATUSES:
                     location = response.headers.get("Location")
@@ -360,7 +548,7 @@ class URLAdapter:
                     if declared_bytes > self.max_download_bytes:
                         raise UnsafeURLError(
                             "URL response exceeds the %sMB limit"
-                            % MAX_URL_DOWNLOAD_MB
+                            % self._download_limit_mb()
                         )
 
                 body = bytearray()
@@ -371,16 +559,18 @@ class URLAdapter:
                     if len(body) + len(block) > self.max_download_bytes:
                         raise UnsafeURLError(
                             "URL response exceeds the %sMB limit"
-                            % MAX_URL_DOWNLOAD_MB
+                            % self._download_limit_mb()
                         )
                     body.extend(block)
                 self._ensure_within_time_limit(started_at)
                 return current_url, bytes(body)
             finally:
                 response.close()
+                control.unregister(response)
                 owned_session = getattr(response, "_opennotebook_session", None)
                 if owned_session is not None:
                     owned_session.close()
+                    control.unregister(owned_session)
 
     def _ensure_within_time_limit(self, started_at: float) -> None:
         """Refuse a download whose total wall-clock cap has elapsed.
@@ -394,12 +584,18 @@ class URLAdapter:
         if self.clock() - started_at > self.max_download_seconds:
             raise UnsafeURLError("URL download exceeded the time limit")
 
-    def _request(self, url: str, addresses: List[str]):
+    def _request(
+        self,
+        url: str,
+        addresses: List[str],
+        control: _FetchControl,
+    ):
         """Open one streamed request pinned to the validated DNS result.
 
         Args:
             url: Normalized destination URL.
             addresses: Public IP strings resolved during validation.
+            control: Cancellation registry for this extraction.
 
         Returns:
             A streamed requests response.
@@ -411,6 +607,8 @@ class URLAdapter:
             "allow_redirects": False,
         }
         if self.session is not None:
+            control.register(self.session)
+            control.raise_if_cancelled()
             return self.session.get(url, **options)
 
         last_error = None
@@ -418,11 +616,17 @@ class URLAdapter:
         for address in addresses:
             session = requests.Session()
             session.trust_env = False
-            session.mount(scheme + "://", _PinnedHTTPAdapter(address))
+            control.register(session)
+            session.mount(
+                scheme + "://",
+                _PinnedHTTPAdapter(address, fetch_control=control),
+            )
             try:
+                control.raise_if_cancelled()
                 response = session.get(url, **options)
             except requests.RequestException as exc:
                 session.close()
+                control.unregister(session)
                 last_error = exc
                 continue
             response._opennotebook_session = session
@@ -431,6 +635,13 @@ class URLAdapter:
         if last_error is not None:
             raise last_error
         raise UnsafeURLError("URL hostname resolved to no usable address")
+
+    def _download_limit_mb(self):
+        """Return the configured cap in compact user-facing mebibytes."""
+        mebibyte = 1024 * 1024
+        if self.max_download_bytes % mebibyte == 0:
+            return self.max_download_bytes // mebibyte
+        return self.max_download_bytes / mebibyte
 
     def _extract_metadata(self, soup: BeautifulSoup, url: str) -> Dict[str, str]:
         """Extract metadata from HTML."""

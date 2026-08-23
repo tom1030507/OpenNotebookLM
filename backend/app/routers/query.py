@@ -39,7 +39,11 @@ from app.routers.rate_limit import (
     get_concurrency_limiter,
     get_rate_limiter,
 )
-from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
+from app.services.rate_limit import (
+    ConcurrencyLimiter,
+    SlidingWindowRateLimiter,
+    UnlimitedConcurrencyLease,
+)
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -50,6 +54,7 @@ logger = structlog.get_logger()
 
 # Initialize services
 rag_service = RAGService()
+settings = get_settings()
 
 
 class QueryRequest(BaseModel):
@@ -147,18 +152,20 @@ def query(
             if not request.project_id and conversation.project_id:
                 request.project_id = conversation.project_id
 
-        enforce_account_rate_limit(
-            request_limiter,
-            "query",
-            current_user.id,
-            limit=30,
-            window_seconds=60,
-        )
-        lease = acquire_account_lease(
-            concurrency_limiter,
-            "query",
-            current_user.id,
-        )
+        lease = UnlimitedConcurrencyLease()
+        if settings.rate_limit_enabled:
+            enforce_account_rate_limit(
+                request_limiter,
+                "query",
+                current_user.id,
+                limit=30,
+                window_seconds=60,
+            )
+            lease = acquire_account_lease(
+                concurrency_limiter,
+                "query",
+                current_user.id,
+            )
         try:
             if conversation is not None:
                 # Process query with conversation context

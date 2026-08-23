@@ -99,3 +99,45 @@ def test_third_concurrent_query_for_one_account_returns_429(monkeypatch):
 
     assert third.status_code == 429
     assert third.headers["Retry-After"] == "1"
+
+
+def test_disabled_controls_ignore_an_exhausted_query_rate_window(monkeypatch):
+    """RATE_LIMIT_ENABLED=false bypasses the query request window."""
+    limiter = SlidingWindowRateLimiter()
+    for _ in range(30):
+        assert limiter.check("query:user-a", 30, 60).allowed
+
+    class FastRAG:
+        def query(self, **kwargs):
+            return QUERY_RESULT
+
+    monkeypatch.setattr(query.get_settings(), "rate_limit_enabled", False)
+    response = query_client(
+        monkeypatch,
+        FastRAG(),
+        request_limiter=limiter,
+    ).post("/api/query", json={"query": "hello"})
+
+    assert response.status_code == 200
+
+
+def test_disabled_controls_ignore_an_occupied_query_concurrency_slot(monkeypatch):
+    """RATE_LIMIT_ENABLED=false also bypasses active query quotas."""
+    concurrency = ConcurrencyLimiter(max_concurrent=1)
+    occupied = concurrency.acquire("query:user-a")
+
+    class FastRAG:
+        def query(self, **kwargs):
+            return QUERY_RESULT
+
+    monkeypatch.setattr(query.get_settings(), "rate_limit_enabled", False)
+    try:
+        response = query_client(
+            monkeypatch,
+            FastRAG(),
+            concurrency=concurrency,
+        ).post("/api/query", json={"query": "hello"})
+    finally:
+        occupied.release()
+
+    assert response.status_code == 200

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import math
 import threading
 import time
-from typing import Callable, Deque, Dict
+from typing import Callable, Deque, Dict, Protocol
 
 
 @dataclass(frozen=True)
@@ -157,8 +157,52 @@ class ConcurrencyLimitError(RuntimeError):
     """Raised when an account has no concurrency slot available."""
 
 
-class _Lease:
-    """Idempotent handle for one acquired concurrency slot."""
+class OperationLease(Protocol):
+    """Service ownership contract for active blocking operations."""
+
+    def release(self) -> None:
+        """Request release after all deferred futures finish.
+
+        Returns:
+            None.
+        """
+        ...
+
+    def defer_release_until(self, future) -> None:
+        """Keep ownership until submitted blocking work really finishes.
+
+        Args:
+            future: Concurrent future representing submitted blocking work.
+
+        Returns:
+            None.
+        """
+        ...
+
+
+class UnlimitedConcurrencyLease:
+    """No-op ownership handle used when abuse controls are disabled."""
+
+    def release(self) -> None:
+        """Complete an unlimited operation.
+
+        Returns:
+            None.
+        """
+
+    def defer_release_until(self, future) -> None:
+        """Accept an underlying future without retaining quota state.
+
+        Args:
+            future: Submitted work that would retain a bounded lease.
+
+        Returns:
+            None.
+        """
+
+
+class ConcurrencyLease:
+    """Thread-safe handle whose release can wait for underlying futures."""
 
     def __init__(self, limiter: "ConcurrencyLimiter", key: str):
         """Store the limiter and key that own this slot.
@@ -169,7 +213,30 @@ class _Lease:
         """
         self._limiter = limiter
         self._key = key
+        self._lock = threading.Lock()
+        self._release_requested = False
         self._released = False
+        self._deferred_futures = 0
+
+    def defer_release_until(self, future) -> None:
+        """Prevent release until an already-submitted future really finishes.
+
+        Args:
+            future: Concurrent future representing blocking work that cannot be
+                force-cancelled with its awaiting coroutine.
+
+        Returns:
+            None.
+
+        Raises:
+            RuntimeError: If ownership was already fully released before the
+                future was attached.
+        """
+        with self._lock:
+            if self._released:
+                raise RuntimeError("cannot defer an already released lease")
+            self._deferred_futures += 1
+        future.add_done_callback(self._deferred_future_done)
 
     def release(self) -> None:
         """Release this lease once.
@@ -177,10 +244,29 @@ class _Lease:
         Returns:
             None.
         """
-        if self._released:
-            return
-        self._released = True
-        self._limiter._release(self._key)
+        should_release = False
+        with self._lock:
+            self._release_requested = True
+            if not self._released and self._deferred_futures == 0:
+                self._released = True
+                should_release = True
+        if should_release:
+            self._limiter._release(self._key)
+
+    def _deferred_future_done(self, _future) -> None:
+        """Release after the last attached blocking future exits."""
+        should_release = False
+        with self._lock:
+            self._deferred_futures -= 1
+            if (
+                self._release_requested
+                and not self._released
+                and self._deferred_futures == 0
+            ):
+                self._released = True
+                should_release = True
+        if should_release:
+            self._limiter._release(self._key)
 
 
 class ConcurrencyLimiter:
@@ -198,7 +284,7 @@ class ConcurrencyLimiter:
         self._active: Dict[str, int] = {}
         self._lock = threading.Lock()
 
-    def acquire(self, key: str) -> _Lease:
+    def acquire(self, key: str) -> ConcurrencyLease:
         """Acquire one slot or reject the operation immediately.
 
         Args:
@@ -217,7 +303,7 @@ class ConcurrencyLimiter:
             if active >= self.max_concurrent:
                 raise ConcurrencyLimitError("Too many concurrent operations")
             self._active[key] = active + 1
-        return _Lease(self, key)
+        return ConcurrencyLease(self, key)
 
     @contextmanager
     def lease(self, key: str):

@@ -10,6 +10,7 @@ from app.schemas import (
     DocumentResponse, DocumentStatusResponse
 )
 from app.db.models import User
+from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
 from app.services.documents import DocumentService, UploadTooLargeError
 from app.config import get_settings
 from app.routers.auth import get_current_user
@@ -20,7 +21,11 @@ from app.routers.rate_limit import (
     get_concurrency_limiter,
     get_rate_limiter,
 )
-from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
+from app.services.rate_limit import (
+    ConcurrencyLimiter,
+    SlidingWindowRateLimiter,
+    UnlimitedConcurrencyLease,
+)
 from app.utils.network import UnsafeURLError
 
 # Every route below requires a signed-in caller. Declaring that on the
@@ -48,16 +53,17 @@ def _begin_ingestion(
         concurrency_limiter: Active-operation limiter.
 
     Returns:
-        A lease the route must release in ``finally``.
+        An operation lease whose ownership transfers to DocumentService.
     """
-    if settings.rate_limit_enabled:
-        enforce_account_rate_limit(
-            request_limiter,
-            "ingest",
-            user_id,
-            limit=10,
-            window_seconds=60,
-        )
+    if not settings.rate_limit_enabled:
+        return UnlimitedConcurrencyLease()
+    enforce_account_rate_limit(
+        request_limiter,
+        "ingest",
+        user_id,
+        limit=10,
+        window_seconds=60,
+    )
     return acquire_account_lease(concurrency_limiter, "ingest", user_id)
 
 
@@ -97,7 +103,9 @@ async def upload_file(
             raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
         if declared_bytes < 0:
             raise HTTPException(status_code=400, detail="Invalid Content-Length")
-        if declared_bytes > settings.max_file_size_bytes:
+        if declared_bytes > (
+            settings.max_file_size_bytes + MULTIPART_ENVELOPE_ALLOWANCE_BYTES
+        ):
             raise HTTPException(
                 status_code=413,
                 detail=f"File size exceeds maximum of {settings.max_file_size_mb}MB",
@@ -123,7 +131,6 @@ async def upload_file(
         request_limiter,
         concurrency_limiter,
     )
-    lease_transferred = False
     try:
         # Process the upload
         document = await document_service.process_pdf_upload(
@@ -133,9 +140,8 @@ async def upload_file(
             file=file.file,
             filename=file.filename,
             title=title,
-            completion_callback=lease.release,
+            operation_lease=lease,
         )
-        lease_transferred = True
         
         return FileUploadResponse(
             doc_id=document.id,
@@ -151,9 +157,6 @@ async def upload_file(
                     filename=file.filename,
                     error=str(e))
         raise HTTPException(status_code=500, detail="File upload failed")
-    finally:
-        if not lease_transferred:
-            lease.release()
 
 
 @router.post("/projects/{project_id}/upload-url", response_model=FileUploadResponse)
@@ -185,7 +188,6 @@ async def upload_url(
         request_limiter,
         concurrency_limiter,
     )
-    lease_transferred = False
     try:
         # Process the URL
         document = await document_service.process_url(
@@ -194,9 +196,8 @@ async def upload_url(
             user_id=current_user.id,
             url=request.url,
             title=request.title,
-            completion_callback=lease.release,
+            operation_lease=lease,
         )
-        lease_transferred = True
         
         return FileUploadResponse(
             doc_id=document.id,
@@ -212,9 +213,6 @@ async def upload_url(
                     url=request.url,
                     error=str(e))
         raise HTTPException(status_code=500, detail="URL processing failed")
-    finally:
-        if not lease_transferred:
-            lease.release()
 
 
 @router.post("/projects/{project_id}/upload-youtube", response_model=FileUploadResponse)
@@ -251,7 +249,6 @@ async def upload_youtube(
         request_limiter,
         concurrency_limiter,
     )
-    lease_transferred = False
     try:
         # Process the YouTube URL
         document = await document_service.process_youtube(
@@ -260,9 +257,8 @@ async def upload_youtube(
             user_id=current_user.id,
             youtube_url=request.youtube_url,
             title=request.title,
-            completion_callback=lease.release,
+            operation_lease=lease,
         )
-        lease_transferred = True
         
         return FileUploadResponse(
             doc_id=document.id,
@@ -276,9 +272,6 @@ async def upload_youtube(
                     youtube_url=request.youtube_url,
                     error=str(e))
         raise HTTPException(status_code=500, detail="YouTube processing failed")
-    finally:
-        if not lease_transferred:
-            lease.release()
 
 
 @router.get("/docs/{doc_id}/status", response_model=DocumentStatusResponse)

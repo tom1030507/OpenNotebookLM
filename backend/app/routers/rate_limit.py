@@ -11,6 +11,7 @@ from app.services.rate_limit import (
 
 
 _request_limiter = SlidingWindowRateLimiter(
+    enabled=get_settings().rate_limit_enabled,
     max_keys=get_settings().rate_limit_max_keys,
 )
 _concurrency_limiter = ConcurrencyLimiter(max_concurrent=2)

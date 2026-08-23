@@ -119,3 +119,24 @@ def test_create_user_rejects_a_partial_identity_collision():
             )
 
         assert db.query(User).count() == 1
+
+
+def test_cli_rejects_multibyte_password_over_bcrypt_byte_limit_without_leak(capsys):
+    """A 75-byte Unicode password exits cleanly without traceback or secret."""
+    sessions = database_factory()
+    password = "密" * 25
+    supplied = iter([password, password])
+
+    exit_code = main(
+        ["--username", "unicode-user", "--email", "unicode@example.com"],
+        password_reader=lambda prompt: next(supplied),
+        session_factory=sessions,
+        initialize_database=lambda: None,
+    )
+
+    output = capsys.readouterr()
+    assert exit_code == 2
+    assert "invalid" in output.err.lower()
+    assert password not in output.out + output.err
+    with sessions() as db:
+        assert db.query(User).count() == 0

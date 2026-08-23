@@ -13,6 +13,7 @@ from app.routers import (
 )
 from app.api import cache
 from app.utils.logging import setup_logging
+from app.middleware.upload_body_limit import UploadBodyLimitMiddleware
 
 # Setup logging
 setup_logging()
@@ -58,6 +59,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    UploadBodyLimitMiddleware,
+    max_file_size_bytes=settings.max_file_size_bytes,
+    configured_limit_mb=settings.max_file_size_mb,
 )
 
 # Include routers

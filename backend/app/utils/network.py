@@ -9,6 +9,33 @@ class UnsafeURLError(ValueError):
     """Raised when a URL is not safe for a server-side fetch."""
 
 
+def _is_public_address(address) -> bool:
+    """Return whether an IP and any embedded transition address are public."""
+    explicitly_denied = (
+        address.is_multicast,
+        address.is_reserved,
+        address.is_unspecified,
+        address.is_loopback,
+        address.is_link_local,
+        address.is_private,
+    )
+    if not address.is_global or any(explicitly_denied):
+        return False
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.is_site_local:
+            return False
+        embedded = []
+        if address.ipv4_mapped is not None:
+            embedded.append(address.ipv4_mapped)
+        if address.sixtofour is not None:
+            embedded.append(address.sixtofour)
+        if address.teredo is not None:
+            embedded.extend(address.teredo)
+        if any(not _is_public_address(item) for item in embedded):
+            return False
+    return True
+
+
 def validate_public_http_url(
     url: str,
     resolver: Callable = socket.getaddrinfo,
@@ -79,10 +106,11 @@ def resolve_public_http_url(
     addresses: List[str] = []
     for answer in answers:
         try:
-            address = str(ipaddress.ip_address(answer[4][0]))
+            parsed_address = ipaddress.ip_address(answer[4][0])
+            address = str(parsed_address)
         except (IndexError, TypeError, ValueError) as exc:
             raise UnsafeURLError("URL hostname returned an invalid address") from exc
-        if not ipaddress.ip_address(address).is_global:
+        if not _is_public_address(parsed_address):
             raise UnsafeURLError("URL destination must be globally routable")
         if address not in addresses:
             addresses.append(address)

@@ -263,7 +263,10 @@ class TestIndexingFailures:
     def test_background_failure_releases_the_ingestion_lease(self, db):
         """A failed background import cannot permanently consume a slot."""
         service = build_service([])
-        released = []
+        from app.services.rate_limit import ConcurrencyLimiter
+
+        limiter = ConcurrencyLimiter(max_concurrent=1)
+        lease = limiter.acquire("ingest:user")
 
         class ExplodingURLAdapter:
             def extract_content(self, url):
@@ -275,10 +278,10 @@ class TestIndexingFailures:
             db,
             DOC_ID,
             "https://example.com",
-            completion_callback=lambda: released.append(True),
+            operation_lease=lease,
         ))
 
-        assert released == [True]
+        assert limiter.active("ingest:user") == 0
 
 
 class TestProcessingMetadata:

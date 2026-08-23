@@ -1,4 +1,7 @@
 """Deterministic tests for bounded request and concurrency controls."""
+from concurrent.futures import Future, ThreadPoolExecutor
+from threading import Barrier, Lock
+
 import pytest
 from starlette.requests import Request
 
@@ -119,6 +122,61 @@ def test_concurrency_lease_releases_after_an_exception():
         assert limiter.active("query:user") == 1
 
     assert limiter.active("query:user") == 0
+
+
+def test_release_waits_for_deferred_underlying_future_and_happens_once():
+    """Cancellation cannot free a slot while its executor future is running."""
+    class CountingLimiter(ConcurrencyLimiter):
+        def __init__(self):
+            super().__init__(max_concurrent=1)
+            self.release_calls = 0
+
+        def _release(self, key):
+            self.release_calls += 1
+            super()._release(key)
+
+    limiter = CountingLimiter()
+    lease = limiter.acquire("ingest:user")
+    underlying = Future()
+
+    lease.defer_release_until(underlying)
+    lease.release()
+
+    assert limiter.active("ingest:user") == 1
+    underlying.set_result(None)
+    assert limiter.active("ingest:user") == 0
+    lease.release()
+    assert limiter.release_calls == 1
+
+
+def test_concurrent_release_calls_decrement_the_limiter_exactly_once():
+    """Lease release is idempotent even when callbacks race across threads."""
+    class CountingLimiter(ConcurrencyLimiter):
+        def __init__(self):
+            super().__init__(max_concurrent=1)
+            self.release_calls = 0
+            self.count_lock = Lock()
+
+        def _release(self, key):
+            with self.count_lock:
+                self.release_calls += 1
+            super()._release(key)
+
+    limiter = CountingLimiter()
+    lease = limiter.acquire("ingest:user")
+    barrier = Barrier(16)
+
+    def release_together():
+        barrier.wait(timeout=2)
+        lease.release()
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = [executor.submit(release_together) for _ in range(16)]
+        for future in futures:
+            future.result(timeout=2)
+
+    assert limiter.active("ingest:user") == 0
+    assert limiter.release_calls == 1
 
 
 def test_forwarded_address_is_ignored_without_explicit_proxy_trust():

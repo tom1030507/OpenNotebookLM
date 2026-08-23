@@ -30,6 +30,7 @@ COPY --from=builder /root/.local /root/.local
 
 # Copy application code
 COPY backend/app ./app
+COPY backend/scripts ./scripts
 COPY backend/*.py ./
 
 # Create necessary directories
