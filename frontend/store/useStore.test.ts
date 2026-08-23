@@ -567,6 +567,221 @@ describe('application store', () => {
     ]);
   });
 
+  it('hands a query refresh from a never-settling second read to a third reader', async () => {
+    const firstRefresh = deferred<Message[]>();
+    const secondRefresh = deferred<Message[]>();
+    const thirdRefresh = deferred<Message[]>();
+    const currentProject = project('project-1');
+    const currentConversation = conversation('conversation-1', currentProject.id);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    apiMock.getMessages
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise)
+      .mockReturnValueOnce(thirdRefresh.promise);
+    useStore.setState({ currentProject, currentConversation });
+
+    const pendingQuery = useStore.getState().sendQuery('Question');
+    await settle();
+    const secondRead = useStore.getState().fetchMessages(currentConversation.id);
+    let secondResult: { status: string } | undefined;
+    void secondRead.then((result) => {
+      secondResult = result;
+    });
+    firstRefresh.resolve([message('message-first', currentConversation.id)]);
+    await settle();
+
+    const thirdRead = useStore.getState().fetchMessages(currentConversation.id);
+    thirdRefresh.resolve([message('message-third', currentConversation.id)]);
+    await thirdRead;
+    await settle();
+
+    expect(secondResult?.status).toBe('stale');
+    await expect(pendingQuery).resolves.toBeUndefined();
+    expect(useStore.getState().messages).toEqual([
+      message('message-third', currentConversation.id),
+    ]);
+    expect(useStore.getState().loadingMessages).toBe(false);
+  });
+
+  it('reports a third same-conversation read failure despite a never-settling second read', async () => {
+    const firstRefresh = deferred<Message[]>();
+    const secondRefresh = deferred<Message[]>();
+    const thirdRefresh = deferred<Message[]>();
+    const currentProject = project('project-1');
+    const currentConversation = conversation('conversation-1', currentProject.id);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    apiMock.getMessages
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise)
+      .mockReturnValueOnce(thirdRefresh.promise);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({ currentProject, currentConversation });
+
+    const pendingQuery = useStore.getState().sendQuery('Question');
+    let queryError: unknown;
+    void pendingQuery.catch((error) => {
+      queryError = error;
+    });
+    await settle();
+    const secondRead = useStore.getState().fetchMessages(currentConversation.id);
+    let secondResult: { status: string } | undefined;
+    void secondRead.then((result) => {
+      secondResult = result;
+    });
+    firstRefresh.resolve([message('message-first', currentConversation.id)]);
+    await settle();
+
+    const thirdRead = useStore.getState().fetchMessages(currentConversation.id);
+    thirdRefresh.reject(new Error('Third refresh failed'));
+    await thirdRead;
+    await settle();
+
+    expect(secondResult?.status).toBe('stale');
+    expect(queryError).toBeInstanceOf(QueryMessageRefreshError);
+    expect(useStore.getState().loadingMessages).toBe(false);
+  });
+
+  it('hands a waiting query through rapid same-conversation replacements', async () => {
+    const firstRefresh = deferred<Message[]>();
+    const secondRefresh = deferred<Message[]>();
+    const thirdRefresh = deferred<Message[]>();
+    const fourthRefresh = deferred<Message[]>();
+    const currentProject = project('project-1');
+    const currentConversation = conversation('conversation-1', currentProject.id);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    apiMock.getMessages
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise)
+      .mockReturnValueOnce(thirdRefresh.promise)
+      .mockReturnValueOnce(fourthRefresh.promise);
+    useStore.setState({ currentProject, currentConversation });
+
+    const pendingQuery = useStore.getState().sendQuery('Question');
+    await settle();
+    const secondRead = useStore.getState().fetchMessages(currentConversation.id);
+    let secondSettled = false;
+    void secondRead.then(() => {
+      secondSettled = true;
+    });
+    firstRefresh.resolve([message('message-first', currentConversation.id)]);
+    await settle();
+
+    const thirdRead = useStore.getState().fetchMessages(currentConversation.id);
+    let thirdSettled = false;
+    void thirdRead.then(() => {
+      thirdSettled = true;
+    });
+    await settle();
+    const fourthRead = useStore.getState().fetchMessages(currentConversation.id);
+    fourthRefresh.resolve([message('message-fourth', currentConversation.id)]);
+    await fourthRead;
+    await settle();
+
+    expect(secondSettled).toBe(true);
+    expect(thirdSettled).toBe(true);
+    await expect(pendingQuery).resolves.toBeUndefined();
+    expect(useStore.getState().messages).toEqual([
+      message('message-fourth', currentConversation.id),
+    ]);
+    expect(useStore.getState().loadingMessages).toBe(false);
+  });
+
+  it('completes a waiting query benignly when its conversation retires', async () => {
+    const firstRefresh = deferred<Message[]>();
+    const secondRefresh = deferred<Message[]>();
+    const currentProject = project('project-1');
+    const currentConversation = conversation('conversation-1', currentProject.id);
+    const otherConversation = conversation('conversation-2', currentProject.id);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    apiMock.getMessages
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise)
+      .mockResolvedValueOnce([]);
+    useStore.setState({ currentProject, currentConversation });
+
+    const pendingQuery = useStore.getState().sendQuery('Question');
+    let querySettled = false;
+    void pendingQuery.then(() => {
+      querySettled = true;
+    });
+    await settle();
+    const secondRead = useStore.getState().fetchMessages(currentConversation.id);
+    let secondResult: { status: string } | undefined;
+    void secondRead.then((result) => {
+      secondResult = result;
+    });
+    firstRefresh.resolve([message('message-first', currentConversation.id)]);
+    await settle();
+
+    await useStore.getState().selectConversation(otherConversation);
+    await settle();
+
+    expect(secondResult?.status).toBe('stale');
+    expect(querySettled).toBe(true);
+    expect(useStore.getState().currentConversation).toEqual(otherConversation);
+    expect(useStore.getState().loadingMessages).toBe(false);
+  });
+
+  it('completes a waiting query benignly when its account retires', async () => {
+    const firstRefresh = deferred<Message[]>();
+    const secondRefresh = deferred<Message[]>();
+    const currentProject = project('project-1');
+    const currentConversation = conversation('conversation-1', currentProject.id);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    apiMock.getMessages
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise);
+    useStore.setState({ currentProject, currentConversation });
+
+    const pendingQuery = useStore.getState().sendQuery('Question');
+    await settle();
+    const secondRead = useStore.getState().fetchMessages(currentConversation.id);
+    firstRefresh.resolve([message('message-first', currentConversation.id)]);
+    await settle();
+
+    useStore.getState().clearAccountState();
+
+    await expect(secondRead).resolves.toMatchObject({ status: 'stale' });
+    await expect(pendingQuery).resolves.toBeUndefined();
+    expect(useStore.getState().currentProject).toBeNull();
+    expect(useStore.getState().loadingMessages).toBe(false);
+  });
+
   it('does not report a query refresh error after leaving its conversation', async () => {
     const queryRefresh = deferred<Message[]>();
     const currentProject = project('project-1');

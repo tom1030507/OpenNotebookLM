@@ -101,7 +101,9 @@ interface MessageReadAuthority {
   projectId: string;
   conversationId: string;
   completion: Promise<MessageFetchResult>;
-  resolve: (result: MessageFetchResult) => void;
+  settle: (result: MessageFetchResult) => void;
+  retirement: Promise<void>;
+  retire: () => void;
 }
 
 /**
@@ -126,6 +128,9 @@ const readGenerations = {
 type ReadResource = keyof typeof readGenerations;
 
 const advanceReadGeneration = (resource: ReadResource): number => {
+  if (resource === 'messages') {
+    retireActiveMessageRead();
+  }
   readGenerations[resource] += 1;
   return readGenerations[resource];
 };
@@ -155,9 +160,15 @@ const createMessageReadAuthority = (
   projectId: string,
   conversationId: string,
 ): MessageReadAuthority => {
-  let resolve!: (result: MessageFetchResult) => void;
+  let resolveCompletion!: (result: MessageFetchResult) => void;
+  let resolveRetirement!: () => void;
+  let settled = false;
+  let retired = false;
   const completion = new Promise<MessageFetchResult>((completionResolve) => {
-    resolve = completionResolve;
+    resolveCompletion = completionResolve;
+  });
+  const retirement = new Promise<void>((retirementResolve) => {
+    resolveRetirement = retirementResolve;
   });
 
   return {
@@ -166,7 +177,17 @@ const createMessageReadAuthority = (
     projectId,
     conversationId,
     completion,
-    resolve,
+    settle: (result) => {
+      if (settled) return;
+      settled = true;
+      resolveCompletion(result);
+    },
+    retirement,
+    retire: () => {
+      if (retired) return;
+      retired = true;
+      resolveRetirement();
+    },
   };
 };
 
@@ -183,6 +204,25 @@ const messageFetchResult = (
   projectId,
   conversationId,
 });
+
+/**
+ * The message transport has no AbortSignal, so retiring an authority must
+ * settle both its followers and its direct caller before a later read wins.
+ */
+const retireActiveMessageRead = (): void => {
+  const authority = activeMessageRead;
+  if (!authority) return;
+
+  activeMessageRead = null;
+  authority.retire();
+  authority.settle(messageFetchResult(
+    'stale',
+    authority.epoch,
+    authority.generation,
+    authority.projectId,
+    authority.conversationId,
+  ));
+};
 
 /** Signals that the query mutation finished but its authoritative refresh did not. */
 export class QueryMessageRefreshError extends Error {
@@ -661,12 +701,16 @@ const useStore = create<AppState>()(
               projectId,
               conversationId,
             );
-            authority.resolve(result);
+            authority.settle(result);
             return result;
           };
           set({ loadingMessages: true });
           try {
-            const messages = await api.getMessages(conversationId);
+            const messages = await Promise.race([
+              api.getMessages(conversationId),
+              authority.retirement.then(() => null),
+            ]);
+            if (messages === null) return complete('stale');
             if (isCurrentRequest()) {
               set({ messages, loadingMessages: false });
               return complete('applied');
@@ -802,7 +846,6 @@ const useStore = create<AppState>()(
         clearAccountState: () => {
           accountEpoch += 1;
           retireAllReads();
-          activeMessageRead = null;
           set((state) => ({
             projects: [],
             currentProject: null,
@@ -823,7 +866,6 @@ const useStore = create<AppState>()(
         resetForTests: () => {
           accountEpoch += 1;
           retireAllReads();
-          activeMessageRead = null;
           set(initialState);
         },
       }),

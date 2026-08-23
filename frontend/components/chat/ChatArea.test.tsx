@@ -316,6 +316,136 @@ describe('ChatArea', () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 
+  it('completes a refresh-only retry after a third reader applies while the second never settles', async () => {
+    const question = 'Can a third refresh unblock this retry?';
+    const retryRefresh = deferred<Message[]>();
+    const secondRefresh = deferred<Message[]>();
+    const thirdRefresh = deferred<Message[]>();
+    const currentConversation = conversation('conversation-1', project.id);
+    const query = vi.spyOn(api, 'query').mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    const getMessages = vi.spyOn(api, 'getMessages')
+      .mockRejectedValueOnce(new Error('Initial refresh failed'))
+      .mockReturnValueOnce(retryRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise)
+      .mockReturnValueOnce(thirdRefresh.promise);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation,
+      messages: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    expect(await screen.findByRole('button', { name: 'Refresh response' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh response' }));
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(2));
+    void useStore.getState().selectConversation(currentConversation);
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(3));
+    await act(async () => {
+      retryRefresh.resolve([]);
+      await retryRefresh.promise;
+    });
+    expect(screen.getByText(question)).toBeTruthy();
+
+    const thirdRead = useStore.getState().fetchMessages(currentConversation.id);
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(4));
+    await act(async () => {
+      thirdRefresh.resolve([
+        {
+          id: 'message-user',
+          conversation_id: currentConversation.id,
+          role: 'user',
+          content: question,
+          citations: [],
+          created_at: '2026-08-23T00:00:00Z',
+        },
+        {
+          id: 'message-assistant',
+          conversation_id: currentConversation.id,
+          role: 'assistant',
+          content: 'The third reader completed the retry.',
+          citations: [],
+          created_at: '2026-08-23T00:00:01Z',
+        },
+      ]);
+      await thirdRead;
+    });
+
+    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false));
+    expect(screen.getByText('The third reader completed the retry.')).toBeTruthy();
+    expect(screen.getAllByText(question)).toHaveLength(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps refresh retry UI when a third reader fails while the second never settles', async () => {
+    const question = 'Can a third failed refresh remain retryable?';
+    const retryRefresh = deferred<Message[]>();
+    const secondRefresh = deferred<Message[]>();
+    const thirdRefresh = deferred<Message[]>();
+    const currentConversation = conversation('conversation-1', project.id);
+    const query = vi.spyOn(api, 'query').mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: currentConversation.id,
+    });
+    const getMessages = vi.spyOn(api, 'getMessages')
+      .mockRejectedValueOnce(new Error('Initial refresh failed'))
+      .mockReturnValueOnce(retryRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise)
+      .mockReturnValueOnce(thirdRefresh.promise);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation,
+      messages: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    expect(await screen.findByRole('button', { name: 'Refresh response' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh response' }));
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(2));
+    void useStore.getState().selectConversation(currentConversation);
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(3));
+    await act(async () => {
+      retryRefresh.resolve([]);
+      await retryRefresh.promise;
+    });
+    expect(screen.getByText(question)).toBeTruthy();
+
+    void useStore.getState().fetchMessages(currentConversation.id);
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(4));
+    thirdRefresh.reject(new Error('Third refresh failed'));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The conversation could not be refreshed.',
+    );
+    expect(screen.getByRole('button', { name: 'Refresh response' })).toBeTruthy();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false);
+    expect(screen.getByText(question)).toBeTruthy();
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
   it('abandons a refresh-only retry benignly after its conversation changes', async () => {
     const question = 'Should an old retry stay quiet?';
     const retryRefresh = deferred<Message[]>();
