@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AUTH_TOKEN_COOKIE,
@@ -18,6 +18,93 @@ const cookieValue = (name: string) => document.cookie
   ?.slice(name.length + 1);
 
 
+const seedAccountState = () => {
+  const project = {
+    id: 'project-a',
+    name: 'Account A project',
+    description: null,
+    meta_json: {},
+    created_at: '2026-08-23T00:00:00Z',
+    updated_at: '2026-08-23T00:00:00Z',
+    document_count: 1,
+    conversation_count: 1,
+  };
+  const conversation = {
+    id: 'conversation-a',
+    project_id: project.id,
+    title: 'Account A conversation',
+    created_at: '2026-08-23T00:00:00Z',
+    updated_at: '2026-08-23T00:00:00Z',
+    message_count: 1,
+  };
+
+  useStore.setState({
+    projects: [project],
+    currentProject: project,
+    documents: [{
+      id: 'document-a',
+      name: 'Account A document',
+      type: 'text',
+      content: 'Private source',
+      meta: {},
+      status: 'ready',
+      created_at: '2026-08-23T00:00:00Z',
+      updated_at: '2026-08-23T00:00:00Z',
+      chunk_count: 1,
+    }],
+    conversations: [conversation],
+    currentConversation: conversation,
+    messages: [{
+      id: 'message-a',
+      conversation_id: conversation.id,
+      role: 'user',
+      content: 'Private question',
+      citations: [],
+      created_at: '2026-08-23T00:00:00Z',
+    }],
+    loadingProjects: true,
+    loadingDocuments: true,
+    loadingConversations: true,
+    loadingMessages: true,
+    uploadProgress: { 'document-a-upload': 50 },
+    sidebarOpen: false,
+    studioOpen: false,
+    notifyOnProcessingComplete: false,
+  });
+};
+
+
+const expectAccountStateCleared = () => {
+  expect(useStore.getState()).toMatchObject({
+    projects: [],
+    currentProject: null,
+    documents: [],
+    conversations: [],
+    currentConversation: null,
+    messages: [],
+    loadingProjects: false,
+    loadingDocuments: false,
+    loadingConversations: false,
+    loadingMessages: false,
+    uploadProgress: {},
+    sidebarOpen: false,
+    studioOpen: false,
+    notifyOnProcessingComplete: false,
+  });
+};
+
+
+const expectReplacementSession = () => {
+  expect(readAccessToken()).toBe('account-b-token');
+  expect(window.localStorage.getItem('auth_token')).toBe('account-b-token');
+  expect(JSON.parse(window.localStorage.getItem('user') as string)).toEqual({
+    username: 'account-b',
+    email: 'b@example.com',
+  });
+  expect(cookieValue(AUTH_TOKEN_COOKIE)).toBe('account-b-token');
+};
+
+
 beforeEach(() => {
   window.localStorage.clear();
   clearSession();
@@ -26,6 +113,7 @@ beforeEach(() => {
 
 afterEach(() => {
   useStore.getState().resetForTests();
+  vi.restoreAllMocks();
 });
 
 
@@ -170,5 +258,42 @@ describe('browser session', () => {
       email: 'b@example.com',
     });
     expect(cookieValue(AUTH_TOKEN_COOKIE)).toBe('account-b-token');
+  });
+
+  it.each([
+    ['null', 'null'],
+    ['empty object', '{}'],
+    ['numeric username', JSON.stringify({ username: 42, email: 'a@example.com' })],
+    ['blank username', JSON.stringify({ username: '   ', email: 'a@example.com' })],
+    ['missing email', JSON.stringify({ username: 'account-b' })],
+  ])('fails closed on valid JSON with an invalid stored user shape: %s', (_label, storedUser) => {
+    window.localStorage.setItem('user', storedUser);
+    seedAccountState();
+
+    storeSession(
+      'account-b-token',
+      { username: 'account-b', email: 'b@example.com' },
+      useStore.getState().clearAccountState,
+    );
+
+    expectAccountStateCleared();
+    expectReplacementSession();
+  });
+
+  it('fails closed when reading stored user data throws before persisting a replacement session', () => {
+    seedAccountState();
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('Storage read denied');
+    });
+
+    storeSession(
+      'account-b-token',
+      { username: 'account-b', email: 'b@example.com' },
+      useStore.getState().clearAccountState,
+    );
+    getItem.mockRestore();
+
+    expectAccountStateCleared();
+    expectReplacementSession();
   });
 });

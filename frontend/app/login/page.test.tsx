@@ -41,7 +41,7 @@ beforeEach(() => {
   push.mockClear();
   window.localStorage.clear();
   document.cookie = `${AUTH_TOKEN_COOKIE}=; Path=/; Max-Age=0`;
-  useStore.setState(useStore.getInitialState(), true);
+  useStore.getState().resetForTests();
 });
 
 afterEach(() => {

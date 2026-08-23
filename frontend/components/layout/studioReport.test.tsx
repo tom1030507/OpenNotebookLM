@@ -31,7 +31,6 @@ const source: Document = {
   chunk_count: 3,
 };
 
-const initialState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState({
@@ -51,7 +50,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('Studio report', () => {

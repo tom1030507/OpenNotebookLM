@@ -22,7 +22,6 @@ const project: Project = {
   conversation_count: 0,
 };
 
-const initialState = useStore.getState();
 
 function documentWith(status: DocumentStatus, id = 'document-1'): Document {
   return {
@@ -68,7 +67,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('useDocumentStatusWatch', () => {

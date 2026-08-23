@@ -61,7 +61,6 @@ const mindMap = (modelUsed = 'test-model'): MindMap => ({
   },
 });
 
-const initialState = useStore.getState();
 
 const openMindMap = async () => {
   render(<StudioPanel />);
@@ -81,7 +80,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('Studio mind map', () => {

@@ -16,9 +16,18 @@ const TOKEN_KEYS = ['access_token', 'auth_token'] as const;
 
 const STORAGE_KEYS = [...TOKEN_KEYS, 'user'] as const;
 
+// A token is normally unique, but account transitions must also retire a
+// request if a replacement session happens to reuse its credential.
+let sessionGeneration = 0;
+
 export interface SessionUser {
   username: string;
   email: string;
+}
+
+export interface SessionCredentialSnapshot {
+  authorization: string | null;
+  generation: number;
 }
 
 const writeCookie = (value: string, maxAgeSeconds: number) => {
@@ -38,34 +47,51 @@ const writeCookie = (value: string, maxAgeSeconds: number) => {
   document.cookie = attributes.join('; ');
 };
 
+
+const isStoredSessionUser = (value: unknown): value is SessionUser => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const user = value as Record<string, unknown>;
+  return typeof user.username === 'string'
+    && user.username.trim().length > 0
+    && typeof user.email === 'string';
+};
+
 /** Record a signed-in session for both the client and the middleware. */
 export const storeSession = (
   accessToken: string,
   user: SessionUser,
   clearAccountState?: () => void,
 ): void => {
-  let previousUser: Partial<SessionUser> | null = null;
+  sessionGeneration += 1;
+  let previousUser: SessionUser | null = null;
+  let mustClearAccountState = false;
 
   try {
     const storedUser = window.localStorage.getItem('user');
-    if (storedUser) {
+    if (storedUser !== null) {
       try {
-        previousUser = JSON.parse(storedUser) as Partial<SessionUser>;
+        const parsedUser: unknown = JSON.parse(storedUser);
+        if (isStoredSessionUser(parsedUser)) {
+          previousUser = parsedUser;
+        } else {
+          mustClearAccountState = true;
+        }
       } catch {
-        // Corrupt identity data leaves the current workspace untrustworthy.
-        // Clear it before recording the replacement session, but keep the
-        // storage writes below independent so this account can still sign in.
-        clearAccountState?.();
+        mustClearAccountState = true;
       }
     }
   } catch {
-    // The cookie below still carries the session for this browsing context.
+    mustClearAccountState = true;
   }
 
-  // This shared browser can move from one account to another without a page
-  // reload. Clear the in-memory workspace before overwriting the identity,
-  // otherwise the next account can briefly read the previous one's data.
-  if (previousUser?.username && previousUser.username !== user.username) {
+  // An unreadable or invalid identity makes the current workspace untrustworthy.
+  // Clear it before replacement writes, which remain independent so the user
+  // can still sign in when old storage is malformed or unavailable.
+  const accountChanged = previousUser !== null && previousUser.username !== user.username;
+  if (mustClearAccountState || accountChanged) {
     clearAccountState?.();
   }
 
@@ -108,8 +134,29 @@ export const readAccessToken = (): string | null => {
   return null;
 };
 
+/** Capture the exact Authorization value sent with a request. */
+export const snapshotSessionCredential = (
+  authorization: string | null,
+): SessionCredentialSnapshot => ({
+  authorization,
+  generation: sessionGeneration,
+});
+
+/** True only while the request still belongs to the active browser session. */
+export const isCurrentSessionCredential = (
+  snapshot: SessionCredentialSnapshot,
+): boolean => {
+  if (!snapshot.authorization || snapshot.generation !== sessionGeneration) {
+    return false;
+  }
+
+  const currentToken = readAccessToken();
+  return currentToken !== null && snapshot.authorization === `Bearer ${currentToken}`;
+};
+
 /** Forget the signed-in session. */
 export const clearSession = (): void => {
+  sessionGeneration += 1;
   for (const key of STORAGE_KEYS) {
     try {
       window.localStorage.removeItem(key);

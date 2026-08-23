@@ -47,9 +47,9 @@ describe('API client', () => {
       document_count: 0,
       conversation_count: 0,
     }]);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/projects',
-      expect.objectContaining({ headers: { Accept: 'application/json' } }),
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/projects');
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Accept')).toBe(
+      'application/json',
     );
   });
 
@@ -394,7 +394,7 @@ describe('API client', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/token');
     expect(fetchMock.mock.calls[0][1].method).toBe('POST');
-    expect(fetchMock.mock.calls[0][1].headers['Content-Type']).toBe(
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Content-Type')).toBe(
       'application/x-www-form-urlencoded',
     );
     expect((fetchMock.mock.calls[0][1].body as URLSearchParams).toString()).toBe(
@@ -438,7 +438,7 @@ describe('API client', () => {
       expect.objectContaining({ username: 'ada', email: 'ada@example.com' }),
     );
     expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/me');
-    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Authorization')).toBe(
       'Bearer a-signed-token',
     );
   });

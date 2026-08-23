@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import api from '@/lib/api';
 import type { Conversation, Document, Message, Project } from '@/lib/api';
+import { registerAccountStateRetirer } from '@/lib/sessionBoundary';
 
 interface AppState {
   // Projects
@@ -603,5 +604,9 @@ const useStore = create<AppState>()(
     )
   )
 );
+
+registerAccountStateRetirer(() => {
+  useStore.getState().clearAccountState();
+});
 
 export default useStore;

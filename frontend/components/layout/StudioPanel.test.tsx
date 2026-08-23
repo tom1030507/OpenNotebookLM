@@ -44,7 +44,6 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const initialState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState({
@@ -57,7 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('StudioPanel', () => {

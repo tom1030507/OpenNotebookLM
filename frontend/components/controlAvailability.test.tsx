@@ -26,7 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useStore.setState(useStore.getInitialState(), true);
+  useStore.getState().resetForTests();
 });
 
 

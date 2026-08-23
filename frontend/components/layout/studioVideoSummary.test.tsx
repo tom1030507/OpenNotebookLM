@@ -69,7 +69,6 @@ const summary = (modelUsed = 'test-model'): VideoSummary => ({
   ],
 });
 
-const initialState = useStore.getState();
 
 interface Utterance {
   text: string;
@@ -137,7 +136,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('Studio video summary', () => {

@@ -38,7 +38,6 @@ const processing: Document = {
   chunk_count: 0,
 };
 
-const initialState = useStore.getState();
 const renderTopNav = () => render(
   <ProjectDialogProvider>
     <TopNav />
@@ -91,7 +90,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
   vi.unstubAllGlobals();
 });
 

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import api from './api';
 import { AUTH_TOKEN_COOKIE, clearSession, storeSession } from './session';
+import useStore from '@/store/useStore';
 
 
 const jsonResponse = (body: unknown, status = 200) => new Response(
@@ -26,10 +27,76 @@ const emptyProjectList = () => jsonResponse({
   per_page: 10,
 });
 
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+};
+
+const seedWorkspace = (account: 'a' | 'b') => {
+  const project = {
+    id: `project-${account}`,
+    name: `Account ${account.toUpperCase()} project`,
+    description: null,
+    meta_json: {},
+    created_at: '2026-08-23T00:00:00Z',
+    updated_at: '2026-08-23T00:00:00Z',
+    document_count: 1,
+    conversation_count: 1,
+  };
+  const conversation = {
+    id: `conversation-${account}`,
+    project_id: project.id,
+    title: `Account ${account.toUpperCase()} conversation`,
+    created_at: '2026-08-23T00:00:00Z',
+    updated_at: '2026-08-23T00:00:00Z',
+    message_count: 1,
+  };
+
+  useStore.setState({
+    projects: [project],
+    currentProject: project,
+    documents: [{
+      id: `document-${account}`,
+      name: `Account ${account.toUpperCase()} document`,
+      type: 'text',
+      content: 'Private source',
+      meta: {},
+      status: 'ready',
+      created_at: '2026-08-23T00:00:00Z',
+      updated_at: '2026-08-23T00:00:00Z',
+      chunk_count: 1,
+    }],
+    conversations: [conversation],
+    currentConversation: conversation,
+    messages: [{
+      id: `message-${account}`,
+      conversation_id: conversation.id,
+      role: 'user',
+      content: `Account ${account.toUpperCase()} question`,
+      citations: [],
+      created_at: '2026-08-23T00:00:00Z',
+    }],
+    loadingProjects: true,
+    loadingDocuments: true,
+    loadingConversations: true,
+    loadingMessages: true,
+    uploadProgress: { [`upload-${account}`]: 50 },
+    sidebarOpen: false,
+    studioOpen: false,
+    notifyOnProcessingComplete: false,
+  });
+
+  return project;
+};
+
 /** The headers the client put on its most recent request. */
-const sentHeaders = (fetchMock: ReturnType<typeof vi.fn>): Record<string, string> => {
+const sentHeaders = (fetchMock: ReturnType<typeof vi.fn>): Headers => {
   const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
-  return init.headers as Record<string, string>;
+  return new Headers(init.headers);
 };
 
 const signIn = () => storeSession('a-signed-token', {
@@ -38,8 +105,8 @@ const signIn = () => storeSession('a-signed-token', {
 });
 
 /** Replace `window.location` so a redirect is observable instead of a crash. */
-const stubLocation = (pathname: string) => {
-  const assign = vi.fn();
+const stubLocation = (pathname: string, onAssign?: () => void) => {
+  const assign = vi.fn(onAssign);
   vi.stubGlobal('location', { ...window.location, pathname, assign });
 
   return assign;
@@ -47,11 +114,13 @@ const stubLocation = (pathname: string) => {
 
 
 beforeEach(() => {
+  useStore.getState().resetForTests();
   window.localStorage.clear();
   clearSession();
 });
 
 afterEach(() => {
+  useStore.getState().resetForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -65,7 +134,7 @@ describe('API client authorization', () => {
 
     await api.getProjects();
 
-    expect(sentHeaders(fetchMock).Authorization).toBe('Bearer a-signed-token');
+    expect(sentHeaders(fetchMock).get('Authorization')).toBe('Bearer a-signed-token');
   });
 
   it('sends the stored token on a write, alongside the content type', async () => {
@@ -84,10 +153,8 @@ describe('API client authorization', () => {
 
     await api.createProject({ name: 'Research' });
 
-    expect(sentHeaders(fetchMock)).toMatchObject({
-      Authorization: 'Bearer a-signed-token',
-      'Content-Type': 'application/json',
-    });
+    expect(sentHeaders(fetchMock).get('Authorization')).toBe('Bearer a-signed-token');
+    expect(sentHeaders(fetchMock).get('Content-Type')).toBe('application/json');
   });
 
   it('sends the stored token when downloading an export', async () => {
@@ -97,7 +164,7 @@ describe('API client authorization', () => {
 
     await api.exportProjectSummary('project-1');
 
-    expect(sentHeaders(fetchMock).Authorization).toBe('Bearer a-signed-token');
+    expect(sentHeaders(fetchMock).get('Authorization')).toBe('Bearer a-signed-token');
   });
 
   it('sends the stored token when reading an export as text', async () => {
@@ -107,7 +174,7 @@ describe('API client authorization', () => {
 
     await api.fetchProjectSummaryText('project-1');
 
-    expect(sentHeaders(fetchMock).Authorization).toBe('Bearer a-signed-token');
+    expect(sentHeaders(fetchMock).get('Authorization')).toBe('Bearer a-signed-token');
   });
 
   it('sends no Authorization header when nobody is signed in', async () => {
@@ -116,7 +183,7 @@ describe('API client authorization', () => {
 
     await api.getProjects();
 
-    expect(sentHeaders(fetchMock)).not.toHaveProperty('Authorization');
+    expect(sentHeaders(fetchMock).get('Authorization')).toBeNull();
   });
 
   it('falls back to the mirrored key when only that one survived', async () => {
@@ -127,7 +194,7 @@ describe('API client authorization', () => {
 
     await api.getProjects();
 
-    expect(sentHeaders(fetchMock).Authorization).toBe('Bearer the-surviving-copy');
+    expect(sentHeaders(fetchMock).get('Authorization')).toBe('Bearer the-surviving-copy');
   });
 });
 
@@ -205,6 +272,126 @@ describe('a token the backend rejects', () => {
     await expect(api.getAccount('a-signed-token')).rejects.toThrow();
 
     expect(window.localStorage.getItem('access_token')).toBe('a-signed-token');
+    expect(assign).not.toHaveBeenCalled();
+  });
+});
+
+const protectedFetchHelpers = [
+  { kind: 'JSON', request: () => api.getProjects() },
+  { kind: 'blob', request: () => api.exportProjectSummary('project-a') },
+  { kind: 'text', request: () => api.fetchProjectSummaryText('project-a') },
+];
+
+describe('deferred 401 session boundaries', () => {
+  it.each(protectedFetchHelpers)(
+    'does not abandon Account B when an Account A $kind response arrives late',
+    async ({ request }) => {
+      storeSession('account-a-token', {
+        username: 'account-a',
+        email: 'a@example.com',
+      }, useStore.getState().clearAccountState);
+      seedWorkspace('a');
+      const pendingResponse = deferred<Response>();
+      vi.stubGlobal('fetch', vi.fn(() => pendingResponse.promise));
+      const assign = stubLocation('/projects/project-b');
+
+      const pendingRequest = request();
+      storeSession('account-b-token', {
+        username: 'account-b',
+        email: 'b@example.com',
+      }, useStore.getState().clearAccountState);
+      seedWorkspace('b');
+      pendingResponse.resolve(jsonResponse({ detail: 'Could not validate credentials' }, 401));
+
+      await expect(pendingRequest).rejects.toThrow('Could not validate credentials');
+      expect(window.localStorage.getItem('access_token')).toBe('account-b-token');
+      expect(window.localStorage.getItem('auth_token')).toBe('account-b-token');
+      expect(JSON.parse(window.localStorage.getItem('user') as string)).toEqual({
+        username: 'account-b',
+        email: 'b@example.com',
+      });
+      expect(document.cookie).toContain(`${AUTH_TOKEN_COOKIE}=account-b-token`);
+      expect(useStore.getState()).toMatchObject({
+        projects: [expect.objectContaining({ id: 'project-b' })],
+        currentProject: expect.objectContaining({ id: 'project-b' }),
+        documents: [expect.objectContaining({ id: 'document-b' })],
+        conversations: [expect.objectContaining({ id: 'conversation-b' })],
+        currentConversation: expect.objectContaining({ id: 'conversation-b' }),
+        messages: [expect.objectContaining({ id: 'message-b' })],
+        loadingProjects: true,
+        loadingDocuments: true,
+        loadingConversations: true,
+        loadingMessages: true,
+        uploadProgress: { 'upload-b': 50 },
+      });
+      expect(assign).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(protectedFetchHelpers)(
+    'retires the active account before navigation for a $kind 401 response',
+    async ({ request }) => {
+      storeSession('account-a-token', {
+        username: 'account-a',
+        email: 'a@example.com',
+      }, useStore.getState().clearAccountState);
+      seedWorkspace('a');
+      const pendingResponse = deferred<Response>();
+      vi.stubGlobal('fetch', vi.fn(() => pendingResponse.promise));
+      let stateAtNavigation: ReturnType<typeof useStore.getState> | null = null;
+      const assign = stubLocation('/projects/project-a', () => {
+        stateAtNavigation = useStore.getState();
+      });
+
+      const pendingRequest = request();
+      pendingResponse.resolve(jsonResponse({ detail: 'Could not validate credentials' }, 401));
+
+      await expect(pendingRequest).rejects.toThrow('Could not validate credentials');
+      expect(stateAtNavigation).toMatchObject({
+        projects: [],
+        currentProject: null,
+        documents: [],
+        conversations: [],
+        currentConversation: null,
+        messages: [],
+        loadingProjects: false,
+        loadingDocuments: false,
+        loadingConversations: false,
+        loadingMessages: false,
+        uploadProgress: {},
+        sidebarOpen: false,
+        studioOpen: false,
+        notifyOnProcessingComplete: false,
+      });
+      expect(window.localStorage.getItem('access_token')).toBeNull();
+      expect(window.localStorage.getItem('auth_token')).toBeNull();
+      expect(window.localStorage.getItem('user')).toBeNull();
+      expect(document.cookie).not.toContain(`${AUTH_TOKEN_COOKIE}=account-a-token`);
+      expect(assign).toHaveBeenCalledWith('/login');
+    },
+  );
+
+  it('does not abandon a replacement identity that reuses the dispatched token', async () => {
+    storeSession('shared-token', {
+      username: 'account-a',
+      email: 'a@example.com',
+    }, useStore.getState().clearAccountState);
+    seedWorkspace('a');
+    const pendingResponse = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn(() => pendingResponse.promise));
+    const assign = stubLocation('/projects/project-b');
+
+    const pendingRequest = api.getProjects();
+    storeSession('shared-token', {
+      username: 'account-b',
+      email: 'b@example.com',
+    }, useStore.getState().clearAccountState);
+    seedWorkspace('b');
+    pendingResponse.resolve(jsonResponse({ detail: 'Could not validate credentials' }, 401));
+
+    await expect(pendingRequest).rejects.toThrow('Could not validate credentials');
+    expect(window.localStorage.getItem('access_token')).toBe('shared-token');
+    expect(useStore.getState().currentProject).toMatchObject({ id: 'project-b' });
     expect(assign).not.toHaveBeenCalled();
   });
 });

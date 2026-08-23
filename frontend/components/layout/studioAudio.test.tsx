@@ -19,7 +19,6 @@ const project: Project = {
   conversation_count: 1,
 };
 
-const initialState = useStore.getState();
 
 interface Utterance { text: string; onend?: () => void; onerror?: (e: { error: string }) => void }
 
@@ -68,7 +67,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('Studio audio summary', () => {
