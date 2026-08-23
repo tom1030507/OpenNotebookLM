@@ -4,11 +4,12 @@ import asyncio
 from app.middleware.upload_body_limit import UploadBodyLimitMiddleware
 
 
-def _upload_scope(content_length=None):
+def _upload_scope(content_length=None, origin=None):
     """Build an HTTP upload scope with optional declared length.
 
     Args:
         content_length: Optional declared request-body byte count.
+        origin: Optional browser Origin header.
 
     Returns:
         Minimal ASGI HTTP scope for the PDF upload route.
@@ -16,6 +17,8 @@ def _upload_scope(content_length=None):
     headers = [(b"content-type", b"multipart/form-data; boundary=boundary")]
     if content_length is not None:
         headers.append((b"content-length", str(content_length).encode("ascii")))
+    if origin is not None:
+        headers.append((b"origin", origin.encode("ascii")))
     return {
         "type": "http",
         "asgi": {"version": "3.0"},
@@ -140,3 +143,27 @@ def test_non_upload_request_is_not_capped():
 
     assert downstream_called is True
     assert sent[0]["status"] == 204
+
+
+def test_app_cors_wraps_preparser_upload_rejection():
+    """Browser clients receive CORS headers even when the body guard rejects."""
+    from app.main import app
+
+    sent = []
+
+    async def receive():
+        raise AssertionError("declared oversized body was read")
+
+    async def send(message):
+        sent.append(message)
+
+    scope = _upload_scope(
+        content_length=60 * 1024 * 1024,
+        origin="http://localhost:3000",
+    )
+    asyncio.run(app(scope, receive, send))
+
+    response_start = sent[0]
+    headers = dict(response_start["headers"])
+    assert response_start["status"] == 413
+    assert headers[b"access-control-allow-origin"] == b"http://localhost:3000"

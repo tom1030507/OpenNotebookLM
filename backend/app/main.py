@@ -52,18 +52,20 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-# Configure CORS
+# Starlette makes the most recently added middleware outermost. The upload
+# guard must remain ahead of routing/form parsing, while CORS must wrap its
+# direct 413 so browser clients are allowed to read the stable error response.
+app.add_middleware(
+    UploadBodyLimitMiddleware,
+    max_file_size_bytes=settings.max_file_size_bytes,
+    configured_limit_mb=settings.max_file_size_mb,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
-app.add_middleware(
-    UploadBodyLimitMiddleware,
-    max_file_size_bytes=settings.max_file_size_bytes,
-    configured_limit_mb=settings.max_file_size_mb,
 )
 
 # Include routers
