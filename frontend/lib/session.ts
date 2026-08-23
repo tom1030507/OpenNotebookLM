@@ -44,17 +44,32 @@ export const storeSession = (
   user: SessionUser,
   clearAccountState?: () => void,
 ): void => {
+  let previousUser: Partial<SessionUser> | null = null;
+
   try {
     const storedUser = window.localStorage.getItem('user');
-    const previousUser = storedUser ? JSON.parse(storedUser) as Partial<SessionUser> : null;
-
-    // This shared browser can move from one account to another without a page
-    // reload. Clear the in-memory workspace before overwriting the identity,
-    // otherwise the next account can briefly read the previous one's data.
-    if (previousUser?.username && previousUser.username !== user.username) {
-      clearAccountState?.();
+    if (storedUser) {
+      try {
+        previousUser = JSON.parse(storedUser) as Partial<SessionUser>;
+      } catch {
+        // Corrupt identity data leaves the current workspace untrustworthy.
+        // Clear it before recording the replacement session, but keep the
+        // storage writes below independent so this account can still sign in.
+        clearAccountState?.();
+      }
     }
+  } catch {
+    // The cookie below still carries the session for this browsing context.
+  }
 
+  // This shared browser can move from one account to another without a page
+  // reload. Clear the in-memory workspace before overwriting the identity,
+  // otherwise the next account can briefly read the previous one's data.
+  if (previousUser?.username && previousUser.username !== user.username) {
+    clearAccountState?.();
+  }
+
+  try {
     window.localStorage.setItem('access_token', accessToken);
     // The API client and TopNav both read this key.
     window.localStorage.setItem('auth_token', accessToken);

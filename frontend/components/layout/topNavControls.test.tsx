@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TopNav from './TopNav';
 import ProjectDialogProvider from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
-import type { Document, Project } from '@/lib/api';
-import { AUTH_TOKEN_COOKIE, storeSession } from '@/lib/session';
+import api, { type Document, type Project } from '@/lib/api';
+import { AUTH_TOKEN_COOKIE, clearSession, storeSession } from '@/lib/session';
+import ChatArea from '../chat/ChatArea';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -44,6 +45,22 @@ const renderTopNav = () => render(
   </ProjectDialogProvider>,
 );
 
+const renderWorkspace = () => render(
+  <ProjectDialogProvider>
+    <TopNav />
+    <ChatArea onAddSourcesOpenChange={() => undefined} />
+  </ProjectDialogProvider>,
+);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
+}
+
 // jsdom has no layout, so a viewport width reaches the component the same way a
 // browser reports it: through matchMedia.
 const stubViewportWidth = (width: number) => {
@@ -67,16 +84,103 @@ const renderTopNavAtWidth = (width: number) => {
 beforeEach(() => {
   push.mockClear();
   window.localStorage.clear();
+  HTMLElement.prototype.scrollIntoView = () => undefined;
   useStore.setState({ currentProject: project, projects: [project], documents: [] });
 });
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   useStore.setState(initialState, true);
   vi.unstubAllGlobals();
 });
 
 describe('TopNav controls that were previously inert', () => {
+  it('does not restore account A data when its project fetch resolves after account B starts', async () => {
+    const accountAProject = { ...project, name: 'Account A project' };
+    const accountAConversation = {
+      id: 'conversation-a',
+      project_id: accountAProject.id,
+      title: 'Account A conversation',
+      created_at: '2026-08-23T00:00:00Z',
+      updated_at: '2026-08-23T00:00:00Z',
+      message_count: 1,
+    };
+    const accountAFetch = deferred<Project[]>();
+    vi.spyOn(api, 'getProjects')
+      .mockReturnValueOnce(accountAFetch.promise)
+      .mockRejectedValueOnce(new Error('Account B is offline'));
+    vi.spyOn(api, 'getDocuments').mockResolvedValue([]);
+    vi.spyOn(api, 'getConversations').mockResolvedValue([]);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({
+      projects: [accountAProject],
+      currentProject: accountAProject,
+      documents: [{ ...processing, name: 'Account A document', status: 'ready' }],
+      conversations: [accountAConversation],
+      currentConversation: accountAConversation,
+      messages: [{
+        id: 'message-a',
+        conversation_id: accountAConversation.id,
+        role: 'user',
+        content: 'Account A message',
+        citations: [],
+        created_at: '2026-08-23T00:00:00Z',
+      }],
+      loadingProjects: true,
+      loadingDocuments: true,
+      loadingConversations: true,
+      loadingMessages: true,
+      uploadProgress: { 'account-a-upload': 50 },
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
+    storeSession('account-a-token', { username: 'account-a', email: 'a@example.com' });
+    renderWorkspace();
+
+    const pendingAccountAFetch = useStore.getState().fetchProjects();
+    expect(screen.getByText('Account A project')).toBeTruthy();
+    expect(screen.getByText('Account A conversation')).toBeTruthy();
+    expect(screen.getByText('Account A message')).toBeTruthy();
+
+    act(() => {
+      useStore.getState().clearAccountState();
+      clearSession();
+      storeSession('account-b-token', {
+        username: 'account-b',
+        email: 'b@example.com',
+      }, useStore.getState().clearAccountState);
+    });
+    await act(async () => {
+      await useStore.getState().fetchProjects();
+    });
+    await act(async () => {
+      accountAFetch.resolve([accountAProject]);
+      await pendingAccountAFetch;
+    });
+
+    expect(screen.queryByText('Account A project')).toBeNull();
+    expect(screen.queryByText('Account A conversation')).toBeNull();
+    expect(screen.queryByText('Account A message')).toBeNull();
+    expect(useStore.getState()).toMatchObject({
+      projects: [],
+      currentProject: null,
+      documents: [],
+      conversations: [],
+      currentConversation: null,
+      messages: [],
+      loadingProjects: false,
+      loadingDocuments: false,
+      loadingConversations: false,
+      loadingMessages: false,
+      uploadProgress: {},
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
+  });
+
   it('signs the user out by clearing credentials and returning to the login page', () => {
     storeSession('demo', { username: 'demo', email: 'demo@example.com' });
     useStore.setState({
@@ -108,6 +212,11 @@ describe('TopNav controls that were previously inert', () => {
       sidebarOpen: false,
       studioOpen: false,
       notifyOnProcessingComplete: false,
+      loadingProjects: true,
+      loadingDocuments: true,
+      loadingConversations: true,
+      loadingMessages: true,
+      uploadProgress: { 'account-a-upload': 50 },
     });
     renderTopNav();
 
@@ -131,6 +240,11 @@ describe('TopNav controls that were previously inert', () => {
       conversations: [],
       currentConversation: null,
       messages: [],
+      loadingProjects: false,
+      loadingDocuments: false,
+      loadingConversations: false,
+      loadingMessages: false,
+      uploadProgress: {},
       sidebarOpen: false,
       studioOpen: false,
       notifyOnProcessingComplete: false,

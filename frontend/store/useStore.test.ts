@@ -131,6 +131,19 @@ describe('application store', () => {
     expect(useStore.getState().currentProject).toBeNull();
   });
 
+  it('does not return a project created by an account that has since cleared', async () => {
+    const creation = deferred<Project>();
+    apiMock.createProject.mockReturnValue(creation.promise);
+
+    const pendingCreation = useStore.getState().createProject('Account A project');
+    useStore.getState().clearAccountState();
+    creation.resolve(project('project-a'));
+
+    await expect(pendingCreation).resolves.toBeNull();
+    expect(useStore.getState().projects).toEqual([]);
+    expect(useStore.getState().currentProject).toBeNull();
+  });
+
   it('selects and loads the first real project after fetching', async () => {
     apiMock.getProjects.mockResolvedValue([project('project-1')]);
 

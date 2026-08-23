@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   AUTH_TOKEN_COOKIE,
@@ -8,6 +8,8 @@ import {
   readAccessToken,
   storeSession,
 } from './session';
+import useStore from '@/store/useStore';
+import type { Conversation, Document, Project } from './api';
 
 
 const cookieValue = (name: string) => document.cookie
@@ -19,6 +21,11 @@ const cookieValue = (name: string) => document.cookie
 beforeEach(() => {
   window.localStorage.clear();
   clearSession();
+  useStore.getState().resetForTests();
+});
+
+afterEach(() => {
+  useStore.getState().resetForTests();
 });
 
 
@@ -77,5 +84,91 @@ describe('browser session', () => {
     clearSession();
 
     expect(readAccessToken()).toBeNull();
+  });
+
+  it('fails closed on malformed stored user data while persisting the replacement session', () => {
+    const project: Project = {
+      id: 'project-a',
+      name: 'Account A project',
+      description: null,
+      meta_json: {},
+      created_at: '2026-08-23T00:00:00Z',
+      updated_at: '2026-08-23T00:00:00Z',
+      document_count: 1,
+      conversation_count: 1,
+    };
+    const document: Document = {
+      id: 'document-a',
+      name: 'Account A document',
+      type: 'text',
+      content: 'Private source',
+      meta: {},
+      status: 'ready',
+      created_at: '2026-08-23T00:00:00Z',
+      updated_at: '2026-08-23T00:00:00Z',
+      chunk_count: 1,
+    };
+    const conversation: Conversation = {
+      id: 'conversation-a',
+      project_id: project.id,
+      title: 'Account A conversation',
+      created_at: '2026-08-23T00:00:00Z',
+      updated_at: '2026-08-23T00:00:00Z',
+      message_count: 1,
+    };
+    window.localStorage.setItem('user', '{malformed');
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [document],
+      conversations: [conversation],
+      currentConversation: conversation,
+      messages: [{
+        id: 'message-a',
+        conversation_id: conversation.id,
+        role: 'user',
+        content: 'Private question',
+        citations: [],
+        created_at: '2026-08-23T00:00:00Z',
+      }],
+      loadingProjects: true,
+      loadingDocuments: true,
+      loadingConversations: true,
+      loadingMessages: true,
+      uploadProgress: { 'document-a-upload': 50 },
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
+
+    storeSession(
+      'account-b-token',
+      { username: 'account-b', email: 'b@example.com' },
+      useStore.getState().clearAccountState,
+    );
+
+    expect(useStore.getState()).toMatchObject({
+      projects: [],
+      currentProject: null,
+      documents: [],
+      conversations: [],
+      currentConversation: null,
+      messages: [],
+      loadingProjects: false,
+      loadingDocuments: false,
+      loadingConversations: false,
+      loadingMessages: false,
+      uploadProgress: {},
+      sidebarOpen: false,
+      studioOpen: false,
+      notifyOnProcessingComplete: false,
+    });
+    expect(readAccessToken()).toBe('account-b-token');
+    expect(window.localStorage.getItem('auth_token')).toBe('account-b-token');
+    expect(JSON.parse(window.localStorage.getItem('user') as string)).toEqual({
+      username: 'account-b',
+      email: 'b@example.com',
+    });
+    expect(cookieValue(AUTH_TOKEN_COOKIE)).toBe('account-b-token');
   });
 });

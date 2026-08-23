@@ -3,7 +3,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import api, { type Conversation, type Document, type Project } from '@/lib/api';
+import api, {
+  type Conversation,
+  type Document,
+  type Message,
+  type Project,
+} from '@/lib/api';
 import useStore from '@/store/useStore';
 import ChatArea from './ChatArea';
 
@@ -57,6 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   useStore.setState(useStore.getInitialState(), true);
 });
 
@@ -66,7 +72,14 @@ describe('ChatArea', () => {
     const question = 'What does this source say?';
     vi.spyOn(api, 'query')
       .mockRejectedValueOnce(new Error('Request failed'))
-      .mockResolvedValueOnce({ answer: '', citations: [] });
+      .mockResolvedValueOnce({
+        answer: '',
+        sources: [],
+        chunks_used: 0,
+        model_used: null,
+        usage: {},
+        conversation_id: 'conversation-1',
+      });
     vi.spyOn(api, 'getMessages').mockResolvedValue([
       {
         id: 'message-user',
@@ -106,6 +119,72 @@ describe('ChatArea', () => {
     await waitFor(() => expect(screen.getByText('It explains the source.')).toBeTruthy());
     expect(screen.getAllByText(question)).toHaveLength(1);
     expect(screen.getAllByText('It explains the source.')).toHaveLength(1);
+  });
+
+  it('refreshes persisted messages without resending a question after its query succeeds', async () => {
+    const question = 'What does this source say?';
+    const refreshedMessages = deferred<Message[]>();
+    const query = vi.spyOn(api, 'query').mockResolvedValue({
+      answer: 'It explains the source.',
+      sources: [],
+      chunks_used: 1,
+      model_used: 'test-model',
+      usage: {},
+      conversation_id: 'conversation-1',
+    });
+    const getMessages = vi.spyOn(api, 'getMessages')
+      .mockRejectedValueOnce(new Error('Message refresh failed'))
+      .mockReturnValueOnce(refreshedMessages.promise);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation: conversation('conversation-1', project.id),
+      messages: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The question was sent, but the conversation could not be refreshed.',
+    );
+    expect(screen.getByText(question, { selector: 'p' })).toBeTruthy();
+    expect(query).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh response' }));
+
+    await waitFor(() => expect(getMessages).toHaveBeenCalledTimes(2));
+    expect(query).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      refreshedMessages.resolve([
+        {
+          id: 'message-user',
+          conversation_id: 'conversation-1',
+          role: 'user',
+          content: question,
+          citations: [],
+          created_at: '2026-08-23T00:00:00Z',
+        },
+        {
+          id: 'message-assistant',
+          conversation_id: 'conversation-1',
+          role: 'assistant',
+          content: 'It explains the source.',
+          citations: [],
+          created_at: '2026-08-23T00:00:01Z',
+        },
+      ]);
+      await refreshedMessages.promise;
+    });
+
+    await waitFor(() => expect(screen.getByText('It explains the source.')).toBeTruthy());
+    expect(screen.getAllByText(question)).toHaveLength(1);
+    expect(screen.getAllByText('It explains the source.')).toHaveLength(1);
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the first submitted question visible while its answer is pending', async () => {

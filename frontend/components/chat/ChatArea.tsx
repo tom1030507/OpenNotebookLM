@@ -9,7 +9,7 @@ import {
   ChevronRight,
   Loader2
 } from 'lucide-react';
-import useStore from '@/store/useStore';
+import useStore, { QueryMessageRefreshError } from '@/store/useStore';
 import {
   chatWorkspaceStyle,
   welcomeHeroStyles,
@@ -28,6 +28,7 @@ interface PendingQuery {
   projectId: string;
   conversationId: string | null;
   error: string | null;
+  retryMode: 'query' | 'refresh';
 }
 
 const MessageRow = React.memo(function MessageRow({ message }: { message: Message }) {
@@ -83,6 +84,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const documents = useStore((state) => state.documents);
   const sendQuery = useStore((state) => state.sendQuery);
   const createConversation = useStore((state) => state.createConversation);
+  const fetchMessages = useStore((state) => state.fetchMessages);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -103,6 +105,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       projectId: currentProject.id,
       conversationId: currentConversation?.id ?? null,
       error: null,
+      retryMode: 'query',
     });
     
     try {
@@ -117,11 +120,22 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       console.error('Failed to send query:', error);
       const message = error instanceof Error ? error.message : 'Unable to send the question.';
       setPendingQuery((pending) => (
-        pending?.requestId === requestId ? { ...pending, error: message } : pending
+        pending?.requestId === requestId
+          ? {
+              ...pending,
+              conversationId: error instanceof QueryMessageRefreshError
+                ? error.conversationId
+                : pending.conversationId,
+              error: message,
+              retryMode: error instanceof QueryMessageRefreshError ? 'refresh' : 'query',
+            }
+          : pending
       ));
-      // A reader can start composing another question while a request fails.
-      // Do not overwrite that newer text with the failed question.
-      setInputValue((value) => value || query);
+      if (!(error instanceof QueryMessageRefreshError)) {
+        // A reader can start composing another question while a request fails.
+        // Do not overwrite that newer text with the failed question.
+        setInputValue((value) => value || query);
+      }
     } finally {
       setPendingQuery((pending) => (
         pending?.requestId === requestId && !pending.error ? null : pending
@@ -139,6 +153,36 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
 
   const retryPendingQuery = () => {
     if (!pendingQuery || !pendingQuery.error) return;
+
+    if (pendingQuery.retryMode === 'refresh') {
+      const { conversationId, requestId } = pendingQuery;
+      if (!conversationId) return;
+
+      setPendingQuery((pending) => (
+        pending?.requestId === requestId ? { ...pending, error: null } : pending
+      ));
+      void (async () => {
+        try {
+          const refreshed = await fetchMessages(conversationId);
+          if (!refreshed) {
+            throw new Error('The conversation could not be refreshed.');
+          }
+          setPendingQuery((pending) => (
+            pending?.requestId === requestId ? null : pending
+          ));
+        } catch (error) {
+          const message = error instanceof Error
+            ? error.message
+            : 'The conversation could not be refreshed.';
+          setPendingQuery((pending) => (
+            pending?.requestId === requestId
+              ? { ...pending, error: message, retryMode: 'refresh' }
+              : pending
+          ));
+        }
+      })();
+      return;
+    }
 
     setInputValue('');
     void submitQuery(pendingQuery.content);
@@ -295,7 +339,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     onClick={retryPendingQuery}
                     className="text-[var(--primary)] hover:underline"
                   >
-                    Retry question
+                    {pendingQuery.retryMode === 'refresh' ? 'Refresh response' : 'Retry question'}
                   </button>
                 </div>
               )}

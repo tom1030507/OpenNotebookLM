@@ -32,7 +32,7 @@ interface AppState {
   // Actions - Projects
   fetchProjects: () => Promise<void>;
   selectProject: (project: Project) => void;
-  createProject: (name: string, description?: string) => Promise<Project>;
+  createProject: (name: string, description?: string) => Promise<Project | null>;
   deleteProject: (id: string) => Promise<void>;
   
   // Actions - Documents
@@ -61,7 +61,7 @@ interface AppState {
   ) => Promise<Conversation>;
   updateConversation: (conversationId: string, title: string) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
-  fetchMessages: (conversationId: string) => Promise<void>;
+  fetchMessages: (conversationId: string) => Promise<boolean>;
   
   // Actions - Query
   sendQuery: (
@@ -80,6 +80,24 @@ interface AppState {
   // Account boundary
   clearAccountState: () => void;
   resetForTests: () => void;
+}
+
+/**
+ * Thwarts late responses from a prior signed-in account. This deliberately
+ * lives outside Zustand so account transitions cannot be undone by an old
+ * request replacing state wholesale.
+ */
+let accountEpoch = 0;
+
+/** Signals that the query mutation finished but its authoritative refresh did not. */
+export class QueryMessageRefreshError extends Error {
+  conversationId: string;
+
+  constructor(conversationId: string) {
+    super('The question was sent, but the conversation could not be refreshed.');
+    this.name = 'QueryMessageRefreshError';
+    this.conversationId = conversationId;
+  }
 }
 
 const initialState = {
@@ -107,9 +125,13 @@ const useStore = create<AppState>()(
         
         // Projects
         fetchProjects: async () => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
+          if (!isCurrentAccount()) return;
           set({ loadingProjects: true });
           try {
             const projects = await api.getProjects();
+            if (!isCurrentAccount()) return;
             const previousProject = get().currentProject;
             const currentProject = projects.find(
               (project) => project.id === previousProject?.id,
@@ -131,13 +153,14 @@ const useStore = create<AppState>()(
               } : {}),
             });
 
-            if (currentProject) {
+            if (currentProject && isCurrentAccount()) {
               await Promise.all([
                 get().fetchDocuments(currentProject.id),
                 get().fetchConversations(currentProject.id),
               ]);
             }
           } catch (error) {
+            if (!isCurrentAccount()) return;
             console.error('Failed to fetch projects:', error);
             get().clearAccountState();
           }
@@ -160,19 +183,25 @@ const useStore = create<AppState>()(
         },
         
         createProject: async (name, description) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           try {
             const project = await api.createProject({ name, description });
+            if (!isCurrentAccount()) return null;
             set((state) => ({ projects: [...state.projects, project] }));
             return project;
           } catch (error) {
-            console.error('Failed to create project:', error);
+            if (isCurrentAccount()) console.error('Failed to create project:', error);
             throw error;
           }
         },
         
         deleteProject: async (id) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           try {
             await api.deleteProject(id);
+            if (!isCurrentAccount()) return;
             set((state) => {
               const deletedCurrentProject = state.currentProject?.id === id;
               return {
@@ -190,21 +219,25 @@ const useStore = create<AppState>()(
               };
             });
           } catch (error) {
-            console.error('Failed to delete project:', error);
+            if (isCurrentAccount()) console.error('Failed to delete project:', error);
             throw error;
           }
         },
         
         // Documents
         fetchDocuments: async (projectId) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           if (get().currentProject?.id !== projectId) return;
+          if (!isCurrentAccount()) return;
           set({ loadingDocuments: true });
           try {
             const documents = await api.getDocuments(projectId);
-            if (get().currentProject?.id === projectId) {
+            if (isCurrentAccount() && get().currentProject?.id === projectId) {
               set({ documents, loadingDocuments: false });
             }
           } catch (error) {
+            if (!isCurrentAccount()) return;
             console.error('Failed to fetch documents:', error);
             if (get().currentProject?.id === projectId) {
               set({ loadingDocuments: false });
@@ -216,10 +249,15 @@ const useStore = create<AppState>()(
         // being indexed can be re-checked without flashing a spinner over the
         // list the reader is looking at.
         refreshDocuments: async (projectId, signal, shouldApply = () => true) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           if (get().currentProject?.id !== projectId) return;
+          if (!isCurrentAccount()) return;
           try {
             const documents = await api.getDocuments(projectId, signal);
             if (
+              isCurrentAccount()
+              &&
               !signal?.aborted
               && shouldApply()
               && get().currentProject?.id === projectId
@@ -227,13 +265,16 @@ const useStore = create<AppState>()(
               set({ documents });
             }
           } catch (error) {
-            if (!signal?.aborted) {
+            if (isCurrentAccount() && !signal?.aborted) {
               console.error('Failed to refresh documents:', error);
             }
           }
         },
 
         uploadDocument: async (projectId, file) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
+          if (!isCurrentAccount()) return;
           const uploadId = `${projectId}-${file.name}-${Date.now()}`;
           let progressInterval: ReturnType<typeof setInterval> | undefined;
           set((state) => ({
@@ -243,6 +284,10 @@ const useStore = create<AppState>()(
           try {
             // Simulate progress updates
             progressInterval = setInterval(() => {
+              if (!isCurrentAccount()) {
+                if (progressInterval) clearInterval(progressInterval);
+                return;
+              }
               set((state) => {
                 const currentProgress = state.uploadProgress[uploadId] || 0;
                 if (currentProgress < 90) {
@@ -258,7 +303,8 @@ const useStore = create<AppState>()(
             }, 200);
             
             const document = await api.uploadDocument(projectId, file);
-            const isCurrentProject = get().currentProject?.id === projectId;
+            const isCurrentProject = isCurrentAccount()
+              && get().currentProject?.id === projectId;
 
             if (isCurrentProject) {
               set((state) => ({
@@ -268,23 +314,26 @@ const useStore = create<AppState>()(
 
               // Clean up progress after a delay
               setTimeout(() => {
+                if (!isCurrentAccount()) return;
                 set((state) => {
                   const { [uploadId]: _, ...rest } = state.uploadProgress;
                   return { uploadProgress: rest };
                 });
               }, 1000);
-            } else {
+            } else if (isCurrentAccount()) {
               set((state) => {
                 const { [uploadId]: _, ...rest } = state.uploadProgress;
                 return { uploadProgress: rest };
               });
             }
           } catch (error) {
-            console.error('Failed to upload document:', error);
-            set((state) => {
-              const { [uploadId]: _, ...rest } = state.uploadProgress;
-              return { uploadProgress: rest };
-            });
+            if (isCurrentAccount()) {
+              console.error('Failed to upload document:', error);
+              set((state) => {
+                const { [uploadId]: _, ...rest } = state.uploadProgress;
+                return { uploadProgress: rest };
+              });
+            }
             throw error;
           } finally {
             if (progressInterval) {
@@ -294,41 +343,49 @@ const useStore = create<AppState>()(
         },
         
         createDocument: async (projectId, data) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           try {
             const document = await api.createDocument(projectId, data);
-            if (get().currentProject?.id === projectId) {
+            if (isCurrentAccount() && get().currentProject?.id === projectId) {
               set((state) => ({ documents: [...state.documents, document] }));
             }
           } catch (error) {
-            console.error('Failed to create document:', error);
+            if (isCurrentAccount()) console.error('Failed to create document:', error);
             throw error;
           }
         },
         
         deleteDocument: async (projectId, documentId) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           try {
             await api.deleteDocument(projectId, documentId);
-            if (get().currentProject?.id === projectId) {
+            if (isCurrentAccount() && get().currentProject?.id === projectId) {
               set((state) => ({
                 documents: state.documents.filter(d => d.id !== documentId),
               }));
             }
           } catch (error) {
-            console.error('Failed to delete document:', error);
+            if (isCurrentAccount()) console.error('Failed to delete document:', error);
             throw error;
           }
         },
         
         // Conversations
         fetchConversations: async (projectId) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           if (get().currentProject?.id !== projectId) return;
+          if (!isCurrentAccount()) return;
           set({ loadingConversations: true });
           try {
             const conversations = await api.getConversations(projectId);
-            if (get().currentProject?.id === projectId) {
+            if (isCurrentAccount() && get().currentProject?.id === projectId) {
               set({ conversations, loadingConversations: false });
             }
           } catch (error) {
+            if (!isCurrentAccount()) return;
             console.error('Failed to fetch conversations:', error);
             if (get().currentProject?.id === projectId) {
               set({ loadingConversations: false });
@@ -337,15 +394,21 @@ const useStore = create<AppState>()(
         },
         
         selectConversation: async (conversation) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           if (get().currentProject?.id !== conversation.project_id) return;
+          if (!isCurrentAccount()) return;
           set({ currentConversation: conversation, messages: [] });
+          if (!isCurrentAccount()) return;
           await get().fetchMessages(conversation.id);
         },
         
         createConversation: async (projectId, title, select = true) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           try {
             const conversation = await api.createConversation(projectId, title);
-            if (get().currentProject?.id === projectId) {
+            if (isCurrentAccount() && get().currentProject?.id === projectId) {
               set((state) => ({
                 conversations: [...state.conversations, conversation],
                 ...(select ? {
@@ -356,15 +419,17 @@ const useStore = create<AppState>()(
             }
             return conversation;
           } catch (error) {
-            console.error('Failed to create conversation:', error);
+            if (isCurrentAccount()) console.error('Failed to create conversation:', error);
             throw error;
           }
         },
 
         updateConversation: async (conversationId, title) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           try {
             const conversation = await api.updateConversation(conversationId, title);
-            if (get().currentProject?.id === conversation.project_id) {
+            if (isCurrentAccount() && get().currentProject?.id === conversation.project_id) {
               set((state) => ({
                 conversations: state.conversations.map((item) => (
                   item.id === conversationId ? conversation : item
@@ -375,14 +440,17 @@ const useStore = create<AppState>()(
               }));
             }
           } catch (error) {
-            console.error('Failed to update conversation:', error);
+            if (isCurrentAccount()) console.error('Failed to update conversation:', error);
             throw error;
           }
         },
         
         deleteConversation: async (conversationId) => {
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           try {
             await api.deleteConversation(conversationId);
+            if (!isCurrentAccount()) return;
             set((state) => ({
               conversations: state.conversations.filter(c => c.id !== conversationId),
               currentConversation: state.currentConversation?.id === conversationId 
@@ -393,32 +461,41 @@ const useStore = create<AppState>()(
                 : state.messages,
             }));
           } catch (error) {
-            console.error('Failed to delete conversation:', error);
+            if (isCurrentAccount()) console.error('Failed to delete conversation:', error);
             throw error;
           }
         },
         
         fetchMessages: async (conversationId) => {
-          if (get().currentConversation?.id !== conversationId) return;
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
+          if (get().currentConversation?.id !== conversationId) return false;
+          if (!isCurrentAccount()) return false;
           set({ loadingMessages: true });
           try {
             const messages = await api.getMessages(conversationId);
-            if (get().currentConversation?.id === conversationId) {
+            if (isCurrentAccount() && get().currentConversation?.id === conversationId) {
               set({ messages, loadingMessages: false });
+              return true;
             }
+            return false;
           } catch (error) {
+            if (!isCurrentAccount()) return false;
             console.error('Failed to fetch messages:', error);
             if (get().currentConversation?.id === conversationId) {
               set({ loadingMessages: false });
             }
+            return false;
           }
         },
         
         // Query
         sendQuery: async (query, stream = false, onConversationReady) => {
           void stream;
+          const epoch = accountEpoch;
+          const isCurrentAccount = () => accountEpoch === epoch;
           const state = get();
-          if (!state.currentProject) {
+          if (!isCurrentAccount() || !state.currentProject) {
             throw new Error('No project selected');
           }
 
@@ -437,6 +514,7 @@ const useStore = create<AppState>()(
               false,
             );
             conversationId = conversation.id;
+            if (!isCurrentAccount()) return;
 
             const activeState = get();
             const activeConversationId = activeState.currentConversation?.project_id
@@ -444,6 +522,8 @@ const useStore = create<AppState>()(
               ? activeState.currentConversation.id
               : null;
             if (
+              isCurrentAccount()
+              &&
               activeState.currentProject?.id === projectId
               && activeConversationId === startingConversationId
             ) {
@@ -451,6 +531,7 @@ const useStore = create<AppState>()(
             }
           }
 
+          if (!isCurrentAccount()) return;
           onConversationReady?.(conversationId);
           
           try {
@@ -459,9 +540,15 @@ const useStore = create<AppState>()(
               query,
               conversation_id: conversationId,
             });
-            await get().fetchMessages(conversationId);
+            if (!isCurrentAccount()) return;
+            const refreshed = await get().fetchMessages(conversationId);
+            if (!isCurrentAccount()) return;
+            if (!refreshed) {
+              if (get().currentConversation?.id !== conversationId) return;
+              throw new QueryMessageRefreshError(conversationId);
+            }
           } catch (error) {
-            console.error('Query failed:', error);
+            if (isCurrentAccount()) console.error('Query failed:', error);
             throw error;
           }
         },
@@ -482,6 +569,7 @@ const useStore = create<AppState>()(
 
         // Account boundary
         clearAccountState: () => {
+          accountEpoch += 1;
           set((state) => ({
             projects: [],
             currentProject: null,
@@ -500,6 +588,7 @@ const useStore = create<AppState>()(
           }));
         },
         resetForTests: () => {
+          accountEpoch += 1;
           set(initialState);
         },
       }),
