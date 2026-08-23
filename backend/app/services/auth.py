@@ -144,9 +144,20 @@ class AuthService:
 
 
 def resolve_jwt_secret_key(settings: Settings) -> str:
-    """Return the token signing key, refusing to invent one for a deployment."""
-    if settings.jwt_secret_key:
-        return settings.jwt_secret_key
+    """Return the token signing key, refusing to invent one for a deployment.
+
+    Args:
+        settings: Application settings containing the environment and key.
+
+    Returns:
+        The configured key, or a per-process development key.
+
+    Raises:
+        RuntimeError: If a non-development environment has no usable key.
+    """
+    configured_key = (settings.jwt_secret_key or "").strip()
+    if configured_key:
+        return configured_key
 
     if settings.app_env != "development":
         raise RuntimeError(
@@ -162,7 +173,14 @@ def resolve_jwt_secret_key(settings: Settings) -> str:
 
 @lru_cache()
 def get_auth_service() -> AuthService:
-    """Get the cached auth service, built from application settings."""
+    """Get the cached auth service, built from application settings.
+
+    Args:
+        None.
+
+    Returns:
+        The process-wide authentication service.
+    """
     settings = get_settings()
     return AuthService(
         secret_key=resolve_jwt_secret_key(settings),

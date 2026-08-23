@@ -51,6 +51,7 @@ PUBLIC_PATHS = frozenset({
     # token. Protecting these would keep the container permanently unhealthy.
     "/healthz",
     "/ready",
+    "/readyz",
     # The name-and-version banner. Carries no user data.
     "/",
     # You cannot present a token before you have an account, or before you
@@ -213,7 +214,7 @@ def test_a_token_for_a_deleted_account_is_refused(anonymous):
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("path", ["/healthz", "/ready"])
+@pytest.mark.parametrize("path", ["/healthz", "/ready", "/readyz"])
 def test_health_checks_stay_reachable_without_a_token(anonymous, path):
     """The container's healthcheck cannot hold a token."""
     response = anonymous.get(path)

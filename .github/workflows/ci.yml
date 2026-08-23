@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+        env:
+          BACKEND_INTERNAL_URL: http://backend:8000
+      - run: npm audit --omit=dev --audit-level=critical
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag opennotebook-backend-ci ./backend
+      - uses: actions/cache@v4
+        with:
+          path: .ci-model-cache
+          key: backend-test-model-paraphrase-minilm-l3-v2
+      - name: Prepare the model cache for the image user
+        run: mkdir -p .ci-model-cache && chmod 777 .ci-model-cache
+      - name: Run backend tests in the supported image
+        run: >-
+          docker run --rm
+          --volume "$PWD:/workspace"
+          --volume "$PWD/.ci-model-cache:/model-cache"
+          --workdir /workspace/backend
+          --env PYTHONPATH=/workspace/backend
+          --env LLM_MODE=none
+          --env EMB_MODEL_NAME=sentence-transformers/paraphrase-MiniLM-L3-v2
+          --env EMB_DIMENSION=384
+          --env SENTENCE_TRANSFORMERS_HOME=/model-cache
+          --env HF_HOME=/model-cache
+          opennotebook-backend-ci
+          python -m pytest tests -q
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify a missing JWT secret is rejected
+        run: >-
+          if JWT_SECRET_KEY= docker compose config >/dev/null 2>&1; then
+            echo 'Compose unexpectedly accepted an empty JWT secret';
+            exit 1;
+          fi
+      - name: Validate the production Compose model
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+        run: docker compose config
+      - name: Build the real production Compose images
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+        run: docker compose build

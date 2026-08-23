@@ -71,9 +71,6 @@ dist/
 coverage/
 .nyc_output/
 
-# Docker
-.dockerignore
-
 # Test output files
 export_test_summary_*.md
 test_output_*.md

@@ -1,7 +1,7 @@
 # Core
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+python-multipart==0.0.32
 python-dotenv==1.0.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
@@ -9,7 +9,7 @@ pydantic-settings==2.1.0
 # Database
 sqlalchemy==2.0.23
 alembic==1.12.1
-sqlite-vec==0.1.1
+sqlite-vec==0.1.9
 
 # Document Processing
 PyMuPDF==1.23.8
@@ -22,6 +22,10 @@ youtube-transcript-api==0.6.1
 # ML/NLP
 numpy==1.24.3
 sentence-transformers==2.2.2
+# sentence-transformers 2.2.2 still imports cached_download, which was removed
+# from newer huggingface-hub releases despite its open-ended lower-bound pin.
+huggingface-hub==0.25.2
+transformers==4.48.3
 faiss-cpu==1.7.4
 llama-cpp-python==0.2.20
 openai==1.3.7

@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/FastAPI-0.104-009688.svg?logo=fastapi&logoColor=white" alt="FastAPI 0.104">
-  <img src="https://img.shields.io/badge/Next.js-15.4-000000.svg?logo=nextdotjs&logoColor=white" alt="Next.js 15.4">
+  <img src="https://img.shields.io/badge/Next.js-15.5-000000.svg?logo=nextdotjs&logoColor=white" alt="Next.js 15.5">
   <img src="https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white" alt="Docker ready">
 </p>
 
@@ -85,7 +85,8 @@ docker compose ps
 | Frontend | <http://localhost:3000> |
 | API | <http://localhost:8000> |
 | Interactive API docs | <http://localhost:8000/docs> |
-| Health | <http://localhost:8000/healthz> |
+| Liveness | <http://localhost:8000/healthz> |
+| Readiness | <http://localhost:8000/readyz> |
 
 Register on `/login`, create a project, drop in a PDF, and ask it something. The
 first request downloads the embedding model, so expect a slow cold start.
@@ -107,8 +108,20 @@ the embedding model.
 
 ```bash
 cp .env.example .env
+# Set JWT_SECRET_KEY to a unique random value before Compose can start.
 docker compose up -d --build
 ```
+
+The production Compose file deliberately fails before creating containers when
+`JWT_SECRET_KEY` is missing or empty. Generate one with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. It also defaults
+`DEBUG=false` and allows CORS only from `http://localhost:3000`; set
+`CORS_ORIGINS` to a comma-separated list of your deployed frontend origins.
+
+Browser requests use the same-origin `/api` path. Next proxies that path to
+`BACKEND_INTERNAL_URL` (`http://backend:8000` in Compose), so Docker service
+names never enter the browser bundle. Rebuild the frontend image after changing
+that internal destination because Next compiles rewrites during its build.
 
 The root `docker-compose.yml` also defines optional `ollama` and `redis`
 services, behind profiles:
@@ -120,6 +133,10 @@ docker compose --profile with-cache up -d       # add Redis
 
 `start.sh` / `start.bat` wrap the same thing: `./start.sh`, `./start.sh with-ollama`,
 `./start.sh with-cache`, `./start.sh full`. Stop with `./stop.sh` or `docker compose down`.
+
+Ollama and Redis are reachable only on the Compose network. Their profiles do
+not publish host ports; add an explicit loopback-only mapping such as
+`127.0.0.1:11434:11434` in a local override if host tools need direct access.
 
 Models are cached into the mounted `./models` volume, so recreating the container
 does not re-download them.
@@ -575,7 +592,8 @@ See [`.env.example`](./.env.example) and [`deploy/.env.example`](./deploy/.env.e
 ## 🔌 API
 
 Interactive docs at `/docs`, ReDoc at `/redoc`. Every path except `/healthz`,
-`/ready` and the two `/api/auth` credential endpoints requires
+`/readyz` (and its legacy `/ready` alias), and the two `/api/auth` credential
+endpoints requires
 `Authorization: Bearer <token>` and answers `401` without one.
 
 <details>
@@ -583,7 +601,7 @@ Interactive docs at `/docs`, ReDoc at `/redoc`. Every path except `/healthz`,
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/healthz`, `/ready` | Liveness and readiness |
+| `GET` | `/healthz`, `/readyz` | Liveness and readiness |
 | `POST` | `/api/auth/register`, `/api/auth/token` | Create an account, exchange credentials for a token |
 | `GET` | `/api/auth/me` | The account behind a bearer token |
 | `GET`/`POST` | `/api/projects` | List and create projects |
