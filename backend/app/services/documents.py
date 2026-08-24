@@ -1,7 +1,7 @@
 """Document ingestion service."""
 import uuid
 import os
-from typing import Dict, Optional, BinaryIO
+from typing import BinaryIO, Dict, Optional
 from pathlib import Path
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -15,10 +15,21 @@ from app.config import get_settings
 from app.services.chunking import ChunkingService
 from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
+from app.services.rate_limit import OperationLease, UnlimitedConcurrencyLease
 from app.utils.time import utc_now_iso
 
 logger = structlog.get_logger()
 settings = get_settings()
+PDF_UPLOAD_BLOCK_BYTES = 1024 * 1024
+
+
+class UploadTooLargeError(ValueError):
+    """Raised when an upload crosses the configured byte limit."""
+
+
+def _operation_lease(lease: Optional[OperationLease]) -> OperationLease:
+    """Return a concrete operation ownership handle."""
+    return lease if lease is not None else UnlimitedConcurrencyLease()
 
 
 class DocumentService:
@@ -33,7 +44,13 @@ class DocumentService:
             embedding_service: Optional embedding service, same reason
         """
         self.pdf_adapter = PDFAdapter(use_pymupdf=False)  # Use pdfminer for now
-        self.url_adapter = URLAdapter()
+        self.url_adapter = URLAdapter(
+            timeout=settings.url_read_timeout_seconds,
+            connect_timeout=settings.url_connect_timeout_seconds,
+            max_download_bytes=settings.max_url_download_mb * 1024 * 1024,
+            max_redirects=settings.max_url_redirects,
+            max_download_seconds=settings.url_download_timeout_seconds,
+        )
         self.youtube_adapter = None  # Initialize only if needed
         self.executor = ThreadPoolExecutor(max_workers=4)
         self.chunking_service = chunking_service or ChunkingService()
@@ -110,7 +127,8 @@ class DocumentService:
         user_id: str,
         file: BinaryIO,
         filename: str,
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        operation_lease: Optional[OperationLease] = None,
     ) -> Document:
         """Process PDF file upload.
         
@@ -121,20 +139,35 @@ class DocumentService:
             file: File object
             filename: Original filename
             title: Optional document title
+            operation_lease: Explicit quota ownership transferred to this
+                service until background extraction/indexing really finishes.
             
         Returns:
             Created document
         """
+        lease = _operation_lease(operation_lease)
+        file_path = None
+        retained = False
         try:
             # Generate document ID
             doc_id = str(uuid.uuid4())
             
-            # Save file to disk
+            # Save file to disk. Reading without a size would duplicate the
+            # entire multipart spool in RAM before the limit could be checked.
             file_path = UPLOAD_DIR / f"{doc_id}_{filename}"
-            content = file.read()  # BinaryIO is not async
-            
             with open(file_path, "wb") as f:
-                f.write(content)
+                file_size = 0
+                while True:
+                    block = file.read(PDF_UPLOAD_BLOCK_BYTES)
+                    if not block:
+                        break
+                    if file_size + len(block) > settings.max_file_size_bytes:
+                        raise UploadTooLargeError(
+                            "File size exceeds maximum of %sMB"
+                            % settings.max_file_size_mb
+                        )
+                    f.write(block)
+                    file_size += len(block)
             
             # Create document record with queued status
             document = Document(
@@ -146,7 +179,7 @@ class DocumentService:
                 status="queued",
                 meta_json={
                     "filename": filename,
-                    "file_size": len(content),
+                    "file_size": file_size,
                     "upload_time": utc_now_iso(),
                 }
             )
@@ -162,9 +195,18 @@ class DocumentService:
             
             db.commit()
             db.refresh(document)
+            retained = True
             
             # Process asynchronously
-            asyncio.create_task(self._process_pdf_async(db, doc_id, file_path))
+            task = asyncio.create_task(self._process_pdf_async(
+                db,
+                doc_id,
+                file_path,
+                operation_lease=lease,
+            ))
+            # A task cancelled before its coroutine ever starts cannot execute
+            # its finally block, so the submitted task is also an owner edge.
+            task.add_done_callback(lambda _task: lease.release())
             
             logger.info("PDF upload initiated", 
                        doc_id=doc_id, 
@@ -174,19 +216,32 @@ class DocumentService:
             return document
             
         except Exception as e:
+            lease.release()
+            if file_path is not None and not retained:
+                file_path.unlink(missing_ok=True)
             logger.error("Failed to process PDF upload", 
                         filename=filename, 
                         error=str(e))
             raise
     
-    async def _process_pdf_async(self, db: Session, doc_id: str, file_path: Path):
+    async def _process_pdf_async(
+        self,
+        db: Session,
+        doc_id: str,
+        file_path: Path,
+        operation_lease: Optional[OperationLease] = None,
+    ):
         """Process PDF file asynchronously.
         
         Args:
             db: Database session
             doc_id: Document ID
             file_path: Path to PDF file
+            operation_lease: Quota ownership released only after this task and
+                any uncancellable executor work finish.
         """
+        lease = _operation_lease(operation_lease)
+        extraction_future = None
         try:
             # Update status to processing
             doc = db.query(Document).filter(Document.id == doc_id).first()
@@ -195,12 +250,17 @@ class DocumentService:
                 db.commit()
             
             # Extract text in thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self.executor,
+            extraction_future = self.executor.submit(
                 self.pdf_adapter.extract_text_from_file,
                 str(file_path)
             )
+            try:
+                result = await asyncio.shield(
+                    asyncio.wrap_future(extraction_future)
+                )
+            except asyncio.CancelledError:
+                lease.defer_release_until(extraction_future)
+                raise
             
             # Store the extracted content, staying in "processing": the source
             # is not usable until it has been indexed below.
@@ -229,6 +289,8 @@ class DocumentService:
                            num_pages=result["num_pages"],
                            status=status)
             
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error("Failed to process PDF",
                         doc_id=doc_id,
@@ -240,6 +302,8 @@ class DocumentService:
                 doc.status = "error"
                 doc.error_message = str(e)
                 db.commit()
+        finally:
+            lease.release()
     
     async def process_url(
         self,
@@ -247,7 +311,8 @@ class DocumentService:
         project_id: str,
         user_id: str,
         url: str,
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        operation_lease: Optional[OperationLease] = None,
     ) -> Document:
         """Process URL content extraction.
         
@@ -257,11 +322,33 @@ class DocumentService:
             user_id: Account that will own the document
             url: URL to extract content from
             title: Optional document title
+            operation_lease: Explicit quota ownership transferred to this
+                service through fetch and background indexing completion.
             
         Returns:
             Created document
         """
+        lease = _operation_lease(operation_lease)
+        extraction_future = None
         try:
+            # Fetch before creating a database row so SSRF/content/size
+            # refusals reach the HTTP caller as 4xx instead of becoming an
+            # orphaned queued document whose background task later fails.
+            if hasattr(self.url_adapter, "start_extract_content"):
+                operation = self.url_adapter.start_extract_content(url)
+                extraction_future = operation.future
+                extracted = await operation.wait()
+            else:
+                # Non-network test/recovery adapters retain the same ownership
+                # semantics even though production uses URLFetchOperation.
+                extraction_future = self.executor.submit(
+                    self.url_adapter.extract_content,
+                    url,
+                )
+                extracted = await asyncio.shield(
+                    asyncio.wrap_future(extraction_future)
+                )
+
             # Generate document ID
             doc_id = str(uuid.uuid4())
             
@@ -292,7 +379,16 @@ class DocumentService:
             db.refresh(document)
             
             # Process asynchronously
-            asyncio.create_task(self._process_url_async(db, doc_id, url))
+            task = asyncio.create_task(
+                self._process_url_async(
+                    db,
+                    doc_id,
+                    url,
+                    extracted=extracted,
+                    operation_lease=lease,
+                )
+            )
+            task.add_done_callback(lambda _task: lease.release())
             
             logger.info("URL processing initiated",
                        doc_id=doc_id,
@@ -301,20 +397,41 @@ class DocumentService:
             
             return document
             
+        except asyncio.CancelledError:
+            if extraction_future is not None:
+                lease.defer_release_until(extraction_future)
+            lease.release()
+            raise
         except Exception as e:
+            if extraction_future is not None and not extraction_future.done():
+                lease.defer_release_until(extraction_future)
+            lease.release()
             logger.error("Failed to process URL",
                         url=url,
                         error=str(e))
             raise
     
-    async def _process_url_async(self, db: Session, doc_id: str, url: str):
+    async def _process_url_async(
+        self,
+        db: Session,
+        doc_id: str,
+        url: str,
+        extracted: Optional[Dict] = None,
+        operation_lease: Optional[OperationLease] = None,
+    ):
         """Process URL asynchronously.
         
         Args:
             db: Database session
             doc_id: Document ID
             url: URL to process
+            extracted: Content already fetched at the request boundary. Tests
+                and recovery callers may omit it to perform extraction here.
+            operation_lease: Quota ownership released only after this task and
+                any uncancellable executor work finish.
         """
+        lease = _operation_lease(operation_lease)
+        extraction_future = None
         try:
             # Update status to processing
             doc = db.query(Document).filter(Document.id == doc_id).first()
@@ -322,13 +439,25 @@ class DocumentService:
                 doc.status = "processing"
                 db.commit()
             
-            # Extract content in thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self.executor,
-                self.url_adapter.extract_content,
-                url
-            )
+            result = extracted
+            if result is None:
+                if hasattr(self.url_adapter, "start_extract_content"):
+                    operation = self.url_adapter.start_extract_content(url)
+                    extraction_future = operation.future
+                    wait_for_extraction = operation.wait()
+                else:
+                    extraction_future = self.executor.submit(
+                        self.url_adapter.extract_content,
+                        url,
+                    )
+                    wait_for_extraction = asyncio.shield(
+                        asyncio.wrap_future(extraction_future)
+                    )
+                try:
+                    result = await wait_for_extraction
+                except asyncio.CancelledError:
+                    lease.defer_release_until(extraction_future)
+                    raise
             
             # Store the extracted content, staying in "processing": the source
             # is not usable until it has been indexed below.
@@ -355,7 +484,11 @@ class DocumentService:
                            url=url,
                            status=status)
             
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
+            if extraction_future is not None and not extraction_future.done():
+                lease.defer_release_until(extraction_future)
             logger.error("Failed to process URL",
                         doc_id=doc_id,
                         url=url,
@@ -367,6 +500,8 @@ class DocumentService:
                 doc.status = "error"
                 doc.error_message = str(e)
                 db.commit()
+        finally:
+            lease.release()
     
     async def process_youtube(
         self,
@@ -374,7 +509,8 @@ class DocumentService:
         project_id: str,
         user_id: str,
         youtube_url: str,
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        operation_lease: Optional[OperationLease] = None,
     ) -> Document:
         """Process YouTube video transcript.
         
@@ -384,10 +520,13 @@ class DocumentService:
             user_id: Account that will own the document
             youtube_url: YouTube video URL
             title: Optional document title
+            operation_lease: Explicit quota ownership transferred to this
+                service until background extraction/indexing really finishes.
             
         Returns:
             Created document
         """
+        lease = _operation_lease(operation_lease)
         try:
             # Initialize YouTube adapter if needed
             if not self.youtube_adapter:
@@ -423,7 +562,13 @@ class DocumentService:
             db.refresh(document)
             
             # Process asynchronously
-            asyncio.create_task(self._process_youtube_async(db, doc_id, youtube_url))
+            task = asyncio.create_task(self._process_youtube_async(
+                db,
+                doc_id,
+                youtube_url,
+                operation_lease=lease,
+            ))
+            task.add_done_callback(lambda _task: lease.release())
             
             logger.info("YouTube processing initiated",
                        doc_id=doc_id,
@@ -433,19 +578,30 @@ class DocumentService:
             return document
             
         except Exception as e:
+            lease.release()
             logger.error("Failed to process YouTube URL",
                         youtube_url=youtube_url,
                         error=str(e))
             raise
     
-    async def _process_youtube_async(self, db: Session, doc_id: str, youtube_url: str):
+    async def _process_youtube_async(
+        self,
+        db: Session,
+        doc_id: str,
+        youtube_url: str,
+        operation_lease: Optional[OperationLease] = None,
+    ):
         """Process YouTube video asynchronously.
         
         Args:
             db: Database session
             doc_id: Document ID
             youtube_url: YouTube URL
+            operation_lease: Quota ownership released only after this task and
+                any uncancellable executor work finish.
         """
+        lease = _operation_lease(operation_lease)
+        extraction_future = None
         try:
             # Update status to processing
             doc = db.query(Document).filter(Document.id == doc_id).first()
@@ -454,12 +610,17 @@ class DocumentService:
                 db.commit()
             
             # Extract transcript in thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self.executor,
+            extraction_future = self.executor.submit(
                 self.youtube_adapter.extract_transcript,
                 youtube_url
             )
+            try:
+                result = await asyncio.shield(
+                    asyncio.wrap_future(extraction_future)
+                )
+            except asyncio.CancelledError:
+                lease.defer_release_until(extraction_future)
+                raise
             
             # Store the extracted content, staying in "processing": the source
             # is not usable until it has been indexed below.
@@ -488,6 +649,8 @@ class DocumentService:
                            video_id=result.get("video_id"),
                            status=status)
             
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error("Failed to process YouTube video",
                         doc_id=doc_id,
@@ -501,6 +664,8 @@ class DocumentService:
                 doc.status = "error"
                 doc.error_message = str(e)
                 db.commit()
+        finally:
+            lease.release()
     
     def get_document_status(self, db: Session, doc_id: str) -> Optional[Document]:
         """Get document processing status.

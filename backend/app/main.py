@@ -9,6 +9,7 @@ from app.routers import (
 )
 from app.api import cache
 from app.utils.logging import setup_logging
+from app.middleware.upload_body_limit import UploadBodyLimitMiddleware
 
 # Setup logging
 setup_logging()
@@ -24,7 +25,14 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-# Configure CORS
+# Starlette makes the most recently added middleware outermost. The upload
+# guard must remain ahead of routing/form parsing, while CORS must wrap its
+# direct 413 so browser clients are allowed to read the stable error response.
+app.add_middleware(
+    UploadBodyLimitMiddleware,
+    max_file_size_bytes=settings.max_file_size_bytes,
+    configured_limit_mb=settings.max_file_size_mb,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,

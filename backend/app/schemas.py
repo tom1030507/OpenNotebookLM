@@ -1,7 +1,7 @@
 """Pydantic schemas for API models."""
 from datetime import datetime
 from typing import Annotated, Optional, List, Dict, Any
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from app.utils.time import as_utc
 
@@ -30,6 +30,24 @@ class UserRegister(BaseModel):
     # bcrypt reads at most 72 bytes, so longer passwords are refused here
     # rather than being silently truncated.
     password: str = Field(..., min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def password_must_fit_bcrypt(cls, password: str) -> str:
+        """Reject Unicode passwords whose UTF-8 form exceeds bcrypt's cap.
+
+        Args:
+            password: Validated password string.
+
+        Returns:
+            The password unchanged when its encoded size is safe.
+
+        Raises:
+            ValueError: If UTF-8 encoding exceeds bcrypt's 72-byte boundary.
+        """
+        if len(password.encode("utf-8")) > 72:
+            raise ValueError("Password must be at most 72 UTF-8 bytes")
+        return password
 
 
 class UserResponse(BaseModel):

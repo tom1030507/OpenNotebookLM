@@ -327,10 +327,21 @@ directory as `metrics.json` and `report.md`.
 <details>
 <summary><b>Who can read what</b> — sign-in and ownership</summary>
 
-Registering on `/login` creates an account through `POST /api/auth/register`;
-passwords are hashed with bcrypt. Signing in exchanges those credentials for a
-bearer token at `POST /api/auth/token`. There is no way in that skips the
-backend — a session it never issued is refused by every API route.
+Development keeps registration on `/login` open through
+`POST /api/auth/register`; passwords are hashed with bcrypt. Production closes
+public registration unless `ALLOW_PUBLIC_REGISTRATION=true` is set. Bootstrap
+an operator account without opening enrollment (the password is prompted for
+without echoing it) with:
+
+```bash
+docker exec -it opennotebook-backend sh -lc \
+  "cd /app && python -m scripts.create_user --username operator --email operator@example.com"
+```
+
+The command is idempotent for the same username/email. Signing in exchanges the
+credentials for a bearer token at `POST /api/auth/token`. There is no way in
+that skips the backend — a session it never issued is refused by every API
+route.
 
 Every route except the health checks and the two credential endpoints is mounted
 behind `get_current_user`, so a request with no `Authorization` header and one
@@ -617,9 +628,19 @@ improve on their own.
 | `JWT_SECRET_KEY` | Token signing key — **required** unless `APP_ENV=development` | – |
 | `JWT_ALGORITHM` | Signing algorithm | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime | `720` |
+| `ALLOW_PUBLIC_REGISTRATION` | Public signup; defaults on only in development | environment-dependent |
 | **Uploads** | | |
 | `MAX_FILE_SIZE_MB` | Upload limit | `50` |
 | `ALLOWED_FILE_TYPES` | Accepted extensions | `pdf,txt,md` |
+| `MAX_URL_DOWNLOAD_MB` | Decompressed URL response limit | `10` |
+| `MAX_URL_REDIRECTS` | Redirects revalidated per URL import | `5` |
+| `URL_CONNECT_TIMEOUT_SECONDS` | URL socket connection timeout | `5` |
+| `URL_READ_TIMEOUT_SECONDS` | URL socket read timeout | `30` |
+| `URL_DOWNLOAD_TIMEOUT_SECONDS` | Total URL import download cap | `30` |
+| **Abuse controls** | | |
+| `RATE_LIMIT_ENABLED` | Enforce in-process IP/account windows | `true` |
+| `RATE_LIMIT_MAX_KEYS` | Maximum non-expired limiter buckets | `10000` |
+| `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-For` from an operator-controlled proxy | `false` |
 
 Without `JWT_SECRET_KEY`, a development server signs tokens with a key generated
 per process — sessions do not survive a restart. Any non-development deployment

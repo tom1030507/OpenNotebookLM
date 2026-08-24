@@ -41,6 +41,10 @@ tiktoken==0.5.1
 # Utils
 # OpenAI 1.3 still passes the `proxies` keyword removed by httpx 0.28.
 httpx==0.27.2
+# URL pinning depends on Requests' TLS-context hook and the reviewed urllib3
+# connection-pool cleanup contract; keep both versions exact.
+requests==2.34.2
+urllib3==2.7.0
 aiofiles==23.2.1
 PyJWT[crypto]==2.13.0
 passlib[bcrypt]==1.7.4

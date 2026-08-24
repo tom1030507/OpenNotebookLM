@@ -52,3 +52,16 @@ def test_a_set_optional_number_is_still_read(tmp_path):
     env_file.write_text("LLM_MAX_REQUEST_TOKENS=8000\n", encoding="utf-8")
 
     assert Settings(_env_file=env_file).llm_max_request_tokens == 8000
+
+
+def test_public_registration_defaults_to_development_only():
+    """An Internet-facing environment is closed unless enrollment is explicit."""
+    assert Settings(app_env="development").allow_public_registration is True
+    assert Settings(app_env="production").allow_public_registration is False
+
+
+def test_production_can_explicitly_enable_public_registration():
+    """Operators retain an explicit opt-in for deployments that need signup."""
+    settings = Settings(app_env="production", allow_public_registration=True)
+
+    assert settings.allow_public_registration is True
