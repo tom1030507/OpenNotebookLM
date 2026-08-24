@@ -31,40 +31,38 @@ export interface DocumentStatus {
 export interface Conversation {
   id: string;
   project_id: string;
-  title: string;
+  title: string | null;
   message_count: number;
+}
+
+/** The conversation endpoint returns raw JSON citations without a response model. */
+export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
+
+export interface JsonObject {
+  [key: string]: JsonValue;
 }
 
 export interface ConversationDetail {
   id: string;
   project_id: string;
-  title: string;
+  title: string | null;
   messages: Array<{
     id: string;
-    role: 'user' | 'assistant';
+    // The persisted model accepts any string, including system messages.
+    role: string;
     text: string;
-    citations: Array<{
-      document_id: string;
-      document_title: string;
-      chunk_id: string;
-      text_preview: string;
-    }>;
+    citations: JsonValue;
   }>;
 }
 
 export interface QueryResult {
   answer: string;
-  sources: Array<{
-    id: number;
-    document_id: string;
-    document_title: string;
-    chunk_id: string;
-    text_preview: string;
-    score: number;
-  }>;
+  // QueryResponse declares sources as List[dict], without a stricter model.
+  sources: JsonObject[];
   chunks_used: number;
   model_used: string | null;
-  conversation_id: string;
+  usage: JsonObject;
+  conversation_id: string | null;
 }
 
 export class E2EApi {
@@ -152,7 +150,7 @@ export class E2EApi {
     return latest as DocumentStatus;
   }
 
-  async createConversation(projectId: string, title: string): Promise<Conversation> {
+  async createConversation(projectId: string, title: string | null = null): Promise<Conversation> {
     return this.json(await this.request.post(`${runtime.apiUrl}/projects/${projectId}/conversations`, {
       headers: this.authorization(),
       data: { title },

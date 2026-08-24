@@ -5,7 +5,8 @@ import { runtime } from './runtime.js';
 const frontendOrigin = new URL(runtime.frontendUrl).origin;
 const backendApiUrl = new URL(runtime.apiUrl);
 const backendApiPath = backendApiUrl.pathname.replace(/\/$/, '');
-const browserResource4xx = /^Failed to load resource: the server responded with a status of 4\d{2}\b/;
+const authTokenUrl = `${runtime.apiUrl}/auth/token`;
+const browserResource401 = /^Failed to load resource: the server responded with a status of 401\b/;
 
 export function isApplicationUrl(candidate: string): boolean {
   let url: URL;
@@ -29,13 +30,31 @@ export function isApplicationUrl(candidate: string): boolean {
 
 export class BrowserDiagnostics {
   private readonly issues: string[] = [];
+  private readonly pendingResource401Errors: string[] = [];
+  private expectedAuthToken401Count = 0;
+  private observedAuthToken401Count = 0;
+
+  /** Register the one deliberate wrong-password response before submitting its form. */
+  allowExpectedAuthToken401(): void {
+    this.expectedAuthToken401Count += 1;
+  }
+
+  private isExpectedAuthToken401(response: { url(): string; status(): number; request(): { method(): string } }): boolean {
+    return (
+      response.url() === authTokenUrl
+      && response.status() === 401
+      && response.request().method() === 'POST'
+      && this.observedAuthToken401Count < this.expectedAuthToken401Count
+    );
+  }
 
   install(page: Page): void {
     page.on('pageerror', (error) => this.issues.push(`pageerror: ${error.stack ?? error.message}`));
     page.on('console', (message) => {
-      // Chrome reports deliberate client errors as console errors even though
-      // response handling below intentionally reserves diagnostics for 5xx.
-      if (message.type() === 'error' && !browserResource4xx.test(message.text())) {
+      if (message.type() === 'error' && browserResource401.test(message.text())) {
+        // The response event can arrive after Chrome's generic resource error.
+        this.pendingResource401Errors.push(message.text());
+      } else if (message.type() === 'error') {
         this.issues.push(`console.error: ${message.text()}`);
       }
     });
@@ -50,13 +69,22 @@ export class BrowserDiagnostics {
       }
     });
     page.on('response', (response) => {
-      if (isApplicationUrl(response.url()) && response.status() >= 500) {
+      if (this.isExpectedAuthToken401(response)) {
+        this.observedAuthToken401Count += 1;
+      } else if (isApplicationUrl(response.url()) && response.status() >= 500) {
         this.issues.push(`http ${response.status()}: ${response.request().method()} ${response.url()}`);
       }
     });
   }
 
   async verify(testInfo: TestInfo): Promise<void> {
+    const toleratedResource401Errors = Math.min(
+      this.pendingResource401Errors.length,
+      this.observedAuthToken401Count,
+    );
+    for (const message of this.pendingResource401Errors.slice(toleratedResource401Errors)) {
+      this.issues.push(`console.error: ${message}`);
+    }
     if (this.issues.length === 0) {
       return;
     }

@@ -31,7 +31,11 @@ test('registers and restores the signed-in session after reload', async ({ page 
   await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible();
 });
 
-test('rejects a wrong password without creating browser session state', async ({ api, page }, testInfo) => {
+test('rejects a wrong password without creating browser session state', async ({
+  api,
+  browserDiagnostics,
+  page,
+}, testInfo) => {
   const account = accountFor(testInfo, 'wrong-password');
   await api.register(account);
   await page.goto('/login');
@@ -40,6 +44,7 @@ test('rejects a wrong password without creating browser session state', async ({
   const rejected = page.waitForResponse(
     (response) => response.url().endsWith('/api/auth/token') && response.status() === 401,
   );
+  browserDiagnostics.allowExpectedAuthToken401();
   await page.getByRole('button', { name: 'Login', exact: true }).click();
   await rejected;
 
