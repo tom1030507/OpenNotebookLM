@@ -1,5 +1,6 @@
 """Database connection and session management."""
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
@@ -15,22 +16,63 @@ settings = get_settings()
 # Ensure data directory exists
 Path(os.path.dirname(settings.db_path)).mkdir(parents=True, exist_ok=True)
 
-# Create engine
-if "sqlite" in settings.database_url:
-    # SQLite specific settings
-    engine = create_engine(
-        settings.database_url,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        echo=settings.debug,
-    )
-else:
-    # For other databases
-    engine = create_engine(
-        settings.database_url,
-        echo=settings.debug,
-        pool_pre_ping=True,
-    )
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
+
+def create_database_engine(database_url: str, echo: bool) -> Engine:
+    """Create an engine with pooling and connection policy for its database.
+
+    Args:
+        database_url: SQLAlchemy URL for the database.
+        echo: Whether SQLAlchemy should log emitted SQL.
+
+    Returns:
+        A configured SQLAlchemy engine.
+    """
+    parsed_url = make_url(database_url)
+    if parsed_url.get_backend_name() != "sqlite":
+        return create_engine(database_url, echo=echo, pool_pre_ping=True)
+
+    is_memory = parsed_url.database in (None, "", ":memory:")
+    engine_options = {
+        "connect_args": {"check_same_thread": False},
+        "echo": echo,
+    }
+    if is_memory:
+        # Separate in-memory connections each get a different database, so one
+        # shared connection is required for app sessions to see the same data.
+        engine_options["poolclass"] = StaticPool
+
+    database_engine = create_engine(database_url, **engine_options)
+
+    @event.listens_for(database_engine, "connect")
+    def configure_sqlite_connection(dbapi_connection, _connection_record):
+        """Apply correctness and contention policy to each pooled connection.
+
+        Args:
+            dbapi_connection: Newly opened sqlite3 connection.
+            _connection_record: SQLAlchemy pool record for the connection.
+
+        Returns:
+            None.
+        """
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute(
+                "PRAGMA busy_timeout=%d" % SQLITE_BUSY_TIMEOUT_MS
+            )
+            if not is_memory:
+                # WAL lets readers continue while ingestion commits chunks on
+                # another connection; applying it to :memory: is unsupported.
+                cursor.execute("PRAGMA journal_mode=WAL")
+        finally:
+            cursor.close()
+
+    return database_engine
+
+
+engine = create_database_engine(settings.database_url, echo=settings.debug)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
