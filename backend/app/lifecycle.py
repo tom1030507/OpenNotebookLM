@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     ingestion_worker = IngestionJobWorker(
         session_factory=SessionLocal,
+        processor=getattr(app.state, "ingestion_job_processor", None),
         concurrency=settings.ingestion_worker_concurrency,
     )
     await ingestion_worker.start()

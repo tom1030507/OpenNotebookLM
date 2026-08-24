@@ -54,7 +54,7 @@ def query_client(
     if route_settings is not None:
         app.dependency_overrides[get_settings] = lambda: route_settings
     monkeypatch.setattr(query, "owned_document_ids", lambda *args: [])
-    monkeypatch.setattr(query, "rag_service", rag_service)
+    app.dependency_overrides[query.get_rag_service] = lambda: rag_service
     return TestClient(app)
 
 

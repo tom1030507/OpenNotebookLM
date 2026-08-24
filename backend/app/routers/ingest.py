@@ -1,5 +1,6 @@
 """Document ingestion router."""
-from typing import Optional
+from functools import lru_cache
+from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 import structlog
@@ -11,7 +12,6 @@ from app.schemas import (
 )
 from app.db.models import User
 from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
-from app.services.documents import DocumentService, UploadTooLargeError
 from app.config import get_settings
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_document, require_project
@@ -36,8 +36,19 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
 settings = get_settings()
 
-# Initialize document service
-document_service = DocumentService()
+@lru_cache
+def get_document_service() -> Any:
+    """Return the process-wide document service on first use.
+
+    Args:
+        None.
+
+    Returns:
+        The production document service.
+    """
+    from app.services.documents import DocumentService
+
+    return DocumentService()
 
 
 def _begin_ingestion(
@@ -75,6 +86,7 @@ async def upload_file(
     title: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    document_service: Any = Depends(get_document_service),
     request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
@@ -131,6 +143,10 @@ async def upload_file(
         request_limiter,
         concurrency_limiter,
     )
+    # Import after dependency resolution so importing the router never crosses
+    # the optional ML boundary through the document service module.
+    from app.services.documents import UploadTooLargeError
+
     try:
         # Process the upload
         document = await document_service.process_pdf_upload(
@@ -165,6 +181,7 @@ async def upload_url(
     request: URLUploadRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    document_service: Any = Depends(get_document_service),
     request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
@@ -221,6 +238,7 @@ async def upload_youtube(
     request: YouTubeUploadRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    document_service: Any = Depends(get_document_service),
     request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
@@ -333,7 +351,8 @@ async def get_document(
 async def delete_document(
     doc_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    document_service: Any = Depends(get_document_service),
 ):
     """Delete one of the caller's documents."""
     require_document(db, doc_id, current_user)

@@ -1,6 +1,7 @@
 """Tests for the export API."""
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import zipfile
 
@@ -16,6 +17,7 @@ from app.db.models import (
     Base,
     Conversation,
     Document,
+    Message,
     Project,
     ProjectDocument,
 )
@@ -561,3 +563,70 @@ def test_batch_route_attaches_background_cleanup(tmp_path, monkeypatch):
     assert isinstance(response.background, BackgroundTask)
     asyncio.run(response.background())
     assert not archive_path.exists()
+
+
+def test_json_conversation_export_orders_persisted_messages_by_time_and_legacy_id():
+    """Conversation export must give legacy timestamp ties a stable order."""
+    conversation_id = "export-ordered-conversation"
+    tied_timestamp = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    with TestingSessionLocal() as db:
+        owner = owner_id(db)
+        db.add_all([
+            Project(
+                id="export-ordered-project",
+                user_id=owner,
+                name="Ordered export project",
+            ),
+            Conversation(
+                id=conversation_id,
+                project_id="export-ordered-project",
+                title="Ordered export",
+            ),
+            # Insert in the opposite of the required order, including a legacy tie.
+            Message(
+                id="export-later-message",
+                conversation_id=conversation_id,
+                role="assistant",
+                text="Later",
+                created_at=tied_timestamp + timedelta(seconds=1),
+            ),
+            Message(
+                id="export-legacy-z-message",
+                conversation_id=conversation_id,
+                role="assistant",
+                text="Legacy Z",
+                created_at=tied_timestamp,
+            ),
+            Message(
+                id="export-earlier-message",
+                conversation_id=conversation_id,
+                role="user",
+                text="Earlier",
+                created_at=tied_timestamp - timedelta(seconds=1),
+            ),
+            Message(
+                id="export-legacy-a-message",
+                conversation_id=conversation_id,
+                role="user",
+                text="Legacy A",
+                created_at=tied_timestamp,
+            ),
+        ])
+        db.commit()
+
+    try:
+        response = client.get(f"/api/export/conversation/{conversation_id}?format=json")
+
+        assert response.status_code == 200
+        assert [message["id"] for message in json.loads(response.text)["messages"]] == [
+            "export-earlier-message",
+            "export-legacy-a-message",
+            "export-legacy-z-message",
+            "export-later-message",
+        ]
+    finally:
+        with TestingSessionLocal() as db:
+            db.query(Message).filter(Message.conversation_id == conversation_id).delete()
+            db.query(Conversation).filter(Conversation.id == conversation_id).delete()
+            db.query(Project).filter(Project.id == "export-ordered-project").delete()
+            db.commit()

@@ -457,4 +457,44 @@ describe('API client', () => {
       '/api/export/conversation/conversation-1?format=markdown',
     );
   });
+
+  it('detaches fetched export bytes before the browser download uses them', async () => {
+    const arrayBuffer = vi.fn().mockResolvedValue(new TextEncoder().encode('# Export').buffer);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'text/markdown' }),
+      arrayBuffer,
+    }));
+
+    const blob = await api.exportProject('project-1', 'markdown');
+
+    expect(arrayBuffer).toHaveBeenCalledOnce();
+    expect(blob.type).toBe('text/markdown');
+    await expect(blob.text()).resolves.toBe('# Export');
+  });
+
+  it('keeps document-file previews backed by the response blob', async () => {
+    const responseBlob = new Blob(['%PDF-preview'], { type: 'application/pdf' });
+    const blob = vi.fn().mockResolvedValue(responseBlob);
+    const arrayBuffer = vi.fn().mockRejectedValue(new Error('preview should not copy bytes'));
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/pdf' }),
+      blob,
+      arrayBuffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = await api.fetchDocumentFile('document-1');
+
+    expect(file).toBe(responseBlob);
+    expect(blob).toHaveBeenCalledOnce();
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/docs/document-1/file',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+  });
 });

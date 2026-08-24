@@ -11,8 +11,9 @@ import { AUTH_TOKEN_COOKIE, clearSession, storeSession } from '@/lib/session';
 import ChatArea from '../chat/ChatArea';
 
 const push = vi.fn();
+const replace = vi.fn();
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push }),
+  useRouter: () => ({ push, replace }),
 }));
 
 const project: Project = {
@@ -82,6 +83,7 @@ const renderTopNavAtWidth = (width: number) => {
 
 beforeEach(() => {
   push.mockClear();
+  replace.mockClear();
   window.localStorage.clear();
   HTMLElement.prototype.scrollIntoView = () => undefined;
   useStore.setState({ currentProject: project, projects: [project], documents: [] });
@@ -231,7 +233,7 @@ describe('TopNav controls that were previously inert', () => {
     expect(window.localStorage.getItem('user')).toBeNull();
     // The middleware gates on the cookie, so signing out has to expire it too.
     expect(document.cookie).not.toContain(AUTH_TOKEN_COOKIE);
-    expect(push).toHaveBeenCalledWith('/login');
+    expect(replace).toHaveBeenCalledWith('/login');
     expect(useStore.getState()).toMatchObject({
       projects: [],
       currentProject: null,

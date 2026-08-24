@@ -12,6 +12,7 @@ UTC, and says it without moving the instant.
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import json
 import re
 import sys
@@ -352,6 +353,7 @@ class TestIngestionMetadataTimestamps:
         service = DocumentService(
             chunking_service=FakeChunkingService(),
             embedding_service=FakeEmbeddingService(),
+            session_context=lambda: nullcontext(db),
         )
         service.url_adapter = FakeURLAdapter()
 
@@ -370,9 +372,7 @@ class TestIngestionMetadataTimestamps:
             db.add(ProjectDocument(project_id="project-1", document_id="document-1"))
             db.commit()
 
-            asyncio.run(
-                service._process_url_async(db, "document-1", "https://example.com")
-            )
+            asyncio.run(service._process_url_async("document-1", "https://example.com"))
 
             document = db.query(Document).filter(Document.id == "document-1").first()
             checked = assert_all_utc(document.meta_json)
