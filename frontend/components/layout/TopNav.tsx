@@ -96,7 +96,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
     clearSession();
 
     setShowUserMenu(false);
-    router.push('/login');
+    // Replace the protected entry so Back cannot restore it from client history.
+    router.replace('/login');
   };
 
   // Documents are the only asynchronous work the workspace runs today, so their

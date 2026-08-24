@@ -5,6 +5,7 @@ import { runtime } from './runtime.js';
 const frontendOrigin = new URL(runtime.frontendUrl).origin;
 const backendApiUrl = new URL(runtime.apiUrl);
 const backendApiPath = backendApiUrl.pathname.replace(/\/$/, '');
+const browserResource4xx = /^Failed to load resource: the server responded with a status of 4\d{2}\b/;
 
 export function isApplicationUrl(candidate: string): boolean {
   let url: URL;
@@ -32,7 +33,9 @@ export class BrowserDiagnostics {
   install(page: Page): void {
     page.on('pageerror', (error) => this.issues.push(`pageerror: ${error.stack ?? error.message}`));
     page.on('console', (message) => {
-      if (message.type() === 'error') {
+      // Chrome reports deliberate client errors as console errors even though
+      // response handling below intentionally reserves diagnostics for 5xx.
+      if (message.type() === 'error' && !browserResource4xx.test(message.text())) {
         this.issues.push(`console.error: ${message.text()}`);
       }
     });
