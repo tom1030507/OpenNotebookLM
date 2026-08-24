@@ -41,10 +41,7 @@ function citationsContainDocument(
 }
 
 function inspectStoredEmbeddings(documentId: string): Array<{ model_name: string; vector_json: unknown }> {
-  const python = process.env.E2E_PYTHON;
-  if (!python) {
-    throw new Error('E2E_PYTHON must point to the isolated backend interpreter.');
-  }
+  const python = process.env.E2E_PYTHON ?? 'python';
   const database = path.join(runtime.root, 'opennotebook.db');
   const script = [
     'import json, sqlite3, sys',
