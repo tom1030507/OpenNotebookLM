@@ -407,17 +407,26 @@ const requestJson = async <T>(
 };
 
 
-const requestBlob = async (path: string): Promise<Blob> => {
+const fetchBlobResponse = async (path: string): Promise<Response> => {
   const headers = requestHeaders('*/*');
   const snapshot = snapshotSessionCredential(headers.get('Authorization'));
   const response = await fetch(apiUrl(path), {
     headers,
   });
   await guard(path, response, snapshot);
+  return response;
+};
 
-  // Chrome's download manager can retain a network-backed response Blob and
-  // replay its protected URL without the bearer header. Copying the bytes makes
-  // the later UI download depend only on browser-owned Blob data.
+const requestBlob = async (path: string): Promise<Blob> => {
+  return (await fetchBlobResponse(path)).blob();
+};
+
+const requestDetachedExportBlob = async (path: string): Promise<Blob> => {
+  const response = await fetchBlobResponse(path);
+
+  // In reproducible Chromium/Playwright export flows, a response-backed Blob
+  // can trigger a later protected URL request without the bearer header. Copy
+  // export bytes before handing them to the browser download path.
   const content = await response.arrayBuffer();
   return new Blob([content], { type: response.headers.get('Content-Type') || '' });
 };
@@ -704,7 +713,7 @@ const api = {
     conversationId: string,
     format: ConversationExportFormat,
   ): Promise<Blob> {
-    return requestBlob(
+    return requestDetachedExportBlob(
       `/export/conversation/${conversationId}?format=${encodeURIComponent(format)}`,
     );
   },
@@ -713,7 +722,7 @@ const api = {
     projectId: string,
     format: ProjectExportFormat,
   ): Promise<Blob> {
-    return requestBlob(
+    return requestDetachedExportBlob(
       `/export/project/${projectId}?format=${encodeURIComponent(format)}`,
     );
   },
@@ -727,7 +736,7 @@ const api = {
   },
 
   exportProjectSummary(projectId: string): Promise<Blob> {
-    return requestBlob(`/export/project/${projectId}/summary`);
+    return requestDetachedExportBlob(`/export/project/${projectId}/summary`);
   },
 
   /** The same summary as text, for reading aloud rather than downloading. */
