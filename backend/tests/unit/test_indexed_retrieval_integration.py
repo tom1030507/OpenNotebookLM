@@ -1,7 +1,9 @@
 """Integration contracts between ingestion, RAG, and the retrieval index."""
 from __future__ import annotations
 
+import importlib
 import pickle
+import sys
 import types
 
 import numpy as np
@@ -14,11 +16,31 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base, Chunk, Document, Embedding  # noqa: E402
 from app.routers import health  # noqa: E402
-from app.services import chunking, documents, embeddings, ingestion_jobs, rag  # noqa: E402
+from app.services import chunking, documents, embeddings, ingestion_jobs  # noqa: E402
 from app.services.retrieval_index import (  # noqa: E402
     IndexedChunk,
     RetrievalCandidate,
 )
+
+
+def real_rag_module():
+    """Return real RAG code after route tests install their lightweight stub.
+
+    Returns:
+        The genuine ``app.services.rag`` module.
+    """
+    module = sys.modules.get("app.services.rag")
+    if (
+        module is None
+        or not hasattr(module, "RAGService")
+        or not hasattr(module.RAGService, "retrieve_with_diagnostics")
+    ):
+        sys.modules.pop("app.services.rag", None)
+        module = importlib.import_module("app.services.rag")
+    return module
+
+
+rag = real_rag_module()
 
 
 @pytest.fixture
