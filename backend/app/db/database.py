@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
 from typing import Generator
 import os
+import sqlite3
 from pathlib import Path
 
 from app.config import get_settings
@@ -68,6 +69,23 @@ def create_database_engine(database_url: str, echo: bool) -> Engine:
                 cursor.execute("PRAGMA journal_mode=WAL")
         finally:
             cursor.close()
+
+        # SQLite extensions are connection-local. Loading here makes pooled,
+        # reindex, and evaluation connections behave identically; failures are
+        # deliberately non-fatal because RetrievalIndex exposes the named
+        # brute fallback when sqlite-vec cannot be imported or loaded.
+        try:
+            import sqlite_vec
+
+            dbapi_connection.enable_load_extension(True)
+            sqlite_vec.load(dbapi_connection)
+        except (ImportError, AttributeError, OSError, sqlite3.Error):
+            pass
+        finally:
+            try:
+                dbapi_connection.enable_load_extension(False)
+            except (AttributeError, sqlite3.Error):
+                pass
 
     return database_engine
 
@@ -136,6 +154,14 @@ def init_db():
     """Initialize database tables, and upgrade an older one in place."""
     Base.metadata.create_all(bind=engine)
     ensure_added_columns()
+    # Import inside startup after models exist to avoid a database/service
+    # import cycle. Committing the virtual-table schema here makes health
+    # diagnostics accurate before the first retrieval request.
+    from app.services.retrieval_index import get_retrieval_index
+
+    with Session(bind=engine) as db:
+        get_retrieval_index().ensure_schema(db, settings.emb_dimension)
+        db.commit()
 
 
 def get_db() -> Generator[Session, None, None]:

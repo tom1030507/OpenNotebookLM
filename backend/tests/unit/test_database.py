@@ -69,6 +69,45 @@ def test_file_sqlite_sets_pragmas_on_every_connection(tmp_path):
         engine.dispose()
 
 
+def test_file_sqlite_loads_sqlite_vec_on_every_connection(tmp_path):
+    """Every pooled connection can execute vec functions before a first query."""
+    engine = database.create_database_engine(
+        "sqlite:///%s" % (tmp_path / "sqlite-vec.db"),
+        echo=False,
+    )
+    try:
+        with engine.connect() as first, engine.connect() as second:
+            assert first.exec_driver_sql("SELECT vec_version()").scalar_one() == "v0.1.9"
+            assert second.exec_driver_sql("SELECT vec_version()").scalar_one() == "v0.1.9"
+    finally:
+        engine.dispose()
+
+
+def test_init_db_creates_retrieval_schema_before_the_first_query(
+    monkeypatch,
+    tmp_path,
+):
+    """Startup publishes active vec/FTS health without waiting for retrieval."""
+    engine = database.create_database_engine(
+        "sqlite:///%s" % (tmp_path / "startup-index.db"),
+        echo=False,
+    )
+    monkeypatch.setattr(database, "engine", engine)
+    monkeypatch.setattr(database.settings, "emb_dimension", 2)
+    try:
+        database.init_db()
+        with engine.connect() as connection:
+            names = set(
+                connection.exec_driver_sql(
+                    "SELECT name FROM sqlite_master"
+                ).scalars()
+            )
+        assert "retrieval_index_vec" in names
+        assert "retrieval_index_fts" in names
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("database_url", ["sqlite:///:memory:", "sqlite://"])
 def test_explicit_memory_sqlite_alone_uses_static_pool(database_url):
     """The two explicit in-memory URL forms retain one shared connection.
