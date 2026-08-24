@@ -627,6 +627,7 @@ improve on their own.
 | `RERANK_ENABLED` | Legacy heuristic re-ranker, used when `HYBRID_ENABLED=false` | `true` |
 | **Database** | | |
 | `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/opennotebook.db` |
+| `INGESTION_WORKER_CONCURRENCY` | Simultaneous durable ingestion jobs (`1`–`16`) | `1` |
 | **Auth** | | |
 | `JWT_SECRET_KEY` | Token signing key — **required** unless `APP_ENV=development` | – |
 | `JWT_ALGORITHM` | Signing algorithm | `HS256` |
@@ -644,6 +645,11 @@ improve on their own.
 | `RATE_LIMIT_ENABLED` | Enforce in-process IP/account windows | `true` |
 | `RATE_LIMIT_MAX_KEYS` | Maximum non-expired limiter buckets | `10000` |
 | `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-For` from an operator-controlled proxy | `false` |
+
+The shipped SQLite deployment runs one backend process. Its retained worker
+requeues jobs left `running` by a previous process at startup; do not run
+multiple backend processes against the same SQLite file because one process
+could otherwise mistake another process's active job for abandoned work.
 
 Without `JWT_SECRET_KEY`, a development server signs tokens with a key generated
 per process — sessions do not survive a restart. Any non-development deployment

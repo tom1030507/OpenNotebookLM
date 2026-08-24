@@ -63,6 +63,20 @@ def test_non_positive_chunk_size_is_rejected_during_config_parse(chunk_size):
         Settings(chunk_size=chunk_size)
 
 
+@pytest.mark.parametrize("concurrency", [0, 17])
+def test_ingestion_worker_concurrency_is_bounded(concurrency):
+    """Configuration cannot create zero or an excessive number of workers.
+
+    Args:
+        concurrency: Invalid worker count under test.
+
+    Returns:
+        None.
+    """
+    with pytest.raises(ValidationError):
+        Settings(ingestion_worker_concurrency=concurrency)
+
+
 def test_public_registration_defaults_to_development_only():
     """An Internet-facing environment is closed unless enrollment is explicit."""
     assert Settings(app_env="development").allow_public_registration is True

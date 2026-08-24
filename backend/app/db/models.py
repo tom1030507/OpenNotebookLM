@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy import (
     Column, String, Integer, Text,
-    ForeignKey, JSON, Float, Boolean, LargeBinary, Index
+    ForeignKey, JSON, Float, Boolean, LargeBinary, Index, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -89,11 +89,51 @@ class Document(Base):
     owner = relationship("User", back_populates="documents")
     chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
     projects = relationship("ProjectDocument", back_populates="document", cascade="all, delete-orphan")
+    ingestion_jobs = relationship(
+        "IngestionJob",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
     
     __table_args__ = (
         Index("idx_documents_status", "status"),
         Index("idx_documents_source_type", "source_type"),
         Index("idx_documents_user_id", "user_id"),
+    )
+
+
+class IngestionJob(Base):
+    """Durable extraction and indexing work for one document."""
+    __tablename__ = "ingestion_jobs"
+
+    id = Column(String, primary_key=True)
+    # Terminal rows are durable attempt history. The partial unique index below
+    # prevents competing active attempts without discarding that history.
+    document_id = Column(
+        String,
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    job_type = Column(String, nullable=False)
+    payload_json = Column(JSON, default=dict, nullable=False)
+    status = Column(String, default="queued", nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    last_error = Column(JSON)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    started_at = Column(UTCDateTime)
+    completed_at = Column(UTCDateTime)
+
+    document = relationship("Document", back_populates="ingestion_jobs")
+
+    __table_args__ = (
+        Index("idx_ingestion_jobs_status_created", "status", "created_at"),
+        Index(
+            "uq_ingestion_jobs_active_document",
+            "document_id",
+            unique=True,
+            sqlite_where=text("status IN ('queued', 'running')"),
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
     )
 
 

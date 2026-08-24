@@ -15,6 +15,12 @@ from app.config import get_settings
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
+from app.services.ingestion_jobs import (
+    enqueue_ingestion_job,
+    notify_ingestion_worker,
+    release_operation_lease,
+    retain_operation_lease,
+)
 from app.services.rate_limit import OperationLease, UnlimitedConcurrencyLease
 from app.utils.time import utc_now_iso
 
@@ -290,6 +296,8 @@ class DocumentService:
         lease = _operation_lease(operation_lease)
         file_path = None
         retained = False
+        job_id = None
+        database_touched = False
         try:
             # Generate document ID
             doc_id = str(uuid.uuid4())
@@ -326,6 +334,7 @@ class DocumentService:
                 }
             )
             
+            database_touched = True
             db.add(document)
             
             # Link to project
@@ -334,21 +343,28 @@ class DocumentService:
                 document_id=doc_id
             )
             db.add(project_doc)
-            
-            db.commit()
-            db.refresh(document)
-            retained = True
-            
-            # Process asynchronously
-            task = asyncio.create_task(self._process_pdf_async(
+
+            job = enqueue_ingestion_job(
                 db,
-                doc_id,
-                file_path,
-                operation_lease=lease,
-            ))
-            # A task cancelled before its coroutine ever starts cannot execute
-            # its finally block, so the submitted task is also an owner edge.
-            task.add_done_callback(lambda _task: lease.release())
+                document_id=doc_id,
+                job_type="pdf",
+                payload={"file_path": str(file_path)},
+            )
+            job_id = job.id
+            retain_operation_lease(job_id, operation_lease)
+            db.commit()
+            retained = True
+            try:
+                notify_ingestion_worker()
+            except Exception as error:
+                # Polling is the durable notification path. A process-local
+                # wakeup failure must not undo a committed document/job pair or
+                # delete the PDF file that recovery now owns.
+                logger.warning(
+                    "Could not wake ingestion worker after PDF enqueue",
+                    job_id=job_id,
+                    error=str(error),
+                )
             
             logger.info("PDF upload initiated", 
                        doc_id=doc_id, 
@@ -358,7 +374,12 @@ class DocumentService:
             return document
             
         except Exception as e:
-            lease.release()
+            if database_touched:
+                db.rollback()
+            if job_id is not None and not retained:
+                release_operation_lease(job_id)
+            elif job_id is None:
+                lease.release()
             if file_path is not None and not retained:
                 file_path.unlink(missing_ok=True)
             logger.error("Failed to process PDF upload", 
@@ -477,26 +498,9 @@ class DocumentService:
             Created document
         """
         lease = _operation_lease(operation_lease)
-        extraction_future = None
+        job_id = None
+        retained = False
         try:
-            # Fetch before creating a database row so SSRF/content/size
-            # refusals reach the HTTP caller as 4xx instead of becoming an
-            # orphaned queued document whose background task later fails.
-            if hasattr(self.url_adapter, "start_extract_content"):
-                operation = self.url_adapter.start_extract_content(url)
-                extraction_future = operation.future
-                extracted = await operation.wait()
-            else:
-                # Non-network test/recovery adapters retain the same ownership
-                # semantics even though production uses URLFetchOperation.
-                extraction_future = self.executor.submit(
-                    self.url_adapter.extract_content,
-                    url,
-                )
-                extracted = await asyncio.shield(
-                    asyncio.wrap_future(extraction_future)
-                )
-
             # Generate document ID
             doc_id = str(uuid.uuid4())
             
@@ -522,21 +526,25 @@ class DocumentService:
                 document_id=doc_id
             )
             db.add(project_doc)
-            
-            db.commit()
-            db.refresh(document)
-            
-            # Process asynchronously
-            task = asyncio.create_task(
-                self._process_url_async(
-                    db,
-                    doc_id,
-                    url,
-                    extracted=extracted,
-                    operation_lease=lease,
-                )
+
+            job = enqueue_ingestion_job(
+                db,
+                document_id=doc_id,
+                job_type="url",
+                payload={"url": url},
             )
-            task.add_done_callback(lambda _task: lease.release())
+            job_id = job.id
+            retain_operation_lease(job_id, operation_lease)
+            db.commit()
+            retained = True
+            try:
+                notify_ingestion_worker()
+            except Exception as error:
+                logger.warning(
+                    "Could not wake ingestion worker after URL enqueue",
+                    job_id=job_id,
+                    error=str(error),
+                )
             
             logger.info("URL processing initiated",
                        doc_id=doc_id,
@@ -545,15 +553,12 @@ class DocumentService:
             
             return document
             
-        except asyncio.CancelledError:
-            if extraction_future is not None:
-                lease.defer_release_until(extraction_future)
-            lease.release()
-            raise
         except Exception as e:
-            if extraction_future is not None and not extraction_future.done():
-                lease.defer_release_until(extraction_future)
-            lease.release()
+            db.rollback()
+            if job_id is not None and not retained:
+                release_operation_lease(job_id)
+            elif job_id is None:
+                lease.release()
             logger.error("Failed to process URL",
                         url=url,
                         error=str(e))
@@ -681,11 +686,9 @@ class DocumentService:
             Created document
         """
         lease = _operation_lease(operation_lease)
+        job_id = None
+        retained = False
         try:
-            # Initialize YouTube adapter if needed
-            if not self.youtube_adapter:
-                self.youtube_adapter = YouTubeAdapter()
-            
             # Generate document ID
             doc_id = str(uuid.uuid4())
             
@@ -711,18 +714,25 @@ class DocumentService:
                 document_id=doc_id
             )
             db.add(project_doc)
-            
-            db.commit()
-            db.refresh(document)
-            
-            # Process asynchronously
-            task = asyncio.create_task(self._process_youtube_async(
+
+            job = enqueue_ingestion_job(
                 db,
-                doc_id,
-                youtube_url,
-                operation_lease=lease,
-            ))
-            task.add_done_callback(lambda _task: lease.release())
+                document_id=doc_id,
+                job_type="youtube",
+                payload={"youtube_url": youtube_url},
+            )
+            job_id = job.id
+            retain_operation_lease(job_id, operation_lease)
+            db.commit()
+            retained = True
+            try:
+                notify_ingestion_worker()
+            except Exception as error:
+                logger.warning(
+                    "Could not wake ingestion worker after YouTube enqueue",
+                    job_id=job_id,
+                    error=str(error),
+                )
             
             logger.info("YouTube processing initiated",
                        doc_id=doc_id,
@@ -732,7 +742,11 @@ class DocumentService:
             return document
             
         except Exception as e:
-            lease.release()
+            db.rollback()
+            if job_id is not None and not retained:
+                release_operation_lease(job_id)
+            elif job_id is None:
+                lease.release()
             logger.error("Failed to process YouTube URL",
                         youtube_url=youtube_url,
                         error=str(e))
@@ -826,6 +840,126 @@ class DocumentService:
                 db.commit()
         finally:
             lease.release()
+
+    def process_ingestion_job(
+        self,
+        db: Session,
+        document_id: str,
+        job_type: str,
+        payload: Dict,
+    ) -> str:
+        """Run one durable extraction and indexing pipeline synchronously.
+
+        The lifespan worker invokes this entire method through
+        ``asyncio.to_thread``. Content and chunk/embedding checkpoints may
+        commit independently, but the final ``ready`` state is deliberately
+        left uncommitted so the worker can persist it together with the job's
+        ``completed`` state.
+
+        Args:
+            db: Session created and owned by the worker for this job.
+            document_id: Document referenced by the durable job.
+            job_type: Persisted source kind.
+            payload: Persisted recoverable source references.
+
+        Returns:
+            The uncommitted final document status, always ``ready``.
+        """
+        document = db.get(Document, document_id)
+        if document is None:
+            raise ValueError("Document %s not found" % document_id)
+        if document.source_type != job_type:
+            raise ValueError(
+                "Ingestion job type %s does not match document source type %s"
+                % (job_type, document.source_type)
+            )
+
+        source_key = {
+            "pdf": "file_path",
+            "url": "url",
+            "youtube": "youtube_url",
+        }.get(job_type)
+        if source_key is None:
+            raise ValueError("Unsupported ingestion job type: %s" % job_type)
+        source_reference = payload.get(source_key)
+        if not isinstance(source_reference, str) or not source_reference:
+            raise ValueError("Ingestion job is missing %s" % source_key)
+        if job_type == "pdf":
+            expected_source = Path(document.source_url or "").resolve()
+            actual_source = Path(source_reference).resolve()
+            if actual_source != expected_source:
+                raise ValueError("PDF job source does not match its document")
+        elif source_reference != document.source_url:
+            raise ValueError("Ingestion job source does not match its document")
+
+        document.status = "processing"
+        document.error_message = None
+
+        if job_type == "pdf":
+            result = self.pdf_adapter.extract_text_from_file(source_reference)
+            document.content = result["text"]
+            document.meta_json = {
+                **(document.meta_json or {}),
+                "num_pages": result["num_pages"],
+                "pages": result.get("pages", []),
+                "metadata": result.get("metadata", {}),
+                "processed_at": utc_now_iso(),
+            }
+        elif job_type == "url":
+            result = self.url_adapter.extract_content(source_reference)
+            document.content = result["text"]
+            document.title = result.get("title", source_reference)
+            document.meta_json = {
+                **(document.meta_json or {}),
+                "metadata": result.get("metadata", {}),
+                "headings": result.get("headings", []),
+                "num_links": len(result.get("links", [])),
+                "processed_at": utc_now_iso(),
+            }
+        else:
+            if self.youtube_adapter is None:
+                self.youtube_adapter = YouTubeAdapter()
+            result = self.youtube_adapter.extract_transcript(source_reference)
+            document.content = result["text"]
+            document.title = "YouTube: %s" % result.get(
+                "video_id",
+                source_reference,
+            )
+            document.meta_json = {
+                **(document.meta_json or {}),
+                "video_id": result.get("video_id"),
+                "duration": result.get("duration", 0),
+                "language": result.get("language", "unknown"),
+                "metadata": result.get("metadata", {}),
+                "num_segments": len(result.get("segments", [])),
+                "processed_at": utc_now_iso(),
+            }
+
+        # A durable content checkpoint avoids repeating a successful external
+        # extraction after a later model/process crash. Retrying still rebuilds
+        # the index from scratch, so these commits cannot create duplicates.
+        db.commit()
+        chunks = self.chunking_service.chunk_document(
+            db,
+            document_id,
+            max_chunks=self.max_chunks_per_doc,
+        )
+        if len(chunks) > self.max_chunks_per_doc:
+            raise ChunkLimitExceededError(
+                len(chunks),
+                self.max_chunks_per_doc,
+            )
+        embeddings = self.embedding_service.embed_chunks(db, document_id)
+        if not embeddings:
+            raise RuntimeError(
+                "No searchable text could be extracted, so this source "
+                "cannot be queried."
+            )
+
+        document = db.get(Document, document_id)
+        document.status = "ready"
+        document.error_message = None
+        return "ready"
     
     def get_document_status(self, db: Session, doc_id: str) -> Optional[Document]:
         """Get document processing status.
@@ -853,21 +987,38 @@ class DocumentService:
         
         if not doc:
             return False
+
+        queued_job_ids = [
+            job.id
+            for job in doc.ingestion_jobs
+            if job.status == "queued"
+        ]
         
-        # Delete file if it's a PDF
-        if doc.source_type == "pdf" and doc.source_url:
-            file_path = Path(doc.source_url)
-            if file_path.exists():
-                try:
-                    file_path.unlink()
-                except Exception as e:
-                    logger.warning("Failed to delete file",
-                                 file_path=str(file_path),
-                                 error=str(e))
-        
-        # Delete from database (cascade will handle related records)
+        file_path = (
+            Path(doc.source_url)
+            if doc.source_type == "pdf" and doc.source_url
+            else None
+        )
+
+        # Commit the durable state first. Removing the only recoverable PDF
+        # before a failed database delete would leave a queued job that can
+        # never succeed after restart.
         db.delete(doc)
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        for job_id in queued_job_ids:
+            release_operation_lease(job_id)
+
+        if file_path is not None and file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception as e:
+                logger.warning("Failed to delete file",
+                             file_path=str(file_path),
+                             error=str(e))
         
         logger.info("Document deleted", doc_id=doc_id)
         return True
