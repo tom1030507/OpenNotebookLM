@@ -472,6 +472,48 @@ def test_backfill_reports_and_rebuilds_a_dimension_change(db) -> None:
     ]
 
 
+def test_scoped_backfill_cannot_rebuild_the_global_vector_dimension(db) -> None:
+    """A subset dimension change must preserve every out-of-scope vec row."""
+    first = Embedding(
+        id="embedding-a",
+        chunk_id="a-best",
+        vector_json=[1.0, 0.0],
+        model_name="old-model",
+    )
+    second = Embedding(
+        id="embedding-b",
+        chunk_id="b-best",
+        vector_json=[0.0, 1.0],
+        model_name="old-model",
+    )
+    db.add_all([first, second])
+    db.commit()
+    index = RetrievalIndex()
+    index.backfill(db)
+    first.vector_json = [1.0, 0.0, 0.0]
+    first.model_name = "new-model"
+    db.flush()
+
+    with pytest.raises(
+        RetrievalIndexDimensionError,
+        match="unscoped.*reindex|full.*reindex",
+    ):
+        index.backfill(db, document_ids=["doc-a"])
+
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_vec")
+    ).scalar_one() == 2
+    assert [
+        item.chunk_id
+        for item in index.dense_search(
+            db,
+            [0.0, 1.0],
+            document_ids=["doc-b"],
+            top_k=1,
+        )
+    ] == ["b-best"]
+
+
 def test_backfill_updates_stale_sources_and_removes_deleted_embeddings(db) -> None:
     """Canonical text/vector changes and removals reconcile both indexes."""
     first = Embedding(
@@ -537,6 +579,29 @@ def test_only_extension_unavailability_activates_dense_fallback(db) -> None:
     with pytest.raises(RetrievalIndexError, match="cannot determine"):
         normal.dense_search(db, [1.0, 0.0])
     assert normal.status().dense_backend != "brute"
+
+
+def test_dense_fallback_preserves_empty_and_scoped_top_k_semantics(db) -> None:
+    """Brute mode applies the same ownership scope before global top-k."""
+    class NoExtensionIndex(RetrievalIndex):
+        def _load_vector_extension(self, db):
+            raise retrieval_index_module._VectorExtensionUnavailable(
+                "sqlite-vec extension unavailable (ImportError)"
+            )
+
+    index = NoExtensionIndex(scope_batch_size=2)
+    index.upsert_chunks(db, _indexed_chunks())
+
+    assert index.dense_search(db, [1.0, 0.0], document_ids=[]) == []
+    assert [
+        item.chunk_id
+        for item in index.dense_search(
+            db,
+            [1.0, 0.0],
+            document_ids=["missing", "doc-b"],
+            top_k=1,
+        )
+    ] == ["b-best"]
 
 
 def test_dense_index_path_never_unpickles_or_scans_canonical_embeddings(

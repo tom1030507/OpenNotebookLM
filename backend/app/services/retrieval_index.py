@@ -752,6 +752,11 @@ class RetrievalIndex:
             and vector_dimension is not None
             and target_dimension != vector_dimension
         ):
+            if document_ids is not None:
+                raise RetrievalIndexDimensionError(
+                    "a scoped dimension change cannot rebuild the global vector table; "
+                    "run an unscoped full retrieval reindex"
+                )
             self._load_vector_extension(db)
             db.execute(text("DROP TABLE %s" % VECTOR_TABLE))
             if mapping_exists:
