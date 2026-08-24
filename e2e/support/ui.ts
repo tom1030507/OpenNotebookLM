@@ -4,6 +4,10 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 
 import type { E2EApi, Project } from './api.js';
 
+// A clean Next dev run can cold-compile `/` longer than the global 10s expect
+// timeout immediately after authentication; this is not a retry or a sleep.
+const POST_AUTH_NAVIGATION_TIMEOUT_MS = 30_000;
+
 export interface Account {
   username: string;
   email: string;
@@ -38,7 +42,7 @@ export async function loginThroughUi(page: Page, account: Account): Promise<void
   );
   await page.getByRole('button', { name: 'Login', exact: true }).click();
   expect((await tokenResponse).status()).toBe(200);
-  await expect(page).toHaveURL('/');
+  await expect(page).toHaveURL('/', { timeout: POST_AUTH_NAVIGATION_TIMEOUT_MS });
   await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible();
 }
 
@@ -58,7 +62,7 @@ export async function registerThroughUi(page: Page, account: Account): Promise<v
   await page.getByRole('button', { name: 'Register', exact: true }).click();
   expect((await registration).status()).toBe(200);
   expect((await tokenResponse).status()).toBe(200);
-  await expect(page).toHaveURL('/');
+  await expect(page).toHaveURL('/', { timeout: POST_AUTH_NAVIGATION_TIMEOUT_MS });
 }
 
 export async function createProjectThroughUi(
