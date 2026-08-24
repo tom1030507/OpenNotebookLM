@@ -6,7 +6,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base, Chunk, Document, Embedding
-from app.services.retrieval_index import IndexedChunk, IndexStatus, RetrievalIndex
+from app.services import retrieval_index as retrieval_index_module
+from app.services.retrieval_index import (
+    IndexedChunk,
+    IndexStatus,
+    RetrievalIndex,
+    RetrievalIndexDimensionError,
+    RetrievalIndexError,
+)
 
 
 @pytest.fixture
@@ -368,3 +375,194 @@ def test_upsert_virtual_and_mapping_rows_roll_back_together(db) -> None:
     assert db.execute(text("SELECT COUNT(*) FROM retrieval_index_entries")).scalar_one() == 0
     assert index.dense_search(db, [1.0, 0.0]) == []
     assert index.lexical_search(db, "alpha") == []
+
+
+def test_unchanged_upsert_does_not_rewrite_virtual_rows(db) -> None:
+    """Idempotent lifecycle calls preserve stable vec and FTS rows."""
+    index = RetrievalIndex()
+    chunk = _indexed_chunks()[0]
+    index.upsert_chunks(db, [chunk])
+    mutations = []
+
+    def record_mutation(_connection, _cursor, statement, _parameters, _context, _many):
+        folded = statement.upper()
+        if (
+            ("RETRIEVAL_INDEX_VEC" in folded or "RETRIEVAL_INDEX_FTS" in folded)
+            and (folded.lstrip().startswith("INSERT") or folded.lstrip().startswith("DELETE"))
+        ):
+            mutations.append(statement)
+
+    event.listen(db.get_bind(), "before_cursor_execute", record_mutation)
+    try:
+        changes = index.upsert_chunks(db, [chunk])
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", record_mutation)
+
+    assert changes.updated == 0
+    assert mutations == []
+
+
+def test_backfill_detects_and_repairs_missing_virtual_rows(db) -> None:
+    """Hash markers cannot hide a deleted vec row or missing FTS posting."""
+    db.add(
+        Embedding(
+            id="embedding-a",
+            chunk_id="a-best",
+            vector_json=[1.0, 0.0],
+            model_name="test-model",
+        )
+    )
+    db.commit()
+    index = RetrievalIndex()
+    index.backfill(db)
+    entry = db.execute(
+        text(
+            "SELECT id, lexical_text FROM retrieval_index_entries "
+            "WHERE chunk_id = 'a-best'"
+        )
+    ).one()
+    db.execute(
+        text("DELETE FROM retrieval_index_vec WHERE entry_id = :entry_id"),
+        {"entry_id": entry.id},
+    )
+    db.execute(
+        text(
+            "INSERT INTO retrieval_index_fts("
+            "retrieval_index_fts, rowid, lexical_text) "
+            "VALUES ('delete', :entry_id, :lexical_text)"
+        ),
+        {"entry_id": entry.id, "lexical_text": entry.lexical_text},
+    )
+
+    dry = index.backfill(db, dry_run=True)
+    index.backfill(db)
+
+    assert (dry.dense_missing, dry.lexical_missing) == (1, 1)
+    assert [item.chunk_id for item in index.dense_search(db, [1.0, 0.0])] == [
+        "a-best"
+    ]
+    assert [item.chunk_id for item in index.lexical_search(db, "alpha")] == [
+        "a-best"
+    ]
+
+
+def test_backfill_reports_and_rebuilds_a_dimension_change(db) -> None:
+    """Only explicit reindexing rebuilds vec0 for a canonical dimension change."""
+    index = RetrievalIndex()
+    index.ensure_schema(db, 2)
+    db.add(
+        Embedding(
+            id="embedding-a",
+            chunk_id="a-best",
+            vector_json=[1.0, 0.0, 0.0],
+            model_name="new-model",
+        )
+    )
+    db.commit()
+
+    dry = index.backfill(db, dry_run=True)
+    with pytest.raises(RetrievalIndexDimensionError, match="run the retrieval reindex"):
+        index.dense_search(db, [1.0, 0.0, 0.0])
+    index.backfill(db)
+
+    assert dry.dimension_mismatch == 1
+    assert index.status(db).dimension == 3
+    assert [item.chunk_id for item in index.dense_search(db, [1.0, 0.0, 0.0])] == [
+        "a-best"
+    ]
+
+
+def test_backfill_updates_stale_sources_and_removes_deleted_embeddings(db) -> None:
+    """Canonical text/vector changes and removals reconcile both indexes."""
+    first = Embedding(
+        id="embedding-a",
+        chunk_id="a-best",
+        vector_json=[1.0, 0.0],
+        model_name="test-model",
+    )
+    removed = Embedding(
+        id="embedding-b",
+        chunk_id="b-best",
+        vector_json=[0.0, 1.0],
+        model_name="test-model",
+    )
+    db.add_all([first, removed])
+    db.commit()
+    index = RetrievalIndex()
+    index.backfill(db)
+
+    db.query(Chunk).filter(Chunk.id == "a-best").one().text = "gamma"
+    first.vector_json = [0.0, 1.0]
+    db.delete(removed)
+    db.flush()
+
+    dry = index.backfill(db, dry_run=True)
+    index.backfill(db)
+
+    assert (dry.updated, dry.removed) == (1, 1)
+    assert (dry.dense_stale, dry.lexical_stale) == (1, 1)
+    assert index.lexical_search(db, "alpha") == []
+    assert [item.chunk_id for item in index.lexical_search(db, "gamma")] == [
+        "a-best"
+    ]
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_entries")
+    ).scalar_one() == 1
+
+
+def test_only_extension_unavailability_activates_dense_fallback(db) -> None:
+    """An unavailable load is disclosed, while a broken schema remains an error."""
+    class NoExtensionIndex(RetrievalIndex):
+        def _load_vector_extension(self, db):
+            raise retrieval_index_module._VectorExtensionUnavailable(
+                "sqlite-vec extension unavailable (ImportError)"
+            )
+
+    fallback = NoExtensionIndex()
+    fallback.upsert_chunks(db, [_indexed_chunks()[0]])
+
+    assert [item.chunk_id for item in fallback.dense_search(db, [1.0, 0.0])] == [
+        "a-best"
+    ]
+    status = fallback.status(db)
+    assert status.dense_backend == "brute"
+    assert status.dimension == 2
+    assert "ImportError" in status.fallback_reason
+
+    db.rollback()
+    normal = RetrievalIndex()
+    normal.ensure_schema(db, 2)
+    db.execute(text("DROP TABLE retrieval_index_vec"))
+    db.execute(text("CREATE TABLE retrieval_index_vec (broken INTEGER)"))
+    with pytest.raises(RetrievalIndexError, match="cannot determine"):
+        normal.dense_search(db, [1.0, 0.0])
+    assert normal.status().dense_backend != "brute"
+
+
+def test_dense_index_path_never_unpickles_or_scans_canonical_embeddings(
+    db,
+    monkeypatch,
+) -> None:
+    """Normal KNN reads vec0 candidates rather than legacy embedding blobs."""
+    index = RetrievalIndex()
+    index.upsert_chunks(db, _indexed_chunks())
+    statements = []
+    monkeypatch.setattr(
+        retrieval_index_module.pickle,
+        "loads",
+        lambda _value: pytest.fail("indexed search unpickled a legacy vector"),
+    )
+
+    def record_select(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement.lower())
+
+    event.listen(db.get_bind(), "before_cursor_execute", record_select)
+    try:
+        results = index.dense_search(db, [1.0, 0.0], top_k=1)
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", record_select)
+
+    assert [item.chunk_id for item in results] == ["a-best"]
+    assert any("embedding match" in statement and " k = " in statement for statement in statements)
+    assert all(" from embeddings" not in statement for statement in statements)

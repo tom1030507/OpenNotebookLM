@@ -320,16 +320,31 @@ class RetrievalIndex:
                 updated += int(changed)
 
             if self._dense_backend == "sqlitevec":
-                if entry.dense_hash != dense_hash:
+                vector_exists = db.execute(
+                    text(
+                        "SELECT 1 FROM %s WHERE entry_id = :entry_id LIMIT 1"
+                        % VECTOR_TABLE
+                    ),
+                    {"entry_id": entry.id},
+                ).first() is not None
+                if entry.dense_hash != dense_hash or not vector_exists:
                     self._replace_vector_row(db, entry)
                     entry.dense_hash = dense_hash
 
             if self._lexical_backend == "fts5":
-                if entry.lexical_hash != lexical_hash and entry.lexical_hash is not None:
+                lexical_indexed = bool(
+                    entry.lexical_hash is not None
+                    and old_lexical_text
+                    and self._fts_row_indexed(db, entry.id, old_lexical_text)
+                )
+                if entry.lexical_hash != lexical_hash and lexical_indexed:
                     self._delete_fts_row(db, entry.id, old_lexical_text or "")
-                if entry.lexical_hash != lexical_hash:
+                    lexical_indexed = False
+                if lexical_text and (
+                    entry.lexical_hash != lexical_hash or not lexical_indexed
+                ):
                     self._insert_fts_row(db, entry.id, entry.lexical_text)
-                    entry.lexical_hash = lexical_hash
+                entry.lexical_hash = lexical_hash
 
             db.flush()
 
@@ -642,6 +657,7 @@ class RetrievalIndex:
             self._vector_dimension(db) if self._table_exists(db, VECTOR_TABLE) else None
         )
         vector_ids: set[int] = set()
+        vector_index_inspected = False
         if vector_dimension is not None:
             try:
                 self._load_vector_extension(db)
@@ -650,6 +666,7 @@ class RetrievalIndex:
                 self._dense_available = True
                 self._remember_fallback(str(error))
             else:
+                vector_index_inspected = True
                 vector_ids = {
                     int(value)
                     for value in db.execute(
@@ -681,18 +698,18 @@ class RetrievalIndex:
                 updated += int(entry.source_hash != source_hash)
                 if chunk.searchable:
                     if entry.dense_hash is None or (
-                        vector_ids and entry.id not in vector_ids
+                        vector_index_inspected and entry.id not in vector_ids
                     ):
                         dense_missing += 1
                     elif entry.dense_hash != dense_hash:
                         dense_stale += 1
                     if lexical_text:
-                        if entry.lexical_hash is None or not self._fts_row_indexed(
-                            db, entry.id, lexical_text
-                        ):
+                        if entry.lexical_hash is None:
                             lexical_missing += 1
                         elif entry.lexical_hash != lexical_hash:
                             lexical_stale += 1
+                        elif not self._fts_row_indexed(db, entry.id, lexical_text):
+                            lexical_missing += 1
                 elif entry.searchable:
                     dense_stale += 1
                     lexical_stale += int(bool(entry.lexical_text))
@@ -854,6 +871,22 @@ class RetrievalIndex:
             raise _VectorExtensionUnavailable(
                 "sqlite-vec unavailable (database dialect is not SQLite)"
             )
+        raw_connection = db.connection().connection.driver_connection
+        cursor = raw_connection.cursor()
+        try:
+            try:
+                cursor.execute("SELECT vec_version()")
+            except sqlite3.OperationalError as error:
+                if "no such function" not in str(error).lower():
+                    raise RetrievalIndexError(
+                        "sqlite-vec version probe failed after connection setup"
+                    ) from error
+            else:
+                self._sqlitevec_version = str(cursor.fetchone()[0])
+                return
+        finally:
+            cursor.close()
+
         try:
             sqlite_vec = importlib.import_module("sqlite_vec")
         except ImportError as error:
@@ -861,7 +894,6 @@ class RetrievalIndex:
                 "sqlite-vec extension unavailable (ImportError)"
             ) from error
 
-        raw_connection = db.connection().connection.driver_connection
         try:
             raw_connection.enable_load_extension(True)
             sqlite_vec.load(raw_connection)
@@ -875,9 +907,12 @@ class RetrievalIndex:
             except (AttributeError, sqlite3.OperationalError):
                 pass
 
-        self._sqlitevec_version = str(
-            db.execute(text("SELECT vec_version()"), {}).scalar_one()
-        )
+        cursor = raw_connection.cursor()
+        try:
+            cursor.execute("SELECT vec_version()")
+            self._sqlitevec_version = str(cursor.fetchone()[0])
+        finally:
+            cursor.close()
 
     @staticmethod
     def _table_exists(db: Session, table_name: str) -> bool:
