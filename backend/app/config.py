@@ -1,6 +1,6 @@
 """Application configuration."""
 from typing import Any, List, Optional
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -131,9 +131,19 @@ class Settings(BaseSettings):
     rate_limit_period: int = 60
     rate_limit_max_keys: int = 10000
     trust_proxy_headers: bool = False
+
+    # Cache
+    redis_url: Optional[str] = None
+    # Compose consumes this value for Redis itself. It is declared here too so
+    # copying the canonical .env example cannot fail Settings extra-key checks.
+    redis_maxmemory: str = "256mb"
+    cache_namespace: str = "opennotebooklm"
+    # Separate bounds: at most this many cached values and this many scope
+    # version markers. They are reported independently by CacheService stats.
+    cache_max_entries: int = 10000
     
     # Chunking
-    chunk_size: int = 512
+    chunk_size: int = Field(default=512, ge=1)
     chunk_overlap: int = 50
     max_chunks_per_doc: int = 1000
     

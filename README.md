@@ -149,6 +149,9 @@ docker compose -f deploy/docker-compose.yml up -d --build
 Ollama and Redis are reachable only on the Compose network. Their profiles do
 not publish host ports; add an explicit loopback-only mapping such as
 `127.0.0.1:11434:11434` in a local override if host tools need direct access.
+Redis is deliberately disposable: Compose disables both AOF and RDB snapshots
+and gives it no volume. Restarting it starts an empty cache, so repeated scoped
+invalidation cannot grow persistent disk or replay an invalidated generation.
 
 Database, model, and upload state use Docker-managed named volumes
 (`opennotebooklm-data`, `opennotebooklm-models`, and
@@ -174,12 +177,12 @@ docker compose rm -f backend
 ```
 
 Skip a `docker cp` line when that old path does not exist. Do not bulk-copy
-`data/` or `models/`: that would put `data/redis` and `models/ollama` into the
-backend volumes instead of the optional services' separate volumes. This
-migration intentionally leaves every cache in the old directories for rollback;
-the new stack re-downloads embedding/Ollama models when used and rebuilds Redis
-cache when its profile is enabled. Remove the old directories only after
-verifying the durable database and uploads in the new stack.
+`data/` or `models/`: that would mix rebuildable `data/redis` and
+`models/ollama` caches into the backend's durable volumes. This migration
+intentionally leaves every cache in the old directories for rollback; the new
+stack re-downloads embedding/Ollama models when used and starts Redis empty when
+its profile is enabled. Remove the old directories only after verifying the
+durable database and uploads in the new stack.
 
 </details>
 
@@ -377,9 +380,9 @@ and can never move a row between accounts. The `user_id` columns themselves are
 added to an existing database on start-up by `db.database.ensure_added_columns`,
 since `create_all` only ever creates missing *tables*.
 
-Not scoped per account: `/api/cache/stats`, `/api/cache/health` and
-`/api/cache/clear` act on one shared process-wide cache. They need a token but
-not an owner, and clearing it affects everyone.
+Cache administration is not public. The only cache routes invalidate a project
+or document after the same ownership check used by its data routes; foreign and
+missing ids both answer `404`.
 
 </details>
 
@@ -396,7 +399,7 @@ OpenNotebookLM/
 │   │   ├── adapters/         # pdf, url, youtube
 │   │   ├── db/               # SQLAlchemy models, session, UTCDateTime column type
 │   │   ├── utils/            # logging, time
-│   │   ├── api/cache.py      # cache management endpoints
+│   │   ├── api/cache.py      # ownership-scoped cache invalidation
 │   │   ├── config.py         # settings (env-driven)
 │   │   └── main.py           # app factory and router registration
 │   └── tests/                # pytest; tests/unit/ holds the focused ones
@@ -682,7 +685,7 @@ endpoints requires
 | `GET` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
 | `GET` | `/api/projects/{id}/mindmap` | Mind map of a project; returns `root`, `node_count`, `model_used` |
 | `GET` | `/api/projects/{id}/video-summary` | Scene script for Studio's video summary; returns `scenes`, `estimated_seconds`, `model_used` |
-| `GET`/`DELETE` | `/api/cache/*` | Cache stats, health, clear, invalidate, warm up |
+| `DELETE` | `/api/cache/invalidate/project/{id}`, `/api/cache/invalidate/document/{id}` | Invalidate cache entries after an ownership check |
 
 `/api/docs/{id}/file` is no exception to the bearer-token rule, which is why the
 preview pane fetches a file through the API client and renders the bytes, rather
@@ -718,9 +721,15 @@ without them cannot collect the tests.
 
 - **There is no sharing.** Ownership is all-or-nothing: a project belongs to one
   account, and there is no way to grant another account access to it.
-- **Caching is in-memory.** `app/services/cache.py` will use Redis if a client and
-  a `redis_url` setting are present; neither ships, so the cache is per-process
-  and resets on restart.
+- **Caching defaults to bounded in-memory storage outside Compose.** Set
+  `REDIS_URL` for a shared cache, or enable Compose's `with-cache` profile. Redis
+  stays on the internal network; without it, each backend process keeps at most
+  `CACHE_MAX_ENTRIES` cached values plus, separately, at most that many
+  project/document scope-version markers. Stats report both counts and their
+  total. Compose caps disposable, non-persistent Redis at `REDIS_MAXMEMORY`
+  (256 MB by default) with `allkeys-lru`; resource invalidation rotates an opaque
+  version in constant work, while unreachable values are reclaimed by TTL or
+  eviction.
 - **YouTube import depends on YouTube.** The pinned
   `youtube-transcript-api==0.6.1` scrapes the watch page, and YouTube rate-limits
   it — imports can fail with an XML parse error on a blocked response even though

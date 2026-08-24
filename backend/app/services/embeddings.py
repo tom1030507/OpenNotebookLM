@@ -20,7 +20,9 @@ except ImportError:
     cache_service = None
 
 logger = structlog.get_logger()
-settings = get_settings()
+
+QUERY_VECTOR_CACHE_SCOPE = "__shared_query_vectors__"
+UNSCOPED_PASSAGE_CACHE_SCOPE = "__unscoped_passages__"
 
 # The e5 family is trained with asymmetric prefixes: indexed text is embedded as
 # "passage: ..." and a search string as "query: ...". Omitting them costs
@@ -38,7 +40,7 @@ def prefix_for_role(role: str) -> str:
     Returns:
         The prefix to prepend, or "" for models that take none.
     """
-    if "e5" in settings.emb_model_name.lower():
+    if "e5" in get_settings().emb_model_name.lower():
         return E5_PREFIXES.get(role, "")
     return ""
 
@@ -62,6 +64,7 @@ class EmbeddingService:
     
     def _initialize_model(self):
         """Load the embedding model."""
+        settings = get_settings()
         try:
             logger.info(f"Loading embedding model: {settings.emb_model_name}")
             
@@ -97,7 +100,8 @@ class EmbeddingService:
         text: Union[str, List[str]],
         normalize: bool = True,
         use_cache: bool = True,
-        role: str = "passage"
+        role: str = "passage",
+        document_id: Optional[str] = None,
     ) -> Union[np.ndarray, List[np.ndarray]]:
         """Generate embedding for text.
 
@@ -108,22 +112,42 @@ class EmbeddingService:
             role: "passage" for indexed content, "query" for a search string.
                 Models trained with asymmetric prefixes need the distinction;
                 see `prefix_for_role`.
+            document_id: Owning document scope for passage vectors. Query
+                vectors intentionally use one shared scope.
 
         Returns:
             Embedding vector(s)
         """
         prefix = prefix_for_role(role)
+        model_name = get_settings().emb_model_name
+        cache_scope = (
+            document_id
+            if document_id is not None
+            else (
+                QUERY_VECTOR_CACHE_SCOPE
+                if role == "query"
+                else UNSCOPED_PASSAGE_CACHE_SCOPE
+            )
+        )
+
+        def cache_key_for(value: str) -> str:
+            # Model, semantic role, and normalization all change the vector.
+            # Keeping them explicit avoids collisions for models that use the
+            # same empty textual prefix for both query and passage inputs.
+            identity = json.dumps(
+                [model_name, role, normalize, prefix, value],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
         try:
             if isinstance(text, str):
                 # Check cache for single text
                 if use_cache and cache_service:
-                    # Keyed by role too: the same string embedded as a query and
-                    # as a passage are different vectors.
-                    cache_key = hashlib.sha256(
-                        f"{prefix}{text}_{normalize}".encode()
-                    ).hexdigest()
+                    cache_key = cache_key_for(text)
                     cached_embedding = cache_service.get_cached_embedding(
-                        document_id="text_embed",
+                        document_id=cache_scope,
                         chunk_id=cache_key
                     )
                     if cached_embedding is not None:
@@ -140,7 +164,7 @@ class EmbeddingService:
                 # Cache the result
                 if use_cache and cache_service:
                     cache_service.cache_embedding(
-                        document_id="text_embed",
+                        document_id=cache_scope,
                         chunk_id=cache_key,
                         embedding=embedding,
                         ttl=7200  # Cache for 2 hours
@@ -156,11 +180,9 @@ class EmbeddingService:
                 if use_cache and cache_service:
                     # Check cache for each text
                     for i, t in enumerate(text):
-                        cache_key = hashlib.sha256(
-                            f"{prefix}{t}_{normalize}".encode()
-                        ).hexdigest()
+                        cache_key = cache_key_for(t)
                         cached_embedding = cache_service.get_cached_embedding(
-                            document_id="text_embed",
+                            document_id=cache_scope,
                             chunk_id=cache_key
                         )
                         if cached_embedding is not None:
@@ -184,11 +206,9 @@ class EmbeddingService:
                     # Cache new embeddings
                     if use_cache and cache_service:
                         for t, emb in zip(texts_to_process, new_embeddings):
-                            cache_key = hashlib.sha256(
-                                f"{prefix}{t}_{normalize}".encode()
-                            ).hexdigest()
+                            cache_key = cache_key_for(t)
                             cache_service.cache_embedding(
-                                document_id="text_embed",
+                                document_id=cache_scope,
                                 chunk_id=cache_key,
                                 embedding=emb,
                                 ttl=7200  # Cache for 2 hours
@@ -291,7 +311,11 @@ class EmbeddingService:
             
             # Generate embeddings in batch (with caching)
             embeddings = self.generate_embedding(
-                texts_to_embed, normalize=True, use_cache=True, role="passage"
+                texts_to_embed,
+                normalize=True,
+                use_cache=True,
+                role="passage",
+                document_id=document_id,
             )
             
             # Save to database
@@ -308,7 +332,7 @@ class EmbeddingService:
                     chunk_id=chunk.id,
                     vector=embedding_bytes,
                     vector_json=embedding_json,
-                    model_name=settings.emb_model_name
+                    model_name=get_settings().emb_model_name
                 )
                 
                 db.add(embedding_record)
@@ -514,8 +538,8 @@ class EmbeddingService:
                 "total_chunks": total_chunks,
                 "total_documents": total_documents,
                 "coverage": f"{(total_embeddings / total_chunks * 100):.1f}%" if total_chunks > 0 else "0%",
-                "model": settings.emb_model_name,
-                "dimension": settings.emb_dimension,
+                "model": get_settings().emb_model_name,
+                "dimension": get_settings().emb_dimension,
                 "documents": [
                     {
                         "id": doc_id,

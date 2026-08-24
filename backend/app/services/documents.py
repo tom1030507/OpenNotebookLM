@@ -8,23 +8,27 @@ from concurrent.futures import ThreadPoolExecutor
 import structlog
 from sqlalchemy.orm import Session
 
-from app.db.models import Document, Project, ProjectDocument
+from app.db.models import Chunk, Document, Project, ProjectDocument
 from app.schemas import DocumentCreate
 from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
-from app.services.chunking import ChunkingService
+from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
 from app.services.rate_limit import OperationLease, UnlimitedConcurrencyLease
 from app.utils.time import utc_now_iso
 
 logger = structlog.get_logger()
-settings = get_settings()
 PDF_UPLOAD_BLOCK_BYTES = 1024 * 1024
+CHUNK_LIMIT_CLEANUP_ATTEMPTS = 2
 
 
 class UploadTooLargeError(ValueError):
     """Raised when an upload crosses the configured byte limit."""
+
+
+class ChunkLimitPersistenceError(RuntimeError):
+    """Raised when an over-limit chunk set cannot be atomically cleaned up."""
 
 
 def _operation_lease(lease: Optional[OperationLease]) -> OperationLease:
@@ -35,26 +39,42 @@ def _operation_lease(lease: Optional[OperationLease]) -> OperationLease:
 class DocumentService:
     """Service for document ingestion and processing."""
     
-    def __init__(self, chunking_service=None, embedding_service=None):
+    def __init__(
+        self,
+        chunking_service=None,
+        embedding_service=None,
+        max_chunks_per_doc: Optional[int] = None,
+    ):
         """Initialize document service.
 
         Args:
             chunking_service: Optional chunking service, mainly so tests can
                 run without the embedding model
             embedding_service: Optional embedding service, same reason
+            max_chunks_per_doc: Optional hard ceiling override. The application
+                setting defaults to exactly 1000.
+
+        Returns:
+            None.
         """
+        self.settings = get_settings()
         self.pdf_adapter = PDFAdapter(use_pymupdf=False)  # Use pdfminer for now
         self.url_adapter = URLAdapter(
-            timeout=settings.url_read_timeout_seconds,
-            connect_timeout=settings.url_connect_timeout_seconds,
-            max_download_bytes=settings.max_url_download_mb * 1024 * 1024,
-            max_redirects=settings.max_url_redirects,
-            max_download_seconds=settings.url_download_timeout_seconds,
+            timeout=self.settings.url_read_timeout_seconds,
+            connect_timeout=self.settings.url_connect_timeout_seconds,
+            max_download_bytes=self.settings.max_url_download_mb * 1024 * 1024,
+            max_redirects=self.settings.max_url_redirects,
+            max_download_seconds=self.settings.url_download_timeout_seconds,
         )
         self.youtube_adapter = None  # Initialize only if needed
         self.executor = ThreadPoolExecutor(max_workers=4)
         self.chunking_service = chunking_service or ChunkingService()
         self.embedding_service = embedding_service or EmbeddingService()
+        self.max_chunks_per_doc = (
+            max_chunks_per_doc
+            if max_chunks_per_doc is not None
+            else self.settings.max_chunks_per_doc
+        )
 
     def _index_document(self, db: Session, doc_id: str, source_label: str) -> str:
         """Chunk and embed a document, then mark it ready.
@@ -73,11 +93,35 @@ class DocumentService:
             The status the document ended up in
         """
         try:
-            chunks = self.chunking_service.chunk_document(db, doc_id)
+            chunks = self.chunking_service.chunk_document(
+                db,
+                doc_id,
+                max_chunks=self.max_chunks_per_doc,
+            )
             logger.info(f"Created {len(chunks)} chunks for {source_label} document {doc_id}")
+
+            if len(chunks) > self.max_chunks_per_doc:
+                return self._mark_chunk_limit_failed(db, doc_id, len(chunks))
 
             embeddings = self.embedding_service.embed_chunks(db, doc_id)
             logger.info(f"Generated {len(embeddings)} embeddings for {source_label} document {doc_id}")
+        except ChunkLimitExceededError as error:
+            logger.warning(
+                "Chunk planning stopped at document limit",
+                document_id=doc_id,
+                chunk_count=error.chunk_count,
+                max_chunks=error.max_chunks,
+            )
+            return self._mark_chunk_limit_failed(
+                db,
+                doc_id,
+                error.chunk_count,
+            )
+        except ChunkLimitPersistenceError:
+            # A status-only fallback would retain the already committed chunk
+            # rows. Preserve the dedicated failure so the caller can surface a
+            # database incident without pretending cleanup succeeded.
+            raise
         except Exception as e:
             logger.error(f"Failed to chunk/embed {source_label} document: {e}")
             return self._mark_failed(db, doc_id, f"Indexing failed: {e}")
@@ -98,6 +142,104 @@ class DocumentService:
             db.commit()
 
         return "ready"
+
+    def _mark_chunk_limit_failed(
+        self,
+        db: Session,
+        doc_id: str,
+        chunk_count: int,
+    ) -> str:
+        """Remove any prior index and atomically record an over-limit failure.
+
+        The live chunker raises before inserting replacement rows, but a retry
+        can still begin with an older committed index. Deleting it in the same
+        transaction that updates the document prevents failed sources from
+        retaining searchable stale data or status without actionable metadata.
+
+        Args:
+            db: Database session.
+            doc_id: Document id that exceeded the ceiling.
+            chunk_count: Number of chunks the chunker committed.
+
+        Returns:
+            The status the document ended up in.
+        """
+        action = "Reduce the source size or increase CHUNK_SIZE before retrying."
+        message = (
+            f"Document produced {chunk_count} chunks, exceeding the limit of "
+            f"{self.max_chunks_per_doc}. {action}"
+        )
+
+        last_error = None
+        for attempt in range(1, CHUNK_LIMIT_CLEANUP_ATTEMPTS + 1):
+            try:
+                # Re-read and re-delete on every attempt. A rollback after a
+                # failed commit restores both the rows and the document, so
+                # retrying only commit would falsely report a clean database.
+                for chunk in (
+                    db.query(Chunk)
+                    .filter(Chunk.document_id == doc_id)
+                    .all()
+                ):
+                    db.delete(chunk)
+
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "error"
+                    doc.error_message = message
+                    # SQLAlchemy cannot detect an in-place mutation of this
+                    # plain JSON column, which would commit the status without
+                    # the actionable reason.
+                    doc.meta_json = {
+                        **(doc.meta_json or {}),
+                        "indexing_failure": {
+                            "code": "chunk_limit_exceeded",
+                            "chunk_count": chunk_count,
+                            "max_chunks": self.max_chunks_per_doc,
+                            "action": action,
+                        },
+                    }
+                db.commit()
+                break
+            except Exception as error:
+                last_error = error
+                try:
+                    db.rollback()
+                except Exception as rollback_error:
+                    # A failed rollback leaves transaction state unknown. Any
+                    # retry or status-only fallback could commit only part of
+                    # the cleanup, so normalize immediately to the dedicated
+                    # path that every caller already treats as non-recoverable.
+                    logger.error(
+                        "Failed to rollback chunk-limit cleanup",
+                        document_id=doc_id,
+                        commit_error=str(error),
+                        rollback_error=str(rollback_error),
+                    )
+                    raise ChunkLimitPersistenceError(
+                        "Could not safely rollback over-limit cleanup for "
+                        f"document {doc_id} after persistence failure: {error}"
+                    ) from rollback_error
+                logger.warning(
+                    "Failed to persist chunk-limit cleanup",
+                    document_id=doc_id,
+                    attempt=attempt,
+                    max_attempts=CHUNK_LIMIT_CLEANUP_ATTEMPTS,
+                    error=str(error),
+                )
+        else:
+            raise ChunkLimitPersistenceError(
+                f"Could not persist over-limit cleanup for document {doc_id} "
+                f"after {CHUNK_LIMIT_CLEANUP_ATTEMPTS} attempts"
+            ) from last_error
+
+        logger.warning(
+            "Document exceeded chunk limit",
+            document_id=doc_id,
+            chunk_count=chunk_count,
+            max_chunks=self.max_chunks_per_doc,
+        )
+        return "error"
 
     def _mark_failed(self, db: Session, doc_id: str, message: str) -> str:
         """Record that a document cannot be used, discarding partial work.
@@ -161,10 +303,10 @@ class DocumentService:
                     block = file.read(PDF_UPLOAD_BLOCK_BYTES)
                     if not block:
                         break
-                    if file_size + len(block) > settings.max_file_size_bytes:
+                    if file_size + len(block) > self.settings.max_file_size_bytes:
                         raise UploadTooLargeError(
                             "File size exceeds maximum of %sMB"
-                            % settings.max_file_size_mb
+                            % self.settings.max_file_size_mb
                         )
                     f.write(block)
                     file_size += len(block)
@@ -290,6 +432,12 @@ class DocumentService:
                            status=status)
             
         except asyncio.CancelledError:
+            raise
+        except ChunkLimitPersistenceError:
+            logger.critical(
+                "PDF chunk-limit cleanup could not be persisted",
+                doc_id=doc_id,
+            )
             raise
         except Exception as e:
             logger.error("Failed to process PDF",
@@ -486,6 +634,12 @@ class DocumentService:
             
         except asyncio.CancelledError:
             raise
+        except ChunkLimitPersistenceError:
+            logger.critical(
+                "URL chunk-limit cleanup could not be persisted",
+                doc_id=doc_id,
+            )
+            raise
         except Exception as e:
             if extraction_future is not None and not extraction_future.done():
                 lease.defer_release_until(extraction_future)
@@ -650,6 +804,12 @@ class DocumentService:
                            status=status)
             
         except asyncio.CancelledError:
+            raise
+        except ChunkLimitPersistenceError:
+            logger.critical(
+                "YouTube chunk-limit cleanup could not be persisted",
+                doc_id=doc_id,
+            )
             raise
         except Exception as e:
             logger.error("Failed to process YouTube video",

@@ -49,8 +49,12 @@ services:
       RATE_LIMIT_MAX_KEYS: "${RATE_LIMIT_MAX_KEYS:-10000}"
       TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-false}"
       ALLOW_PUBLIC_REGISTRATION: "${ALLOW_PUBLIC_REGISTRATION:-false}"
-      CHUNK_SIZE: 512
-      CHUNK_OVERLAP: 50
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CACHE_NAMESPACE: ${CACHE_NAMESPACE:-opennotebooklm}
+      CACHE_MAX_ENTRIES: "${CACHE_MAX_ENTRIES:-10000}"
+      CHUNK_SIZE: "${CHUNK_SIZE:-512}"
+      CHUNK_OVERLAP: "${CHUNK_OVERLAP:-50}"
+      MAX_CHUNKS_PER_DOC: "${MAX_CHUNKS_PER_DOC:-1000}"
       RETRIEVAL_TOP_K: 5
       RERANK_ENABLED: "true"
     volumes:
@@ -59,6 +63,10 @@ services:
       - uploads:/app/uploads
     networks:
       - opennotebook
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
       interval: 30s
@@ -108,14 +116,27 @@ services:
     profiles:
       - with-ollama
 
-  # Optional: Redis for caching (future enhancement)
+  # Optional: Redis for a cache shared across backend processes.
   redis:
     image: redis:7-alpine
     container_name: opennotebook-redis
-    volumes:
-      - redis_data:/data
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
     networks:
       - opennotebook
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
     profiles:
       - with-cache
@@ -133,5 +154,3 @@ volumes:
     name: opennotebooklm-uploads
   ollama_models:
     name: opennotebooklm-ollama-models
-  redis_data:
-    name: opennotebooklm-redis-data

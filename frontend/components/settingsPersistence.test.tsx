@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Settings from './Settings';
 import TopNav from './layout/TopNav';
 import ProjectDialogProvider from './ProjectDialogProvider';
-import api from '@/lib/api';
 import useStore from '@/store/useStore';
 import { initializeTheme, THEME_STORAGE_KEY } from '@/lib/theme';
 
@@ -230,24 +229,12 @@ describe('settings that cannot be honoured yet', () => {
       .toBe(true);
   });
 
-  it('clears the real server cache', async () => {
-    const clearCache = vi.spyOn(api, 'clearCache').mockResolvedValue(3);
+  it('does not offer process-wide cache clearing', () => {
     render(<Settings isOpen onClose={() => {}} />);
 
     openTab('Data & Storage');
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Cache' }));
 
-    await waitFor(() => expect(clearCache).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/3 cached/)).toBeTruthy();
-  });
-
-  it('reports a failed cache clear instead of pretending it worked', async () => {
-    vi.spyOn(api, 'clearCache').mockRejectedValue(new Error('offline'));
-    render(<Settings isOpen onClose={() => {}} />);
-
-    openTab('Data & Storage');
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Cache' }));
-
-    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Clear Cache' })).toBeNull();
+    expect(screen.queryByText(/Clear Cache drops/)).toBeNull();
   });
 });
