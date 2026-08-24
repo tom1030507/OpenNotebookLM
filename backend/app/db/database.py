@@ -1,5 +1,6 @@
 """Database connection and session management."""
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
@@ -12,25 +13,40 @@ from app.db.models import Base
 
 settings = get_settings()
 
+
+def create_database_engine(database_url: str, echo: bool):
+    """Create an engine with pooling appropriate for the parsed database URL.
+
+    A file-backed SQLite runtime has concurrent request and worker sessions, so
+    sharing one connection lets one session commit or roll back another one's
+    transaction. In-memory SQLite instead needs StaticPool to keep its one
+    transient database visible to every test session.
+
+    Args:
+        database_url: SQLAlchemy URL for the application database.
+        echo: Whether SQLAlchemy should log SQL statements.
+
+    Returns:
+        A configured SQLAlchemy engine.
+    """
+    url = make_url(database_url)
+    if url.get_backend_name() == "sqlite":
+        options = {
+            "connect_args": {"check_same_thread": False},
+            "echo": echo,
+        }
+        if url.database in (None, "", ":memory:"):
+            options["poolclass"] = StaticPool
+        return create_engine(database_url, **options)
+
+    return create_engine(database_url, echo=echo, pool_pre_ping=True)
+
+
 # Ensure data directory exists
 Path(os.path.dirname(settings.db_path)).mkdir(parents=True, exist_ok=True)
 
 # Create engine
-if "sqlite" in settings.database_url:
-    # SQLite specific settings
-    engine = create_engine(
-        settings.database_url,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        echo=settings.debug,
-    )
-else:
-    # For other databases
-    engine = create_engine(
-        settings.database_url,
-        echo=settings.debug,
-        pool_pre_ping=True,
-    )
+engine = create_database_engine(settings.database_url, echo=settings.debug)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
