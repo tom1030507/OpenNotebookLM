@@ -397,7 +397,6 @@ class ComposeContractTests(unittest.TestCase):
         expected_targets = {
             "backend": {"/app/data", "/app/models", "/app/uploads"},
             "ollama": {"/root/.ollama"},
-            "redis": {"/data"},
         }
 
         for compose_file in COMPOSE_FILES:
@@ -411,6 +410,19 @@ class ComposeContractTests(unittest.TestCase):
                     self.assertTrue(targets.issubset(mounts))
                     for target in targets:
                         self.assertEqual(mounts[target]["type"], "volume")
+
+    def test_redis_cache_is_disposable_at_every_entry_point(self) -> None:
+        """Redis must neither mount storage nor persist rebuildable cache data."""
+        for compose_file in COMPOSE_FILES:
+            with self.subTest(compose_file=compose_file):
+                redis_service = compose_config(compose_file)["services"]["redis"]
+                command = redis_service["command"]
+
+                self.assertNotIn("volumes", redis_service)
+                appendonly_index = command.index("--appendonly")
+                self.assertEqual(command[appendonly_index + 1], "no")
+                save_index = command.index("--save")
+                self.assertEqual(command[save_index + 1], "")
 
 
 if __name__ == "__main__":
