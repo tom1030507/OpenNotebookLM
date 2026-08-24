@@ -10,7 +10,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.types import UTCDateTime
-from app.utils.time import utc_now
+from app.utils.time import ordered_utc_now, utc_now
 
 Base = declarative_base()
 
@@ -262,7 +262,14 @@ class Conversation(Base):
     
     # Relationships
     project = relationship("Project", back_populates="conversations")
-    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+    # New messages have monotonic timestamps, but legacy rows can tie. The id
+    # only gives those ties a deterministic fallback; it does not imply time.
+    messages = relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by=lambda: (Message.created_at, Message.id),
+    )
     
     __table_args__ = (
         Index("idx_conversations_project_id", "project_id"),
@@ -284,12 +291,11 @@ class Message(Base):
     processing_time = Column(Float)
     is_bookmarked = Column(Boolean, default=False)
     tags = Column(JSON, default=[])
-    # Python-side, not func.now(): SQLite's CURRENT_TIMESTAMP has second
-    # resolution, and the two messages of one turn are written in a single
-    # commit. Tied timestamps make `order_by(created_at)` arbitrary, which
-    # scrambles the history in the prompt and made picking the previous
-    # question for a follow-up return whichever row the engine felt like.
-    created_at = Column(UTCDateTime, default=utc_now)
+    # Python-side and strictly ordered: SQLite's CURRENT_TIMESTAMP has second
+    # resolution, while Windows can repeat individual Python clock reads for
+    # roughly 15.6 ms. Tied values make `order_by(created_at)` arbitrary,
+    # which can scramble the history used to find a follow-up's prior question.
+    created_at = Column(UTCDateTime, default=ordered_utc_now)
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")

@@ -84,7 +84,7 @@ def test_upload_route_returns_413_before_calling_the_document_service(monkeypatc
         async def process_pdf_upload(self, **kwargs):
             raise AssertionError("oversized upload reached document processing")
 
-    monkeypatch.setattr(ingest, "document_service", MustNotRun())
+    app.dependency_overrides[ingest.get_document_service] = MustNotRun
 
     response = TestClient(app).post(
         "/api/projects/project/upload",
@@ -107,7 +107,7 @@ def test_upload_route_rejects_oversized_content_length_before_service(monkeypatc
         async def process_pdf_upload(self, **kwargs):
             raise AssertionError("declared oversized upload reached the service")
 
-    monkeypatch.setattr(ingest, "document_service", MustNotRun())
+    app.dependency_overrides[ingest.get_document_service] = MustNotRun
 
     response = TestClient(app).post(
         "/api/projects/project/upload",
@@ -132,7 +132,7 @@ def test_route_allows_declared_multipart_envelope_above_exact_file_cap(monkeypat
             operation_lease.release()
             return SimpleNamespace(id="document", status="queued")
 
-    monkeypatch.setattr(ingest, "document_service", AcceptingService())
+    app.dependency_overrides[ingest.get_document_service] = AcceptingService
     response = TestClient(app).post(
         "/api/projects/project/upload",
         headers={"Content-Length": str(1024 * 1024 + 512)},
@@ -163,7 +163,7 @@ def test_asgi_cap_rejects_actual_upload_before_auth_and_form_route(monkeypatch):
         async def process_pdf_upload(self, **kwargs):
             raise AssertionError("ASGI-capped upload reached document service")
 
-    monkeypatch.setattr(ingest, "document_service", MustNotRun())
+    app.dependency_overrides[ingest.get_document_service] = MustNotRun
     response = TestClient(app).post(
         "/api/projects/project/upload",
         files={"file": ("large.pdf", b"x" * 1024, "application/pdf")},
@@ -186,7 +186,7 @@ def test_url_upload_route_returns_400_for_a_fetch_boundary_refusal(monkeypatch):
         async def process_url(self, **kwargs):
             raise UnsafeURLError("URL destination must be globally routable")
 
-    monkeypatch.setattr(ingest, "document_service", RefusingService())
+    app.dependency_overrides[ingest.get_document_service] = RefusingService
 
     response = TestClient(app).post(
         "/api/projects/project/upload-url",
@@ -218,7 +218,7 @@ def url_ingest_client(monkeypatch, service, request_limiter=None, concurrency=No
     app.dependency_overrides[get_rate_limiter] = lambda: request_limiter
     app.dependency_overrides[get_concurrency_limiter] = lambda: concurrency
     monkeypatch.setattr(ingest, "require_project", lambda *args: object())
-    monkeypatch.setattr(ingest, "document_service", service)
+    app.dependency_overrides[ingest.get_document_service] = lambda: service
     return TestClient(app)
 
 

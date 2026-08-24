@@ -1,0 +1,5 @@
+-r requirements-e2e.txt
+torch==2.13.0
+huggingface-hub==1.27.0
+sentence-transformers==5.7.0
+transformers==5.5.0

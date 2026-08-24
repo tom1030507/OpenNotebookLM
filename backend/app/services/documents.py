@@ -1,7 +1,7 @@
 """Document ingestion service."""
 import uuid
 import os
-from typing import BinaryIO, Dict, Optional
+from typing import Any, BinaryIO, Callable, ContextManager, Dict, Optional
 from pathlib import Path
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -16,12 +16,12 @@ from app.db.models import (
     Project,
     ProjectDocument,
 )
+from app.db.database import get_db_context
 from app.schemas import DocumentCreate
 from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
-from app.services.embeddings import EmbeddingService
 from app.services.retrieval_index import get_retrieval_index
 from app.services.ingestion_jobs import (
     enqueue_ingestion_job_with_result,
@@ -123,35 +123,58 @@ class DocumentService:
     
     def __init__(
         self,
-        chunking_service=None,
-        embedding_service=None,
+        chunking_service: Any | None = None,
+        embedding_service: Any | None = None,
+        pdf_adapter: Any | None = None,
+        url_adapter: Any | None = None,
+        youtube_adapter: Any | None = None,
+        session_context: Callable[[], ContextManager[Session]] = get_db_context,
         max_chunks_per_doc: Optional[int] = None,
     ):
-        """Initialize document service.
+        """Initialize document processing dependencies.
 
         Args:
-            chunking_service: Optional chunking service, mainly so tests can
-                run without the embedding model
-            embedding_service: Optional embedding service, same reason
+            chunking_service: Optional chunking implementation.
+            embedding_service: Optional embedding implementation.
+            pdf_adapter: Optional PDF extraction implementation.
+            url_adapter: Optional URL extraction implementation.
+            youtube_adapter: Optional YouTube transcript implementation.
+            session_context: Factory that owns each detached worker session.
             max_chunks_per_doc: Optional hard ceiling override. The application
                 setting defaults to exactly 1000.
 
         Returns:
             None.
         """
+        if embedding_service is None:
+            from app.services.embeddings import EmbeddingService
+
+            embedding_service = EmbeddingService()
+
         self.settings = get_settings()
-        self.pdf_adapter = PDFAdapter(use_pymupdf=False)  # Use pdfminer for now
-        self.url_adapter = URLAdapter(
-            timeout=self.settings.url_read_timeout_seconds,
-            connect_timeout=self.settings.url_connect_timeout_seconds,
-            max_download_bytes=self.settings.max_url_download_mb * 1024 * 1024,
-            max_redirects=self.settings.max_url_redirects,
-            max_download_seconds=self.settings.url_download_timeout_seconds,
+        self.pdf_adapter = (
+            pdf_adapter
+            if pdf_adapter is not None
+            else PDFAdapter(use_pymupdf=False)
         )
-        self.youtube_adapter = None  # Initialize only if needed
+        self.url_adapter = (
+            url_adapter
+            if url_adapter is not None
+            else URLAdapter(
+                timeout=self.settings.url_read_timeout_seconds,
+                connect_timeout=self.settings.url_connect_timeout_seconds,
+                max_download_bytes=self.settings.max_url_download_mb * 1024 * 1024,
+                max_redirects=self.settings.max_url_redirects,
+                max_download_seconds=self.settings.url_download_timeout_seconds,
+            )
+        )
+        self.youtube_adapter = youtube_adapter
         self.executor = ThreadPoolExecutor(max_workers=4)
-        self.chunking_service = chunking_service or ChunkingService()
-        self.embedding_service = embedding_service or EmbeddingService()
+        self.chunking_service = (
+            chunking_service if chunking_service is not None else ChunkingService()
+        )
+        self.embedding_service = embedding_service
+        self.session_context = session_context
         self.max_chunks_per_doc = (
             max_chunks_per_doc
             if max_chunks_per_doc is not None
@@ -451,7 +474,6 @@ class DocumentService:
                 document_id=doc_id
             )
             db.add(project_doc)
-
             enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
@@ -510,83 +532,78 @@ class DocumentService:
     
     async def _process_pdf_async(
         self,
-        db: Session,
         doc_id: str,
         file_path: Path,
         operation_lease: Optional[OperationLease] = None,
-    ):
+    ) -> None:
         """Process PDF file asynchronously.
         
         Args:
-            db: Database session
             doc_id: Document ID
             file_path: Path to PDF file
             operation_lease: Quota ownership released only after this task and
                 any uncancellable executor work finish.
+
+        Returns:
+            None.
         """
         lease = _operation_lease(operation_lease)
         extraction_future = None
         try:
-            # Update status to processing
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "processing"
-                db.commit()
-            
-            # Extract text in thread pool
-            extraction_future = self.executor.submit(
-                self.pdf_adapter.extract_text_from_file,
-                str(file_path)
-            )
-            try:
-                result = await asyncio.shield(
-                    asyncio.wrap_future(extraction_future)
-                )
-            except asyncio.CancelledError:
-                lease.defer_release_until(extraction_future)
-                raise
-            
-            # Store the extracted content, staying in "processing": the source
-            # is not usable until it has been indexed below.
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.content = result["text"]
-                # Reassign rather than mutate: meta_json is a plain JSON
-                # column, so an in-place update is invisible to SQLAlchemy and
-                # never reaches the database.
-                doc.meta_json = {
-                    **(doc.meta_json or {}),
-                    "num_pages": result["num_pages"],
-                    # Keep the per-page text. Dropping it was the only reason
-                    # Chunk.page_num was NULL for every PDF: the chunker has the
-                    # code to map offsets to pages, it just never had the pages.
-                    "pages": result.get("pages", []),
-                    "metadata": result.get("metadata", {}),
-                    "processed_at": utc_now_iso(),
-                }
-                db.commit()
+            with self.session_context() as db:
+                try:
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.status = "processing"
+                        db.commit()
 
-                status = self._index_document(db, doc_id, "PDF")
+                    extraction_future = self.executor.submit(
+                        self.pdf_adapter.extract_text_from_file,
+                        str(file_path),
+                    )
+                    try:
+                        result = await asyncio.shield(
+                            asyncio.wrap_future(extraction_future)
+                        )
+                    except asyncio.CancelledError:
+                        lease.defer_release_until(extraction_future)
+                        raise
 
-                logger.info("PDF processing completed",
-                           doc_id=doc_id,
-                           num_pages=result["num_pages"],
-                           status=status)
-            
-        except asyncio.CancelledError:
-            raise
-        except ChunkLimitPersistenceError:
-            logger.critical(
-                "PDF chunk-limit cleanup could not be persisted",
-                doc_id=doc_id,
-            )
-            raise
-        except Exception as e:
-            logger.error("Failed to process PDF",
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.content = result["text"]
+                        doc.meta_json = {
+                            **(doc.meta_json or {}),
+                            "num_pages": result["num_pages"],
+                            # The chunker needs per-page text to populate page_num.
+                            "pages": result.get("pages", []),
+                            "metadata": result.get("metadata", {}),
+                            "processed_at": utc_now_iso(),
+                        }
+                        db.commit()
+
+                        status = self._index_document(db, doc_id, "PDF")
+                        logger.info(
+                            "PDF processing completed",
+                            doc_id=doc_id,
+                            num_pages=result["num_pages"],
+                            status=status,
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except ChunkLimitPersistenceError:
+                    logger.critical(
+                        "PDF chunk-limit cleanup could not be persisted",
                         doc_id=doc_id,
-                        error=str(e))
-            
-            self._mark_failed(db, doc_id, str(e))
+                    )
+                    raise
+                except Exception as error:
+                    logger.error(
+                        "Failed to process PDF",
+                        doc_id=doc_id,
+                        error=str(error),
+                    )
+                    self._mark_failed(db, doc_id, str(error))
         finally:
             lease.release()
     
@@ -643,7 +660,6 @@ class DocumentService:
                 document_id=doc_id
             )
             db.add(project_doc)
-
             enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
@@ -696,94 +712,92 @@ class DocumentService:
     
     async def _process_url_async(
         self,
-        db: Session,
         doc_id: str,
         url: str,
         extracted: Optional[Dict] = None,
         operation_lease: Optional[OperationLease] = None,
-    ):
+    ) -> None:
         """Process URL asynchronously.
         
         Args:
-            db: Database session
             doc_id: Document ID
             url: URL to process
             extracted: Content already fetched at the request boundary. Tests
                 and recovery callers may omit it to perform extraction here.
             operation_lease: Quota ownership released only after this task and
                 any uncancellable executor work finish.
+
+        Returns:
+            None.
         """
         lease = _operation_lease(operation_lease)
         extraction_future = None
         try:
-            # Update status to processing
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "processing"
-                db.commit()
-            
-            result = extracted
-            if result is None:
-                if hasattr(self.url_adapter, "start_extract_content"):
-                    operation = self.url_adapter.start_extract_content(url)
-                    extraction_future = operation.future
-                    wait_for_extraction = operation.wait()
-                else:
-                    extraction_future = self.executor.submit(
-                        self.url_adapter.extract_content,
-                        url,
-                    )
-                    wait_for_extraction = asyncio.shield(
-                        asyncio.wrap_future(extraction_future)
-                    )
+            with self.session_context() as db:
                 try:
-                    result = await wait_for_extraction
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.status = "processing"
+                        db.commit()
+
+                    result = extracted
+                    if result is None:
+                        if hasattr(self.url_adapter, "start_extract_content"):
+                            operation = self.url_adapter.start_extract_content(url)
+                            extraction_future = operation.future
+                            wait_for_extraction = operation.wait()
+                        else:
+                            extraction_future = self.executor.submit(
+                                self.url_adapter.extract_content,
+                                url,
+                            )
+                            wait_for_extraction = asyncio.shield(
+                                asyncio.wrap_future(extraction_future)
+                            )
+                        try:
+                            result = await wait_for_extraction
+                        except asyncio.CancelledError:
+                            lease.defer_release_until(extraction_future)
+                            raise
+
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.content = result["text"]
+                        doc.title = result.get("title", url)
+                        doc.meta_json = {
+                            **(doc.meta_json or {}),
+                            "metadata": result.get("metadata", {}),
+                            "headings": result.get("headings", []),
+                            "num_links": len(result.get("links", [])),
+                            "processed_at": utc_now_iso(),
+                        }
+                        db.commit()
+
+                        status = self._index_document(db, doc_id, "URL")
+                        logger.info(
+                            "URL processing completed",
+                            doc_id=doc_id,
+                            url=url,
+                            status=status,
+                        )
                 except asyncio.CancelledError:
-                    lease.defer_release_until(extraction_future)
                     raise
-            
-            # Store the extracted content, staying in "processing": the source
-            # is not usable until it has been indexed below.
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.content = result["text"]
-                doc.title = result.get("title", url)
-                # Reassign rather than mutate: meta_json is a plain JSON
-                # column, so an in-place update is invisible to SQLAlchemy and
-                # never reaches the database.
-                doc.meta_json = {
-                    **(doc.meta_json or {}),
-                    "metadata": result.get("metadata", {}),
-                    "headings": result.get("headings", []),
-                    "num_links": len(result.get("links", [])),
-                    "processed_at": utc_now_iso(),
-                }
-                db.commit()
-
-                status = self._index_document(db, doc_id, "URL")
-
-                logger.info("URL processing completed",
-                           doc_id=doc_id,
-                           url=url,
-                           status=status)
-            
-        except asyncio.CancelledError:
-            raise
-        except ChunkLimitPersistenceError:
-            logger.critical(
-                "URL chunk-limit cleanup could not be persisted",
-                doc_id=doc_id,
-            )
-            raise
-        except Exception as e:
-            if extraction_future is not None and not extraction_future.done():
-                lease.defer_release_until(extraction_future)
-            logger.error("Failed to process URL",
+                except ChunkLimitPersistenceError:
+                    logger.critical(
+                        "URL chunk-limit cleanup could not be persisted",
+                        doc_id=doc_id,
+                    )
+                    raise
+                except Exception as error:
+                    if extraction_future is not None and not extraction_future.done():
+                        lease.defer_release_until(extraction_future)
+                    logger.error(
+                        "Failed to process URL",
                         doc_id=doc_id,
                         url=url,
-                        error=str(e))
-            
-            self._mark_failed(db, doc_id, str(e))
+                        error=str(error),
+                    )
+                    self._mark_failed(db, doc_id, str(error))
         finally:
             lease.release()
     
@@ -840,7 +854,6 @@ class DocumentService:
                 document_id=doc_id
             )
             db.add(project_doc)
-
             enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
@@ -893,85 +906,82 @@ class DocumentService:
     
     async def _process_youtube_async(
         self,
-        db: Session,
         doc_id: str,
         youtube_url: str,
         operation_lease: Optional[OperationLease] = None,
-    ):
+    ) -> None:
         """Process YouTube video asynchronously.
         
         Args:
-            db: Database session
             doc_id: Document ID
             youtube_url: YouTube URL
             operation_lease: Quota ownership released only after this task and
                 any uncancellable executor work finish.
+
+        Returns:
+            None.
         """
         lease = _operation_lease(operation_lease)
         extraction_future = None
         try:
-            # Update status to processing
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "processing"
-                db.commit()
-            
-            # Extract transcript in thread pool
-            extraction_future = self.executor.submit(
-                self.youtube_adapter.extract_transcript,
-                youtube_url
-            )
-            try:
-                result = await asyncio.shield(
-                    asyncio.wrap_future(extraction_future)
-                )
-            except asyncio.CancelledError:
-                lease.defer_release_until(extraction_future)
-                raise
-            
-            # Store the extracted content, staying in "processing": the source
-            # is not usable until it has been indexed below.
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.content = result["text"]
-                doc.title = f"YouTube: {result.get('video_id', youtube_url)}"
-                # Reassign rather than mutate: meta_json is a plain JSON
-                # column, so an in-place update is invisible to SQLAlchemy and
-                # never reaches the database.
-                doc.meta_json = {
-                    **(doc.meta_json or {}),
-                    "video_id": result.get("video_id"),
-                    "duration": result.get("duration", 0),
-                    "language": result.get("language", "unknown"),
-                    "metadata": result.get("metadata", {}),
-                    "num_segments": len(result.get("segments", [])),
-                    "processed_at": utc_now_iso(),
-                }
-                db.commit()
+            with self.session_context() as db:
+                try:
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.status = "processing"
+                        db.commit()
 
-                status = self._index_document(db, doc_id, "YouTube")
+                    extraction_future = self.executor.submit(
+                        self.youtube_adapter.extract_transcript,
+                        youtube_url,
+                    )
+                    try:
+                        result = await asyncio.shield(
+                            asyncio.wrap_future(extraction_future)
+                        )
+                    except asyncio.CancelledError:
+                        lease.defer_release_until(extraction_future)
+                        raise
 
-                logger.info("YouTube processing completed",
-                           doc_id=doc_id,
-                           video_id=result.get("video_id"),
-                           status=status)
-            
-        except asyncio.CancelledError:
-            raise
-        except ChunkLimitPersistenceError:
-            logger.critical(
-                "YouTube chunk-limit cleanup could not be persisted",
-                doc_id=doc_id,
-            )
-            raise
-        except Exception as e:
-            logger.error("Failed to process YouTube video",
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.content = result["text"]
+                        doc.title = f"YouTube: {result.get('video_id', youtube_url)}"
+                        doc.meta_json = {
+                            **(doc.meta_json or {}),
+                            "video_id": result.get("video_id"),
+                            "duration": result.get("duration", 0),
+                            "language": result.get("language", "unknown"),
+                            "metadata": result.get("metadata", {}),
+                            "num_segments": len(result.get("segments", [])),
+                            "processed_at": utc_now_iso(),
+                        }
+                        db.commit()
+
+                        status = self._index_document(db, doc_id, "YouTube")
+                        logger.info(
+                            "YouTube processing completed",
+                            doc_id=doc_id,
+                            video_id=result.get("video_id"),
+                            status=status,
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except ChunkLimitPersistenceError:
+                    logger.critical(
+                        "YouTube chunk-limit cleanup could not be persisted",
+                        doc_id=doc_id,
+                    )
+                    raise
+                except Exception as error:
+                    logger.error(
+                        "Failed to process YouTube video",
                         doc_id=doc_id,
                         youtube_url=youtube_url,
-                        error_type=type(e).__name__,
-                        error=str(e))
-            
-            self._mark_failed(db, doc_id, str(e))
+                        error_type=type(error).__name__,
+                        error=str(error),
+                    )
+                    self._mark_failed(db, doc_id, str(error))
         finally:
             lease.release()
 

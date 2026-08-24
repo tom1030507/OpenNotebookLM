@@ -13,7 +13,6 @@ from app.config import get_settings
 from app.db.models import Base
 
 settings = get_settings()
-
 # Ensure data directory exists
 Path(os.path.dirname(settings.db_path)).mkdir(parents=True, exist_ok=True)
 
@@ -88,8 +87,6 @@ def create_database_engine(database_url: str, echo: bool) -> Engine:
                 pass
 
     return database_engine
-
-
 engine = create_database_engine(settings.database_url, echo=settings.debug)
 
 # Create session factory

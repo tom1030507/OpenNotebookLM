@@ -11,15 +11,42 @@ them, and newly generated datetimes come from :func:`utc_now` here rather than
 from ``datetime.now()`` or the deprecated ``datetime.utcnow()``, neither of
 which produces an aware value.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Optional
 
 UTC = timezone.utc
+_ordered_utc_now_lock = Lock()
+_last_ordered_utc_now: Optional[datetime] = None
 
 
 def utc_now() -> datetime:
     """Return the current time as a timezone-aware UTC datetime."""
     return datetime.now(UTC)
+
+
+def ordered_utc_now() -> datetime:
+    """Return a process-local, strictly increasing UTC timestamp.
+
+    Windows can repeat ``datetime.now(UTC)`` values for roughly 15.6 ms. Message
+    history orders by this column, so repeated defaults written in one flush let
+    SQLite return tied rows arbitrarily and can scramble a conversation prompt.
+
+    Args:
+        None.
+
+    Returns:
+        A timezone-aware UTC datetime greater than every earlier value returned
+        by this process.
+    """
+    global _last_ordered_utc_now
+
+    current = utc_now()
+    with _ordered_utc_now_lock:
+        if _last_ordered_utc_now is not None and current <= _last_ordered_utc_now:
+            current = _last_ordered_utc_now + timedelta(microseconds=1)
+        _last_ordered_utc_now = current
+    return current
 
 
 def utc_now_iso() -> str:

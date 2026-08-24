@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import Document, Chunk, Project, ProjectDocument
-from app.services.embeddings import EmbeddingService
 from app.services import retrieval
 from app.services.llm import LLMService
 from app.services.retrieval_index import get_retrieval_index
@@ -33,10 +32,27 @@ FOLLOWUP_CHAR_FLOOR = 16
 class RAGService:
     """Service for RAG-based query processing."""
     
-    def __init__(self):
-        """Initialize RAG service."""
-        self.embedding_service = EmbeddingService()
-        self.llm_service = LLMService()
+    def __init__(
+        self,
+        embedding_service: Any | None = None,
+        llm_service: Any | None = None,
+    ):
+        """Initialize RAG dependencies.
+
+        Args:
+            embedding_service: Optional embedding and dense-search implementation.
+            llm_service: Optional answer-generation implementation.
+
+        Returns:
+            None.
+        """
+        if embedding_service is None:
+            from app.services.embeddings import EmbeddingService
+
+            embedding_service = EmbeddingService()
+
+        self.embedding_service = embedding_service
+        self.llm_service = llm_service if llm_service is not None else LLMService()
     
     def query(
         self,
