@@ -1,9 +1,12 @@
 """Tests for the deterministic E2E service boundary."""
+import importlib
 import math
 import os
 import pickle
 import subprocess
 from pathlib import Path
+import sys
+from types import ModuleType
 
 import numpy as np
 import pytest
@@ -25,6 +28,22 @@ from scripts.e2e_services import (
     FixedURLAdapter,
     FixedYouTubeAdapter,
 )
+
+
+def _real_rag_module():
+    """Return the real RAG module when a route test left a no-file stub behind.
+
+    Args:
+        None.
+
+    Returns:
+        The importable production RAG module.
+    """
+    module = sys.modules.get("app.services.rag")
+    if module is None or getattr(module, "__file__", None) is None:
+        sys.modules.pop("app.services.rag", None)
+        module = importlib.import_module("app.services.rag")
+    return module
 
 
 def _create_directory_link(link: Path, target: Path) -> None:
@@ -359,8 +378,19 @@ def test_runtime_root_rejects_external_alias_to_an_internal_child(tmp_path):
     assert internal_child.is_dir()
 
 
-def test_fast_overrides_select_the_deterministic_service_graph():
+def test_fast_overrides_select_the_deterministic_service_graph(monkeypatch):
     """FastAPI overrides must replace both production embedding boundaries."""
+    class StubRAGService:
+        """No-file stand-in matching the route tests' unused dependency stub."""
+
+    stale_module = ModuleType("app.services.rag")
+    stale_module.RAGService = StubRAGService
+    monkeypatch.setitem(sys.modules, "app.services.rag", stale_module)
+
+    real_rag = _real_rag_module()
+    assert real_rag is not stale_module
+    assert real_rag.RAGService is not StubRAGService
+
     application = FastAPI()
 
     install_fast_overrides(application)
@@ -373,3 +403,4 @@ def test_fast_overrides_select_the_deterministic_service_graph():
     assert document_service.embedding_service is rag_service.embedding_service
     assert isinstance(document_service.url_adapter, FixedURLAdapter)
     assert isinstance(document_service.youtube_adapter, FixedYouTubeAdapter)
+    assert isinstance(rag_service, real_rag.RAGService)
