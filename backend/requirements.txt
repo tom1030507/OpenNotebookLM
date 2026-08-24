@@ -21,6 +21,10 @@ youtube-transcript-api==0.6.1
 
 # ML/NLP
 numpy==1.24.3
+# sentence-transformers 2.2.2 imports pre-0.26 cached_download; pin transformers
+# too so it cannot require a newer incompatible huggingface-hub.
+huggingface-hub==0.25.2
+transformers==4.44.2
 sentence-transformers==2.2.2
 faiss-cpu==1.7.4
 llama-cpp-python==0.2.20
