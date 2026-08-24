@@ -77,6 +77,34 @@ def test_ingestion_worker_concurrency_is_bounded(concurrency):
         Settings(ingestion_worker_concurrency=concurrency)
 
 
+def test_both_compose_entry_points_forward_ingestion_worker_concurrency():
+    """The compatibility Compose file inherits the canonical worker setting.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    root_compose = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    backend_environment = root_compose["services"]["backend"]["environment"]
+    assert backend_environment["INGESTION_WORKER_CONCURRENCY"] == (
+        "${INGESTION_WORKER_CONCURRENCY:-1}"
+    )
+
+    compatibility_compose = yaml.safe_load(
+        (REPO_ROOT / "deploy" / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert compatibility_compose["include"] == [{
+        "path": "../docker-compose.yml",
+        "project_directory": "..",
+    }]
+
+
 def test_public_registration_defaults_to_development_only():
     """An Internet-facing environment is closed unless enrollment is explicit."""
     assert Settings(app_env="development").allow_public_registration is True
