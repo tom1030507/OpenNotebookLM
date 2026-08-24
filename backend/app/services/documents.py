@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
+from app.services.retrieval_index import get_retrieval_index
 from app.services.ingestion_jobs import (
     enqueue_ingestion_job_with_result,
     notify_ingestion_worker,
@@ -220,6 +221,7 @@ class DocumentService:
         if doc:
             doc.status = "ready"
             doc.error_message = None
+            self.embedding_service.publish_document_index(db, doc_id)
             db.commit()
 
         return "ready"
@@ -257,6 +259,7 @@ class DocumentService:
                 # Re-read and re-delete on every attempt. A rollback after a
                 # failed commit restores both the rows and the document, so
                 # retrying only commit would falsely report a clean database.
+                get_retrieval_index().delete_document(db, doc_id)
                 for chunk in (
                     db.query(Chunk)
                     .filter(Chunk.document_id == doc_id)
@@ -335,6 +338,7 @@ class DocumentService:
         """
         db.rollback()
 
+        get_retrieval_index().delete_document(db, doc_id)
         doc = db.query(Document).filter(Document.id == doc_id).first()
         if doc:
             doc.status = "error"
@@ -554,12 +558,7 @@ class DocumentService:
                         doc_id=doc_id,
                         error=str(e))
             
-            # Update status to error
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "error"
-                doc.error_message = str(e)
-                db.commit()
+            self._mark_failed(db, doc_id, str(e))
         finally:
             lease.release()
     
@@ -756,12 +755,7 @@ class DocumentService:
                         url=url,
                         error=str(e))
             
-            # Update status to error
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "error"
-                doc.error_message = str(e)
-                db.commit()
+            self._mark_failed(db, doc_id, str(e))
         finally:
             lease.release()
     
@@ -949,12 +943,7 @@ class DocumentService:
                         error_type=type(e).__name__,
                         error=str(e))
             
-            # Update status to error
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "error"
-                doc.error_message = str(e)
-                db.commit()
+            self._mark_failed(db, doc_id, str(e))
         finally:
             lease.release()
 
@@ -1076,6 +1065,7 @@ class DocumentService:
         document = db.get(Document, document_id)
         document.status = "ready"
         document.error_message = None
+        self.embedding_service.publish_document_index(db, document_id)
         return "ready"
     
     def get_document_status(self, db: Session, doc_id: str) -> Optional[Document]:
@@ -1128,6 +1118,7 @@ class DocumentService:
         # Commit the durable state first. Removing the only recoverable PDF
         # before a failed database delete would leave a queued job that can
         # never succeed after restart.
+        get_retrieval_index().delete_document(db, doc_id)
         db.delete(doc)
         try:
             db.commit()

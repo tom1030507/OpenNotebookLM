@@ -1,6 +1,7 @@
 """RAG (Retrieval-Augmented Generation) query service."""
 import json
 import hashlib
+from time import perf_counter
 from typing import List, Dict, Any, Optional, Tuple
 import structlog
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from app.db.models import Document, Chunk, Project, ProjectDocument
 from app.services.embeddings import EmbeddingService
 from app.services import retrieval
 from app.services.llm import LLMService
+from app.services.retrieval_index import get_retrieval_index
 
 # Try to import cache service
 try:
@@ -247,7 +249,75 @@ class RAGService:
         Returns:
             List of relevant chunks with metadata
         """
+        chunks, _ = self.retrieve_with_diagnostics(
+            db=db,
+            query=query,
+            project_id=project_id,
+            top_k=top_k,
+            allowed_document_ids=allowed_document_ids,
+        )
+        return chunks
+
+    def retrieve_with_diagnostics(
+        self,
+        db: Session,
+        query: str,
+        project_id: Optional[str] = None,
+        top_k: Optional[int] = None,
+        allowed_document_ids: Optional[List[str]] = None,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Retrieve indexed candidates and return request-local diagnostics.
+
+        Args:
+            db: Database session.
+            query: Search query.
+            project_id: Optional project scope.
+            top_k: Maximum fused results.
+            allowed_document_ids: Hard document-ownership scope.
+
+        Returns:
+            A pair of hydrated results and retrieval diagnostics.
+        """
+        started = perf_counter()
         top_k = top_k or settings.retrieval_top_k
+        index = get_retrieval_index()
+
+        def diagnostics(
+            dense_count: int = 0,
+            lexical_count: int = 0,
+            fused_count: int = 0,
+        ) -> Dict[str, Any]:
+            # Passing the request Session would count canonical/index rows on
+            # every query. Searches already initialize the active backends, so
+            # the cached capability view is sufficient and constant-work.
+            index_status = index.status()
+            status_payload = (
+                index_status.as_dict()
+                if hasattr(index_status, "as_dict")
+                else dict(index_status)
+            )
+            active_backend = status_payload.get("active_backend")
+            if not active_backend:
+                dense_backend = (
+                    status_payload.get("dense_backend")
+                    or status_payload.get("active_dense_backend")
+                )
+                lexical_backend = (
+                    status_payload.get("lexical_backend")
+                    or status_payload.get("active_lexical_backend")
+                )
+                active_backend = "+".join(
+                    backend
+                    for backend in (dense_backend, lexical_backend)
+                    if backend
+                ) or "unavailable"
+            return {
+                "dense_candidates": dense_count,
+                "lexical_candidates": lexical_count,
+                "fused_candidates": fused_count,
+                "latency_ms": (perf_counter() - started) * 1000,
+                "active_backend": active_backend,
+            }
 
         # Get document IDs if project is specified
         document_ids = None
@@ -259,7 +329,7 @@ class RAGService:
 
             if not document_ids:
                 logger.warning(f"No documents found in project {project_id}")
-                return []
+                return [], diagnostics()
 
         # Narrow to what the caller may see. This is applied last and always, so
         # a project scope cannot widen it: attaching someone else's document to a
@@ -272,29 +342,89 @@ class RAGService:
                 else sorted(allowed)
             )
             if not document_ids:
-                return []
+                return [], diagnostics()
 
         candidate_k = max(settings.retrieval_candidate_k, top_k)
 
-        dense = self.embedding_service.search_similar_chunks(
-            db=db,
-            query=query,
+        # The query vector is generated exactly once per request. Indexed
+        # search consumes the raw float32 values and never loads the canonical
+        # pickled Embedding table on the normal path.
+        query_vector = self.embedding_service.generate_embedding(
+            query,
+            normalize=True,
+            role="query",
+        )
+        dense_candidates = index.dense_search(
+            db,
+            query_vector,
             document_ids=document_ids,
             top_k=candidate_k,
             threshold=settings.retrieval_min_score,
         )
 
+        lexical_candidates = (
+            index.lexical_search(
+                db,
+                query,
+                document_ids=document_ids,
+                top_k=candidate_k,
+            )
+            if settings.hybrid_enabled
+            else []
+        )
+
+        candidate_ids = list(dict.fromkeys(
+            [candidate.chunk_id for candidate in dense_candidates]
+            + [candidate.chunk_id for candidate in lexical_candidates]
+        ))
+        if not candidate_ids:
+            return [], diagnostics(
+                dense_count=len(dense_candidates),
+                lexical_count=len(lexical_candidates),
+            )
+
+        hydrated = index.hydrate(db, candidate_ids)
+        allowed_scope = set(document_ids) if document_ids is not None else None
+        hydrated_by_id = {
+            payload["chunk_id"]: payload
+            for payload in hydrated
+            if (
+                allowed_scope is None
+                or payload["document_id"] in allowed_scope
+            )
+        }
+
+        def ranked_payloads(candidates):
+            ranked = []
+            for candidate in candidates:
+                payload = hydrated_by_id.get(candidate.chunk_id)
+                if payload is None:
+                    continue
+                item = dict(payload)
+                item["metadata"] = dict(payload.get("metadata") or {})
+                item["score"] = float(candidate.score)
+                ranked.append(item)
+            return ranked
+
+        dense = ranked_payloads(dense_candidates)
+        lexical = ranked_payloads(lexical_candidates)
+
         if not settings.hybrid_enabled:
-            if settings.rerank_enabled:
-                return self._rerank_chunks(query=query, chunks=dense, top_k=top_k)
-            return dense[:top_k]
+            results = (
+                self._rerank_chunks(query=query, chunks=dense, top_k=top_k)
+                if settings.rerank_enabled
+                else dense[:top_k]
+            )
+        elif dense or lexical:
+            results = self._fuse(dense, lexical, top_k)
+        else:
+            results = []
 
-        lexical = self._lexical_candidates(db, query, document_ids, candidate_k)
-
-        if not dense and not lexical:
-            return []
-
-        return self._fuse(dense, lexical, top_k)
+        return results, diagnostics(
+            dense_count=len(dense),
+            lexical_count=len(lexical),
+            fused_count=len(results),
+        )
 
     def _lexical_candidates(
         self,

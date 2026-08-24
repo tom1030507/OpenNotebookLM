@@ -12,6 +12,7 @@ import torch
 
 from app.config import get_settings
 from app.db.models import Document, Chunk, Embedding
+from app.services.retrieval_index import IndexedChunk, get_retrieval_index
 
 # Try to import cache service
 try:
@@ -253,6 +254,11 @@ class EmbeddingService:
             ).order_by(Chunk.start_offset, Chunk.id).all()
             
             if not chunks:
+                # A retry can arrive after replacement chunks were removed.
+                # Clearing both persistent indexes in this transaction prevents
+                # the old passages from surviving an otherwise empty rebuild.
+                get_retrieval_index().delete_document(db, document_id)
+                db.commit()
                 logger.warning(f"No chunks found for document {document_id}")
                 return []
             
@@ -265,6 +271,13 @@ class EmbeddingService:
                 ).all()
                 
                 if len(existing_embeddings) == len(chunks):
+                    self._upsert_retrieval_index(
+                        db,
+                        document,
+                        chunks,
+                        existing_embeddings,
+                    )
+                    db.commit()
                     logger.info("Embeddings already exist, skipping generation")
                     return existing_embeddings
                 elif existing_embeddings:
@@ -272,6 +285,7 @@ class EmbeddingService:
                                f"generating {len(chunks) - len(existing_embeddings)} new ones")
             else:
                 # Delete existing embeddings
+                get_retrieval_index().delete_document(db, document_id)
                 db.query(Embedding).filter(
                     Embedding.chunk_id.in_([c.id for c in chunks])
                 ).delete()
@@ -338,11 +352,20 @@ class EmbeddingService:
                 db.add(embedding_record)
                 embedding_records.append(embedding_record)
                 
-                # Commit in batches
-                if (i + 1) % 100 == 0:
-                    db.commit()
-                    logger.info(f"Saved {i + 1} embeddings")
-            
+            # Canonical embeddings and both retrieval indexes become visible in
+            # one commit. Committing an Embedding batch first would let a crash
+            # leave the durable source looking complete while indexed search
+            # silently misses those chunks.
+            db.flush()
+            all_embeddings = db.query(Embedding).filter(
+                Embedding.chunk_id.in_([chunk.id for chunk in chunks])
+            ).all()
+            self._upsert_retrieval_index(
+                db,
+                document,
+                chunks,
+                all_embeddings,
+            )
             db.commit()
             
             logger.info(
@@ -356,6 +379,88 @@ class EmbeddingService:
             logger.error(f"Failed to embed chunks: {e}")
             db.rollback()
             raise
+
+    @staticmethod
+    def _upsert_retrieval_index(
+        db: Session,
+        document: Document,
+        chunks: List[Chunk],
+        embedding_records: List[Embedding],
+    ) -> None:
+        """Upsert canonical embeddings into the persistent retrieval indexes.
+
+        Args:
+            db: Transaction that owns the canonical Embedding rows.
+            document: Document that owns every supplied chunk.
+            chunks: Canonical chunks, including text used by FTS.
+            embedding_records: Canonical vectors for some or all chunks.
+
+        Returns:
+            None.
+        """
+        chunks_by_id = {chunk.id: chunk for chunk in chunks}
+        indexed_chunks = []
+        for record in embedding_records:
+            chunk = chunks_by_id.get(record.chunk_id)
+            if chunk is None:
+                continue
+            vector = (
+                np.asarray(record.vector_json, dtype=np.float32)
+                if record.vector_json is not None
+                else np.asarray(pickle.loads(record.vector), dtype=np.float32)
+            )
+            indexed_chunks.append(
+                IndexedChunk(
+                    chunk_id=chunk.id,
+                    document_id=document.id,
+                    text=chunk.text,
+                    vector=np.ascontiguousarray(vector, dtype=np.float32),
+                    model_name=record.model_name,
+                    heading_path=chunk.heading_path,
+                    # Processing rows are durable checkpoints, not searchable
+                    # results. A final upsert flips this metadata in the same
+                    # transaction that changes Document.status to ready.
+                    searchable=document.status == "ready",
+                )
+            )
+
+        if indexed_chunks:
+            get_retrieval_index().upsert_chunks(db, indexed_chunks)
+
+    def publish_document_index(self, db: Session, document_id: str) -> None:
+        """Mark one fully indexed document searchable in this transaction.
+
+        Args:
+            db: Transaction that is also changing the document to ``ready``.
+            document_id: Document whose completed index should be published.
+
+        Returns:
+            None.
+        """
+        document = db.get(Document, document_id)
+        if document is None:
+            raise ValueError(f"Document {document_id} not found")
+        if document.status != "ready":
+            raise ValueError(
+                f"Document {document_id} cannot be published from status "
+                f"{document.status}"
+            )
+        chunks = db.query(Chunk).filter(
+            Chunk.document_id == document_id
+        ).order_by(Chunk.start_offset, Chunk.id).all()
+        embedding_records = (
+            db.query(Embedding).filter(
+                Embedding.chunk_id.in_([chunk.id for chunk in chunks])
+            ).all()
+            if chunks
+            else []
+        )
+        self._upsert_retrieval_index(
+            db,
+            document,
+            chunks,
+            embedding_records,
+        )
     
     def embed_all_documents(
         self,
@@ -433,71 +538,46 @@ class EmbeddingService:
             List of similar chunks with scores
         """
         try:
-            # Generate query embedding
             query_embedding = self.generate_embedding(
                 query, normalize=True, role="query"
             )
-            
-            # Get all embeddings (with optional document filter)
-            embedding_query = db.query(Embedding).join(Chunk)
-            
-            if document_ids:
-                embedding_query = embedding_query.filter(
-                    Chunk.document_id.in_(document_ids)
-                )
-            
-            embeddings = embedding_query.all()
-            
-            if not embeddings:
-                logger.warning("No embeddings found")
+            index = get_retrieval_index()
+            candidates = index.dense_search(
+                db,
+                query_embedding,
+                document_ids=document_ids,
+                top_k=top_k,
+                threshold=threshold,
+            )
+            if not candidates:
+                logger.warning("No indexed embeddings found")
                 return []
-            
-            # Calculate similarities
-            similarities = []
-            for embedding in embeddings:
-                # Load stored embedding
-                stored_vector = pickle.loads(embedding.vector)
-                
-                # Calculate cosine similarity
-                similarity = np.dot(query_embedding, stored_vector)
-                
-                if similarity >= threshold:
-                    similarities.append({
-                        "embedding_id": embedding.id,
-                        "chunk_id": embedding.chunk_id,
-                        "score": float(similarity)
-                    })
-            
-            # Sort by similarity and get top k
-            similarities.sort(key=lambda x: x["score"], reverse=True)
-            top_results = similarities[:top_k]
-            
-            # Fetch chunk details
+
+            hydrated = index.hydrate(
+                db,
+                [candidate.chunk_id for candidate in candidates],
+            )
+            allowed_scope = (
+                set(document_ids) if document_ids is not None else None
+            )
+            payload_by_id = {
+                payload["chunk_id"]: payload
+                for payload in hydrated
+                if (
+                    allowed_scope is None
+                    or payload["document_id"] in allowed_scope
+                )
+            }
             results = []
-            for result in top_results:
-                chunk = db.query(Chunk).filter(
-                    Chunk.id == result["chunk_id"]
-                ).first()
-                
-                if chunk:
-                    document = db.query(Document).filter(
-                        Document.id == chunk.document_id
-                    ).first()
-                    
-                    results.append({
-                        "chunk_id": chunk.id,
-                        "document_id": chunk.document_id,
-                        "document_title": document.title if document else "Unknown",
-                        "text": chunk.text,
-                        "score": result["score"],
-                        "metadata": {
-                            "page_num": chunk.page_num,
-                            "timestamp": chunk.ts_start,
-                            "section": chunk.meta_json.get("section") if chunk.meta_json else None,
-                            "heading_path": chunk.heading_path,
-                        }
-                    })
-            
+            for candidate in candidates:
+                payload = payload_by_id.get(candidate.chunk_id)
+                if payload is None:
+                    continue
+                item = dict(payload)
+                item["metadata"] = dict(payload.get("metadata") or {})
+                item["score"] = float(candidate.score)
+                results.append(item)
+
             logger.info(f"Found {len(results)} similar chunks for query")
             return results
             

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import Document, Chunk
+from app.services.retrieval_index import get_retrieval_index
 from app.utils.text import PAGE_SEPARATOR
 
 logger = structlog.get_logger()
@@ -165,6 +166,15 @@ class ChunkingService:
             raise ValueError(f"Document {document_id} not found")
 
         if not document.content:
+            # A retry may replace a previously indexed extraction with empty
+            # content. Leaving the prior chunks here would let embed_chunks
+            # republish stale passages as if the retry had succeeded.
+            get_retrieval_index().delete_document(db, document_id)
+            for existing in db.query(Chunk).filter(
+                Chunk.document_id == document_id
+            ).all():
+                db.delete(existing)
+            db.commit()
             logger.warning("Document has no content to chunk", document_id=document_id)
             return []
 
@@ -195,6 +205,9 @@ class ChunkingService:
 
         # Only a validated plan may mutate the index. A bulk `.delete()` would
         # bypass the cascade on Chunk.embedding and leave orphan embeddings.
+        # The persistent vector/FTS rows are not ORM children, so remove them
+        # explicitly in this same replacement transaction.
+        get_retrieval_index().delete_document(db, document_id)
         for existing in db.query(Chunk).filter(Chunk.document_id == document_id).all():
             db.delete(existing)
         db.flush()
