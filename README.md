@@ -42,7 +42,7 @@ you configure — and you can point that at a model running on the same machine.
 | | Feature | What it does |
 |---|---|---|
 | 📚 | **Bring your own sources** | PDFs, `.txt` and `.md` files, web pages and YouTube transcripts, extracted into Markdown, chunked along the document's own headings, and embedded locally. |
-| 🔍 | **Hybrid retrieval** | A dense vector search and a BM25 keyword search run over the same scope and are fused by reciprocal rank. The BM25 tokenizer emits CJK character bigrams, so Chinese text is searchable too. |
+| 🔍 | **Hybrid retrieval** | Persistent sqlite-vec dense candidates and FTS5/BM25 keyword candidates run over the same document scope and are fused by reciprocal rank. The lexical terms include CJK character bigrams, so Chinese text is searchable too. |
 | 💬 | **Answers with citations** | Every answer names the chunks behind it, with the document and the section path they came from. Conversations are multi-turn and persisted per project. |
 | 🔌 | **Any LLM, or none** | Claude, OpenAI, anything speaking the OpenAI chat-completions API (Groq, OpenRouter, DeepSeek, Gemini, xAI, Mistral), or a local Ollama / llama.cpp / vLLM server. |
 | 🎛 | **Studio outputs** | A Markdown report, a spoken audio summary, a mind map of your sources' topics, and a narrated slideshow — all built from the same project summary. |
@@ -287,6 +287,22 @@ validate, delegate to a service, and shape the response.
 <summary><b>How retrieval actually behaves</b>, and how a change to it is measured</summary>
 
 Retrieval is hybrid, and both halves are needed.
+
+With the default `EMB_BACKEND=sqlitevec`, embeddings live in a persistent
+sqlite-vec `vec0` index and nearest-neighbour candidates are selected in SQLite.
+The application asks the database for a bounded top-k list and batch-loads its
+chunk metadata; it does not unpickle every scoped embedding in Python. Lexical
+terms are maintained in a persistent FTS5 table and ranked with SQLite BM25, so
+they are not tokenized across the whole corpus again for each question.
+
+sqlite-vec 0.1.9 performs an **exact** vector scan: moving the work into SQLite
+removes Python deserialization, full-result sorting and metadata N+1 queries,
+but it is not an ANN/HNSW index and its vector work is still O(n) in the eligible
+rows. This is a correctness and bounded-candidate improvement, not a claim that
+the database has become sublinear. If the sqlite-vec extension cannot load, the
+service names the Python brute-force fallback and its reason in `/healthz`;
+that fallback has a lower practical capacity because it materializes scoped
+embeddings in the application process.
 
 The dense half alone is weak here in a way that is easy to miss. On this
 project's evaluation corpus, `multilingual-e5-base` returns cosine similarities
@@ -533,6 +549,14 @@ the `/api/query` response: anything other than `"fallback"` is a real generated
 answer. A provider that fails at call time logs the underlying error at `ERROR`
 level and falls back for that request.
 
+The `/healthz` response reports retrieval separately; this is operational health
+data, not part of the `/api/query` response. `requested_backend` says what
+configuration asked for, while `active_backend` says whether sqlite-vec is
+actually serving dense candidates or the explicit Python fallback is active. It
+also exposes the canonical chunk count, dense and lexical index row counts, the
+stored vector dimension, and any fallback reason. Those row counts should agree
+after ingestion or re-indexing; use the dry-run below to diagnose drift.
+
 </details>
 
 <details>
@@ -580,9 +604,25 @@ switch models:
 
 `scripts/reindex.py` re-extracts, re-chunks and re-embeds every document already
 in the database, keeping document ids — so projects, conversations and citations
-survive, which deleting the embeddings and re-uploading by hand does not. Back up
-`backend/data/opennotebook.db` first and use `--dry-run` to see what it would
-touch; `--source-type` and `--ids` narrow it. A source it cannot re-read — a URL
+survive, which deleting the embeddings and re-uploading by hand does not. It then
+idempotently reconciles the dense and lexical candidate indexes. Back up
+`backend/data/opennotebook.db` first.
+
+`python -m scripts.reindex --dry-run` does not load the embedding model and does
+not write the database. It reports canonical/dense/lexical row counts plus dense
+and lexical missing/stale rows, rows that would be added, updated or removed, and
+vector dimension mismatches. `--source-type` and `--ids` narrow source rebuilding;
+an explicit `--ids` also scopes index reconciliation. To repair only persistent
+candidate indexes from the chunks and embeddings already stored, use:
+
+```bash
+python -m scripts.reindex --index-only
+```
+
+Backfill is idempotent: after one successful reconciliation, running the same
+index-only command again reports zero added, updated and removed rows. It cannot
+repair an embedding-model dimension mismatch because that requires producing
+new vectors; run the full command for that. A source it cannot re-read — a URL
 that now 404s, a PDF whose upload is gone — is marked `error` and keeps its old
 chunks, so it stops being retrievable until it is re-added.
 
@@ -614,7 +654,7 @@ improve on their own.
 | **Embedding** | | |
 | `EMB_MODEL_NAME` | sentence-transformers model | `intfloat/multilingual-e5-base` |
 | `EMB_DIMENSION` | Vector dimension (auto-corrected from the model) | `768` |
-| `EMB_BACKEND` | Vector store backend | `sqlitevec` |
+| `EMB_BACKEND` | Requested dense backend: sqlite-vec, with a disclosed Python fallback if its extension is unavailable | `sqlitevec` |
 | **Retrieval & chunking** | | |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking window, in characters | `512` / `50` |
 | `RETRIEVAL_TOP_K` | Chunks retrieved per question | `5` |
@@ -773,9 +813,12 @@ without them cannot collect the tests.
   answer exists only in Chinese prose — `multilingual-e5-base` does not reliably
   bridge the gap. `BAAI/bge-m3` is the stronger multilingual model and would
   likely close it, but needs roughly 4.85 GB of RSS against this one's 2.69 GB.
-- **Retrieval scans the whole scope on every question.** Both halves are linear in
-  the number of chunks in the project; `sqlite-vec` and `faiss-cpu` are installed
-  but not wired up, so `EMB_BACKEND` has no effect.
+- **sqlite-vec is exact, not ANN.** Version 0.1.9 selects top-k vector candidates
+  inside SQLite but still does O(n) distance work over eligible rows. Persistent
+  FTS5 avoids rebuilding a lexical corpus per request, and metadata is loaded in
+  one batch, but very large installations will eventually need an ANN backend.
+  `/healthz` names the active backend; the Python brute-force fallback has a
+  lower capacity because it loads scoped vectors into process memory.
 
 </details>
 

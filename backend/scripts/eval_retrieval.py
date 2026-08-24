@@ -7,7 +7,7 @@ stack:
 
 The run is self-contained: it builds its own SQLite database, ingests the corpus
 through the real adapters, chunker and embedder, and queries through
-`RAGService._retrieve_chunks`. It never touches `data/opennotebook.db`, and with
+`RAGService.retrieve_with_diagnostics`. It never touches `data/opennotebook.db`, and with
 `LLM_MODE=none` it never calls a model provider.
 
 Results land in `output/rag-eval/<tag>-<timestamp>/` as `metrics.json` plus a
@@ -15,16 +15,16 @@ readable `report.md`, so two runs can be diffed directly.
 """
 import argparse
 import asyncio
+from collections.abc import Mapping
+from dataclasses import asdict, is_dataclass
 import json
 import sys
+from time import perf_counter
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from scripts import eval_corpus, eval_metrics
 
@@ -40,6 +40,32 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output" / "rag-eval"
 EVAL_TOP_K = 10
 
 
+def normalize_index_report(value: Any) -> Dict[str, Any]:
+    """Turn a typed retrieval-index report into JSON-safe dictionary shape.
+
+    Args:
+        value: Mapping, dataclass, or value exposing ``as_dict``/``to_dict``.
+
+    Returns:
+        A shallow dictionary containing the report.
+
+    Raises:
+        TypeError: If the retrieval service violates its conversion contract.
+    """
+    if isinstance(value, Mapping):
+        return dict(value)
+    for method_name in ("as_dict", "to_dict"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            converted = method()
+            if not isinstance(converted, Mapping):
+                raise TypeError("%s() must return a mapping" % method_name)
+            return dict(converted)
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
+    raise TypeError("unsupported retrieval-index report: %r" % (type(value),))
+
+
 def build_session(db_path: Path):
     """Create the database if needed and return a session bound to it.
 
@@ -49,15 +75,13 @@ def build_session(db_path: Path):
     Returns:
         A tuple of (session, engine).
     """
+    from app.db.database import create_database_engine, ensure_added_columns
     from app.db.models import Base
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(
-        "sqlite:///" + db_path.as_posix(),
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    engine = create_database_engine("sqlite:///" + db_path.as_posix(), echo=False)
     Base.metadata.create_all(bind=engine)
+    ensure_added_columns(bind=engine)
     session = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
     return session, engine
 
@@ -151,9 +175,12 @@ def run_queries(db, queries, doc_ids, project_id):
     results = []
     for record in queries:
         expected = {doc_ids[name] for name in record["expect_docs"] if name in doc_ids}
-        chunks = rag._retrieve_chunks(
+        started_at = perf_counter()
+        chunks, diagnostics_value = rag.retrieve_with_diagnostics(
             db=db, query=record["query"], project_id=project_id, top_k=EVAL_TOP_K
         )
+        latency_ms = (perf_counter() - started_at) * 1000.0
+        diagnostics = normalize_index_report(diagnostics_value)
         relevance = [
             chunk["document_id"] in expected
             and eval_metrics.judge(chunk["text"], record["must_contain"])
@@ -167,6 +194,11 @@ def run_queries(db, queries, doc_ids, project_id):
             "query": record["query"],
             "expect_docs": record["expect_docs"],
             "retrieved": len(chunks),
+            "latency_ms": round(latency_ms, 3),
+            "dense_candidates": int(diagnostics.get("dense_candidates", 0)),
+            "lexical_candidates": int(diagnostics.get("lexical_candidates", 0)),
+            "fused_candidates": int(diagnostics.get("fused_candidates", len(chunks))),
+            "active_backend": diagnostics.get("active_backend", "unknown"),
             "relevance": relevance,
             "first_hit_rank": first_hit,
             "boilerplate_ranks": [
@@ -189,8 +221,12 @@ def run_queries(db, queries, doc_ids, project_id):
             ],
         })
         marker = ("HIT@%d" % first_hit) if first_hit else "MISS"
-        print("  %-6s %s/%-5s %-6s retrieved=%d" % (
-            record["id"], record["lang"], record["mode"], marker, len(chunks)), flush=True)
+        print("  %-6s %s/%-5s %-6s retrieved=%d candidates=%d/%d/%d %.1fms" % (
+            record["id"], record["lang"], record["mode"], marker, len(chunks),
+            diagnostics.get("dense_candidates", 0),
+            diagnostics.get("lexical_candidates", 0),
+            diagnostics.get("fused_candidates", len(chunks)),
+            latency_ms), flush=True)
     return results
 
 
@@ -285,6 +321,38 @@ def write_report(target: Path, payload: Dict[str, Any]) -> None:
         "Of the chunks actually retrieved: **%.3f** boilerplate, **%.3f** citation-like." % (
             payload["retrieved_boilerplate_rate"], payload["retrieved_citation_rate"]),
         "",
+        "## Retrieval index",
+        "",
+        "| Field | Value |",
+        "|---|---|",
+    ]
+    for key, value in payload["retrieval_index"].items():
+        lines.append("| `%s` | %s |" % (key, "-" if value is None else value))
+    lines += [
+        "",
+        "## Retrieval performance",
+        "",
+        "Times are measured around retrieval with `perf_counter`; candidate counts are",
+        "reported by the same request, not process-global counters.",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+    ]
+    for key, value in payload["retrieval_performance"].items():
+        formatted = "%.3f" % value if isinstance(value, float) else str(value)
+        lines.append("| `%s` | %s |" % (key, formatted))
+    lines += [
+        "",
+        "| Query | Latency ms | Dense candidates | Lexical candidates | Fused candidates | Backend |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for record in payload["results"]:
+        lines.append("| %s | %.3f | %d | %d | %d | %s |" % (
+            record["id"], record["latency_ms"], record["dense_candidates"],
+            record["lexical_candidates"], record["fused_candidates"],
+            record.get("active_backend", "unknown")))
+    lines += [
+        "",
         "## Misses",
         "",
         "| Query | Lang/Mode | Expected | Question |",
@@ -352,6 +420,22 @@ def main() -> int:
             print("ingesting corpus through the real pipeline:", flush=True)
             doc_ids = ingest_corpus(session, corpus, project_id)
 
+        # Lifecycle hooks normally keep both indexes aligned. Backfill here is
+        # an idempotent guard for reused eval databases and makes the active
+        # index shape part of the measurement rather than an assumption.
+        from app.services.retrieval_index import get_retrieval_index
+
+        retrieval_index = get_retrieval_index()
+        index_changes = normalize_index_report(retrieval_index.backfill(
+            session,
+            dry_run=False,
+            document_ids=list(doc_ids.values()),
+        ))
+        retrieval_index_status = normalize_index_report(retrieval_index.status(session))
+        print("index reconciliation: added=%s updated=%s removed=%s" % (
+            index_changes.get("added", 0), index_changes.get("updated", 0),
+            index_changes.get("removed", 0)), flush=True)
+
         chunks = session.query(Chunk).all()
         settings_snapshot = snapshot_settings()
         health = eval_metrics.index_health(
@@ -366,20 +450,25 @@ def main() -> int:
         session.close()
         engine.dispose()
 
+    from app.utils.time import utc_now
+
+    run_time = utc_now()
     payload = {
         "tag": args.tag,
-        "run_at": datetime.now().isoformat(timespec="seconds"),
+        "run_at": run_time.isoformat(timespec="seconds"),
         "corpus_size": len(corpus),
         "query_count": len(queries),
         "settings": settings_snapshot,
         "metrics": group_metrics(results),
         "index_health": health,
+        "retrieval_index": retrieval_index_status,
+        "retrieval_performance": eval_metrics.retrieval_performance(results),
         "retrieved_boilerplate_rate": retrieved_share(results, "boilerplate_ranks"),
         "retrieved_citation_rate": retrieved_share(results, "citation_ranks"),
         "results": results,
     }
 
-    target = output_root / (args.tag + "-" + datetime.now().strftime("%Y%m%d-%H%M"))
+    target = output_root / (args.tag + "-" + run_time.strftime("%Y%m%d-%H%M%S"))
     write_report(target, payload)
 
     overall = payload["metrics"]["overall"]
@@ -393,6 +482,16 @@ def main() -> int:
     print("citation-like: index %.3f, retrieved %.3f   boilerplate: index %.3f, retrieved %.3f" % (
         health["share_citation_like"], payload["retrieved_citation_rate"],
         health["share_boilerplate"], payload["retrieved_boilerplate_rate"]))
+    performance = payload["retrieval_performance"]
+    print("retrieval latency ms p50/p95/max %.1f/%.1f/%.1f  candidates dense/lexical/fused %.1f/%.1f/%.1f" % (
+        performance["latency_ms_p50"], performance["latency_ms_p95"],
+        performance["latency_ms_max"], performance["dense_candidates_mean"],
+        performance["lexical_candidates_mean"], performance["fused_candidates_mean"]))
+    print("backend %s  canonical/dense/lexical %s/%s/%s" % (
+        retrieval_index_status.get("active_backend", "unknown"),
+        retrieval_index_status.get("canonical_chunks", "?"),
+        retrieval_index_status.get("dense_rows", "?"),
+        retrieval_index_status.get("lexical_rows", "?")))
     print("report: %s" % target)
     return 0
 
