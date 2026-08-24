@@ -48,6 +48,8 @@ test('renames and deletes a conversation through authenticated APIs', async ({ a
 
   const renamed = await api.renameConversation(conversation.id, 'Renamed title');
   expect(renamed.title).toBe('Renamed title');
+  const persistedRename = await api.conversation(conversation.id);
+  expect(persistedRename.title).toBe('Renamed title');
   await api.deleteConversation(conversation.id);
   expect((await api.listConversations(project.id)).map((item) => item.id))
     .not.toContain(conversation.id);
