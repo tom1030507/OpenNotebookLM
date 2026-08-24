@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+from datetime import datetime, timedelta, timezone
 from types import ModuleType
 
 import pytest
@@ -181,6 +182,61 @@ def test_conversation_details_include_message_text_and_citations(client):
                 "text_preview": "Evidence",
             }],
         }
+    ]
+
+
+def test_conversation_details_orders_persisted_messages_by_time_and_legacy_id(client):
+    """Details API must give legacy timestamp ties a deterministic message order."""
+    test_client, testing_session = client
+    project = create_project(test_client)
+    conversation = test_client.post(
+        f"/api/projects/{project['id']}/conversations",
+        json={"title": "Ordered chat"},
+    ).json()
+    tied_timestamp = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+
+    # Insert in the opposite of the required order, including an old tied pair.
+    with testing_session() as db:
+        db.add_all([
+            Message(
+                id="later-message",
+                conversation_id=conversation["id"],
+                role="assistant",
+                text="Later",
+                created_at=tied_timestamp + timedelta(seconds=1),
+            ),
+            Message(
+                id="legacy-z-message",
+                conversation_id=conversation["id"],
+                role="assistant",
+                text="Legacy Z",
+                created_at=tied_timestamp,
+            ),
+            Message(
+                id="earlier-message",
+                conversation_id=conversation["id"],
+                role="user",
+                text="Earlier",
+                created_at=tied_timestamp - timedelta(seconds=1),
+            ),
+            Message(
+                id="legacy-a-message",
+                conversation_id=conversation["id"],
+                role="user",
+                text="Legacy A",
+                created_at=tied_timestamp,
+            ),
+        ])
+        db.commit()
+
+    response = test_client.get(f"/api/conversations/{conversation['id']}")
+
+    assert response.status_code == 200
+    assert [message["id"] for message in response.json()["messages"]] == [
+        "earlier-message",
+        "legacy-a-message",
+        "legacy-z-message",
+        "later-message",
     ]
 
 

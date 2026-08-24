@@ -167,7 +167,14 @@ class Conversation(Base):
     
     # Relationships
     project = relationship("Project", back_populates="conversations")
-    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+    # New messages have monotonic timestamps, but legacy rows can tie. The id
+    # only gives those ties a deterministic fallback; it does not imply time.
+    messages = relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by=lambda: (Message.created_at, Message.id),
+    )
     
     __table_args__ = (
         Index("idx_conversations_project_id", "project_id"),
