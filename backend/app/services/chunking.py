@@ -1,7 +1,6 @@
 """Document chunking service."""
-import re
 import uuid
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Generator, Iterable, Iterator, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 import structlog
 from sqlalchemy.orm import Session
@@ -25,10 +24,6 @@ CLOSING_MARKS = "」』）〉》”’\"')]"
 # Abbreviations whose trailing dot must not end a sentence.
 ABBREVIATIONS = ("Dr", "Mr", "Mrs", "Ms", "Prof", "Sr", "Jr", "St", "vs",
                  "Fig", "No", "Vol", "Inc", "Ltd", "Approx", "cf")
-
-DOT_PLACEHOLDER = "\x00DOT\x00"
-
-HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 
 # Chunks below this are too small to answer anything on their own; they are
 # merged into a neighbour rather than indexed as their own vector.
@@ -234,7 +229,7 @@ class ChunkingService:
         return chunks
 
     def _to_blocks(self, text: str) -> Iterator[_Block]:
-        """Split text into content lines, tracking the heading stack.
+        """Stream bounded content blocks while tracking the heading stack.
 
         Args:
             text: Extracted document text.
@@ -244,36 +239,82 @@ class ChunkingService:
         """
         stack: List[Tuple[int, str]] = []
         offset = 0
+        length = len(text)
 
-        while offset <= len(text):
-            newline = text.find("\n", offset)
-            if newline < 0:
-                line = text[offset:]
-                next_offset = len(text) + 1
+        while offset < length:
+            content_start = offset
+            while content_start < length:
+                char = self._scan_character(text, content_start)
+                if char == "\n":
+                    offset = content_start + 1
+                    break
+                if not char.isspace():
+                    break
+                content_start += 1
             else:
-                line = text[offset:newline]
-                next_offset = newline + 1
+                return
 
-            stripped = line.strip()
-            if not stripped:
-                pass
-            elif heading := HEADING_RE.match(stripped):
-                level = len(heading.group(1))
-                while stack and stack[-1][0] >= level:
-                    stack.pop()
-                stack.append((level, heading.group(2)))
-            else:
-                start = offset + (len(line) - len(line.lstrip()))
+            if offset > content_start:
+                continue
+
+            # Only bounded, ordinary headings become metadata. Treating an
+            # attacker-sized `# ...` line as content avoids copying its full
+            # title before the document ceiling can stop the scanner.
+            hash_end = content_start
+            if char == "#":
+                while (
+                    hash_end < length
+                    and hash_end - content_start < 7
+                    and self._scan_character(text, hash_end) == "#"
+                ):
+                    hash_end += 1
+            heading_level = hash_end - content_start
+            heading_handled = False
+            if 1 <= heading_level <= 6 and hash_end < length:
+                separator = self._scan_character(text, hash_end)
+                if separator.isspace() and separator != "\n":
+                    title_start = hash_end + 1
+                    while title_start < length:
+                        char = self._scan_character(text, title_start)
+                        if char == "\n" or not char.isspace():
+                            break
+                        title_start += 1
+
+                    title_limit = min(title_start + self.chunk_size, length)
+                    search_end = min(title_limit + 1, length)
+                    newline = text.find("\n", title_start, search_end)
+                    if newline >= 0 or title_limit == length:
+                        line_end = newline if newline >= 0 else length
+                        title = text[title_start:line_end].strip()
+                        if title:
+                            while stack and stack[-1][0] >= heading_level:
+                                stack.pop()
+                            stack.append((heading_level, title))
+                            offset = line_end + 1
+                            heading_handled = True
+
+            if heading_handled:
+                continue
+
+            output_cursor = content_start
+            fragments = self._iter_bounded_fragments(
+                text,
+                start=content_start,
+                stop_at_newline=True,
+            )
+            while True:
+                try:
+                    fragment = next(fragments)
+                except StopIteration as stopped:
+                    offset = stopped.value
+                    break
                 yield _Block(
-                    text=stripped,
-                    start=start,
-                    end=start + len(stripped),
+                    text=fragment,
+                    start=output_cursor,
+                    end=output_cursor + len(fragment),
                     heading_path=" > ".join(title for _, title in stack),
                 )
-
-            if newline < 0:
-                break
-            offset = next_offset
+                output_cursor += len(fragment)
 
     def _pack(
         self,
@@ -396,7 +437,7 @@ class ChunkingService:
             yield block
 
     def _hard_split(self, sentence: str) -> Iterator[str]:
-        """Cut an over-long sentence near a word boundary.
+        """Cut an over-long sentence with a bounded cursor scanner.
 
         Args:
             sentence: A single sentence.
@@ -404,22 +445,147 @@ class ChunkingService:
         Returns:
             Iterator of fragments no longer than `chunk_size`.
         """
-        if len(sentence) <= self.chunk_size:
-            yield sentence
-            return
+        start = 0
+        length = len(sentence)
 
-        remaining = sentence
-        while len(remaining) > self.chunk_size:
-            window = remaining[:self.chunk_size]
-            cut = max(window.rfind(" "), window.rfind("，"), window.rfind(","))
-            if cut < self.chunk_size // 2:
-                cut = self.chunk_size
-            fragment = remaining[:cut].strip()
+        while length - start > self.chunk_size:
+            window_end = start + self.chunk_size
+            cut = self._hard_boundary_index(sentence, start, window_end)
+            if cut - start < self.chunk_size // 2:
+                cut = window_end
+            fragment = sentence[start:cut].strip()
             if fragment:
                 yield fragment
-            remaining = remaining[cut:].strip()
-        if remaining:
-            yield remaining
+            start = self._skip_whitespace(sentence, cut)
+
+        fragment = sentence[start:length].strip()
+        if fragment:
+            yield fragment
+
+    def _scan_character(self, text: str, index: int) -> str:
+        """Read one source character through an instrumentable boundary.
+
+        Args:
+            text: Source text.
+            index: Character index to inspect.
+
+        Returns:
+            Character at ``index``.
+        """
+        return text[index]
+
+    def _hard_boundary_index(self, text: str, start: int, end: int) -> int:
+        """Find the last word or comma boundary in one bounded window.
+
+        Args:
+            text: Source text.
+            start: Inclusive window start.
+            end: Exclusive window end, at most one chunk after ``start``.
+
+        Returns:
+            Absolute boundary index, or ``-1`` when the window has none.
+        """
+        return max(
+            text.rfind(" ", start, end),
+            text.rfind("，", start, end),
+            text.rfind(",", start, end),
+        )
+
+    def _skip_whitespace(self, text: str, start: int) -> int:
+        """Advance a cursor past whitespace without copying its suffix.
+
+        Args:
+            text: Source text.
+            start: Cursor to advance.
+
+        Returns:
+            First non-whitespace index, or the text length.
+        """
+        length = len(text)
+        while start < length and self._scan_character(text, start).isspace():
+            start += 1
+        return start
+
+    @staticmethod
+    def _is_word_character(char: str) -> bool:
+        """Return whether a character participates in a regex-style word.
+
+        Args:
+            char: One source character.
+
+        Returns:
+            True for alphanumeric characters and underscore.
+        """
+        return char.isalnum() or char == "_"
+
+    def _is_protected_period(self, text: str, index: int) -> bool:
+        """Recognize abbreviation and uppercase-initial periods locally.
+
+        Args:
+            text: Source text.
+            index: Index of the period under consideration.
+
+        Returns:
+            True when the period must not terminate a sentence.
+        """
+        for abbreviation in ABBREVIATIONS:
+            word_start = index - len(abbreviation)
+            if word_start < 0 or text[word_start:index] != abbreviation:
+                continue
+            if word_start == 0 or not self._is_word_character(
+                self._scan_character(text, word_start - 1)
+            ):
+                return True
+
+        letter_index = index - 1
+        if letter_index < 0:
+            return False
+        letter = self._scan_character(text, letter_index)
+        if letter not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            return False
+        return letter_index == 0 or not self._is_word_character(
+            self._scan_character(text, letter_index - 1)
+        )
+
+    def _sentence_end_index(
+        self,
+        text: str,
+        index: int,
+        fragment_start: int,
+        char: str,
+    ) -> Optional[int]:
+        """Find a sentence end using only constant local lookaround.
+
+        Args:
+            text: Source text.
+            index: Index of the already-read character.
+            fragment_start: Start of the current bounded fragment.
+            char: Character at ``index``.
+
+        Returns:
+            Exclusive sentence-end index, or None when scanning should continue.
+        """
+        length = len(text)
+        if char in CJK_TERMINATORS:
+            end = index + 1
+            fragment_limit = min(fragment_start + self.chunk_size, length)
+            while end < fragment_limit:
+                if self._scan_character(text, end) not in CLOSING_MARKS:
+                    break
+                end += 1
+            return end
+
+        if char not in LATIN_TERMINATORS:
+            return None
+        if char == "." and self._is_protected_period(text, index):
+            return None
+
+        following_index = index + 1
+        if following_index >= length:
+            return following_index
+        if self._scan_character(text, following_index).isspace():
+            return following_index
+        return None
 
     def _overlap_block(self, chunk: Tuple[str, int, int, str]) -> Optional[_Block]:
         """Build the overlap carried into the next chunk.
@@ -699,53 +865,95 @@ class ChunkingService:
 
         return chunks
 
-    def _iter_sentences(self, text: str) -> Iterator[str]:
-        """Yield sentences in any of the languages this app indexes.
+    def _iter_bounded_fragments(
+        self,
+        text: str,
+        start: int = 0,
+        stop_at_newline: bool = False,
+    ) -> Generator[str, None, int]:
+        """Yield bounded sentence-aligned fragments from the original source.
+
+        A sentence longer than ``chunk_size`` is emitted incrementally at the
+        same word/comma boundary used by ``_hard_split``. This keeps the live
+        path from materializing an attacker-sized sentence before its first
+        chunk reaches the resource ceiling.
 
         Args:
-            text: Text to split
+            text: Original source text.
+            start: Source index at which scanning begins.
+            stop_at_newline: Whether a newline ends this generator.
 
         Returns:
-            Iterator of sentences.
+            Iterator of fragments no longer than ``chunk_size``. Its terminal
+            value is the first source index after the line or input.
         """
-        guarded = text
-        for abbreviation in ABBREVIATIONS:
-            guarded = re.sub(
-                r"\b(%s)\." % abbreviation, r"\1" + DOT_PLACEHOLDER, guarded
-            )
-        # Initials such as "U.S." must not break either.
-        guarded = re.sub(r"\b([A-Z])\.", r"\1" + DOT_PLACEHOLDER, guarded)
+        length = len(text)
 
-        buffer: List[str] = []
-        index = 0
-        length = len(guarded)
+        while start < length:
+            window_end = min(start + self.chunk_size, length)
+            index = start
 
-        while index < length:
-            char = guarded[index]
-            buffer.append(char)
+            while index < window_end:
+                char = self._scan_character(text, index)
+                if stop_at_newline and char == "\n":
+                    fragment = text[start:index].strip()
+                    if fragment:
+                        yield fragment
+                    return index + 1
+                sentence_end = self._sentence_end_index(
+                    text,
+                    index,
+                    start,
+                    char,
+                )
+                if sentence_end is not None:
+                    fragment = text[start:sentence_end].strip()
+                    if fragment:
+                        yield fragment
+                    start = sentence_end
+                    while start < length:
+                        char = self._scan_character(text, start)
+                        if stop_at_newline and char == "\n":
+                            return start + 1
+                        if not char.isspace():
+                            break
+                        start += 1
+                    break
+                index += 1
+            else:
+                if window_end == length:
+                    fragment = text[start:window_end].strip()
+                    if fragment:
+                        yield fragment
+                    return length + 1
 
-            if char in CJK_TERMINATORS:
-                while index + 1 < length and guarded[index + 1] in CLOSING_MARKS:
-                    index += 1
-                    buffer.append(guarded[index])
-                sentence = "".join(buffer).replace(DOT_PLACEHOLDER, ".").strip()
-                if sentence:
-                    yield sentence
-                buffer = []
-            elif char in LATIN_TERMINATORS:
-                following = guarded[index + 1:index + 2]
-                if following == "" or following.isspace():
-                    sentence = "".join(buffer).replace(DOT_PLACEHOLDER, ".").strip()
-                    if sentence:
-                        yield sentence
-                    buffer = []
+                cut = self._hard_boundary_index(text, start, window_end)
+                if cut - start < self.chunk_size // 2:
+                    cut = window_end
+                fragment = text[start:cut].strip()
+                if fragment:
+                    yield fragment
+                start = cut
+                while start < length:
+                    char = self._scan_character(text, start)
+                    if stop_at_newline and char == "\n":
+                        return start + 1
+                    if not char.isspace():
+                        break
+                    start += 1
 
-            index += 1
+        return length + 1
 
-        if buffer:
-            sentence = "".join(buffer).replace(DOT_PLACEHOLDER, ".").strip()
-            if sentence:
-                yield sentence
+    def _iter_sentences(self, text: str) -> Iterator[str]:
+        """Yield bounded sentence-aligned fragments for compatibility.
+
+        Args:
+            text: Text to scan.
+
+        Returns:
+            Iterator of fragments no longer than ``chunk_size``.
+        """
+        yield from self._iter_bounded_fragments(text)
 
     def _split_sentences(self, text: str) -> List[str]:
         """Return the sentence iterator as a compatibility list.

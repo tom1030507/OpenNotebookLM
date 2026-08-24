@@ -63,7 +63,20 @@ class TestSentenceSplitting:
     def test_closing_quote_stays_with_its_sentence(self):
         service = ChunkingService()
         sentences = service._split_sentences("他說「這樣可以。」然後離開了。")
-        assert sentences[0].endswith("」")
+        assert sentences == ["他說「這樣可以。」", "然後離開了。"]
+
+    def test_bounded_scanner_preserves_language_boundary_semantics(self):
+        service = ChunkingService(chunk_size=20, chunk_overlap=0)
+        text = "Dr. Ada met the U.S. team. The score was 3.14 overall. Done!"
+
+        chunks = service._chunk_text_content(text)
+
+        assert [chunk["text"] for chunk in chunks] == [
+            "Dr. Ada met the",
+            "U.S. team.",
+            "The score was 3.14",
+            "overall.\nDone!",
+        ]
 
 
 class TestChunkSize:
@@ -87,6 +100,18 @@ class TestChunkSize:
         service = ChunkingService(chunk_size=100, chunk_overlap=0)
         chunks = service._chunk_text_content("x" * 350)
         assert all(len(chunk["text"]) <= 100 for chunk in chunks)
+
+    def test_hard_split_preserves_word_and_comma_boundaries(self):
+        service = ChunkingService(chunk_size=10, chunk_overlap=0)
+
+        assert list(service._hard_split("abcdefgh,ijklmnop")) == [
+            "abcdefgh",
+            ",ijklmnop",
+        ]
+        assert list(service._hard_split("alpha beta gamma")) == [
+            "alpha",
+            "beta gamma",
+        ]
 
     def test_the_limit_holds_with_overlap_enabled(self):
         # The overlap used to be prepended to a fresh chunk without rechecking
@@ -161,6 +186,15 @@ class TestHeadings:
     def test_heading_lines_are_not_indexed_as_content(self):
         chunks = ChunkingService(chunk_size=512, chunk_overlap=0)._chunk_text_content(self.SECTIONED)
         assert not any(chunk["text"].startswith("#") for chunk in chunks)
+
+    def test_attacker_sized_heading_candidate_is_bounded_content(self):
+        service = ChunkingService(chunk_size=100, chunk_overlap=0)
+        text = "# " + "x" * 250
+
+        chunks = service._chunk_text_content(text)
+
+        assert chunks[0]["text"].startswith("# ")
+        assert all(chunk["metadata"]["heading_path"] is None for chunk in chunks)
 
 
 class TestOffsets:

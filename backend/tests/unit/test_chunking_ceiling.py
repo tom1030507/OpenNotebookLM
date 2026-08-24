@@ -37,27 +37,6 @@ class RejectingEmbedder:
         raise AssertionError("over-limit chunks reached embedding")
 
 
-class CountingFragmentChunker(ChunkingService):
-    """Count fragments pulled through the real hard-split/pack pipeline."""
-
-    def __init__(self) -> None:
-        super().__init__(chunk_size=100, chunk_overlap=0)
-        self.fragments_generated = 0
-
-    def _hard_split(self, sentence: str):
-        """Yield real fragments while counting generator consumption.
-
-        Args:
-            sentence: Oversized source sentence.
-
-        Returns:
-            Iterator of real hard-split fragments.
-        """
-        for fragment in super()._hard_split(sentence):
-            self.fragments_generated += 1
-            yield fragment
-
-
 class RecordingCeilingChunker(ChunkingService):
     """Record ceilings received by the shared text splitting path."""
 
@@ -126,12 +105,12 @@ class SplitRejectingText(str):
         raise AssertionError("live block generation eagerly split every line")
 
 
-class LazySentenceChunker(ChunkingService):
-    """Expose whether the live fit path consumes a lazy sentence iterator."""
+class LazyFragmentChunker(ChunkingService):
+    """Expose whether the live path consumes a bounded fragment iterator."""
 
     def __init__(self) -> None:
         super().__init__(chunk_size=100, chunk_overlap=0)
-        self.sentences_generated = 0
+        self.fragments_generated = 0
 
     def _split_sentences(self, _text: str):
         """Reject the compatibility list wrapper on the live path.
@@ -144,18 +123,152 @@ class LazySentenceChunker(ChunkingService):
         """
         raise AssertionError("live fitting materialized the complete sentence list")
 
-    def _iter_sentences(self, _text: str):
-        """Yield many planned sentences while counting consumption.
+    def _iter_bounded_fragments(
+        self,
+        _text: str,
+        start: int = 0,
+        stop_at_newline: bool = False,
+    ):
+        """Yield many bounded fragments while counting consumption.
 
         Args:
             _text: Unused source text.
+            start: Unused source start.
+            stop_at_newline: Unused line-boundary mode.
 
         Returns:
-            Iterator of deterministic sentences.
+            Iterator of deterministic bounded fragments.
         """
+        del start, stop_at_newline
         for index in range(100):
-            self.sentences_generated += 1
+            self.fragments_generated += 1
             yield chr(97 + index % 26) * 100
+        return len(_text) + 1
+
+
+class InstrumentedScannerChunker(ChunkingService):
+    """Measure source reads and hard-boundary windows deterministically."""
+
+    def __init__(self) -> None:
+        super().__init__(chunk_size=100, chunk_overlap=0)
+        self.character_reads = 0
+        self.highest_source_index = -1
+        self.boundary_windows = []
+
+    def _scan_character(self, text: str, index: int) -> str:
+        """Record one production scanner read before returning its character.
+
+        Args:
+            text: Source text.
+            index: Character index being inspected.
+
+        Returns:
+            Character at ``index``.
+        """
+        self.character_reads += 1
+        self.highest_source_index = max(self.highest_source_index, index)
+        return super()._scan_character(text, index)
+
+    def _hard_boundary_index(self, text: str, start: int, end: int) -> int:
+        """Record the bounded source window searched for a hard split.
+
+        Args:
+            text: Source text.
+            start: Inclusive source index.
+            end: Exclusive source index.
+
+        Returns:
+            Boundary selected by the production scanner.
+        """
+        self.boundary_windows.append((start, end))
+        return super()._hard_boundary_index(text, start, end)
+
+
+class SuffixSliceRejectingText(str):
+    """Source that rejects copies extending from a cursor through EOF."""
+
+    def __getitem__(self, key):
+        """Reject the quadratic ``remaining = remaining[cut:]`` pattern.
+
+        Args:
+            key: Integer or slice requested by the scanner.
+
+        Returns:
+            Requested character or explicitly bounded slice.
+        """
+        if (
+            isinstance(key, slice)
+            and key.start not in (None, 0)
+            and key.stop is None
+        ):
+            raise AssertionError("scanner copied the complete remaining suffix")
+        return super().__getitem__(key)
+
+
+class GuardedScannerText(str):
+    """Huge source that rejects reads beyond the expected ceiling window."""
+
+    max_read_index = 399
+
+    def __getitem__(self, key):
+        """Reject character reads and slices reaching the protected suffix.
+
+        Args:
+            key: Integer or slice requested by production code.
+
+        Returns:
+            Requested character or bounded slice.
+        """
+        if isinstance(key, int) and key > self.max_read_index:
+            raise AssertionError("scanner read beyond the bounded prefix")
+        if isinstance(key, slice) and (
+            key.stop is None or key.stop > self.max_read_index + 1
+        ):
+            raise AssertionError("scanner copied the protected source suffix")
+        return super().__getitem__(key)
+
+    def find(self, sub, start=None, end=None):
+        """Reject unbounded forward searches.
+
+        Args:
+            sub: Substring to locate.
+            start: Optional inclusive search start.
+            end: Optional exclusive search end.
+
+        Returns:
+            Matching index from the bounded search.
+        """
+        if end is None or end > self.max_read_index + 1:
+            raise AssertionError("scanner searched the complete source suffix")
+        return super().find(sub, start, end)
+
+    def rfind(self, sub, start=None, end=None):
+        """Reject unbounded reverse searches.
+
+        Args:
+            sub: Substring to locate.
+            start: Optional inclusive search start.
+            end: Optional exclusive search end.
+
+        Returns:
+            Matching index from the bounded search.
+        """
+        if end is None or end > self.max_read_index + 1:
+            raise AssertionError("scanner searched the complete source suffix")
+        return super().rfind(sub, start, end)
+
+    def strip(self, chars=None):
+        """Reject stripping the complete protected source.
+
+        Args:
+            chars: Optional characters to remove.
+
+        Returns:
+            Stripped text only when the receiver itself is bounded.
+        """
+        if len(self) > self.max_read_index + 1:
+            raise AssertionError("scanner stripped the complete source")
+        return super().strip(chars)
 
 
 @pytest.fixture
@@ -301,24 +414,40 @@ def test_live_one_thousand_and_one_stops_before_chunk_inserts(
     assert db.query(Chunk).count() == 0
 
 
-def test_text_splitter_stops_generating_at_limit_plus_one(db) -> None:
-    """A compressed oversized block cannot expand into every fragment first."""
-    document = Document(
-        id=DOCUMENT_ID,
-        title="Expanded source",
-        source_type="text",
-        content="x" * 10_000,
-        status="processing",
-        meta_json={},
-    )
-    db.add(document)
-    db.commit()
-    service = CountingFragmentChunker()
+def test_first_no_punctuation_fragment_reads_only_one_bounded_window() -> None:
+    """Calling next cannot scan a huge block before producing useful text."""
+    service = InstrumentedScannerChunker()
+    text = "x" * 1_000_000
+
+    first = next(service._iter_sentences(text))
+
+    assert first == "x" * service.chunk_size
+    assert 0 < service.character_reads <= service.chunk_size
+    assert service.highest_source_index < service.chunk_size
+    assert service.boundary_windows == [(0, service.chunk_size)]
+
+
+def test_ceiling_stops_scanner_after_limit_plus_one_windows() -> None:
+    """Final N+1 detection never reads the remainder of a huge source."""
+    service = InstrumentedScannerChunker()
+    text = GuardedScannerText("x" * 1_000_000)
 
     with pytest.raises(ValueError):
-        service.chunk_document(db, DOCUMENT_ID, max_chunks=2)
+        service._chunk_text_content(text, max_chunks=2)
 
-    assert service.fragments_generated == 3
+    assert 0 < service.character_reads <= 3 * service.chunk_size + 3
+    assert service.highest_source_index < 3 * service.chunk_size
+    assert service.boundary_windows == [(0, 100), (100, 200), (200, 300)]
+
+
+def test_hard_split_never_copies_the_complete_remaining_suffix() -> None:
+    """Cursor-based hard splitting only materializes bounded fragments."""
+    service = ChunkingService(chunk_size=100, chunk_overlap=0)
+    text = SuffixSliceRejectingText("x" * 350)
+
+    fragments = list(service._hard_split(text))
+
+    assert [len(fragment) for fragment in fragments] == [100, 100, 100, 50]
 
 
 def test_multiline_block_generation_does_not_split_every_line_first() -> None:
@@ -330,14 +459,14 @@ def test_multiline_block_generation_does_not_split_every_line_first() -> None:
         service._chunk_text_content(text, max_chunks=2)
 
 
-def test_sentence_generation_stops_at_limit_plus_one() -> None:
-    """The live fit path never builds or consumes the full sentence list."""
-    service = LazySentenceChunker()
+def test_bounded_fragment_generation_stops_at_limit_plus_one() -> None:
+    """The live path never builds or consumes every derived fragment."""
+    service = LazyFragmentChunker()
 
     with pytest.raises(ValueError):
         service._chunk_text_content("unused" * 20, max_chunks=2)
 
-    assert service.sentences_generated == 3
+    assert service.fragments_generated == 3
 
 
 def test_final_ceiling_does_not_reject_a_mergeable_runt() -> None:
