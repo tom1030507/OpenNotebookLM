@@ -1,8 +1,8 @@
 # End-to-end test design
 
-Status: approved; implementation planned.
+Status: implemented and verified locally; remote GitHub Actions execution remains pending.
 
-Date: 2026-08-23
+Date: 2026-08-24
 
 ## Purpose
 
@@ -62,7 +62,7 @@ rather than the availability or wording of a remote language model.
 
 ### Repository layout
 
-The intended implementation is:
+The implemented layout is:
 
 ~~~text
 e2e/
@@ -93,19 +93,16 @@ backend/
 .github/workflows/e2e.yml
 ~~~
 
-The root README testing section will list the supported commands. Playwright
+The root README testing section lists the supported commands. Playwright
 reports, traces, videos, screenshots, runtime databases, generated PDFs, and
 uploads live under output/e2e and remain ignored.
 
 ## Service boundaries
 
-The ingest and query routers currently construct DocumentService and RAGService
-at module import time. That eagerly imports and creates the embedding model even
-when a request never ingests or queries a document. It also prevents FastAPI
-dependency overrides from selecting deterministic E2E services.
-
-The implementation will introduce lazy, cached dependency providers for these
-two services:
+The ingest and query routers use lazy, cached dependency providers for
+DocumentService and RAGService. This avoids importing or creating the embedding
+model until an ingest or query request needs it, and lets FastAPI dependency
+overrides select deterministic E2E services:
 
 - Production requests receive the same concrete services and behavior as now.
 - App startup and auth/project requests do not load an embedding model.
@@ -298,21 +295,27 @@ Both jobs upload diagnostics only on failure. Neither job reads API-provider
 secrets. Existing frontend Vitest, lint, and backend pytest commands remain
 separate validation gates.
 
-## Verification requirements
+## Local verification
 
-Implementation is complete only after the following evidence is collected:
+The following fresh local checks completed on 2026-08-24:
 
 - New backend unit tests prove service creation is lazy and dependency
   overrides select the deterministic services.
-- Existing backend tests pass in the documented ML-capable environment.
-- Existing 338 frontend tests pass.
-- Frontend lint passes, or any pre-existing lint-tooling failure is documented
-  separately from E2E changes.
-- The complete deterministic Chromium suite passes from a clean runtime.
-- The full-RAG test is run when the real model is available; otherwise its
-  command, skip reason, and remaining verification are reported explicitly.
-- Git status contains no runtime database, uploads, model cache, Playwright
-  report, trace, screenshot, or video.
+- `docker run --rm --platform linux/amd64 ... python -m pytest tests -q` passed
+  **539 tests**, with 11 warnings, in 111.38 seconds. It used a read-only local
+  sentence-transformers cache mount under Docker Desktop emulation.
+- `cd frontend && npm test` passed **40 files / 408 tests** in 27.84 seconds;
+  `npm run lint` completed with no warnings or errors; `cd e2e && npm run
+  typecheck` also passed.
+- `cd e2e && npm test` passed **33 tests** in 1.3 minutes, with no unexpected
+  skips. It intentionally excludes exactly one opt-in test: `full-rag.spec.ts`.
+- `cd e2e && npm run test:full-rag` passed **1 test** in 28.8 seconds with
+  locally cached CPU model weights and `LLM_MODE=none`.
+- The tracked-artifact audit contains no runtime database, uploads, model cache,
+  Playwright report, trace, screenshot, or video.
+
+The workflow has not yet executed remotely in GitHub Actions; that remains the
+only workflow-level validation pending.
 
 ## Expected limitations
 

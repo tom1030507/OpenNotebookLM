@@ -1,0 +1,156 @@
+name: End-to-end tests
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-e2e:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: e2e-fast-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-minimal.txt
+            backend/requirements-e2e.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+
+      - name: Install deterministic backend dependencies
+        run: python -m pip install -r backend/requirements-e2e.txt
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install E2E dependencies
+        run: npm ci
+        working-directory: e2e
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+        working-directory: e2e
+
+      - name: Type-check E2E suite
+        run: npm run typecheck
+        working-directory: e2e
+
+      - name: Run deterministic Chromium E2E
+        run: npm test
+        working-directory: e2e
+
+      - name: Upload failed fast-E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-fast-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/e2e
+          if-no-files-found: warn
+          retention-days: 7
+
+  full-rag-e2e:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: e2e-full-rag-${{ github.workflow }}
+      cancel-in-progress: false
+    env:
+      HF_HOME: ${{ github.workspace }}/.cache/huggingface
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-minimal.txt
+            backend/requirements-e2e.txt
+            backend/requirements-e2e-rag.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+
+      - name: Restore Hugging Face model cache
+        uses: actions/cache@v6
+        with:
+          path: .cache/huggingface
+          key: hf-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('backend/requirements-minimal.txt', 'backend/requirements-e2e.txt', 'backend/requirements-e2e-rag.txt', 'backend/app/config.py') }}
+
+      - name: Install CPU PyTorch
+        run: >-
+          python -m pip install
+          --index-url https://download.pytorch.org/whl/cpu
+          torch==2.5.1 torchvision==0.20.1
+
+      - name: Install full-RAG backend dependencies
+        run: python -m pip install -r backend/requirements-e2e-rag.txt
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install E2E dependencies
+        run: npm ci
+        working-directory: e2e
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+        working-directory: e2e
+
+      - name: Type-check E2E suite
+        run: npm run typecheck
+        working-directory: e2e
+
+      - name: Run production-embedding Chromium E2E
+        run: npm run test:full-rag
+        working-directory: e2e
+
+      - name: Upload failed full-RAG diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-full-rag-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/e2e
+          if-no-files-found: warn
+          retention-days: 7

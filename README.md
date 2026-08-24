@@ -627,9 +627,62 @@ cd frontend && npm test          # vitest
 cd frontend && npm run lint
 ```
 
-Both suites are green on `master`. The backend suite needs the ML dependencies
+The backend and frontend suites have separate commands. The backend suite needs the ML dependencies
 (`sentence-transformers` and its transformers pin) importable — a bare virtualenv
 without them cannot collect the tests.
+
+### Browser E2E
+
+The default Chromium suite starts isolated Next.js and FastAPI servers on ports
+3100 and 8100. It uses a run-specific SQLite database under `output/e2e`.
+Installing Python/npm dependencies and Chromium uses their package-download
+networks, but once installed the fast test runtime makes no external application
+or API calls and needs no provider secret, API key, public network, torch, or
+sentence-transformers.
+
+From the repository root:
+
+```bash
+python -m pip install -r backend/requirements-e2e.txt
+npm --prefix frontend ci
+npm --prefix e2e ci
+npx --prefix e2e playwright install chromium
+npm --prefix e2e test
+```
+
+The E2E server uses `python` by default. Point it at the E2E virtual environment
+when that is not the Python on your `PATH`:
+
+```bash
+E2E_PYTHON="$(pwd)/backend/venv/bin/python" npm --prefix e2e test
+```
+
+```powershell
+$env:E2E_PYTHON = (Resolve-Path 'backend\venv\Scripts\python.exe')
+npm --prefix e2e test
+```
+
+Use `npm --prefix e2e run test:headed` or `npm --prefix e2e run test:debug` for
+local investigation. Failed runs retain an HTML report, trace, video,
+screenshot, server logs, and isolated database under `output/e2e/<run-id>`.
+Successful runs clean that runtime unless `E2E_KEEP_RUNTIME=1` is set (or, in
+PowerShell, `$env:E2E_KEEP_RUNTIME = '1'`).
+
+The production-embedding test is a separate, slower opt-in. It needs
+CPU-compatible PyTorch, sufficient disk, RAM, and time; a cold run also downloads
+the embedding model unless it is already cached. It still uses `LLM_MODE=none`
+and requires no provider secret:
+
+```bash
+python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1 torchvision==0.20.1
+python -m pip install -r backend/requirements-e2e-rag.txt
+E2E_PYTHON="$(pwd)/backend/venv/bin/python" npm --prefix e2e run test:full-rag
+```
+
+```powershell
+$env:E2E_PYTHON = (Resolve-Path 'backend\venv\Scripts\python.exe')
+npm --prefix e2e run test:full-rag
+```
 
 ## ⚠ Known limitations
 
