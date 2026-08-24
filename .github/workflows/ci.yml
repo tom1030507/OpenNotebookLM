@@ -81,6 +81,7 @@ jobs:
           sh -eu -c
           'cp -R /source/backend /test-workspace/backend
           && cp /source/.env.example /test-workspace/.env.example
+          && cp /source/docker-compose.yml /test-workspace/docker-compose.yml
           && cd /test-workspace/backend
           && python -m pytest tests -q'
 
