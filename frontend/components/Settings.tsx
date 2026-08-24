@@ -16,7 +16,6 @@ import {
   Loader2
 } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
-import api from '@/lib/api';
 import useStore from '@/store/useStore';
 import {
   applyThemePreference,
@@ -46,9 +45,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [notifyOnComplete, setNotifyOnComplete] = useState(storedNotifyOnComplete);
   const [wasOpen, setWasOpen] = useState(isOpen);
   const [isSaving, setIsSaving] = useState(false);
-  const [isClearingCache, setIsClearingCache] = useState(false);
-  const [cacheResult, setCacheResult] = useState('');
-  const [cacheError, setCacheError] = useState('');
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -77,8 +73,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     if (isOpen) {
       setTheme(readThemePreference());
       setNotifyOnComplete(storedNotifyOnComplete);
-      setCacheResult('');
-      setCacheError('');
     }
   }
 
@@ -99,24 +93,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     }
 
     onClose();
-  };
-
-  const clearCache = async () => {
-    setIsClearingCache(true);
-    setCacheResult('');
-    setCacheError('');
-
-    try {
-      const cleared = await api.clearCache();
-      setCacheResult(cleared < 0
-        // A flushed Redis database reports no count.
-        ? 'Server cache cleared.'
-        : `Server cache cleared: ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} dropped.`);
-    } catch {
-      setCacheError('The cache could not be cleared. Please try again.');
-    } finally {
-      setIsClearingCache(false);
-    }
   };
 
   if (!isOpen) return null;
@@ -363,15 +339,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={clearCache}
-                        disabled={isClearingCache}
-                        className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {isClearingCache && <Loader2 className="w-4 h-4 animate-spin" />}
-                        <span>Clear Cache</span>
-                      </button>
-                      <button
-                        type="button"
                         disabled
                         aria-label={`Export Data (${availabilityLabel})`}
                         className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
@@ -380,20 +347,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                       </button>
                     </div>
 
-                    {cacheResult && (
-                      <p role="status" className="text-xs text-[var(--muted-foreground)]">
-                        {cacheResult}
-                      </p>
-                    )}
-                    {cacheError && (
-                      <p role="alert" className="text-xs text-[var(--error)]">
-                        {cacheError}
-                      </p>
-                    )}
-
                     <p className="text-xs text-[var(--muted-foreground)]">
-                      Clear Cache drops the server&apos;s cached answers and
-                      embeddings; sources and conversations are untouched.
                       Exporting everything at once is {availabilityLabel} — export
                       a conversation or a project from the toolbar instead.
                     </p>

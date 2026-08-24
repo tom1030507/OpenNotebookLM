@@ -166,7 +166,7 @@ def test_the_app_actually_serves_the_routes_under_test():
     assert "/api/docs/{doc_id}/file" in paths
     assert "/api/query" in paths
     assert "/api/export/conversation/{conversation_id}" in paths
-    assert "/api/cache/stats" in paths
+    assert "/api/cache/invalidate/project/{project_id}" in paths
     assert len(paths) > 20
 
 
@@ -253,7 +253,7 @@ def test_a_valid_token_gets_past_the_gate(signed_in, method, path):
     ("GET", "/api/docs/no-such-id/file", None, 404),
     ("POST", "/api/query", {"project_id": "no-such-id", "query": "hello"}, 404),
     ("GET", "/api/export/conversation/no-such-id", None, 404),
-    ("GET", "/api/cache/stats", None, 200),
+    ("DELETE", "/api/cache/invalidate/project/no-such-id", None, 404),
 ])
 def test_signed_in_behaviour_is_unchanged(signed_in, method, path, body, expected):
     """One route per router group still answers what it always answered."""

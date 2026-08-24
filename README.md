@@ -377,9 +377,9 @@ and can never move a row between accounts. The `user_id` columns themselves are
 added to an existing database on start-up by `db.database.ensure_added_columns`,
 since `create_all` only ever creates missing *tables*.
 
-Not scoped per account: `/api/cache/stats`, `/api/cache/health` and
-`/api/cache/clear` act on one shared process-wide cache. They need a token but
-not an owner, and clearing it affects everyone.
+Cache administration is not public. The only cache routes invalidate a project
+or document after the same ownership check used by its data routes; foreign and
+missing ids both answer `404`.
 
 </details>
 
@@ -396,7 +396,7 @@ OpenNotebookLM/
 │   │   ├── adapters/         # pdf, url, youtube
 │   │   ├── db/               # SQLAlchemy models, session, UTCDateTime column type
 │   │   ├── utils/            # logging, time
-│   │   ├── api/cache.py      # cache management endpoints
+│   │   ├── api/cache.py      # ownership-scoped cache invalidation
 │   │   ├── config.py         # settings (env-driven)
 │   │   └── main.py           # app factory and router registration
 │   └── tests/                # pytest; tests/unit/ holds the focused ones
@@ -682,7 +682,7 @@ endpoints requires
 | `GET` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
 | `GET` | `/api/projects/{id}/mindmap` | Mind map of a project; returns `root`, `node_count`, `model_used` |
 | `GET` | `/api/projects/{id}/video-summary` | Scene script for Studio's video summary; returns `scenes`, `estimated_seconds`, `model_used` |
-| `GET`/`DELETE` | `/api/cache/*` | Cache stats, health, clear, invalidate, warm up |
+| `DELETE` | `/api/cache/invalidate/project/{id}`, `/api/cache/invalidate/document/{id}` | Invalidate cache entries after an ownership check |
 
 `/api/docs/{id}/file` is no exception to the bearer-token rule, which is why the
 preview pane fetches a file through the API client and renders the bytes, rather
@@ -718,9 +718,10 @@ without them cannot collect the tests.
 
 - **There is no sharing.** Ownership is all-or-nothing: a project belongs to one
   account, and there is no way to grant another account access to it.
-- **Caching is in-memory.** `app/services/cache.py` will use Redis if a client and
-  a `redis_url` setting are present; neither ships, so the cache is per-process
-  and resets on restart.
+- **Caching defaults to bounded in-memory storage outside Compose.** Set
+  `REDIS_URL` for a shared cache, or enable Compose's `with-cache` profile. Redis
+  stays on the internal network; without it, each backend process keeps at most
+  `CACHE_MAX_ENTRIES` entries and loses them on restart.
 - **YouTube import depends on YouTube.** The pinned
   `youtube-transcript-api==0.6.1` scrapes the watch page, and YouTube rate-limits
   it — imports can fail with an XML parse error on a blocked response even though

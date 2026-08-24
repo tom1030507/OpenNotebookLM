@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     rate_limit_period: int = 60
     rate_limit_max_keys: int = 10000
     trust_proxy_headers: bool = False
+
+    # Cache
+    redis_url: Optional[str] = None
+    cache_namespace: str = "opennotebooklm"
+    cache_max_entries: int = 10000
     
     # Chunking
     chunk_size: int = 512
