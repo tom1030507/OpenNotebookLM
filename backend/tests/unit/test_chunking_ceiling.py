@@ -530,6 +530,37 @@ def test_source_scan_budget_bounds_non_chunk_metadata_work(text: str) -> None:
     assert service.highest_source_index <= guarded.max_read_index
 
 
+@pytest.mark.parametrize(
+    ("line_count", "expected_chunks"),
+    [(40, 1), (50_000, 1_000)],
+    ids=["small", "exact-1000"],
+)
+def test_source_scan_budget_accepts_many_short_lines_at_the_exact_limit(
+    line_count: int,
+    expected_chunks: int,
+) -> None:
+    """Nearby newlines charge only inspected characters, not full windows.
+
+    Args:
+        line_count: Number of one-character source lines.
+        expected_chunks: Hand-derived final chunk count and configured ceiling.
+
+    Returns:
+        None.
+    """
+    service = ChunkingService(chunk_size=100, chunk_overlap=0)
+    text = ("a\n" * line_count).rstrip()
+
+    unlimited = service._chunk_text_content(text)
+    limited = service._chunk_text_content(
+        text,
+        max_chunks=expected_chunks,
+    )
+
+    assert len(unlimited) == expected_chunks
+    assert limited == unlimited
+
+
 def test_hard_split_never_copies_the_complete_remaining_suffix() -> None:
     """Cursor-based hard splitting only materializes bounded fragments."""
     service = ChunkingService(chunk_size=100, chunk_overlap=0)

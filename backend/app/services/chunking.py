@@ -623,9 +623,15 @@ class ChunkingService:
         Returns:
             Matching source index, or ``-1``.
         """
+        result = text.find(value, start, end)
         if scan_budget is not None:
-            scan_budget.consume(max(0, end - start))
-        return text.find(value, start, end)
+            inspected = (
+                result - start + len(value)
+                if result >= 0
+                else max(0, end - start)
+            )
+            scan_budget.consume(inspected)
+        return result
 
     def _hard_boundary_index(
         self,
