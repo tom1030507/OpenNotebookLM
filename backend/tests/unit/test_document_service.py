@@ -25,7 +25,13 @@ class CommittingChunker:
     def __init__(self, count: int):
         self.count = count
 
-    def chunk_document(self, db, document_id: str) -> list[Chunk]:
+    def chunk_document(
+        self,
+        db,
+        document_id: str,
+        max_chunks: int | None = None,
+    ) -> list[Chunk]:
+        del max_chunks
         for existing in db.query(Chunk).filter(Chunk.document_id == document_id).all():
             db.delete(existing)
         db.flush()

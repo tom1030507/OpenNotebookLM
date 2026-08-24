@@ -138,6 +138,8 @@ class Settings(BaseSettings):
     # copying the canonical .env example cannot fail Settings extra-key checks.
     redis_maxmemory: str = "256mb"
     cache_namespace: str = "opennotebooklm"
+    # Separate bounds: at most this many cached values and this many scope
+    # version markers. They are reported independently by CacheService stats.
     cache_max_entries: int = 10000
     
     # Chunking

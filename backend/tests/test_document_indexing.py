@@ -35,7 +35,8 @@ class FakeChunkingService:
         self.num_chunks = num_chunks
         self.failure = failure
 
-    def chunk_document(self, db, document_id):
+    def chunk_document(self, db, document_id, max_chunks=None):
+        del max_chunks
         self.timeline.append(("chunk", current_status(db, document_id)))
 
         if self.failure:

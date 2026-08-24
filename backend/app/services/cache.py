@@ -56,7 +56,8 @@ class CacheService:
             redis_url: Redis URL override. Omit it to read current application
                 settings; pass ``None`` to force the memory backend.
             namespace: Prefix isolating this application's logical keys.
-            max_entries: Maximum number of in-process entries.
+            max_entries: Separate maximums for in-process cached values and
+                ownership-scope version markers.
             clock: Monotonic clock used for in-process expiry metadata.
             redis_client: Prebuilt Redis-compatible client, primarily for
                 controlled integrations and tests.
@@ -567,24 +568,44 @@ class CacheService:
                 stats = self.cache_stats.copy()
             try:
                 info = self.cache_backend.info()
+                backend_records = int(self.cache_backend.dbsize())
                 stats.update({
                     "backend": "redis",
                     "used_memory": info.get("used_memory_human", "N/A"),
                     # Redis DBSIZE is constant work. This internal diagnostic
                     # reports the shared database total rather than scanning
                     # the namespace and turning stats into unbounded work.
-                    "total_keys": int(self.cache_backend.dbsize()),
+                    "total_keys": backend_records,
+                    # Splitting Redis records by type would require the
+                    # full-keyspace scan this service intentionally forbids.
+                    "cached_values": None,
+                    "scope_markers": None,
+                    "total_resource_records": backend_records,
                     "connected_clients": info.get("connected_clients", 0),
                 })
             except Exception:
-                stats.update({"backend": "redis (error)", "total_keys": 0})
+                stats.update({
+                    "backend": "redis (error)",
+                    "total_keys": 0,
+                    "cached_values": None,
+                    "scope_markers": None,
+                    "total_resource_records": 0,
+                })
         else:
             with self._lock:
                 self._cleanup_expired_locked(self._clock())
                 stats = self.cache_stats.copy()
+                cached_values = len(self.in_memory_cache)
+                scope_markers = len(self._scope_versions)
                 stats.update({
                     "backend": "in-memory",
-                    "total_keys": len(self.in_memory_cache),
+                    # total_keys remains the cached-value count for backward
+                    # compatibility; the explicit fields prevent markers from
+                    # being hidden in resource accounting.
+                    "total_keys": cached_values,
+                    "cached_values": cached_values,
+                    "scope_markers": scope_markers,
+                    "total_resource_records": cached_values + scope_markers,
                 })
 
         total_requests = stats["hits"] + stats["misses"]

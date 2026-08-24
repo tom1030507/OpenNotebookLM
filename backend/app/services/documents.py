@@ -12,7 +12,7 @@ from app.db.models import Chunk, Document, Project, ProjectDocument
 from app.schemas import DocumentCreate
 from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
-from app.services.chunking import ChunkingService
+from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
 from app.services.rate_limit import OperationLease, UnlimitedConcurrencyLease
@@ -93,7 +93,11 @@ class DocumentService:
             The status the document ended up in
         """
         try:
-            chunks = self.chunking_service.chunk_document(db, doc_id)
+            chunks = self.chunking_service.chunk_document(
+                db,
+                doc_id,
+                max_chunks=self.max_chunks_per_doc,
+            )
             logger.info(f"Created {len(chunks)} chunks for {source_label} document {doc_id}")
 
             if len(chunks) > self.max_chunks_per_doc:
@@ -101,6 +105,18 @@ class DocumentService:
 
             embeddings = self.embedding_service.embed_chunks(db, doc_id)
             logger.info(f"Generated {len(embeddings)} embeddings for {source_label} document {doc_id}")
+        except ChunkLimitExceededError as error:
+            logger.warning(
+                "Chunk planning stopped at document limit",
+                document_id=doc_id,
+                chunk_count=error.chunk_count,
+                max_chunks=error.max_chunks,
+            )
+            return self._mark_chunk_limit_failed(
+                db,
+                doc_id,
+                error.chunk_count,
+            )
         except ChunkLimitPersistenceError:
             # A status-only fallback would retain the already committed chunk
             # rows. Preserve the dedicated failure so the caller can surface a
@@ -133,12 +149,12 @@ class DocumentService:
         doc_id: str,
         chunk_count: int,
     ) -> str:
-        """Remove committed over-limit chunks and atomically record the failure.
+        """Remove any prior index and atomically record an over-limit failure.
 
-        The chunking service owns its own commit, so a rollback here cannot
-        remove its rows. Deleting them in the same transaction that updates the
-        document prevents a failed source from retaining an attacker-sized
-        chunk set or exposing a failed status without its actionable metadata.
+        The live chunker raises before inserting replacement rows, but a retry
+        can still begin with an older committed index. Deleting it in the same
+        transaction that updates the document prevents failed sources from
+        retaining searchable stale data or status without actionable metadata.
 
         Args:
             db: Database session.

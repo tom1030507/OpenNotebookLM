@@ -69,16 +69,22 @@ def test_production_can_explicitly_enable_public_registration():
 
 
 def test_compose_redis_has_finite_memory_without_public_port() -> None:
-    """The optional cache cannot grow forever or evict durable version keys."""
+    """The optional cache is bounded, internal, and fully disposable."""
     compose_path = REPO_ROOT / "docker-compose.yml"
     compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
     redis_service = compose["services"]["redis"]
-    command = " ".join(redis_service["command"])
+    command_parts = redis_service["command"]
+    command = " ".join(command_parts)
 
     assert "ports" not in redis_service
     assert "--maxmemory" in command
     assert "${REDIS_MAXMEMORY:-256mb}" in command
     assert "--maxmemory-policy allkeys-lru" in command
+    assert "--appendonly no" in command
+    save_index = command_parts.index("--save")
+    assert command_parts[save_index + 1] == ""
+    assert "volumes" not in redis_service
+    assert "redis_data" not in compose.get("volumes", {})
 
     settings = Settings(_env_file=REPO_ROOT / ".env.example")
     assert settings.redis_maxmemory == "256mb"

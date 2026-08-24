@@ -1,7 +1,7 @@
 """Document chunking service."""
 import re
 import uuid
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 import structlog
 from sqlalchemy.orm import Session
@@ -37,6 +37,27 @@ MIN_CHUNK_CHARS = 80
 # Blocks are rejoined one per line, so a chunk keeps the paragraph structure the
 # extractor produced.
 LINE_JOIN = "\n"
+
+
+class ChunkLimitExceededError(ValueError):
+    """Raised before ORM rows are created for an over-limit chunk plan."""
+
+    def __init__(self, chunk_count: int, max_chunks: int) -> None:
+        """Record the first observed count beyond the configured ceiling.
+
+        Args:
+            chunk_count: Number of planned chunks observed when stopping.
+            max_chunks: Inclusive configured ceiling.
+
+        Returns:
+            None.
+        """
+        self.chunk_count = chunk_count
+        self.max_chunks = max_chunks
+        super().__init__(
+            f"Document produced at least {chunk_count} chunks, exceeding "
+            f"the limit of {max_chunks}"
+        )
 
 
 @dataclass
@@ -82,13 +103,16 @@ class ChunkingService:
     def chunk_document(
         self,
         db: Session,
-        document_id: str
+        document_id: str,
+        max_chunks: Optional[int] = None,
     ) -> List[Chunk]:
         """Chunk a document and save chunks to database.
 
         Args:
             db: Database session
             document_id: Document ID to chunk
+            max_chunks: Inclusive ceiling checked before any Chunk ORM rows or
+                chunk transaction are created.
 
         Returns:
             List of created chunks
@@ -102,22 +126,36 @@ class ChunkingService:
             logger.warning("Document has no content to chunk", document_id=document_id)
             return []
 
-        # Delete existing chunks through the ORM. A bulk `.delete()` bypasses the
-        # cascade on Chunk.embedding and leaves embedding rows pointing at chunk
-        # ids that no longer exist.
-        for existing in db.query(Chunk).filter(Chunk.document_id == document_id).all():
-            db.delete(existing)
-        db.flush()
+        if max_chunks is not None and max_chunks < 1:
+            raise ValueError("max_chunks must be at least 1")
 
         # Create chunks based on document type
         if document.source_type == "pdf":
-            chunks_data = self._chunk_pdf_content(document)
+            chunks_data = self._chunk_pdf_content(
+                document,
+                max_chunks=max_chunks,
+            )
         elif document.source_type == "url":
-            chunks_data = self._chunk_url_content(document)
+            chunks_data = self._chunk_url_content(
+                document,
+                max_chunks=max_chunks,
+            )
         elif document.source_type == "youtube":
-            chunks_data = self._chunk_youtube_content(document)
+            chunks_data = self._chunk_youtube_content(
+                document,
+                max_chunks=max_chunks,
+            )
         else:
-            chunks_data = self._chunk_text_content(document.content)
+            chunks_data = self._chunk_text_content(
+                document.content,
+                max_chunks=max_chunks,
+            )
+
+        # Only a validated plan may mutate the index. A bulk `.delete()` would
+        # bypass the cascade on Chunk.embedding and leave orphan embeddings.
+        for existing in db.query(Chunk).filter(Chunk.document_id == document_id).all():
+            db.delete(existing)
+        db.flush()
 
         # Save chunks to database
         chunks = []
@@ -154,7 +192,8 @@ class ChunkingService:
     def _chunk_text_content(
         self,
         text: str,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
+        max_chunks: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Chunk text, respecting section headings and sentence boundaries.
 
@@ -164,16 +203,16 @@ class ChunkingService:
         Args:
             text: Text to chunk
             metadata: Optional metadata
+            max_chunks: Inclusive planned-chunk ceiling.
 
         Returns:
             List of chunks with metadata
         """
         blocks = self._to_blocks(text)
-        if not blocks:
-            return []
-
-        packed = self._pack(blocks)
-        packed = self._merge_runts(packed)
+        packed = self._merge_runts(
+            self._pack(blocks),
+            max_chunks=max_chunks,
+        )
 
         chunks = []
         for index, (chunk_text, start, end, heading_path) in enumerate(packed):
@@ -194,46 +233,52 @@ class ChunkingService:
 
         return chunks
 
-    def _to_blocks(self, text: str) -> List[_Block]:
+    def _to_blocks(self, text: str) -> Iterator[_Block]:
         """Split text into content lines, tracking the heading stack.
 
         Args:
             text: Extracted document text.
 
         Returns:
-            Content blocks in document order.
+            Iterator of content blocks in document order.
         """
-        blocks: List[_Block] = []
         stack: List[Tuple[int, str]] = []
         offset = 0
 
-        for line in text.split("\n"):
+        while offset <= len(text):
+            newline = text.find("\n", offset)
+            if newline < 0:
+                line = text[offset:]
+                next_offset = len(text) + 1
+            else:
+                line = text[offset:newline]
+                next_offset = newline + 1
+
             stripped = line.strip()
             if not stripped:
-                offset += len(line) + 1
-                continue
-
-            heading = HEADING_RE.match(stripped)
-            if heading:
+                pass
+            elif heading := HEADING_RE.match(stripped):
                 level = len(heading.group(1))
                 while stack and stack[-1][0] >= level:
                     stack.pop()
                 stack.append((level, heading.group(2)))
-                offset += len(line) + 1
-                continue
+            else:
+                start = offset + (len(line) - len(line.lstrip()))
+                yield _Block(
+                    text=stripped,
+                    start=start,
+                    end=start + len(stripped),
+                    heading_path=" > ".join(title for _, title in stack),
+                )
 
-            start = offset + (len(line) - len(line.lstrip()))
-            blocks.append(_Block(
-                text=stripped,
-                start=start,
-                end=start + len(stripped),
-                heading_path=" > ".join(title for _, title in stack),
-            ))
-            offset += len(line) + 1
+            if newline < 0:
+                break
+            offset = next_offset
 
-        return blocks
-
-    def _pack(self, blocks: List[_Block]) -> List[Tuple[str, int, int, str]]:
+    def _pack(
+        self,
+        blocks: Iterable[_Block],
+    ) -> Iterator[Tuple[str, int, int, str]]:
         """Group blocks into chunks of at most `chunk_size` characters.
 
         A block longer than the limit is split on sentence boundaries, and a
@@ -245,93 +290,136 @@ class ChunkingService:
             blocks: Content blocks in document order.
 
         Returns:
-            Tuples of (text, start_offset, end_offset, heading_path).
+            Iterator of (text, start_offset, end_offset, heading_path) tuples.
         """
-        chunks: List[Tuple[str, int, int, str]] = []
         current: List[_Block] = []
         current_len = 0
+        pending_overlap: Optional[Tuple[str, int, int, str]] = None
 
-        def flush():
+        def flush() -> Optional[Tuple[str, int, int, str]]:
             nonlocal current, current_len
             if not current:
-                return
+                return None
             text = LINE_JOIN.join(block.text for block in current)
-            chunks.append((text, current[0].start, current[-1].end, current[0].heading_path))
+            completed = (
+                text,
+                current[0].start,
+                current[-1].end,
+                current[0].heading_path,
+            )
             current = []
             current_len = 0
+            return completed
 
         for block in blocks:
             if current and block.heading_path != current[0].heading_path:
-                flush()
+                completed = flush()
+                if completed is not None:
+                    # Heading boundaries are semantic boundaries. Overlap is
+                    # only carried after a size-driven split in one section.
+                    pending_overlap = None
+                    yield completed
+            elif pending_overlap and block.heading_path != pending_overlap[3]:
+                pending_overlap = None
 
             for piece in self._fit(block):
                 piece_len = len(piece.text)
-                if current and current_len + piece_len + 1 > self.chunk_size:
-                    flush()
-                    # Seed the next chunk with the overlap only when the piece
-                    # that triggered the flush still fits alongside it. Seeding
-                    # unconditionally pushed the chunk to chunk_overlap over the
-                    # limit, and an oversized chunk is silently truncated by the
-                    # encoder's sequence limit -- for CJK, almost immediately.
-                    overlap = self._overlap_block(chunks[-1]) if chunks else None
-                    if overlap is not None and len(overlap.text) + piece_len + 1 <= self.chunk_size:
+
+                if not current and pending_overlap is not None:
+                    overlap = self._overlap_block(pending_overlap)
+                    pending_overlap = None
+                    if (
+                        overlap is not None
+                        and overlap.heading_path == piece.heading_path
+                        and len(overlap.text) + piece_len + 1 <= self.chunk_size
+                    ):
                         current = [overlap]
                         current_len = len(overlap.text)
+
+                separator_len = 1 if current else 0
+                if current and current_len + separator_len + piece_len > self.chunk_size:
+                    completed = flush()
+                    if completed is not None:
+                        yield completed
+                        overlap = self._overlap_block(completed)
+                        if (
+                            overlap is not None
+                            and overlap.heading_path == piece.heading_path
+                            and len(overlap.text) + piece_len + 1 <= self.chunk_size
+                        ):
+                            current = [overlap]
+                            current_len = len(overlap.text)
+
+                separator_len = 1 if current else 0
                 current.append(piece)
-                current_len += piece_len + 1
+                current_len += separator_len + piece_len
 
-        flush()
-        return chunks
+                # Yield a full chunk immediately. Waiting for the following
+                # piece would needlessly materialize arbitrarily large source
+                # expansions before the final ceiling can stop iteration.
+                if current_len >= self.chunk_size:
+                    completed = flush()
+                    if completed is not None:
+                        pending_overlap = completed
+                        yield completed
 
-    def _fit(self, block: _Block) -> List[_Block]:
+        completed = flush()
+        if completed is not None:
+            yield completed
+
+    def _fit(self, block: _Block) -> Iterator[_Block]:
         """Break a block down until every piece fits the chunk size.
 
         Args:
             block: One content block.
 
         Returns:
-            Blocks no longer than `chunk_size`, in order.
+            Iterator of blocks no longer than `chunk_size`, in order.
         """
         if len(block.text) <= self.chunk_size:
-            return [block]
+            yield block
+            return
 
-        pieces: List[_Block] = []
         cursor = block.start
-        for sentence in self._split_sentences(block.text):
+        yielded = False
+        for sentence in self._iter_sentences(block.text):
             for fragment in self._hard_split(sentence):
-                pieces.append(_Block(
+                yielded = True
+                yield _Block(
                     text=fragment,
                     start=cursor,
                     end=cursor + len(fragment),
                     heading_path=block.heading_path,
-                ))
+                )
                 cursor += len(fragment)
-        return pieces or [block]
+        if not yielded:
+            yield block
 
-    def _hard_split(self, sentence: str) -> List[str]:
+    def _hard_split(self, sentence: str) -> Iterator[str]:
         """Cut an over-long sentence near a word boundary.
 
         Args:
             sentence: A single sentence.
 
         Returns:
-            Fragments no longer than `chunk_size`.
+            Iterator of fragments no longer than `chunk_size`.
         """
         if len(sentence) <= self.chunk_size:
-            return [sentence]
+            yield sentence
+            return
 
-        fragments = []
         remaining = sentence
         while len(remaining) > self.chunk_size:
             window = remaining[:self.chunk_size]
             cut = max(window.rfind(" "), window.rfind("，"), window.rfind(","))
             if cut < self.chunk_size // 2:
                 cut = self.chunk_size
-            fragments.append(remaining[:cut].strip())
+            fragment = remaining[:cut].strip()
+            if fragment:
+                yield fragment
             remaining = remaining[cut:].strip()
         if remaining:
-            fragments.append(remaining)
-        return [fragment for fragment in fragments if fragment]
+            yield remaining
 
     def _overlap_block(self, chunk: Tuple[str, int, int, str]) -> Optional[_Block]:
         """Build the overlap carried into the next chunk.
@@ -363,7 +451,11 @@ class ChunkingService:
         return _Block(text=tail, start=max(0, end - len(tail)), end=end,
                       heading_path=heading_path)
 
-    def _merge_runts(self, chunks: List[Tuple[str, int, int, str]]):
+    def _merge_runts(
+        self,
+        chunks: Iterable[Tuple[str, int, int, str]],
+        max_chunks: Optional[int] = None,
+    ) -> List[Tuple[str, int, int, str]]:
         """Fold chunks too small to stand alone into a neighbour.
 
         Merging never crosses a section and never breaks the size limit. Both
@@ -377,23 +469,30 @@ class ChunkingService:
 
         Args:
             chunks: Packed chunks.
+            max_chunks: Inclusive final-chunk ceiling.
 
         Returns:
             Chunks with runts merged.
         """
-        if len(chunks) <= 1:
-            return chunks
-
-        pending = list(chunks)
         merged: List[Tuple[str, int, int, str]] = []
+        iterator = iter(chunks)
+        sentinel = object()
+        current = next(iterator, sentinel)
 
-        index = 0
-        while index < len(pending):
-            text, start, end, heading_path = pending[index]
+        def append_final(chunk: Tuple[str, int, int, str]) -> None:
+            if max_chunks is not None and len(merged) >= max_chunks:
+                raise ChunkLimitExceededError(
+                    chunk_count=max_chunks + 1,
+                    max_chunks=max_chunks,
+                )
+            merged.append(chunk)
+
+        while current is not sentinel:
+            text, start, end, heading_path = current
 
             if len(text) >= MIN_CHUNK_CHARS:
-                merged.append(pending[index])
-                index += 1
+                append_final(current)
+                current = next(iterator, sentinel)
                 continue
 
             if (
@@ -405,36 +504,43 @@ class ChunkingService:
                 merged.append((
                     previous[0] + LINE_JOIN + text, previous[1], end, heading_path,
                 ))
-                index += 1
+                current = next(iterator, sentinel)
                 continue
 
-            following = pending[index + 1] if index + 1 < len(pending) else None
+            following = next(iterator, sentinel)
             if (
-                following
+                following is not sentinel
                 and following[3] == heading_path
                 and len(text) + len(following[0]) + 1 <= self.chunk_size
             ):
-                pending[index + 1] = (
+                current = (
                     text + LINE_JOIN + following[0], start, following[2], heading_path,
                 )
-                index += 1
                 continue
 
-            merged.append(pending[index])
-            index += 1
+            append_final(current)
+            current = following
 
         return merged
 
-    def _chunk_pdf_content(self, document: Document) -> List[Dict[str, Any]]:
+    def _chunk_pdf_content(
+        self,
+        document: Document,
+        max_chunks: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Chunk PDF content, preserving page information.
 
         Args:
             document: Document object
+            max_chunks: Inclusive planned-chunk ceiling.
 
         Returns:
             List of chunks with metadata
         """
-        chunks = self._chunk_text_content(document.content)
+        chunks = self._chunk_text_content(
+            document.content,
+            max_chunks=max_chunks,
+        )
 
         pages = (document.meta_json or {}).get("pages") or []
         if not pages:
@@ -461,16 +567,24 @@ class ChunkingService:
 
         return chunks
 
-    def _chunk_url_content(self, document: Document) -> List[Dict[str, Any]]:
+    def _chunk_url_content(
+        self,
+        document: Document,
+        max_chunks: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Chunk URL content, preserving structure information.
 
         Args:
             document: Document object
+            max_chunks: Inclusive planned-chunk ceiling.
 
         Returns:
             List of chunks with metadata
         """
-        chunks = self._chunk_text_content(document.content)
+        chunks = self._chunk_text_content(
+            document.content,
+            max_chunks=max_chunks,
+        )
 
         # Fall back to the page title when a chunk sits above the first heading,
         # so a citation always has something to show. Chunks inside a section
@@ -482,11 +596,16 @@ class ChunkingService:
 
         return chunks
 
-    def _chunk_youtube_content(self, document: Document) -> List[Dict[str, Any]]:
+    def _chunk_youtube_content(
+        self,
+        document: Document,
+        max_chunks: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Chunk YouTube transcript, preserving timestamps.
 
         Args:
             document: Document object
+            max_chunks: Inclusive planned-chunk ceiling.
 
         Returns:
             List of chunks with metadata
@@ -529,6 +648,16 @@ class ChunkingService:
                     current_length = 0
                     chunk_index += 1
 
+                if (
+                    not current_chunk_text
+                    and max_chunks is not None
+                    and len(chunks) >= max_chunks
+                ):
+                    raise ChunkLimitExceededError(
+                        chunk_count=max_chunks + 1,
+                        max_chunks=max_chunks,
+                    )
+
                 current_chunk_text.append(segment_text)
                 current_chunk_segments.append(segment)
                 current_length += segment_length + 1
@@ -554,7 +683,10 @@ class ChunkingService:
                 chunk["metadata"]["total_chunks"] = len(chunks)
         else:
             # Fallback to text chunking
-            chunks = self._chunk_text_content(document.content)
+            chunks = self._chunk_text_content(
+                document.content,
+                max_chunks=max_chunks,
+            )
 
             # Add estimated timestamps
             if document.meta_json and "duration" in document.meta_json:
@@ -567,14 +699,14 @@ class ChunkingService:
 
         return chunks
 
-    def _split_sentences(self, text: str) -> List[str]:
-        """Split text into sentences, in any of the languages this app indexes.
+    def _iter_sentences(self, text: str) -> Iterator[str]:
+        """Yield sentences in any of the languages this app indexes.
 
         Args:
             text: Text to split
 
         Returns:
-            List of sentences
+            Iterator of sentences.
         """
         guarded = text
         for abbreviation in ABBREVIATIONS:
@@ -584,7 +716,6 @@ class ChunkingService:
         # Initials such as "U.S." must not break either.
         guarded = re.sub(r"\b([A-Z])\.", r"\1" + DOT_PLACEHOLDER, guarded)
 
-        sentences: List[str] = []
         buffer: List[str] = []
         index = 0
         length = len(guarded)
@@ -597,24 +728,35 @@ class ChunkingService:
                 while index + 1 < length and guarded[index + 1] in CLOSING_MARKS:
                     index += 1
                     buffer.append(guarded[index])
-                sentences.append("".join(buffer))
+                sentence = "".join(buffer).replace(DOT_PLACEHOLDER, ".").strip()
+                if sentence:
+                    yield sentence
                 buffer = []
             elif char in LATIN_TERMINATORS:
                 following = guarded[index + 1:index + 2]
                 if following == "" or following.isspace():
-                    sentences.append("".join(buffer))
+                    sentence = "".join(buffer).replace(DOT_PLACEHOLDER, ".").strip()
+                    if sentence:
+                        yield sentence
                     buffer = []
 
             index += 1
 
         if buffer:
-            sentences.append("".join(buffer))
+            sentence = "".join(buffer).replace(DOT_PLACEHOLDER, ".").strip()
+            if sentence:
+                yield sentence
 
-        return [
-            sentence.replace(DOT_PLACEHOLDER, ".").strip()
-            for sentence in sentences
-            if sentence.strip()
-        ]
+    def _split_sentences(self, text: str) -> List[str]:
+        """Return the sentence iterator as a compatibility list.
+
+        Args:
+            text: Text to split.
+
+        Returns:
+            List of sentences.
+        """
+        return list(self._iter_sentences(text))
 
     def get_document_chunks(
         self,

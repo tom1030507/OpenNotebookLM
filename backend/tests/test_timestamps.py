@@ -341,7 +341,8 @@ class TestIngestionMetadataTimestamps:
                 }
 
         class FakeChunkingService:
-            def chunk_document(self, db, document_id):
+            def chunk_document(self, db, document_id, max_chunks=None):
+                del max_chunks
                 return []
 
         class FakeEmbeddingService:

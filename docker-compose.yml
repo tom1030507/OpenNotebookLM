@@ -123,13 +123,13 @@ services:
     command:
       - redis-server
       - --appendonly
-      - "yes"
+      - "no"
+      - --save
+      - ""
       - --maxmemory
       - ${REDIS_MAXMEMORY:-256mb}
       - --maxmemory-policy
       - allkeys-lru
-    volumes:
-      - redis_data:/data
     networks:
       - opennotebook
     healthcheck:
@@ -154,5 +154,3 @@ volumes:
     name: opennotebooklm-uploads
   ollama_models:
     name: opennotebooklm-ollama-models
-  redis_data:
-    name: opennotebooklm-redis-data

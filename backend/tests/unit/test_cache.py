@@ -192,6 +192,49 @@ def test_memory_cache_evicts_the_least_recently_used_entry() -> None:
     assert service.get_stats()["total_keys"] == 3
 
 
+def test_value_and_scope_marker_budgets_are_separate_and_reported() -> None:
+    """CACHE_MAX_ENTRIES bounds each resource class without hiding markers."""
+    service = CacheService(
+        redis_url=None,
+        namespace="test-app",
+        max_entries=2,
+    )
+    for document in range(4):
+        assert service.cache_embedding(
+            f"document-{document}",
+            "chunk",
+            np.array([float(document)]),
+        )
+
+    stats = service.get_stats()
+    assert len(service.in_memory_cache) == 2
+    assert len(service._scope_versions) == 2
+    assert stats["cached_values"] == 2
+    assert stats["scope_markers"] == 2
+    assert stats["total_resource_records"] == 4
+    assert stats["total_keys"] == 2
+
+
+def test_max_entries_one_still_caches_one_value_and_one_marker() -> None:
+    """Separate budgets preserve a functional cache at the minimum setting."""
+    service = CacheService(
+        redis_url=None,
+        namespace="test-app",
+        max_entries=1,
+    )
+    embedding = np.array([1.0])
+
+    assert service.cache_embedding("document", "chunk", embedding)
+    assert np.allclose(
+        service.get_cached_embedding("document", "chunk"),
+        embedding,
+    )
+    stats = service.get_stats()
+    assert stats["cached_values"] == 1
+    assert stats["scope_markers"] == 1
+    assert stats["total_resource_records"] == 2
+
+
 def test_lazy_expiry_cleanup_inspects_only_a_bounded_batch() -> None:
     """A set must not scan every attacker-controlled key for expired entries."""
     service = CacheService(
