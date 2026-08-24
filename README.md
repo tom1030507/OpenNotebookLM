@@ -552,10 +552,10 @@ level and falls back for that request.
 The `/healthz` response reports retrieval separately; this is operational health
 data, not part of the `/api/query` response. `requested_backend` says what
 configuration asked for, while `active_backend` says whether sqlite-vec is
-actually serving dense candidates or the explicit Python fallback is active. It
-also exposes the canonical chunk count, dense and lexical index row counts, the
-stored vector dimension, and any fallback reason. Those row counts should agree
-after ingestion or re-indexing; use the dry-run below to diagnose drift.
+actually serving dense candidates or the explicit Python fallback is active,
+and `fallback_reason` explains why. Use the reindex dry-run below for an explicit
+canonical/dense/lexical shape and drift audit; health remains a lightweight
+operational signal rather than a substitute for that audit.
 
 </details>
 

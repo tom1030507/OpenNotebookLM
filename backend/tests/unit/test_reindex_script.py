@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 import sys
 
+import pytest
 from sqlalchemy import inspect, text
 
 from scripts import reindex
@@ -151,7 +152,8 @@ def test_index_only_is_repeatable_and_does_not_load_ingestion(
 ):
     """A second reconciliation exposes zero changes without loading the model."""
     database_url = "sqlite:///" + (tmp_path / "repeat.db").as_posix()
-    calls = 0
+    repair_calls = 0
+    audit_calls = 0
 
     class FakeIndex:
         """Stateful stand-in for an idempotent retrieval index."""
@@ -162,14 +164,25 @@ def test_index_only_is_repeatable_and_does_not_load_ingestion(
 
         def backfill(self, db, dry_run=False, document_ids=None):
             """Return one change once, then the required fixed point."""
-            nonlocal calls
-            assert dry_run is False
-            calls += 1
+            nonlocal audit_calls, repair_calls
+            if dry_run:
+                audit_calls += 1
+                return {
+                    "dense_missing": 0,
+                    "dense_stale": 0,
+                    "lexical_missing": 0,
+                    "lexical_stale": 0,
+                    "dimension_mismatch": 0,
+                    "added": 0,
+                    "updated": 0,
+                    "removed": 0,
+                }
+            repair_calls += 1
             return {
                 "canonical_chunks": 0,
                 "dense_rows": 0,
                 "lexical_rows": 0,
-                "added": 1 if calls == 1 else 0,
+                "added": 1 if repair_calls == 1 else 0,
                 "updated": 0,
                 "removed": 0,
                 "dimension_mismatch": 0,
@@ -196,4 +209,165 @@ def test_index_only_is_repeatable_and_does_not_load_ingestion(
     assert reindex.main(["--index-only"]) == 0
     second_output = capsys.readouterr().out
     assert "added                  0" in second_output
-    assert calls == 2
+    assert repair_calls == 2
+    assert audit_calls == 2
+
+
+def test_backfill_commits_then_verifies_with_a_fresh_session(tmp_path):
+    """Repair is durable before the second, read-only reconciliation runs."""
+    database_url = "sqlite:///" + (tmp_path / "transaction.db").as_posix()
+    db, engine = reindex.build_session(database_url)
+    db.execute(text("CREATE TABLE index_marker (id INTEGER PRIMARY KEY)"))
+    db.commit()
+
+    class TransactionalIndex:
+        """Use a real SQL row to expose commit/session mistakes."""
+
+        def backfill(self, session, dry_run=False, document_ids=None):
+            """Insert once, then report the resulting fixed point."""
+            present = session.execute(text("SELECT count(*) FROM index_marker")).scalar_one()
+            if dry_run:
+                return {
+                    "dense_missing": 0 if present else 1,
+                    "dense_stale": 0,
+                    "lexical_missing": 0,
+                    "lexical_stale": 0,
+                    "dimension_mismatch": 0,
+                    "added": 0 if present else 1,
+                    "updated": 0,
+                    "removed": 0,
+                }
+            session.execute(text("INSERT INTO index_marker (id) VALUES (1)"))
+            return {"added": 1, "updated": 0, "removed": 0}
+
+        def status(self, session):
+            """Report shape through the verification session."""
+            present = session.execute(text("SELECT count(*) FROM index_marker")).scalar_one()
+            return _Status(canonical_chunks=present, dense_rows=present, lexical_rows=present)
+
+    try:
+        changes, audit, status = reindex.apply_and_verify_backfill(
+            TransactionalIndex(), db, engine, document_ids=None
+        )
+        assert changes["added"] == 1
+        assert audit["added"] == 0
+        assert not reindex.unresolved_index_drift(audit)
+        assert status["dense_rows"] == 1
+
+        verification, verification_engine = reindex.build_session(database_url)
+        try:
+            assert verification.execute(
+                text("SELECT count(*) FROM index_marker")
+            ).scalar_one() == 1
+        finally:
+            verification.close()
+            verification_engine.dispose()
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_backfill_rolls_back_when_repair_raises(tmp_path):
+    """A partial index repair never leaks through an exception."""
+    database_url = "sqlite:///" + (tmp_path / "rollback.db").as_posix()
+    db, engine = reindex.build_session(database_url)
+    db.execute(text("CREATE TABLE index_marker (id INTEGER PRIMARY KEY)"))
+    db.commit()
+
+    class FailingIndex:
+        """Write one row and fail before the repair can be acknowledged."""
+
+        def backfill(self, session, dry_run=False, document_ids=None):
+            """Simulate a mid-reconciliation failure."""
+            session.execute(text("INSERT INTO index_marker (id) VALUES (1)"))
+            raise RuntimeError("repair failed")
+
+    try:
+        with pytest.raises(RuntimeError, match="repair failed"):
+            reindex.apply_and_verify_backfill(FailingIndex(), db, engine, None)
+
+        assert db.execute(text("SELECT count(*) FROM index_marker")).scalar_one() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_fresh_audit_must_be_a_complete_fixed_point():
+    """Post-commit missing, mismatch, or orphan work is still unhealthy."""
+    assert reindex.unresolved_index_drift({
+        "added": 0,
+        "updated": 0,
+        "removed": 0,
+        "dense_missing": 0,
+        "dense_stale": 0,
+        "lexical_missing": 0,
+        "lexical_stale": 0,
+        "dimension_mismatch": 0,
+    }) == {}
+    assert reindex.unresolved_index_drift({
+        "added": 0,
+        "dimension_mismatch": 4,
+    }) == {"dimension_mismatch": 4}
+    assert reindex.unresolved_index_drift({
+        "removed": 2,
+    }) == {"removed": 2}
+
+
+def test_cli_requires_ids_rejects_negative_limit_and_honors_zero(
+    tmp_path, monkeypatch, capsys
+):
+    """Selection flags cannot silently widen a maintenance run."""
+    with pytest.raises(SystemExit):
+        reindex.main(["--ids"])
+    with pytest.raises(SystemExit):
+        reindex.main(["--limit", "-1"])
+
+    database_url = "sqlite:///" + (tmp_path / "limit.db").as_posix()
+    db, engine = reindex.build_session(database_url)
+    try:
+        from app.db.models import Document
+
+        db.add(Document(
+            id="document-1",
+            title="selected unless limit is zero",
+            source_type="url",
+            source_url="https://example.test",
+            status="ready",
+            meta_json={},
+        ))
+        db.commit()
+    finally:
+        db.close()
+        engine.dispose()
+
+    class EmptyIndex:
+        """Read-only index spy for argument behavior."""
+
+        def status(self, db):
+            """Return an empty shape."""
+            return _Status(canonical_chunks=0, dense_rows=0, lexical_rows=0)
+
+        def backfill(self, db, dry_run=False, document_ids=None):
+            """Return a clean audit."""
+            return {
+                "dense_missing": 0,
+                "dense_stale": 0,
+                "lexical_missing": 0,
+                "lexical_stale": 0,
+                "dimension_mismatch": 0,
+            }
+
+    fake_module = ModuleType("app.services.retrieval_index")
+    fake_module.get_retrieval_index = EmptyIndex
+    monkeypatch.setitem(sys.modules, "app.services.retrieval_index", fake_module)
+
+    import app.config
+
+    monkeypatch.setattr(
+        app.config,
+        "get_settings",
+        lambda: SimpleNamespace(database_url=database_url),
+    )
+
+    assert reindex.main(["--dry-run", "--limit", "0"]) == 0
+    assert "0 document(s) selected" in capsys.readouterr().out

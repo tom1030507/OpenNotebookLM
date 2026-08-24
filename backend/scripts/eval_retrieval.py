@@ -16,17 +16,21 @@ readable `report.md`, so two runs can be diffed directly.
 import argparse
 import asyncio
 from collections.abc import Mapping
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, is_dataclass
 import json
+import os
+import re
 import sys
 from time import perf_counter
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 from sqlalchemy.orm import sessionmaker
 
 from scripts import eval_corpus, eval_metrics
+from scripts.reindex import apply_and_verify_backfill, unresolved_index_drift
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = BACKEND_DIR.parent
@@ -38,6 +42,100 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output" / "rag-eval"
 
 # Deep enough to score Recall@10; the retriever's own candidate pool is wider.
 EVAL_TOP_K = 10
+SAFE_TAG_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+
+
+class EvalLockError(RuntimeError):
+    """A reusable eval database is already owned by another run."""
+
+
+def safe_tag(value: str) -> str:
+    """Validate a tag before using it in cache and report paths.
+
+    Args:
+        value: User-supplied run label.
+
+    Returns:
+        The unchanged safe label.
+
+    Raises:
+        argparse.ArgumentTypeError: If the tag contains separators, traversal,
+            leading punctuation, or is unreasonably long.
+    """
+    if not SAFE_TAG_PATTERN.fullmatch(value):
+        raise argparse.ArgumentTypeError(
+            "tag must start with a letter or digit and contain only letters, "
+            "digits, dot, underscore, or hyphen (maximum 64 characters)"
+        )
+    return value
+
+
+def index_database_path(cache_dir: Path, tag: str, reuse: bool) -> Path:
+    """Choose a fixed reusable database or a unique per-run database.
+
+    Args:
+        cache_dir: Eval cache directory.
+        tag: Validated run tag.
+        reuse: Whether this run intentionally shares the tag's fixed database.
+
+    Returns:
+        Database path rooted directly under ``cache_dir``.
+    """
+    tag = safe_tag(tag)
+    suffix = "" if reuse else "-" + uuid.uuid4().hex
+    return cache_dir / ("index-%s%s.db" % (tag, suffix))
+
+
+def output_target(output_root: Path, tag: str, run_time) -> Path:
+    """Build a collision-resistant report directory path.
+
+    Args:
+        output_root: Parent directory selected by the caller.
+        tag: Validated run tag.
+        run_time: A UTC datetime for the report.
+
+    Returns:
+        Unique target using microseconds and a random UUID.
+    """
+    tag = safe_tag(tag)
+    stamp = run_time.strftime("%Y%m%d-%H%M%S-%f")
+    return output_root / ("%s-%s-%s" % (tag, stamp, uuid.uuid4().hex))
+
+
+@contextmanager
+def exclusive_eval_lock(lock_path: Path) -> Iterator[None]:
+    """Hold a cross-platform O_EXCL file lock for one reusable eval run.
+
+    Args:
+        lock_path: Lock file adjacent to the fixed eval database.
+
+    Returns:
+        A context manager that yields while this process owns the lock file.
+
+    Raises:
+        EvalLockError: If another run already owns the tag.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(
+            str(lock_path),
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+    except FileExistsError as exc:
+        raise EvalLockError(
+            "reusable eval index is already in use: %s" % lock_path
+        ) from exc
+
+    try:
+        os.write(descriptor, ("pid=%d\n" % os.getpid()).encode("ascii"))
+        yield
+    finally:
+        os.close(descriptor)
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def normalize_index_report(value: Any) -> Dict[str, Any]:
@@ -271,8 +369,14 @@ def write_report(target: Path, payload: Dict[str, Any]) -> None:
     Args:
         target: Run directory.
         payload: Everything the run produced.
+
+    Returns:
+        None.
     """
-    target.mkdir(parents=True, exist_ok=True)
+    # The caller gives every run a microsecond/UUID name, and exclusive creation
+    # turns an astronomically unlikely collision into an error instead of an
+    # overwrite of another process's evidence.
+    target.mkdir(parents=True, exist_ok=False)
     (target / "metrics.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -369,26 +473,16 @@ def write_report(target: Path, payload: Dict[str, Any]) -> None:
     (target / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def main() -> int:
-    """Entry point.
+def run_evaluation(args, output_root: Path) -> int:
+    """Execute one fully isolated or exclusively locked eval run.
+
+    Args:
+        args: Parsed CLI arguments.
+        output_root: Parent directory for report artifacts.
 
     Returns:
         Process exit code.
     """
-    parser = argparse.ArgumentParser(description="Measure RAG retrieval quality.")
-    parser.add_argument("--tag", default="run", help="label for the output directory")
-    parser.add_argument("--refresh-cache", action="store_true",
-                        help="re-fetch the corpus pages over the network")
-    parser.add_argument("--reuse-index", action="store_true",
-                        help="keep a previously built index; only safe when neither "
-                             "extraction nor chunking changed since it was built")
-    parser.add_argument("--out", default=None,
-                        help="directory for run reports; required in the container, "
-                             "where the repo root is not mounted")
-    args = parser.parse_args()
-
-    output_root = Path(args.out) if args.out else DEFAULT_OUTPUT_ROOT
-
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -398,12 +492,13 @@ def main() -> int:
     fetched = eval_corpus.fetch_into_cache(corpus, refresh=args.refresh_cache)
     print("corpus cache: %d pages (%d fetched now)" % (len(corpus), len(fetched)), flush=True)
 
-    index_db = eval_corpus.CACHE_DIR / ("index-" + args.tag + ".db")
+    index_db = index_database_path(
+        eval_corpus.CACHE_DIR,
+        args.tag,
+        reuse=args.reuse_index,
+    )
     project_id = "eval-project"
-    if index_db.exists() and not args.reuse_index:
-        index_db.unlink()
-
-    reused = index_db.exists()
+    reused = args.reuse_index and index_db.exists()
     session, engine = build_session(index_db)
     try:
         from app.db.models import Chunk, Document
@@ -426,15 +521,20 @@ def main() -> int:
         from app.services.retrieval_index import get_retrieval_index
 
         retrieval_index = get_retrieval_index()
-        index_changes = normalize_index_report(retrieval_index.backfill(
+        index_changes, index_audit, retrieval_index_status = apply_and_verify_backfill(
+            retrieval_index,
             session,
-            dry_run=False,
+            engine,
             document_ids=list(doc_ids.values()),
-        ))
-        retrieval_index_status = normalize_index_report(retrieval_index.status(session))
+        )
         print("index reconciliation: added=%s updated=%s removed=%s" % (
             index_changes.get("added", 0), index_changes.get("updated", 0),
             index_changes.get("removed", 0)), flush=True)
+        unresolved = unresolved_index_drift(index_audit)
+        if unresolved:
+            raise RuntimeError("retrieval index remains inconsistent after backfill: %s" % (
+                ", ".join("%s=%d" % item for item in sorted(unresolved.items()))
+            ))
 
         chunks = session.query(Chunk).all()
         settings_snapshot = snapshot_settings()
@@ -446,6 +546,9 @@ def main() -> int:
 
         print("querying:", flush=True)
         results = run_queries(session, queries, doc_ids, project_id)
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
         engine.dispose()
@@ -468,7 +571,7 @@ def main() -> int:
         "results": results,
     }
 
-    target = output_root / (args.tag + "-" + run_time.strftime("%Y%m%d-%H%M%S"))
+    target = output_target(output_root, args.tag, run_time)
     write_report(target, payload)
 
     overall = payload["metrics"]["overall"]
@@ -494,6 +597,42 @@ def main() -> int:
         retrieval_index_status.get("lexical_rows", "?")))
     print("report: %s" % target)
     return 0
+
+
+def main(argv=None) -> int:
+    """Parse arguments, acquire any reuse lock, and run the evaluation.
+
+    Args:
+        argv: Optional argument list, for testing.
+
+    Returns:
+        Process exit code; 2 means a reusable index is already locked.
+    """
+    parser = argparse.ArgumentParser(description="Measure RAG retrieval quality.")
+    parser.add_argument("--tag", default="run", type=safe_tag,
+                        help="safe label for cache and output paths")
+    parser.add_argument("--refresh-cache", action="store_true",
+                        help="re-fetch the corpus pages over the network")
+    parser.add_argument("--reuse-index", action="store_true",
+                        help="use/create this tag's fixed index under an exclusive lock; "
+                             "only safe when extraction and chunking are unchanged")
+    parser.add_argument("--out", default=None,
+                        help="directory for run reports; required in the container, "
+                             "where the repo root is not mounted")
+    args = parser.parse_args(argv)
+
+    output_root = Path(args.out) if args.out else DEFAULT_OUTPUT_ROOT
+    lock_context = (
+        exclusive_eval_lock(eval_corpus.CACHE_DIR / ("index-%s.lock" % args.tag))
+        if args.reuse_index
+        else nullcontext()
+    )
+    try:
+        with lock_context:
+            return run_evaluation(args, output_root)
+    except EvalLockError as exc:
+        print("eval error: %s" % exc, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
