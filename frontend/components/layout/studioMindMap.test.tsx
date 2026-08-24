@@ -61,7 +61,6 @@ const mindMap = (modelUsed = 'test-model'): MindMap => ({
   },
 });
 
-const initialState = useStore.getState();
 
 const openMindMap = async () => {
   render(<StudioPanel />);
@@ -71,18 +70,17 @@ const openMindMap = async () => {
 
 beforeEach(() => {
   useStore.setState({ currentProject: project, projects: [project] });
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:mindmap'),
-    revokeObjectURL: vi.fn(),
-  });
+  class TestURL extends URL {}
+  TestURL.createObjectURL = vi.fn(() => 'blob:mindmap');
+  TestURL.revokeObjectURL = vi.fn();
+  vi.stubGlobal('URL', TestURL);
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('Studio mind map', () => {

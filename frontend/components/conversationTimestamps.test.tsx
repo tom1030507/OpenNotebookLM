@@ -46,7 +46,6 @@ function conversationCreatedAt(created_at: string): Conversation {
   };
 }
 
-const initialState = useStore.getState();
 let originalTimezone: string | undefined;
 
 beforeEach(() => {
@@ -60,7 +59,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   process.env.TZ = originalTimezone;
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 function renderWith(created_at: string) {

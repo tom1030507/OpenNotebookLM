@@ -17,7 +17,6 @@ vi.mock('next/navigation', () => ({
 }));
 
 const STORE_STORAGE_KEY = 'app-storage';
-const initialStoreState = useStore.getState();
 
 const setSystemPreference = (prefersDark: boolean) => {
   vi.stubGlobal('matchMedia', (query: string) => ({
@@ -69,7 +68,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useStore.setState(initialStoreState, true);
+  useStore.getState().resetForTests();
   window.localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
   document.documentElement.style.removeProperty('color-scheme');

@@ -32,7 +32,6 @@ const workspaceIconButtonNames = [
 ];
 const openProjectDialog = 'Open create project dialog';
 const closeProjectDialog = 'Close create project dialog';
-const initialStoreState = useStore.getState();
 const project: Project = {
   id: 'project-1',
   name: 'Accessibility Project',
@@ -72,7 +71,7 @@ const conversation: Conversation = {
 
 afterEach(() => {
   cleanup();
-  useStore.setState(initialStoreState, true);
+  useStore.getState().resetForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();

@@ -15,9 +15,29 @@ import {
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
 import type { MindMap, VideoSummary } from '@/lib/api';
-import MindMapDialog from '@/components/MindMapDialog';
-import VideoSummaryDialog from '@/components/VideoSummaryDialog';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
+
+const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
+const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
+
+interface ProjectResult<T> {
+  projectId: string;
+  value: T;
+}
+
+const StudioDialogFallback = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    aria-label="Loading studio result"
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+  >
+    <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--card)] px-4 py-3 text-sm">
+      <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+      Loading studio result…
+    </span>
+  </div>
+);
 
 interface StudioOption {
   id: string;
@@ -47,15 +67,30 @@ export default function StudioPanel({
   const [reportError, setReportError] = useState('');
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
-  const [mindMap, setMindMap] = useState<MindMap | null>(null);
+  const [mindMap, setMindMap] = useState<ProjectResult<MindMap> | null>(null);
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
-  const [videoSummary, setVideoSummary] = useState<VideoSummary | null>(null);
+  const [videoSummary, setVideoSummary] = useState<ProjectResult<VideoSummary> | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   // Identifies the reading in progress. Stopping retires it, so anything the
   // browser reports about it afterwards cannot disturb the panel — or a reading
   // the listener has since started.
   const playbackRun = useRef(0);
+  const projectGeneration = useRef(0);
+
+  const beginProjectOperation = () => {
+    if (!currentProject) return null;
+
+    const project = currentProject;
+    const generation = projectGeneration.current;
+    return {
+      project,
+      isCurrent: () => (
+        projectGeneration.current === generation
+        && useStore.getState().currentProject?.id === project.id
+      ),
+    };
+  };
 
   // Speech support can only be read in the browser, so check after mount to
   // keep the server-rendered markup stable.
@@ -67,18 +102,32 @@ export default function StudioPanel({
     };
   }, []);
 
+  useEffect(() => {
+    projectGeneration.current += 1;
+    playbackRun.current += 1;
+    stopSpeaking();
+    setIsGeneratingReport(false);
+    setIsPreparingAudio(false);
+    setIsBuildingMindMap(false);
+    setIsPreparingVideo(false);
+    setMindMap(null);
+    setVideoSummary(null);
+    setReportError('');
+  }, [currentProject?.id]);
+
   const playAudioSummary = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     const run = playbackRun.current + 1;
     playbackRun.current = run;
-    const isCurrent = () => playbackRun.current === run;
+    const isCurrent = () => playbackRun.current === run && operation.isCurrent();
 
     setIsPreparingAudio(true);
     setReportError('');
 
     try {
-      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(currentProject.id));
+      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(operation.project.id));
       if (!isCurrent()) return;
 
       setIsPreparingAudio(false);
@@ -104,55 +153,71 @@ export default function StudioPanel({
   };
 
   const buildMindMap = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     setIsBuildingMindMap(true);
     setReportError('');
 
     try {
-      setMindMap(await api.fetchProjectMindMap(currentProject.id));
+      const map = await api.fetchProjectMindMap(operation.project.id);
+      if (operation.isCurrent()) {
+        setMindMap({ projectId: operation.project.id, value: map });
+      }
     } catch {
-      setReportError('The mind map could not be built. Please try again.');
+      if (operation.isCurrent()) {
+        setReportError('The mind map could not be built. Please try again.');
+      }
     } finally {
-      setIsBuildingMindMap(false);
+      if (operation.isCurrent()) setIsBuildingMindMap(false);
     }
   };
 
   const playVideoSummary = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     setIsPreparingVideo(true);
     setReportError('');
 
     try {
-      setVideoSummary(await api.fetchProjectVideoSummary(currentProject.id));
+      const summary = await api.fetchProjectVideoSummary(operation.project.id);
+      if (operation.isCurrent()) {
+        setVideoSummary({ projectId: operation.project.id, value: summary });
+      }
     } catch {
-      setReportError('The video summary could not be prepared. Please try again.');
+      if (operation.isCurrent()) {
+        setReportError('The video summary could not be prepared. Please try again.');
+      }
     } finally {
-      setIsPreparingVideo(false);
+      if (operation.isCurrent()) setIsPreparingVideo(false);
     }
   };
 
   const generateReport = async () => {
-    if (!currentProject) return;
+    const operation = beginProjectOperation();
+    if (!operation) return;
 
     setIsGeneratingReport(true);
     setReportError('');
 
     try {
-      const blob = await api.exportProjectSummary(currentProject.id);
+      const blob = await api.exportProjectSummary(operation.project.id);
+      if (!operation.isCurrent()) return;
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${currentProject.name} report.md`;
+      link.download = `${operation.project.name} report.md`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch {
-      setReportError('The report could not be generated. Please try again.');
+      if (operation.isCurrent()) {
+        setReportError('The report could not be generated. Please try again.');
+      }
     } finally {
-      setIsGeneratingReport(false);
+      if (operation.isCurrent()) setIsGeneratingReport(false);
     }
   };
   const optionAction = (option: StudioOption) => {
@@ -169,12 +234,22 @@ export default function StudioPanel({
   // removed, so read the list the rest of the workspace reads. An empty list
   // while it is still arriving means "not known yet", not "nothing to play".
   const hasNoSources = !loadingDocuments && documents.length === 0;
+  // Effects clear old output after commit, but this gate prevents an open A
+  // dialog from being rendered during the B commit that triggered that effect.
+  const currentMindMap = mindMap !== null && mindMap.projectId === currentProject?.id
+    ? mindMap.value
+    : null;
+  const currentVideoSummary = videoSummary !== null && videoSummary.projectId === currentProject?.id
+    ? videoSummary.value
+    : null;
 
   const optionDisabled = (option: StudioOption) => {
     if (!option.available || !currentProject) return true;
     if (option.action === 'audio') return !speechSupported || isPreparingAudio;
-    if (option.action === 'mindmap') return isBuildingMindMap;
-    if (option.action === 'video') return isPreparingVideo || hasNoSources;
+    if (option.action === 'mindmap') return isBuildingMindMap || currentMindMap !== null;
+    if (option.action === 'video') {
+      return isPreparingVideo || currentVideoSummary !== null || hasNoSources;
+    }
     return isGeneratingReport;
   };
 
@@ -367,15 +442,19 @@ export default function StudioPanel({
         </div>
       </div>
 
-      {mindMap && (
-        <MindMapDialog map={mindMap} onClose={() => setMindMap(null)} />
+      {currentMindMap && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <MindMapDialog map={currentMindMap} onClose={() => setMindMap(null)} />
+        </React.Suspense>
       )}
 
-      {videoSummary && (
-        <VideoSummaryDialog
-          summary={videoSummary}
-          onClose={() => setVideoSummary(null)}
-        />
+      {currentVideoSummary && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <VideoSummaryDialog
+            summary={currentVideoSummary}
+            onClose={() => setVideoSummary(null)}
+          />
+        </React.Suspense>
       )}
     </aside>
   );

@@ -33,7 +33,6 @@ const readyDocument: Document = {
   chunk_count: 1,
 };
 
-const initialState = useStore.getState();
 
 function SourcesPanelHarness() {
   const [isAddSourcesOpen, setIsAddSourcesOpen] = useState(false);
@@ -63,7 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('workspace copy is English', () => {

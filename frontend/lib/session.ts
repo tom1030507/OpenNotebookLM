@@ -16,10 +16,37 @@ const TOKEN_KEYS = ['access_token', 'auth_token'] as const;
 
 const STORAGE_KEYS = [...TOKEN_KEYS, 'user'] as const;
 
+// A token is normally unique, but account transitions must also retire a
+// request if a replacement session happens to reuse its credential.
+let sessionGeneration = 0;
+
 export interface SessionUser {
   username: string;
   email: string;
 }
+
+export interface SessionCredentialSnapshot {
+  authorization: string | null;
+  generation: number;
+}
+
+/**
+ * Match cookie names exactly rather than accepting a similarly named cookie.
+ * The middleware can authenticate a cookie-only browser session even when
+ * localStorage is denied, so that cookie is a session credential too.
+ */
+const hasCookie = (name: string): boolean => {
+  if (typeof document === 'undefined') {
+    return false;
+  }
+
+  return document.cookie.split(';').some((entry) => {
+    const trimmed = entry.trim();
+    const separator = trimmed.indexOf('=');
+    const cookieName = separator === -1 ? trimmed : trimmed.slice(0, separator);
+    return cookieName === name;
+  });
+};
 
 const writeCookie = (value: string, maxAgeSeconds: number) => {
   const attributes = [
@@ -38,8 +65,54 @@ const writeCookie = (value: string, maxAgeSeconds: number) => {
   document.cookie = attributes.join('; ');
 };
 
+
+const isStoredSessionUser = (value: unknown): value is SessionUser => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const user = value as Record<string, unknown>;
+  return typeof user.username === 'string'
+    && user.username.trim().length > 0
+    && typeof user.email === 'string';
+};
+
 /** Record a signed-in session for both the client and the middleware. */
-export const storeSession = (accessToken: string, user: SessionUser): void => {
+export const storeSession = (
+  accessToken: string,
+  user: SessionUser,
+  clearAccountState?: () => void,
+): void => {
+  sessionGeneration += 1;
+  let previousUser: SessionUser | null = null;
+  let mustClearAccountState = false;
+
+  try {
+    const storedUser = window.localStorage.getItem('user');
+    if (storedUser !== null) {
+      try {
+        const parsedUser: unknown = JSON.parse(storedUser);
+        if (isStoredSessionUser(parsedUser)) {
+          previousUser = parsedUser;
+        } else {
+          mustClearAccountState = true;
+        }
+      } catch {
+        mustClearAccountState = true;
+      }
+    }
+  } catch {
+    mustClearAccountState = true;
+  }
+
+  // An unreadable or invalid identity makes the current workspace untrustworthy.
+  // Clear it before replacement writes, which remain independent so the user
+  // can still sign in when old storage is malformed or unavailable.
+  const accountChanged = previousUser !== null && previousUser.username !== user.username;
+  if (mustClearAccountState || accountChanged) {
+    clearAccountState?.();
+  }
+
   try {
     window.localStorage.setItem('access_token', accessToken);
     // The API client and TopNav both read this key.
@@ -79,8 +152,33 @@ export const readAccessToken = (): string | null => {
   return null;
 };
 
+/** Capture the exact Authorization value sent with a request. */
+export const snapshotSessionCredential = (
+  authorization: string | null,
+): SessionCredentialSnapshot => ({
+  authorization,
+  generation: sessionGeneration,
+});
+
+/** True only while the request still belongs to the active browser session. */
+export const isCurrentSessionCredential = (
+  snapshot: SessionCredentialSnapshot,
+): boolean => {
+  if (snapshot.generation !== sessionGeneration) {
+    return false;
+  }
+
+  const currentToken = readAccessToken();
+  if (snapshot.authorization === null) {
+    return currentToken === null && hasCookie(AUTH_TOKEN_COOKIE);
+  }
+
+  return currentToken !== null && snapshot.authorization === `Bearer ${currentToken}`;
+};
+
 /** Forget the signed-in session. */
 export const clearSession = (): void => {
+  sessionGeneration += 1;
   for (const key of STORAGE_KEYS) {
     try {
       window.localStorage.removeItem(key);
