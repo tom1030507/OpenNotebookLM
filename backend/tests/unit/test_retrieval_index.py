@@ -16,6 +16,18 @@ from app.services.retrieval_index import (
 )
 
 
+class _PythonBM25FallbackIndex(RetrievalIndex):
+    """Exercise lexical fallback while leaving an existing FTS table offline."""
+
+    def ensure_schema(self, db, dimension=None):
+        """Initialize ordinary storage, then simulate an unavailable FTS module."""
+        super().ensure_schema(db, dimension)
+        self._lexical_backend = "python-bm25"
+        self._lexical_available = True
+        self._remember_fallback("FTS5 unavailable (OperationalError)")
+        return self.status()
+
+
 @pytest.fixture
 def db():
     """Create one shared in-memory SQLite session with canonical chunks."""
@@ -261,6 +273,141 @@ def test_lexical_update_removes_old_terms_and_keeps_stable_mapping_id(db) -> Non
     assert index.lexical_search(db, "alpha") == []
     assert [item.chunk_id for item in index.lexical_search(db, "gamma")] == ["a-best"]
     assert after_id == before_id
+
+
+def test_fts_recovery_deletes_tokens_indexed_before_fallback_update(db) -> None:
+    """Recovery replaces old postings even after fallback changed canonical text."""
+    online = RetrievalIndex()
+    online.upsert_chunks(db, [_indexed_chunks()[0]])
+    db.commit()
+
+    db.query(Chunk).filter(Chunk.id == "a-best").one().text = "gamma"
+    fallback = _PythonBM25FallbackIndex()
+    fallback.upsert_chunks(
+        db,
+        [IndexedChunk("a-best", "doc-a", "gamma", [1.0, 0.0], searchable=True)],
+    )
+    db.add(
+        Embedding(
+            id="embedding-a",
+            chunk_id="a-best",
+            vector_json=[1.0, 0.0],
+            model_name="test-model",
+        )
+    )
+    db.commit()
+    entry_id = db.execute(
+        text("SELECT id FROM retrieval_index_entries WHERE chunk_id = 'a-best'")
+    ).scalar_one()
+    assert db.execute(
+        text(
+            "SELECT rowid FROM retrieval_index_fts "
+            "WHERE retrieval_index_fts MATCH '\"alpha\"'"
+        )
+    ).scalars().all() == [entry_id]
+    assert [item.chunk_id for item in fallback.lexical_search(db, "gamma")] == [
+        "a-best"
+    ]
+
+    recovered = RetrievalIndex()
+    assert recovered.backfill(db, dry_run=True).lexical_stale == 1
+    recovered.backfill(db)
+    db.commit()
+
+    assert recovered.lexical_search(db, "alpha") == []
+    assert [item.chunk_id for item in recovered.lexical_search(db, "gamma")] == [
+        "a-best"
+    ]
+    assert db.execute(
+        text(
+            "SELECT rowid FROM retrieval_index_fts "
+            "WHERE retrieval_index_fts MATCH '\"alpha\"'"
+        )
+    ).scalars().all() == []
+    fresh = recovered.backfill(db, dry_run=True)
+    assert (fresh.lexical_missing, fresh.lexical_stale) == (0, 0)
+
+
+def test_fts_fallback_delete_records_scoped_cleanup_for_recovery(db) -> None:
+    """An offline FTS delete stays hidden and leaves a recoverable tombstone."""
+    online = RetrievalIndex()
+    online.upsert_chunks(db, [_indexed_chunks()[0]])
+    db.commit()
+    entry_id = db.execute(
+        text("SELECT id FROM retrieval_index_entries WHERE chunk_id = 'a-best'")
+    ).scalar_one()
+
+    fallback = _PythonBM25FallbackIndex()
+    fallback.ensure_schema(db, 2)
+    assert fallback.delete_document(db, "doc-a") == 1
+    db.commit()
+
+    assert db.execute(
+        text(
+            "SELECT rowid FROM retrieval_index_fts "
+            "WHERE retrieval_index_fts MATCH '\"alpha\"'"
+        )
+    ).scalars().all() == [entry_id]
+    assert RetrievalIndex().lexical_search(db, "alpha") == []
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_fts_tombstones")
+    ).scalar_one() == 1
+
+    recovered = RetrievalIndex()
+    assert recovered.backfill(
+        db,
+        dry_run=True,
+        document_ids=["doc-b"],
+    ).removed == 0
+    scoped = recovered.backfill(db, dry_run=True, document_ids=["doc-a"])
+    assert scoped.removed == 1
+    assert db.execute(
+        text(
+            "SELECT rowid FROM retrieval_index_fts "
+            "WHERE retrieval_index_fts MATCH '\"alpha\"'"
+        )
+    ).scalars().all() == [entry_id]
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_fts_tombstones")
+    ).scalar_one() == 1
+    recovered.backfill(db, document_ids=["doc-a"])
+    assert db.execute(
+        text(
+            "SELECT rowid FROM retrieval_index_fts "
+            "WHERE retrieval_index_fts MATCH '\"alpha\"'"
+        )
+    ).scalars().all() == []
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_fts_tombstones")
+    ).scalar_one() == 0
+    db.rollback()
+
+    assert db.execute(
+        text(
+            "SELECT rowid FROM retrieval_index_fts "
+            "WHERE retrieval_index_fts MATCH '\"alpha\"'"
+        )
+    ).scalars().all() == [entry_id]
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_fts_tombstones")
+    ).scalar_one() == 1
+    recovered.backfill(db, document_ids=["doc-a"])
+    db.commit()
+
+    assert db.execute(
+        text(
+            "SELECT rowid FROM retrieval_index_fts "
+            "WHERE retrieval_index_fts MATCH '\"alpha\"'"
+        )
+    ).scalars().all() == []
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_fts_tombstones")
+    ).scalar_one() == 0
+    assert recovered.backfill(
+        db,
+        dry_run=True,
+        document_ids=["doc-a"],
+    ).removed == 0
 
 
 def test_delete_document_removes_dense_lexical_and_mapping_rows(db) -> None:

@@ -97,7 +97,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 # Columns added to a model after its table already existed somewhere, as
-# (table, column, type, index name).
+# (table, column, type, optional index name).
 #
 # `Base.metadata.create_all` creates missing *tables* and nothing else: a column
 # added to a model later never reaches a database that already exists. Without
@@ -112,6 +112,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 ADDED_COLUMNS = (
     ("projects", "user_id", "VARCHAR", "idx_projects_user_id"),
     ("documents", "user_id", "VARCHAR", "idx_documents_user_id"),
+    (
+        "retrieval_index_entries",
+        "indexed_lexical_text",
+        "TEXT",
+        None,
+    ),
 )
 
 
@@ -141,10 +147,11 @@ def ensure_added_columns(bind=None):
             connection.execute(
                 text("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, column_type))
             )
-            connection.execute(
-                text("CREATE INDEX IF NOT EXISTS %s ON %s (%s)" % (
-                    index_name, table, column))
-            )
+            if index_name is not None:
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS %s ON %s (%s)" % (
+                        index_name, table, column))
+                )
         added.append("%s.%s" % (table, column))
 
     return added

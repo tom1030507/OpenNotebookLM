@@ -17,7 +17,13 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import Chunk, Document, Embedding, RetrievalIndexEntry
+from app.db.models import (
+    Chunk,
+    Document,
+    Embedding,
+    RetrievalIndexEntry,
+    RetrievalIndexFTSTombstone,
+)
 from app.services import retrieval
 
 
@@ -160,6 +166,10 @@ class RetrievalIndex:
         # explicit check also makes the service safe for scripts that construct
         # a session without calling init_db first.
         RetrievalIndexEntry.__table__.create(bind=db.connection(), checkfirst=True)
+        RetrievalIndexFTSTombstone.__table__.create(
+            bind=db.connection(),
+            checkfirst=True,
+        )
 
         if self._configured_dense_backend != "sqlitevec":
             self._dense_backend = "brute"
@@ -282,6 +292,15 @@ class RetrievalIndex:
             lexical_hash = self._lexical_source_hash(chunk, lexical_text)
             entry = existing.get(chunk.chunk_id)
             old_lexical_text = entry.lexical_text if entry is not None else None
+            indexed_lexical_text = (
+                entry.indexed_lexical_text
+                if entry is not None and entry.indexed_lexical_text is not None
+                else (
+                    old_lexical_text
+                    if entry is not None and entry.lexical_hash is not None
+                    else None
+                )
+            )
             is_new = entry is None
             changed = is_new
 
@@ -296,6 +315,7 @@ class RetrievalIndex:
                     dense_hash=None,
                     lexical_hash=None,
                     lexical_text=lexical_text,
+                    indexed_lexical_text=None,
                     searchable=searchable,
                 )
                 db.add(entry)
@@ -338,17 +358,26 @@ class RetrievalIndex:
             if self._lexical_backend == "fts5":
                 lexical_indexed = bool(
                     entry.lexical_hash is not None
-                    and old_lexical_text
-                    and self._fts_row_indexed(db, entry.id, old_lexical_text)
+                    and indexed_lexical_text
+                    and self._fts_row_indexed(
+                        db,
+                        entry.id,
+                        indexed_lexical_text,
+                    )
                 )
                 if entry.lexical_hash != lexical_hash and lexical_indexed:
-                    self._delete_fts_row(db, entry.id, old_lexical_text or "")
+                    self._delete_fts_row(
+                        db,
+                        entry.id,
+                        indexed_lexical_text or "",
+                    )
                     lexical_indexed = False
                 if lexical_text and (
                     entry.lexical_hash != lexical_hash or not lexical_indexed
                 ):
                     self._insert_fts_row(db, entry.id, entry.lexical_text)
                 entry.lexical_hash = lexical_hash
+                entry.indexed_lexical_text = lexical_text or None
 
             db.flush()
 
@@ -381,24 +410,7 @@ class RetrievalIndex:
         if not entries:
             return 0
         for entry in entries:
-            if self._table_exists(db, VECTOR_TABLE):
-                try:
-                    self._load_vector_extension(db)
-                except _VectorExtensionUnavailable:
-                    # The stable mapping is authoritative. Removing it makes an
-                    # orphan virtual row unreachable through every search join;
-                    # a later backfill clears the orphan after the extension is
-                    # available again.
-                    pass
-                else:
-                    db.execute(
-                        text("DELETE FROM %s WHERE entry_id = :entry_id" % VECTOR_TABLE),
-                        {"entry_id": entry.id},
-                    )
-            if self._table_exists(db, FTS_TABLE):
-                self._delete_fts_row(db, entry.id, entry.lexical_text)
-            db.delete(entry)
-        db.flush()
+            self._delete_entry(db, entry)
         return len(entries)
 
     def dense_search(
@@ -657,6 +669,31 @@ class RetrievalIndex:
             else:
                 entries = {entry.chunk_id: entry for entry in entry_query.all()}
 
+        tombstone_exists = self._table_exists(
+            db,
+            RetrievalIndexFTSTombstone.__tablename__,
+        )
+        fts_tombstones: dict[int, RetrievalIndexFTSTombstone] = {}
+        if tombstone_exists:
+            tombstone_query = db.query(RetrievalIndexFTSTombstone)
+            if document_ids is not None:
+                scoped_tombstones = []
+                for scope in self._batches(list(dict.fromkeys(document_ids))):
+                    scoped_tombstones.extend(
+                        tombstone_query.filter(
+                            RetrievalIndexFTSTombstone.document_id.in_(scope)
+                        ).all()
+                    )
+                fts_tombstones = {
+                    tombstone.entry_id: tombstone
+                    for tombstone in scoped_tombstones
+                }
+            else:
+                fts_tombstones = {
+                    tombstone.entry_id: tombstone
+                    for tombstone in tombstone_query.all()
+                }
+
         vector_dimension = (
             self._vector_dimension(db) if self._table_exists(db, VECTOR_TABLE) else None
         )
@@ -737,6 +774,10 @@ class RetrievalIndex:
         # not report the same physical row again if its partition is already
         # inconsistent and therefore also appeared in the orphan audit.
         orphan_vector_ids.difference_update(removed_entry_ids)
+        # Deferred vec and FTS cleanup can describe the same deleted mapping.
+        # Report one logical removal even when both physical indexes need work.
+        deferred_fts_ids = set(fts_tombstones) - removed_entry_ids
+        deferred_cleanup_ids = orphan_vector_ids | deferred_fts_ids
         current = self.status(db)
         changes = IndexChanges(
             canonical_chunks=sum(chunk.searchable for chunk in canonical),
@@ -748,7 +789,7 @@ class RetrievalIndex:
             lexical_stale=lexical_stale,
             added=added,
             updated=updated,
-            removed=len(removed_ids) + len(orphan_vector_ids),
+            removed=len(removed_ids) + len(deferred_cleanup_ids),
             dimension_mismatch=dimension_mismatch,
             dry_run=dry_run,
             active_backend=current.active_backend,
@@ -785,6 +826,20 @@ class RetrievalIndex:
             vector_rebuilt = True
 
         self.ensure_schema(db, target_dimension)
+        if self._lexical_backend == "fts5":
+            for tombstone in fts_tombstones.values():
+                if self._fts_row_indexed(
+                    db,
+                    tombstone.entry_id,
+                    tombstone.indexed_lexical_text,
+                ):
+                    self._delete_fts_row(
+                        db,
+                        tombstone.entry_id,
+                        tombstone.indexed_lexical_text,
+                    )
+                db.delete(tombstone)
+            db.flush()
         if not vector_rebuilt:
             for entry_id in orphan_vector_ids:
                 db.execute(
@@ -1483,9 +1538,71 @@ class RetrievalIndex:
                     text("DELETE FROM %s WHERE entry_id = :entry_id" % VECTOR_TABLE),
                     {"entry_id": entry.id},
                 )
-        if self._table_exists(db, FTS_TABLE) and entry.lexical_hash is not None:
-            self._delete_fts_row(db, entry.id, entry.lexical_text)
+        indexed_lexical_text = entry.indexed_lexical_text or (
+            entry.lexical_text if entry.lexical_hash is not None else None
+        )
+        if self._table_exists(db, FTS_TABLE) and indexed_lexical_text:
+            if self._lexical_backend == "python-bm25":
+                self._record_fts_tombstone(db, entry, indexed_lexical_text)
+            else:
+                try:
+                    indexed = self._fts_row_indexed(
+                        db,
+                        entry.id,
+                        indexed_lexical_text,
+                    )
+                    if indexed:
+                        self._delete_fts_row(
+                            db,
+                            entry.id,
+                            indexed_lexical_text,
+                        )
+                except OperationalError as error:
+                    if not self._is_fts_unavailable_error(error):
+                        raise
+                    self._record_fts_tombstone(
+                        db,
+                        entry,
+                        indexed_lexical_text,
+                    )
         db.delete(entry)
+        db.flush()
+
+    @staticmethod
+    def _is_fts_unavailable_error(error: OperationalError) -> bool:
+        """Return whether an SQL error specifically means FTS5 is unavailable.
+
+        Args:
+            error: SQLAlchemy-wrapped SQLite operation failure.
+
+        Returns:
+            True only for missing/unloadable FTS5 module errors.
+        """
+        folded = str(error).lower()
+        return "no such module: fts5" in folded or "fts5 unavailable" in folded
+
+    @staticmethod
+    def _record_fts_tombstone(
+        db: Session,
+        entry: RetrievalIndexEntry,
+        indexed_lexical_text: str,
+    ) -> None:
+        """Persist deferred posting deletion before removing its mapping.
+
+        Args:
+            db: Database session.
+            entry: Mapping whose FTS row cannot currently be reached.
+            indexed_lexical_text: Exact tokens used to build its postings.
+
+        Returns:
+            None.
+        """
+        tombstone = db.get(RetrievalIndexFTSTombstone, entry.id)
+        if tombstone is None:
+            tombstone = RetrievalIndexFTSTombstone(entry_id=entry.id)
+            db.add(tombstone)
+        tombstone.document_id = entry.document_id
+        tombstone.indexed_lexical_text = indexed_lexical_text
         db.flush()
 
     def _remember_fallback(self, reason: str) -> None:

@@ -1,9 +1,41 @@
 """Tests for SQLite engine pooling and connection safety."""
 import pytest
+from sqlalchemy import inspect
 from sqlalchemy.pool import StaticPool
 
 from app.db import database
 from app.db.models import Base, Document, IngestionJob
+
+
+def test_added_columns_upgrades_stored_fts_posting_tokens(tmp_path):
+    """An interim retrieval table gains exact indexed tokens idempotently.
+
+    Args:
+        tmp_path: Per-test database directory.
+
+    Returns:
+        None.
+    """
+    engine = database.create_database_engine(
+        "sqlite:///%s" % (tmp_path / "retrieval-upgrade.db"),
+        echo=False,
+    )
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE retrieval_index_entries (id INTEGER PRIMARY KEY)"
+            )
+
+        assert database.ensure_added_columns(engine) == [
+            "retrieval_index_entries.indexed_lexical_text"
+        ]
+        assert "indexed_lexical_text" in {
+            column["name"]
+            for column in inspect(engine).get_columns("retrieval_index_entries")
+        }
+        assert database.ensure_added_columns(engine) == []
+    finally:
+        engine.dispose()
 
 
 def test_file_sqlite_sessions_use_distinct_isolated_connections(tmp_path):

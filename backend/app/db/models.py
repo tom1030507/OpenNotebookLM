@@ -217,6 +217,10 @@ class RetrievalIndexEntry(Base):
     dense_hash = Column(String)
     lexical_hash = Column(String)
     lexical_text = Column(Text, nullable=False)
+    # Canonical text can change while FTS5 is unavailable. Retaining the tokens
+    # that produced the actual postings lets recovery issue the required FTS5
+    # external-content delete before inserting the new representation.
+    indexed_lexical_text = Column(Text)
     searchable = Column(Boolean, default=False, nullable=False)
     created_at = Column(UTCDateTime, default=utc_now, nullable=False)
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
@@ -229,6 +233,20 @@ class RetrievalIndexEntry(Base):
         # maximum INTEGER PRIMARY KEY, which could attach that orphan vector to
         # an unrelated new chunk and bypass its document partition.
         {"sqlite_autoincrement": True},
+    )
+
+
+class RetrievalIndexFTSTombstone(Base):
+    """Deferred FTS posting deletion recorded while FTS5 is unavailable."""
+    __tablename__ = "retrieval_index_fts_tombstones"
+
+    entry_id = Column(Integer, primary_key=True)
+    document_id = Column(String, nullable=False)
+    indexed_lexical_text = Column(Text, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_retrieval_fts_tombstones_document", "document_id"),
     )
 
 
