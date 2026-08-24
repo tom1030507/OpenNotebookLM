@@ -14,7 +14,8 @@ replaces the focused Vitest and pytest suites.
 The first release has two execution tiers:
 
 - A fast, deterministic Chromium suite runs on every pull request and push. It
-  needs no API key, public network, or downloaded embedding model.
+  needs no API key, public network, or downloaded embedding model once its
+  dependencies and Chromium are installed.
 - A full-RAG Chromium test runs nightly and on demand. It uses the production
   embedding implementation with a locally generated PDF fixture.
 
@@ -232,8 +233,8 @@ The full-rag test is excluded from the fast project unless FULL_RAG_E2E=1. It:
 6. Reloads the conversation and verifies that both messages persisted.
 
 The assertion targets the retrieved fact and citation, not exact fallback prose.
-The test neither requires nor calls an external LLM. The model cache is shared
-between nightly runs but the database and uploads are not.
+The test neither requires nor calls an external LLM. Its sentence-transformers
+model cache is shared between nightly runs, but the database and uploads are not.
 
 ## Synchronization and failure handling
 
@@ -288,7 +289,8 @@ The GitHub Actions workflow has two jobs:
   standalone E2E package, Chromium, and the reduced backend E2E requirements.
   Those requirements deliberately exclude torch and sentence-transformers.
 - Full RAG runs on a nightly schedule and workflow dispatch. It installs the
-  additional embedding dependencies, restores the Hugging Face model cache,
+  additional embedding dependencies, restores the Hugging Face and
+  sentence-transformers model cache,
   and runs only full-rag.spec.ts.
 
 Both jobs upload diagnostics only on failure. Neither job reads API-provider
