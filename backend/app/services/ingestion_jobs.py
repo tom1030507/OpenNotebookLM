@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from threading import Lock
+from threading import Event as ThreadEvent, Lock
 import time
 from typing import Callable, Dict, Optional
 import uuid
@@ -466,6 +466,7 @@ class IngestionJobWorker:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
+        self._claim_stop_event = ThreadEvent()
 
     async def start(self) -> None:
         """Recover abandoned work and start the retained supervisor task.
@@ -481,8 +482,12 @@ class IngestionJobWorker:
             return
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
+        self._claim_stop_event = ThreadEvent()
         self._loop = asyncio.get_running_loop()
         await asyncio.to_thread(recover_abandoned_jobs, self.session_factory)
+        if self._claim_stop_event.is_set():
+            self._loop = None
+            return
         _active_worker = self
         self._task = asyncio.create_task(
             self._run(),
@@ -499,12 +504,16 @@ class IngestionJobWorker:
             None.
         """
         global _active_worker
+        # asyncio.Event is loop-owned and cannot guard code that is still
+        # queued in an executor. Set the thread mirror before observing task
+        # state so a not-yet-started claim cannot cross the shutdown boundary.
+        self._claim_stop_event.set()
+        self._stop_event.set()
+        self._wake_event.set()
         task = self._task
         if task is None:
             release_all_operation_leases()
             return
-        self._stop_event.set()
-        self._wake_event.set()
         try:
             await task
         finally:
@@ -548,8 +557,7 @@ class IngestionJobWorker:
                 ):
                     try:
                         job_id = await asyncio.to_thread(
-                            claim_next_job,
-                            self.session_factory,
+                            self._claim_next_job_unless_stopping,
                         )
                     except OperationalError as error:
                         # SQLITE_BUSY is expected under bounded concurrent
@@ -595,6 +603,14 @@ class IngestionJobWorker:
                             error_type=type(result).__name__,
                             error=str(result),
                         )
+
+    def _claim_next_job_unless_stopping(self) -> Optional[str]:
+        """Enter the claim ownership boundary only before shutdown starts."""
+        if self._claim_stop_event.is_set():
+            return None
+        # Once the mirror was observed clear, this claim is in flight. A later
+        # stop drains any processor it wins rather than leaving a running row.
+        return claim_next_job(self.session_factory)
 
     async def _wait_for_wake(self) -> None:
         """Wait for enqueue notification or the bounded poll deadline."""

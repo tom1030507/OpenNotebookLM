@@ -1051,6 +1051,202 @@ def test_graceful_shutdown_leaves_unclaimed_work_queued(job_database):
     assert states == ["completed", "queued"]
 
 
+def test_executor_queued_claim_does_not_start_after_stop_signal(
+    job_database,
+    monkeypatch,
+):
+    """A claim waiting for an executor thread observes shutdown before DB work.
+
+    Args:
+        job_database: Isolated file database fixture.
+        monkeypatch: Pytest patch helper.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    real_claim = ingestion_jobs.claim_next_job
+    initial_empty_claim = threading.Event()
+    claim_entries = []
+
+    def observed_claim(factory):
+        claim_entries.append(threading.current_thread().name)
+        result = real_claim(factory)
+        if result is None:
+            initial_empty_claim.set()
+        return result
+
+    monkeypatch.setattr(ingestion_jobs, "claim_next_job", observed_claim)
+
+    class ObservedExecutor(ThreadPoolExecutor):
+        def __init__(self):
+            super().__init__(max_workers=1)
+            self._observation_lock = threading.Lock()
+            self._observe_next = False
+            self.queued_submission = threading.Event()
+
+        def observe_next_submission(self):
+            with self._observation_lock:
+                self._observe_next = True
+
+        def submit(self, function, /, *args, **kwargs):
+            with self._observation_lock:
+                observe = self._observe_next
+                self._observe_next = False
+            future = super().submit(function, *args, **kwargs)
+            if observe:
+                self.queued_submission.set()
+            return future
+
+    executor_started = threading.Event()
+    release_executor = threading.Event()
+    processor_calls = []
+
+    def occupy_executor():
+        executor_started.set()
+        assert release_executor.wait(timeout=2)
+
+    def processor(db, claimed_job):
+        processor_calls.append(claimed_job.id)
+        claimed_job.document.status = "ready"
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        executor = ObservedExecutor()
+        loop.set_default_executor(executor)
+        worker = ingestion_jobs.IngestionJobWorker(
+            session_factory=session_factory,
+            processor=processor,
+            poll_interval=5,
+        )
+        await worker.start()
+        try:
+            deadline = loop.time() + 1
+            while not initial_empty_claim.is_set() and loop.time() < deadline:
+                await asyncio.sleep(0.005)
+            assert initial_empty_claim.is_set()
+
+            blocker = loop.run_in_executor(None, occupy_executor)
+            deadline = loop.time() + 1
+            while not executor_started.is_set() and loop.time() < deadline:
+                await asyncio.sleep(0.005)
+            assert executor_started.is_set()
+
+            with session_factory() as db:
+                add_document(db, "document-executor-queued-claim")
+                job = ingestion_jobs.enqueue_ingestion_job(
+                    db,
+                    document_id="document-executor-queued-claim",
+                    job_type="url",
+                    payload={"url": "https://example.com/executor-queued"},
+                )
+                db.commit()
+                job_id = job.id
+
+            executor.observe_next_submission()
+            worker.notify()
+            deadline = loop.time() + 1
+            while (
+                not executor.queued_submission.is_set()
+                and loop.time() < deadline
+            ):
+                await asyncio.sleep(0.005)
+            assert executor.queued_submission.is_set()
+
+            stop_task = asyncio.create_task(worker.stop())
+            await asyncio.sleep(0)
+            assert worker._stop_event.is_set()
+            release_executor.set()
+            await blocker
+            await stop_task
+        finally:
+            release_executor.set()
+            if worker._task is not None:
+                await worker.stop()
+
+        return job_id
+
+    job_id = asyncio.run(scenario())
+    assert len(claim_entries) == 1
+    assert processor_calls == []
+    with session_factory() as db:
+        job = db.get(models.IngestionJob, job_id)
+        assert job.status == "queued"
+        assert job.document.status == "queued"
+
+
+def test_stop_drains_a_claim_that_already_entered_its_thread(
+    job_database,
+    monkeypatch,
+):
+    """A claim past the thread boundary still dispatches and drains its job.
+
+    Args:
+        job_database: Isolated file database fixture.
+        monkeypatch: Pytest patch helper.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        add_document(db, "document-inflight-claim-stop")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id="document-inflight-claim-stop",
+            job_type="url",
+            payload={"url": "https://example.com/inflight-claim"},
+        )
+        db.commit()
+        job_id = job.id
+
+    real_claim = ingestion_jobs.claim_next_job
+    claim_entered = threading.Event()
+    release_claim = threading.Event()
+    processor_calls = []
+
+    def blocking_claim(factory):
+        claim_entered.set()
+        assert release_claim.wait(timeout=2)
+        return real_claim(factory)
+
+    def processor(db, claimed_job):
+        processor_calls.append(claimed_job.id)
+        claimed_job.document.status = "ready"
+
+    monkeypatch.setattr(ingestion_jobs, "claim_next_job", blocking_claim)
+
+    async def scenario():
+        worker = ingestion_jobs.IngestionJobWorker(
+            session_factory=session_factory,
+            processor=processor,
+            poll_interval=0.01,
+        )
+        await worker.start()
+        try:
+            deadline = asyncio.get_running_loop().time() + 1
+            while (
+                not claim_entered.is_set()
+                and asyncio.get_running_loop().time() < deadline
+            ):
+                await asyncio.sleep(0.005)
+            assert claim_entered.is_set()
+            stop_task = asyncio.create_task(worker.stop())
+            await asyncio.sleep(0)
+            assert worker._stop_event.is_set()
+            release_claim.set()
+            await stop_task
+        finally:
+            release_claim.set()
+            if worker._task is not None:
+                await worker.stop()
+
+    asyncio.run(scenario())
+    assert processor_calls == [job_id]
+    with session_factory() as db:
+        assert db.get(models.IngestionJob, job_id).status == "completed"
+
+
 def test_worker_never_exceeds_configured_concurrency(job_database):
     """The next queued job waits until one configured slot is free.
 
