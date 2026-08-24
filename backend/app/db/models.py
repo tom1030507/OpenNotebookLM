@@ -224,6 +224,11 @@ class RetrievalIndexEntry(Base):
     __table_args__ = (
         Index("idx_retrieval_index_entries_document", "document_id"),
         Index("idx_retrieval_index_entries_source_hash", "source_hash"),
+        # A vec row can temporarily outlive its mapping when the extension is
+        # unavailable during deletion. SQLite otherwise reuses the deleted
+        # maximum INTEGER PRIMARY KEY, which could attach that orphan vector to
+        # an unrelated new chunk and bypass its document partition.
+        {"sqlite_autoincrement": True},
     )
 
 

@@ -224,7 +224,11 @@ class RetrievalIndex:
             self._lexical_backend = "fts5"
             self._lexical_available = True
 
-        return self.status(db)
+        # Schema checks are on every candidate query. Row-count diagnostics are
+        # intentionally excluded here: status(db) joins canonical embeddings
+        # and counts every index, turning an otherwise bounded top-k lookup
+        # back into a full-shape scan.
+        return self.status()
 
     def upsert_chunks(self, db: Session, chunks: Sequence[IndexedChunk]) -> IndexChanges:
         """Insert or update canonical chunks in both indexes.
@@ -657,6 +661,7 @@ class RetrievalIndex:
             self._vector_dimension(db) if self._table_exists(db, VECTOR_TABLE) else None
         )
         vector_ids: set[int] = set()
+        orphan_vector_ids: set[int] = set()
         vector_index_inspected = False
         if vector_dimension is not None:
             try:
@@ -668,11 +673,17 @@ class RetrievalIndex:
             else:
                 vector_index_inspected = True
                 vector_ids = {
-                    int(value)
-                    for value in db.execute(
-                        text("SELECT entry_id FROM %s" % VECTOR_TABLE)
-                    ).scalars()
+                    entry_id
+                    for entry_id, _document_id in self._vector_index_rows(
+                        db,
+                        document_ids,
+                    )
                 }
+                orphan_vector_ids = self._vector_orphan_ids(
+                    db,
+                    document_ids,
+                    mapping_exists=mapping_exists,
+                )
 
         added = 0
         updated = 0
@@ -721,6 +732,11 @@ class RetrievalIndex:
                 dimension_mismatch += 1
 
         removed_ids = set(entries) - set(canonical_by_id)
+        removed_entry_ids = {entries[chunk_id].id for chunk_id in removed_ids}
+        # A stale mapping deletion owns its vec row through _delete_entry. Do
+        # not report the same physical row again if its partition is already
+        # inconsistent and therefore also appeared in the orphan audit.
+        orphan_vector_ids.difference_update(removed_entry_ids)
         current = self.status(db)
         changes = IndexChanges(
             canonical_chunks=sum(chunk.searchable for chunk in canonical),
@@ -732,7 +748,7 @@ class RetrievalIndex:
             lexical_stale=lexical_stale,
             added=added,
             updated=updated,
-            removed=len(removed_ids),
+            removed=len(removed_ids) + len(orphan_vector_ids),
             dimension_mismatch=dimension_mismatch,
             dry_run=dry_run,
             active_backend=current.active_backend,
@@ -747,6 +763,7 @@ class RetrievalIndex:
                 "canonical embeddings contain mixed dimensions; regenerate them before reindexing"
             )
         target_dimension = next(iter(dimensions), None)
+        vector_rebuilt = False
         if (
             target_dimension is not None
             and vector_dimension is not None
@@ -765,8 +782,15 @@ class RetrievalIndex:
                     synchronize_session=False,
                 )
             self._dimension = None
+            vector_rebuilt = True
 
         self.ensure_schema(db, target_dimension)
+        if not vector_rebuilt:
+            for entry_id in orphan_vector_ids:
+                db.execute(
+                    text("DELETE FROM %s WHERE entry_id = :entry_id" % VECTOR_TABLE),
+                    {"entry_id": entry_id},
+                )
         for chunk_id in removed_ids:
             self._delete_entry(db, entries[chunk_id])
         if canonical:
@@ -859,6 +883,107 @@ class RetrievalIndex:
         """
         for start in range(0, len(values), self.scope_batch_size):
             yield list(values[start:start + self.scope_batch_size])
+
+    def _vector_index_rows(
+        self,
+        db: Session,
+        document_ids: Optional[Sequence[str]],
+    ) -> list[tuple[int, str]]:
+        """Read vec ids and partitions within an optional bounded scope.
+
+        Args:
+            db: Database session with sqlite-vec loaded.
+            document_ids: Optional document partition scope.
+
+        Returns:
+            Stable entry id and vec document partition pairs.
+        """
+        scopes: Iterable[Optional[Sequence[str]]]
+        if document_ids is None:
+            scopes = [None]
+        else:
+            scopes = self._batches(list(dict.fromkeys(document_ids)))
+
+        rows: dict[int, str] = {}
+        for scope in scopes:
+            parameters: dict[str, Any] = {}
+            scope_clause = ""
+            if scope is not None:
+                placeholders = []
+                for index, document_id in enumerate(scope):
+                    key = "document_%d" % index
+                    placeholders.append(":" + key)
+                    parameters[key] = document_id
+                scope_clause = " WHERE v.document_id IN (%s)" % ", ".join(
+                    placeholders
+                )
+            for entry_id, document_id in db.execute(
+                text(
+                    "SELECT v.entry_id, v.document_id FROM %s AS v%s"
+                    % (VECTOR_TABLE, scope_clause)
+                ),
+                parameters,
+            ).all():
+                rows[int(entry_id)] = document_id
+        return sorted(rows.items())
+
+    def _vector_orphan_ids(
+        self,
+        db: Session,
+        document_ids: Optional[Sequence[str]],
+        mapping_exists: bool,
+    ) -> set[int]:
+        """Find unreachable or partition-mismatched vec rows in scope.
+
+        Args:
+            db: Database session with sqlite-vec loaded.
+            document_ids: Optional vec document partition scope.
+            mapping_exists: Whether the stable mapping table exists.
+
+        Returns:
+            Vec entry ids that no valid mapping can hydrate.
+        """
+        if not mapping_exists:
+            return {
+                entry_id
+                for entry_id, _document_id in self._vector_index_rows(
+                    db,
+                    document_ids,
+                )
+            }
+
+        scopes: Iterable[Optional[Sequence[str]]]
+        if document_ids is None:
+            scopes = [None]
+        else:
+            scopes = self._batches(list(dict.fromkeys(document_ids)))
+
+        orphan_ids: set[int] = set()
+        for scope in scopes:
+            parameters: dict[str, Any] = {}
+            scope_clause = ""
+            if scope is not None:
+                placeholders = []
+                for index, document_id in enumerate(scope):
+                    key = "document_%d" % index
+                    placeholders.append(":" + key)
+                    parameters[key] = document_id
+                scope_clause = " AND v.document_id IN (%s)" % ", ".join(
+                    placeholders
+                )
+            orphan_ids.update(
+                int(value)
+                for value in db.execute(
+                    text(
+                        "SELECT v.entry_id FROM %s AS v "
+                        "LEFT JOIN retrieval_index_entries AS e ON e.id = v.entry_id "
+                        "WHERE (e.id IS NULL OR e.document_id != v.document_id)%s"
+                        % (VECTOR_TABLE, scope_clause)
+                    ),
+                    parameters,
+                ).scalars()
+            )
+        return orphan_ids
 
     def _load_vector_extension(self, db: Session) -> None:
         """Load sqlite-vec on the session's concrete DB-API connection.

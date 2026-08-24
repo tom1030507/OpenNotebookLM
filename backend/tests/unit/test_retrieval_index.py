@@ -69,6 +69,40 @@ def _indexed_chunks() -> list[IndexedChunk]:
     ]
 
 
+def _seed_orphan_after_unavailable_delete(db):
+    """Leave one vec row orphaned, then add a different fallback mapping."""
+    class NoExtensionIndex(RetrievalIndex):
+        def _load_vector_extension(self, db):
+            raise retrieval_index_module._VectorExtensionUnavailable(
+                "sqlite-vec extension unavailable (ImportError)"
+            )
+
+    online = RetrievalIndex()
+    online.upsert_chunks(db, [_indexed_chunks()[0]])
+    old_id = db.execute(
+        text("SELECT id FROM retrieval_index_entries WHERE chunk_id = 'a-best'")
+    ).scalar_one()
+    db.commit()
+
+    offline = NoExtensionIndex()
+    assert offline.delete_document(db, "doc-a") == 1
+    db.commit()
+    offline.upsert_chunks(db, [_indexed_chunks()[2]])
+    db.add(
+        Embedding(
+            id="embedding-b",
+            chunk_id="b-best",
+            vector_json=[0.0, 1.0],
+            model_name="test-model",
+        )
+    )
+    db.commit()
+    new_id = db.execute(
+        text("SELECT id FROM retrieval_index_entries WHERE chunk_id = 'b-best'")
+    ).scalar_one()
+    return online, old_id, new_id
+
+
 def test_status_discloses_each_active_backend_and_extension_version() -> None:
     """Health consumers can distinguish one fallback from a healthy peer index."""
     payload = IndexStatus(
@@ -630,4 +664,125 @@ def test_dense_index_path_never_unpickles_or_scans_canonical_embeddings(
 
     assert [item.chunk_id for item in results] == ["a-best"]
     assert any("embedding match" in statement and " k = " in statement for statement in statements)
-    assert all(" from embeddings" not in statement for statement in statements)
+    assert all("embeddings" not in statement for statement in statements)
+    assert all("count(" not in statement for statement in statements)
+
+
+def test_lexical_index_path_does_not_run_status_shape_scans(db) -> None:
+    """Normal FTS lookup never counts canonical, vec, or lexical row shapes."""
+    index = RetrievalIndex()
+    index.upsert_chunks(db, _indexed_chunks())
+    statements = []
+
+    def record_select(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement.lower())
+
+    event.listen(db.get_bind(), "before_cursor_execute", record_select)
+    try:
+        results = index.lexical_search(db, "alpha", top_k=1)
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", record_select)
+
+    assert [item.chunk_id for item in results] == ["a-best"]
+    assert any(" match " in statement and "bm25(" in statement for statement in statements)
+    assert all("embeddings" not in statement for statement in statements)
+    assert all("count(" not in statement for statement in statements)
+
+
+def test_unavailable_delete_never_reuses_vec_id_or_leaks_ownership(db) -> None:
+    """A retained orphan cannot attach to a later fallback mapping on recovery."""
+    index, old_id, new_id = _seed_orphan_after_unavailable_delete(db)
+
+    assert new_id > old_id
+    assert index.dense_search(
+        db,
+        [1.0, 0.0],
+        document_ids=["doc-a"],
+        top_k=1,
+    ) == []
+    assert index.dense_search(
+        db,
+        [0.0, 1.0],
+        document_ids=["doc-b"],
+        top_k=1,
+    ) == []
+
+    dry = index.backfill(db, dry_run=True)
+    assert (dry.removed, dry.dense_missing) == (1, 1)
+    index.backfill(db)
+    assert db.execute(
+        text("SELECT entry_id, document_id FROM retrieval_index_vec")
+    ).all() == [(new_id, "doc-b")]
+
+    db.rollback()
+    assert db.execute(
+        text("SELECT entry_id, document_id FROM retrieval_index_vec")
+    ).all() == [(old_id, "doc-a")]
+
+    index.backfill(db)
+    db.commit()
+    fixed = index.backfill(db, dry_run=True)
+    assert (fixed.removed, fixed.dense_missing) == (0, 0)
+    assert [
+        item.chunk_id
+        for item in index.dense_search(
+            db,
+            [0.0, 1.0],
+            document_ids=["doc-b"],
+            top_k=1,
+        )
+    ] == ["b-best"]
+
+
+def test_scoped_backfill_audits_and_cleans_only_scoped_vec_orphans(db) -> None:
+    """A document-scoped repair cannot mutate an orphan from another scope."""
+    index, old_id, new_id = _seed_orphan_after_unavailable_delete(db)
+
+    new_scope = index.backfill(db, dry_run=True, document_ids=["doc-b"])
+    assert new_scope.removed == 0
+    index.backfill(db, document_ids=["doc-b"])
+    db.commit()
+    assert set(
+        db.execute(
+            text("SELECT entry_id, document_id FROM retrieval_index_vec")
+        ).all()
+    ) == {(old_id, "doc-a"), (new_id, "doc-b")}
+
+    old_scope = index.backfill(db, dry_run=True, document_ids=["doc-a"])
+    assert old_scope.removed == 1
+    index.backfill(db, document_ids=["doc-a"])
+    db.commit()
+
+    assert db.execute(
+        text("SELECT entry_id, document_id FROM retrieval_index_vec")
+    ).all() == [(new_id, "doc-b")]
+    assert index.backfill(
+        db,
+        dry_run=True,
+        document_ids=["doc-a"],
+    ).removed == 0
+
+
+def test_backfill_does_not_double_count_a_removed_mapping_with_bad_partition(db) -> None:
+    """One stale mapping/vec pair is one removal even if its partition differs."""
+    index = RetrievalIndex()
+    index.upsert_chunks(db, [_indexed_chunks()[0]])
+    db.execute(
+        text(
+            "UPDATE retrieval_index_entries SET document_id = 'doc-b' "
+            "WHERE chunk_id = 'a-best'"
+        )
+    )
+    db.flush()
+
+    dry = index.backfill(db, dry_run=True)
+    index.backfill(db)
+
+    assert dry.removed == 1
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_entries")
+    ).scalar_one() == 0
+    assert db.execute(
+        text("SELECT COUNT(*) FROM retrieval_index_vec")
+    ).scalar_one() == 0
