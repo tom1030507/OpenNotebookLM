@@ -260,13 +260,7 @@ class DocumentService:
                 logger.error("Failed to process PDF",
                             doc_id=doc_id,
                             error=str(e))
-
-                # Update status to error
-                doc = db.query(Document).filter(Document.id == doc_id).first()
-                if doc:
-                    doc.status = "error"
-                    doc.error_message = str(e)
-                    db.commit()
+                self._mark_failed(db, doc_id, str(e))
     
     async def process_url(
         self,
@@ -390,13 +384,7 @@ class DocumentService:
                             doc_id=doc_id,
                             url=url,
                             error=str(e))
-
-                # Update status to error
-                doc = db.query(Document).filter(Document.id == doc_id).first()
-                if doc:
-                    doc.status = "error"
-                    doc.error_message = str(e)
-                    db.commit()
+                self._mark_failed(db, doc_id, str(e))
     
     async def process_youtube(
         self,
@@ -527,13 +515,7 @@ class DocumentService:
                             youtube_url=youtube_url,
                             error_type=type(e).__name__,
                             error=str(e))
-
-                # Update status to error
-                doc = db.query(Document).filter(Document.id == doc_id).first()
-                if doc:
-                    doc.status = "error"
-                    doc.error_message = str(e)
-                    db.commit()
+                self._mark_failed(db, doc_id, str(e))
     
     def get_document_status(self, db: Session, doc_id: str) -> Optional[Document]:
         """Get document processing status.
