@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base, Chunk, Document, Embedding
-from app.services.chunking import ChunkingService
+from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.documents import DocumentService
 
 
@@ -128,6 +128,7 @@ class LazyFragmentChunker(ChunkingService):
         _text: str,
         start: int = 0,
         stop_at_newline: bool = False,
+        scan_budget=None,
     ):
         """Yield many bounded fragments while counting consumption.
 
@@ -135,14 +136,20 @@ class LazyFragmentChunker(ChunkingService):
             _text: Unused source text.
             start: Unused source start.
             stop_at_newline: Unused line-boundary mode.
+            scan_budget: Unused per-plan source-work budget.
 
         Returns:
             Iterator of deterministic bounded fragments.
         """
-        del start, stop_at_newline
+        del stop_at_newline, scan_budget
         for index in range(100):
             self.fragments_generated += 1
-            yield chr(97 + index % 26) * 100
+            fragment_start = start + index * 100
+            yield SimpleNamespace(
+                text=chr(97 + index % 26) * 100,
+                start=fragment_start,
+                end=fragment_start + 100,
+            )
         return len(_text) + 1
 
 
@@ -155,33 +162,51 @@ class InstrumentedScannerChunker(ChunkingService):
         self.highest_source_index = -1
         self.boundary_windows = []
 
-    def _scan_character(self, text: str, index: int) -> str:
+    def _scan_character(self, text: str, index: int, scan_budget=None) -> str:
         """Record one production scanner read before returning its character.
 
         Args:
             text: Source text.
             index: Character index being inspected.
+            scan_budget: Per-plan source-work budget, when one applies.
 
         Returns:
             Character at ``index``.
         """
+        char = super()._scan_character(
+            text,
+            index,
+            scan_budget=scan_budget,
+        )
         self.character_reads += 1
         self.highest_source_index = max(self.highest_source_index, index)
-        return super()._scan_character(text, index)
+        return char
 
-    def _hard_boundary_index(self, text: str, start: int, end: int) -> int:
+    def _hard_boundary_index(
+        self,
+        text: str,
+        start: int,
+        end: int,
+        scan_budget=None,
+    ) -> int:
         """Record the bounded source window searched for a hard split.
 
         Args:
             text: Source text.
             start: Inclusive source index.
             end: Exclusive source index.
+            scan_budget: Per-plan source-work budget, when one applies.
 
         Returns:
             Boundary selected by the production scanner.
         """
         self.boundary_windows.append((start, end))
-        return super()._hard_boundary_index(text, start, end)
+        return super()._hard_boundary_index(
+            text,
+            start,
+            end,
+            scan_budget=scan_budget,
+        )
 
 
 class SuffixSliceRejectingText(str):
@@ -269,6 +294,48 @@ class GuardedScannerText(str):
         if len(self) > self.max_read_index + 1:
             raise AssertionError("scanner stripped the complete source")
         return super().strip(chars)
+
+
+class WideGuardedScannerText(GuardedScannerText):
+    """Source guard wide enough for the documented scan-budget factor."""
+
+    max_read_index = 2_000
+
+
+class ProgressGuardChunker(ChunkingService):
+    """Turn a repeated zero-progress boundary into a deterministic failure."""
+
+    def __init__(self) -> None:
+        super().__init__(chunk_size=1, chunk_overlap=0)
+        self.boundary_calls = 0
+
+    def _hard_boundary_index(
+        self,
+        text: str,
+        start: int,
+        end: int,
+        scan_budget=None,
+    ) -> int:
+        """Fail if a caller searches the same non-advancing window repeatedly.
+
+        Args:
+            text: Source text.
+            start: Inclusive window start.
+            end: Exclusive window end.
+            scan_budget: Per-plan source-work budget, when one applies.
+
+        Returns:
+            Production hard-boundary index.
+        """
+        self.boundary_calls += 1
+        if self.boundary_calls > 2:
+            raise AssertionError("hard split did not advance its source cursor")
+        return super()._hard_boundary_index(
+            text,
+            start,
+            end,
+            scan_budget=scan_budget,
+        )
 
 
 @pytest.fixture
@@ -440,6 +507,29 @@ def test_ceiling_stops_scanner_after_limit_plus_one_windows() -> None:
     assert service.boundary_windows == [(0, 100), (100, 200), (200, 300)]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        " " * 1_000_000 + "x" * 100,
+        "x" * 100 + " " * 1_000_000 + "y" * 100,
+        ("# ignored\n" * 100_000) + "x" * 100,
+    ],
+    ids=["leading-whitespace", "inter-chunk-whitespace", "ignored-headings"],
+)
+def test_source_scan_budget_bounds_non_chunk_metadata_work(text: str) -> None:
+    """Whitespace and ignored metadata cannot bypass the final chunk ceiling."""
+    service = InstrumentedScannerChunker()
+    guarded = WideGuardedScannerText(text)
+
+    with pytest.raises(ChunkLimitExceededError) as raised:
+        service._chunk_text_content(guarded, max_chunks=1)
+
+    assert raised.value.chunk_count == 2
+    assert raised.value.max_chunks == 1
+    assert service.character_reads <= 1_600
+    assert service.highest_source_index <= guarded.max_read_index
+
+
 def test_hard_split_never_copies_the_complete_remaining_suffix() -> None:
     """Cursor-based hard splitting only materializes bounded fragments."""
     service = ChunkingService(chunk_size=100, chunk_overlap=0)
@@ -448,6 +538,24 @@ def test_hard_split_never_copies_the_complete_remaining_suffix() -> None:
     fragments = list(service._hard_split(text))
 
     assert [len(fragment) for fragment in fragments] == [100, 100, 100, 50]
+
+
+def test_chunk_size_one_splitters_always_advance() -> None:
+    """A boundary at the cursor cannot trap either split path in a loop."""
+    hard_splitter = ProgressGuardChunker()
+    sentence_splitter = ProgressGuardChunker()
+
+    assert list(hard_splitter._hard_split(",x")) == [",", "x"]
+    assert list(sentence_splitter._iter_sentences(",x")) == [",", "x"]
+    assert list(ChunkingService(chunk_size=1)._hard_split(" x")) == ["x"]
+    assert list(ChunkingService(chunk_size=1)._iter_sentences("xx")) == ["x", "x"]
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1])
+def test_non_positive_chunk_size_is_rejected(chunk_size: int) -> None:
+    """Invalid configuration fails at construction instead of hanging later."""
+    with pytest.raises(ValueError, match="chunk_size"):
+        ChunkingService(chunk_size=chunk_size)
 
 
 def test_multiline_block_generation_does_not_split_every_line_first() -> None:

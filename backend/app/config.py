@@ -1,6 +1,6 @@
 """Application configuration."""
 from typing import Any, List, Optional
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     cache_max_entries: int = 10000
     
     # Chunking
-    chunk_size: int = 512
+    chunk_size: int = Field(default=512, ge=1)
     chunk_overlap: int = 50
     max_chunks_per_doc: int = 1000
     

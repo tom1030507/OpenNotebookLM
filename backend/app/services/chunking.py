@@ -33,6 +33,12 @@ MIN_CHUNK_CHARS = 80
 # extractor produced.
 LINE_JOIN = "\n"
 
+# One character may be inspected by the sentence scanner, local period
+# lookback, a bounded newline probe, and three hard-boundary searches. Keeping
+# sixteen units per allowed output character covers those constant passes while
+# preventing whitespace or metadata-only input from bypassing the chunk limit.
+SOURCE_SCAN_BUDGET_FACTOR = 16
+
 
 class ChunkLimitExceededError(ValueError):
     """Raised before ORM rows are created for an over-limit chunk plan."""
@@ -53,6 +59,33 @@ class ChunkLimitExceededError(ValueError):
             f"Document produced at least {chunk_count} chunks, exceeding "
             f"the limit of {max_chunks}"
         )
+
+
+@dataclass
+class _SourceScanBudget:
+    """Per-call work budget shared by every source scanner in one plan."""
+
+    remaining: int
+    max_chunks: int
+
+    def consume(self, amount: int = 1) -> None:
+        """Charge bounded scanner work or stop the over-limit plan.
+
+        Args:
+            amount: Number of constant-time source inspections to charge.
+
+        Returns:
+            None.
+        """
+        if amount < 0:
+            raise ValueError("scan budget charge must not be negative")
+        if amount > self.remaining:
+            self.remaining = 0
+            raise ChunkLimitExceededError(
+                chunk_count=self.max_chunks + 1,
+                max_chunks=self.max_chunks,
+            )
+        self.remaining -= amount
 
 
 @dataclass
@@ -78,6 +111,15 @@ class _Block:
     heading_path: str
 
 
+@dataclass(frozen=True)
+class _Fragment:
+    """One bounded output value and its exact source span."""
+
+    text: str
+    start: int
+    end: int
+
+
 class ChunkingService:
     """Service for splitting documents into chunks."""
 
@@ -91,8 +133,13 @@ class ChunkingService:
         Args:
             chunk_size: Maximum size of each chunk in characters
             chunk_overlap: Number of overlapping characters between chunks
+
+        Returns:
+            None.
         """
-        self.chunk_size = chunk_size or settings.chunk_size
+        self.chunk_size = settings.chunk_size if chunk_size is None else chunk_size
+        if self.chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero")
         self.chunk_overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
 
     def chunk_document(
@@ -203,7 +250,21 @@ class ChunkingService:
         Returns:
             List of chunks with metadata
         """
-        blocks = self._to_blocks(text)
+        if max_chunks is not None and max_chunks < 1:
+            raise ValueError("max_chunks must be at least 1")
+        scan_budget = (
+            _SourceScanBudget(
+                remaining=(
+                    max_chunks
+                    * self.chunk_size
+                    * SOURCE_SCAN_BUDGET_FACTOR
+                ),
+                max_chunks=max_chunks,
+            )
+            if max_chunks is not None
+            else None
+        )
+        blocks = self._to_blocks(text, scan_budget=scan_budget)
         packed = self._merge_runts(
             self._pack(blocks),
             max_chunks=max_chunks,
@@ -228,11 +289,16 @@ class ChunkingService:
 
         return chunks
 
-    def _to_blocks(self, text: str) -> Iterator[_Block]:
+    def _to_blocks(
+        self,
+        text: str,
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> Iterator[_Block]:
         """Stream bounded content blocks while tracking the heading stack.
 
         Args:
             text: Extracted document text.
+            scan_budget: Per-plan source-work budget, when a ceiling applies.
 
         Returns:
             Iterator of content blocks in document order.
@@ -244,7 +310,11 @@ class ChunkingService:
         while offset < length:
             content_start = offset
             while content_start < length:
-                char = self._scan_character(text, content_start)
+                char = self._scan_character(
+                    text,
+                    content_start,
+                    scan_budget=scan_budget,
+                )
                 if char == "\n":
                     offset = content_start + 1
                     break
@@ -265,24 +335,42 @@ class ChunkingService:
                 while (
                     hash_end < length
                     and hash_end - content_start < 7
-                    and self._scan_character(text, hash_end) == "#"
+                    and self._scan_character(
+                        text,
+                        hash_end,
+                        scan_budget=scan_budget,
+                    ) == "#"
                 ):
                     hash_end += 1
             heading_level = hash_end - content_start
             heading_handled = False
             if 1 <= heading_level <= 6 and hash_end < length:
-                separator = self._scan_character(text, hash_end)
+                separator = self._scan_character(
+                    text,
+                    hash_end,
+                    scan_budget=scan_budget,
+                )
                 if separator.isspace() and separator != "\n":
                     title_start = hash_end + 1
                     while title_start < length:
-                        char = self._scan_character(text, title_start)
+                        char = self._scan_character(
+                            text,
+                            title_start,
+                            scan_budget=scan_budget,
+                        )
                         if char == "\n" or not char.isspace():
                             break
                         title_start += 1
 
                     title_limit = min(title_start + self.chunk_size, length)
                     search_end = min(title_limit + 1, length)
-                    newline = text.find("\n", title_start, search_end)
+                    newline = self._find_in_window(
+                        text,
+                        "\n",
+                        title_start,
+                        search_end,
+                        scan_budget=scan_budget,
+                    )
                     if newline >= 0 or title_limit == length:
                         line_end = newline if newline >= 0 else length
                         title = text[title_start:line_end].strip()
@@ -301,29 +389,40 @@ class ChunkingService:
             # window; splitting short lines changes their text separators and
             # makes offsets drift from the source.
             line_probe_end = min(content_start + self.chunk_size + 1, length)
-            newline = text.find("\n", content_start, line_probe_end)
+            newline = self._find_in_window(
+                text,
+                "\n",
+                content_start,
+                line_probe_end,
+                scan_budget=scan_budget,
+            )
             short_line_end: Optional[int] = None
             if newline >= 0:
                 short_line_end = newline
             elif length - content_start <= self.chunk_size:
                 short_line_end = length
             if short_line_end is not None:
-                line = text[content_start:short_line_end].strip()
-                if line:
+                fragment = self._fragment_from_bounds(
+                    text,
+                    content_start,
+                    short_line_end,
+                    scan_budget=scan_budget,
+                )
+                if fragment is not None:
                     yield _Block(
-                        text=line,
-                        start=content_start,
-                        end=content_start + len(line),
+                        text=fragment.text,
+                        start=fragment.start,
+                        end=fragment.end,
                         heading_path=" > ".join(title for _, title in stack),
                     )
                 offset = short_line_end + 1
                 continue
 
-            output_cursor = content_start
             fragments = self._iter_bounded_fragments(
                 text,
                 start=content_start,
                 stop_at_newline=True,
+                scan_budget=scan_budget,
             )
             while True:
                 try:
@@ -332,12 +431,11 @@ class ChunkingService:
                     offset = stopped.value
                     break
                 yield _Block(
-                    text=fragment,
-                    start=output_cursor,
-                    end=output_cursor + len(fragment),
+                    text=fragment.text,
+                    start=fragment.start,
+                    end=fragment.end,
                     heading_path=" > ".join(title for _, title in stack),
                 )
-                output_cursor += len(fragment)
 
     def _pack(
         self,
@@ -474,7 +572,7 @@ class ChunkingService:
         while length - start > self.chunk_size:
             window_end = start + self.chunk_size
             cut = self._hard_boundary_index(sentence, start, window_end)
-            if cut - start < self.chunk_size // 2:
+            if cut <= start or cut - start < self.chunk_size // 2:
                 cut = window_end
             fragment = sentence[start:cut].strip()
             if fragment:
@@ -485,49 +583,135 @@ class ChunkingService:
         if fragment:
             yield fragment
 
-    def _scan_character(self, text: str, index: int) -> str:
+    def _scan_character(
+        self,
+        text: str,
+        index: int,
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> str:
         """Read one source character through an instrumentable boundary.
 
         Args:
             text: Source text.
             index: Character index to inspect.
+            scan_budget: Per-plan source-work budget, when one applies.
 
         Returns:
             Character at ``index``.
         """
+        if scan_budget is not None:
+            scan_budget.consume()
         return text[index]
 
-    def _hard_boundary_index(self, text: str, start: int, end: int) -> int:
+    def _find_in_window(
+        self,
+        text: str,
+        value: str,
+        start: int,
+        end: int,
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> int:
+        """Find a value while charging only one explicitly bounded window.
+
+        Args:
+            text: Source text.
+            value: Value to locate.
+            start: Inclusive bounded search start.
+            end: Exclusive bounded search end.
+            scan_budget: Per-plan source-work budget, when one applies.
+
+        Returns:
+            Matching source index, or ``-1``.
+        """
+        if scan_budget is not None:
+            scan_budget.consume(max(0, end - start))
+        return text.find(value, start, end)
+
+    def _hard_boundary_index(
+        self,
+        text: str,
+        start: int,
+        end: int,
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> int:
         """Find the last word or comma boundary in one bounded window.
 
         Args:
             text: Source text.
             start: Inclusive window start.
             end: Exclusive window end, at most one chunk after ``start``.
+            scan_budget: Per-plan source-work budget, when one applies.
 
         Returns:
             Absolute boundary index, or ``-1`` when the window has none.
         """
+        if scan_budget is not None:
+            scan_budget.consume(3 * max(0, end - start))
         return max(
             text.rfind(" ", start, end),
             text.rfind("，", start, end),
             text.rfind(",", start, end),
         )
 
-    def _skip_whitespace(self, text: str, start: int) -> int:
+    def _skip_whitespace(
+        self,
+        text: str,
+        start: int,
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> int:
         """Advance a cursor past whitespace without copying its suffix.
 
         Args:
             text: Source text.
             start: Cursor to advance.
+            scan_budget: Per-plan source-work budget, when one applies.
 
         Returns:
             First non-whitespace index, or the text length.
         """
         length = len(text)
-        while start < length and self._scan_character(text, start).isspace():
+        while start < length and self._scan_character(
+            text,
+            start,
+            scan_budget=scan_budget,
+        ).isspace():
             start += 1
         return start
+
+    def _fragment_from_bounds(
+        self,
+        text: str,
+        start: int,
+        end: int,
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> Optional[_Fragment]:
+        """Trim one bounded range and retain its exact source coordinates.
+
+        Args:
+            text: Original source text.
+            start: Inclusive raw range start.
+            end: Exclusive raw range end.
+            scan_budget: Per-plan source-work budget, when one applies.
+
+        Returns:
+            Exact non-whitespace fragment, or None for an empty range.
+        """
+        raw = text[start:end]
+        if scan_budget is not None:
+            # Both trim passes are confined to this one chunk-sized copy. Charge
+            # them explicitly without re-reading the source through the scanner.
+            scan_budget.consume(2 * len(raw))
+        left_trimmed = raw.lstrip()
+        exact_text = left_trimmed.rstrip()
+        if not exact_text:
+            return None
+        exact_start = start + len(raw) - len(left_trimmed)
+        exact_end = exact_start + len(exact_text)
+        return _Fragment(
+            text=exact_text,
+            start=exact_start,
+            end=exact_end,
+        )
 
     @staticmethod
     def _is_word_character(char: str) -> bool:
@@ -541,33 +725,68 @@ class ChunkingService:
         """
         return char.isalnum() or char == "_"
 
-    def _is_protected_period(self, text: str, index: int) -> bool:
+    def _is_protected_period(
+        self,
+        text: str,
+        index: int,
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> bool:
         """Recognize abbreviation and uppercase-initial periods locally.
 
         Args:
             text: Source text.
             index: Index of the period under consideration.
+            scan_budget: Per-plan source-work budget, when one applies.
 
         Returns:
             True when the period must not terminate a sentence.
         """
-        for abbreviation in ABBREVIATIONS:
-            word_start = index - len(abbreviation)
-            if word_start < 0 or text[word_start:index] != abbreviation:
-                continue
-            if word_start == 0 or not self._is_word_character(
-                self._scan_character(text, word_start - 1)
-            ):
-                return True
+        max_abbreviation_length = max(len(value) for value in ABBREVIATIONS)
+        word_start = index
+        while (
+            word_start > 0
+            and index - word_start < max_abbreviation_length
+        ):
+            previous = self._scan_character(
+                text,
+                word_start - 1,
+                scan_budget=scan_budget,
+            )
+            if not self._is_word_character(previous):
+                break
+            word_start -= 1
+        abbreviation = text[word_start:index]
+        if (
+            abbreviation in ABBREVIATIONS
+            and (
+                word_start == 0
+                or not self._is_word_character(
+                    self._scan_character(
+                        text,
+                        word_start - 1,
+                        scan_budget=scan_budget,
+                    )
+                )
+            )
+        ):
+            return True
 
         letter_index = index - 1
         if letter_index < 0:
             return False
-        letter = self._scan_character(text, letter_index)
+        letter = self._scan_character(
+            text,
+            letter_index,
+            scan_budget=scan_budget,
+        )
         if letter not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
             return False
         return letter_index == 0 or not self._is_word_character(
-            self._scan_character(text, letter_index - 1)
+            self._scan_character(
+                text,
+                letter_index - 1,
+                scan_budget=scan_budget,
+            )
         )
 
     def _sentence_end_index(
@@ -576,6 +795,7 @@ class ChunkingService:
         index: int,
         fragment_start: int,
         char: str,
+        scan_budget: Optional[_SourceScanBudget] = None,
     ) -> Optional[int]:
         """Find a sentence end using only constant local lookaround.
 
@@ -584,6 +804,7 @@ class ChunkingService:
             index: Index of the already-read character.
             fragment_start: Start of the current bounded fragment.
             char: Character at ``index``.
+            scan_budget: Per-plan source-work budget, when one applies.
 
         Returns:
             Exclusive sentence-end index, or None when scanning should continue.
@@ -593,20 +814,32 @@ class ChunkingService:
             end = index + 1
             fragment_limit = min(fragment_start + self.chunk_size, length)
             while end < fragment_limit:
-                if self._scan_character(text, end) not in CLOSING_MARKS:
+                if self._scan_character(
+                    text,
+                    end,
+                    scan_budget=scan_budget,
+                ) not in CLOSING_MARKS:
                     break
                 end += 1
             return end
 
         if char not in LATIN_TERMINATORS:
             return None
-        if char == "." and self._is_protected_period(text, index):
+        if char == "." and self._is_protected_period(
+            text,
+            index,
+            scan_budget=scan_budget,
+        ):
             return None
 
         following_index = index + 1
         if following_index >= length:
             return following_index
-        if self._scan_character(text, following_index).isspace():
+        if self._scan_character(
+            text,
+            following_index,
+            scan_budget=scan_budget,
+        ).isspace():
             return following_index
         return None
 
@@ -893,7 +1126,8 @@ class ChunkingService:
         text: str,
         start: int = 0,
         stop_at_newline: bool = False,
-    ) -> Generator[str, None, int]:
+        scan_budget: Optional[_SourceScanBudget] = None,
+    ) -> Generator[_Fragment, None, int]:
         """Yield bounded sentence-aligned fragments from the original source.
 
         A sentence longer than ``chunk_size`` is emitted incrementally at the
@@ -905,10 +1139,11 @@ class ChunkingService:
             text: Original source text.
             start: Source index at which scanning begins.
             stop_at_newline: Whether a newline ends this generator.
+            scan_budget: Per-plan source-work budget, when a ceiling applies.
 
         Returns:
-            Iterator of fragments no longer than ``chunk_size``. Its terminal
-            value is the first source index after the line or input.
+            Iterator of exact source fragments no longer than ``chunk_size``.
+            Its terminal value is the first source index after the line or input.
         """
         length = len(text)
         cjk_closing_pending = False
@@ -919,12 +1154,20 @@ class ChunkingService:
                 closing_end = start
                 closing_limit = min(start + self.chunk_size, length)
                 while closing_end < closing_limit:
-                    if self._scan_character(text, closing_end) not in CLOSING_MARKS:
+                    if self._scan_character(
+                        text,
+                        closing_end,
+                        scan_budget=scan_budget,
+                    ) not in CLOSING_MARKS:
                         break
                     closing_end += 1
 
                 if closing_end > closing_start:
-                    yield text[closing_start:closing_end]
+                    yield _Fragment(
+                        text=text[closing_start:closing_end],
+                        start=closing_start,
+                        end=closing_end,
+                    )
                     start = closing_end
                     if start >= length:
                         return length + 1
@@ -933,7 +1176,11 @@ class ChunkingService:
 
                 cjk_closing_pending = False
                 while start < length:
-                    char = self._scan_character(text, start)
+                    char = self._scan_character(
+                        text,
+                        start,
+                        scan_budget=scan_budget,
+                    )
                     if stop_at_newline and char == "\n":
                         return start + 1
                     if not char.isspace():
@@ -944,10 +1191,19 @@ class ChunkingService:
             index = start
 
             while index < window_end:
-                char = self._scan_character(text, index)
+                char = self._scan_character(
+                    text,
+                    index,
+                    scan_budget=scan_budget,
+                )
                 if stop_at_newline and char == "\n":
-                    fragment = text[start:index].strip()
-                    if fragment:
+                    fragment = self._fragment_from_bounds(
+                        text,
+                        start,
+                        index,
+                        scan_budget=scan_budget,
+                    )
+                    if fragment is not None:
                         yield fragment
                     return index + 1
                 sentence_end = self._sentence_end_index(
@@ -955,6 +1211,7 @@ class ChunkingService:
                     index,
                     start,
                     char,
+                    scan_budget=scan_budget,
                 )
                 if sentence_end is not None:
                     closing_crosses_window = (
@@ -962,15 +1219,24 @@ class ChunkingService:
                         and sentence_end == window_end
                         and sentence_end < length
                     )
-                    fragment = text[start:sentence_end].strip()
-                    if fragment:
+                    fragment = self._fragment_from_bounds(
+                        text,
+                        start,
+                        sentence_end,
+                        scan_budget=scan_budget,
+                    )
+                    if fragment is not None:
                         yield fragment
                     start = sentence_end
                     if closing_crosses_window:
                         cjk_closing_pending = True
                         break
                     while start < length:
-                        char = self._scan_character(text, start)
+                        char = self._scan_character(
+                            text,
+                            start,
+                            scan_budget=scan_budget,
+                        )
                         if stop_at_newline and char == "\n":
                             return start + 1
                         if not char.isspace():
@@ -980,20 +1246,39 @@ class ChunkingService:
                 index += 1
             else:
                 if window_end == length:
-                    fragment = text[start:window_end].strip()
-                    if fragment:
+                    fragment = self._fragment_from_bounds(
+                        text,
+                        start,
+                        window_end,
+                        scan_budget=scan_budget,
+                    )
+                    if fragment is not None:
                         yield fragment
                     return length + 1
 
-                cut = self._hard_boundary_index(text, start, window_end)
-                if cut - start < self.chunk_size // 2:
+                cut = self._hard_boundary_index(
+                    text,
+                    start,
+                    window_end,
+                    scan_budget=scan_budget,
+                )
+                if cut <= start or cut - start < self.chunk_size // 2:
                     cut = window_end
-                fragment = text[start:cut].strip()
-                if fragment:
+                fragment = self._fragment_from_bounds(
+                    text,
+                    start,
+                    cut,
+                    scan_budget=scan_budget,
+                )
+                if fragment is not None:
                     yield fragment
                 start = cut
                 while start < length:
-                    char = self._scan_character(text, start)
+                    char = self._scan_character(
+                        text,
+                        start,
+                        scan_budget=scan_budget,
+                    )
                     if stop_at_newline and char == "\n":
                         return start + 1
                     if not char.isspace():
@@ -1011,7 +1296,8 @@ class ChunkingService:
         Returns:
             Iterator of fragments no longer than ``chunk_size``.
         """
-        yield from self._iter_bounded_fragments(text)
+        for fragment in self._iter_bounded_fragments(text):
+            yield fragment.text
 
     def _split_sentences(self, text: str) -> List[str]:
         """Return the sentence iterator as a compatibility list.

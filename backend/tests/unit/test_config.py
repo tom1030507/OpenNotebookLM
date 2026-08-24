@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from app.config import Settings
 
@@ -53,6 +54,13 @@ def test_a_set_optional_number_is_still_read(tmp_path):
     env_file.write_text("LLM_MAX_REQUEST_TOKENS=8000\n", encoding="utf-8")
 
     assert Settings(_env_file=env_file).llm_max_request_tokens == 8000
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1])
+def test_non_positive_chunk_size_is_rejected_during_config_parse(chunk_size):
+    """Invalid chunk geometry cannot survive until a worker starts ingesting."""
+    with pytest.raises(ValidationError):
+        Settings(chunk_size=chunk_size)
 
 
 def test_public_registration_defaults_to_development_only():

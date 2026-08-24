@@ -52,6 +52,14 @@ class TestSentenceSplitting:
         sentences = service._split_sentences("Dr. Vaswani wrote it. It was 2017.")
         assert sentences[0] == "Dr. Vaswani wrote it."
 
+    def test_abbreviation_suffix_inside_a_word_ends_a_sentence(self):
+        service = ChunkingService()
+
+        assert service._split_sentences("fooApprox. Next.") == [
+            "fooApprox.",
+            "Next.",
+        ]
+
     def test_initials_do_not_end_a_sentence(self):
         service = ChunkingService()
         assert len(service._split_sentences("The U.S. team shipped it.")) == 1
@@ -237,6 +245,31 @@ class TestOffsets:
         assert chunks[0]["metadata"]["start_char"] == 0
         assert chunks[0]["metadata"]["end_char"] == len(text)
 
+    @pytest.mark.parametrize(
+        ("text", "chunk_size"),
+        [
+            ("First sentence. Second sentence.", 16),
+            ("alpha beta gamma delta", 6),
+        ],
+    )
+    def test_long_line_fragment_offsets_select_their_exact_source_text(
+        self,
+        text,
+        chunk_size,
+    ):
+        service = ChunkingService(chunk_size=chunk_size, chunk_overlap=0)
+
+        blocks = list(service._to_blocks(text))
+        chunks = service._chunk_text_content(text)
+
+        assert len(blocks) >= 2
+        for block in blocks:
+            assert text[block.start:block.end] == block.text
+        for chunk in chunks:
+            start = chunk["metadata"]["start_char"]
+            end = chunk["metadata"]["end_char"]
+            assert text[start:end] == chunk["text"]
+
 
 class TestRuntMerging:
     """A fragment too short to answer anything is folded into a neighbour."""
@@ -269,6 +302,9 @@ class TestPdfPages:
         )
         service = ChunkingService(chunk_size=60, chunk_overlap=0)
         chunks = service._chunk_pdf_content(document)
+
+        for block in service._to_blocks(document.content):
+            assert document.content[block.start:block.end] == block.text
 
         assert {chunk["metadata"]["page_num"] for chunk in chunks} == {1, 2, 3}
         assert chunks[0]["metadata"]["page_num"] == 1
