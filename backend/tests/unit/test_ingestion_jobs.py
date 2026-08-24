@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -289,6 +289,180 @@ def test_enqueue_preserves_failed_history_and_creates_one_retry(job_database):
         }
 
 
+def test_persisted_retry_respects_the_callers_outer_rollback(job_database):
+    """A retry savepoint cannot commit outside its caller's transaction.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-rollback-retry")
+        failed = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/failed"},
+        )
+        failed.status = "failed"
+        failed.attempts = 1
+        failed.last_error = {"type": "RuntimeError", "message": "offline"}
+        failed.completed_at = utc_now()
+        document.status = "error"
+        document.error_message = "offline"
+        db.commit()
+        failed_job_id = failed.id
+
+    with session_factory() as db:
+        result = ingestion_jobs.enqueue_ingestion_job_with_result(
+            db,
+            document_id="document-rollback-retry",
+            job_type="url",
+            payload={"url": "https://example.com/retry"},
+        )
+        retry_job_id = result.job.id
+        assert result.created_new_active
+        db.rollback()
+
+    with session_factory() as db:
+        assert db.get(models.IngestionJob, retry_job_id) is None
+        assert db.query(models.IngestionJob).count() == 1
+        failed = db.get(models.IngestionJob, failed_job_id)
+        assert failed.status == "failed"
+        document = db.get(models.Document, "document-rollback-retry")
+        assert document.status == "error"
+        assert document.error_message == "offline"
+
+
+def test_public_enqueue_commit_failure_does_not_persist_retry(job_database):
+    """The public enqueue wrapper leaves commit ownership with its caller.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    engine, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-public-commit-failure")
+        failed = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/failed"},
+        )
+        failed.status = "failed"
+        failed.completed_at = utc_now()
+        document.status = "error"
+        db.commit()
+
+    class RejectCommitSession(Session):
+        def commit(self):
+            raise OperationalError(
+                "COMMIT",
+                {},
+                RuntimeError("caller commit failed"),
+            )
+
+    rejecting_factory = sessionmaker(
+        bind=engine,
+        class_=RejectCommitSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    with rejecting_factory() as db:
+        with pytest.raises(OperationalError, match="caller commit failed"):
+            try:
+                retry = ingestion_jobs.enqueue_ingestion_job(
+                    db,
+                    document_id="document-public-commit-failure",
+                    job_type="url",
+                    payload={"url": "https://example.com/retry"},
+                )
+                retry_job_id = retry.id
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    with session_factory() as db:
+        assert db.get(models.IngestionJob, retry_job_id) is None
+        assert db.query(models.IngestionJob).count() == 1
+        assert db.get(
+            models.Document,
+            "document-public-commit-failure",
+        ).status == "error"
+
+
+def test_concurrent_retries_share_one_job_and_keep_outer_pending_rows(
+    job_database,
+):
+    """SQLite retry contenders serialize without losing caller-owned rows.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-eight-way-retry")
+        failed = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/failed"},
+        )
+        failed.status = "failed"
+        failed.completed_at = utc_now()
+        document.status = "error"
+        db.commit()
+
+    contender_count = 8
+    barrier = threading.Barrier(contender_count)
+
+    def enqueue_contender(contender_number):
+        with session_factory() as db:
+            pending_id = "pending-outer-%s" % contender_number
+            db.add(models.Document(
+                id=pending_id,
+                title=pending_id,
+                source_type="url",
+                status="queued",
+            ))
+            barrier.wait(timeout=2)
+            result = ingestion_jobs.enqueue_ingestion_job_with_result(
+                db,
+                document_id="document-eight-way-retry",
+                job_type="url",
+                payload={"url": "https://example.com/retry"},
+            )
+            db.commit()
+            return result.job.id, result.created_new_active, pending_id
+
+    with ThreadPoolExecutor(max_workers=contender_count) as executor:
+        results = list(executor.map(
+            enqueue_contender,
+            range(contender_count),
+        ))
+
+    job_ids = {job_id for job_id, _, _ in results}
+    assert len(job_ids) == 1
+    assert sum(created for _, created, _ in results) == 1
+    with session_factory() as db:
+        assert db.query(models.IngestionJob).count() == 2
+        assert {
+            db.get(models.Document, pending_id).id
+            for _, _, pending_id in results
+        } == {pending_id for _, _, pending_id in results}
+
+
 def test_completed_enqueue_result_does_not_retain_an_unclaimable_lease(
     job_database,
 ):
@@ -423,6 +597,59 @@ def test_recovery_requeues_abandoned_running_jobs(job_database):
         assert recovered.document.status == "queued"
 
 
+def test_recovery_accepts_a_commit_acknowledgement_failure(job_database):
+    """Startup proceeds when its abandoned-job commit was actually accepted.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    engine, setup_session_factory = job_database
+    with setup_session_factory() as db:
+        document = add_document(db, "document-recovery-ack")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/recovery-ack"},
+        )
+        job.status = "running"
+        job.attempts = 1
+        job.started_at = utc_now()
+        document.status = "processing"
+        db.commit()
+        job_id = job.id
+
+    class AcceptedThenRaisedSession(Session):
+        failures_remaining = 1
+
+        def commit(self):
+            super().commit()
+            if self.__class__.failures_remaining:
+                self.__class__.failures_remaining -= 1
+                raise OperationalError(
+                    "COMMIT",
+                    {},
+                    RuntimeError("commit acknowledgement lost"),
+                )
+
+    recovery_factory = sessionmaker(
+        bind=engine,
+        class_=AcceptedThenRaisedSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    assert ingestion_jobs.recover_abandoned_jobs(recovery_factory) == 1
+    with setup_session_factory() as db:
+        recovered = db.get(models.IngestionJob, job_id)
+        assert recovered.status == "queued"
+        assert recovered.document.status == "queued"
+
+
 def test_worker_claims_atomically_and_records_attempt_metadata(job_database):
     """A claim moves exactly one queued job to running before processing.
 
@@ -453,6 +680,168 @@ def test_worker_claims_atomically_and_records_attempt_metadata(job_database):
         assert claimed.attempts == 1
         assert claimed.started_at is not None
         assert claimed.document.status == "processing"
+
+
+def test_claim_accepts_a_matching_commit_acknowledgement_failure(job_database):
+    """A durable running claim is dispatched when only its ACK was lost.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    engine, setup_session_factory = job_database
+    with setup_session_factory() as db:
+        document = add_document(db, "document-claim-ack")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/claim-ack"},
+        )
+        db.commit()
+        job_id = job.id
+
+    class AcceptedThenRaisedSession(Session):
+        failures_remaining = 1
+
+        def commit(self):
+            super().commit()
+            if self.__class__.failures_remaining:
+                self.__class__.failures_remaining -= 1
+                raise OperationalError(
+                    "COMMIT",
+                    {},
+                    RuntimeError("claim acknowledgement lost"),
+                )
+
+    claim_factory = sessionmaker(
+        bind=engine,
+        class_=AcceptedThenRaisedSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    assert ingestion_jobs.claim_next_job(claim_factory) == job_id
+    with setup_session_factory() as db:
+        claimed = db.get(models.IngestionJob, job_id)
+        assert claimed.status == "running"
+        assert claimed.attempts == 1
+        assert claimed.started_at is not None
+        assert claimed.document.status == "processing"
+
+    def processor(db, claimed_job):
+        claimed_job.document.status = "ready"
+
+    ingestion_jobs.IngestionJobWorker(
+        session_factory=setup_session_factory,
+        processor=processor,
+    )._process_claimed_job(job_id)
+    with setup_session_factory() as db:
+        assert db.get(models.IngestionJob, job_id).status == "completed"
+
+
+def test_claim_rejects_an_ack_for_a_superseded_attempt(job_database):
+    """Fresh reconciliation cannot dispatch a claim whose token changed.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    engine, setup_session_factory = job_database
+    with setup_session_factory() as db:
+        document = add_document(db, "document-claim-superseded")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/claim-superseded"},
+        )
+        db.commit()
+        job_id = job.id
+
+    class AcceptedThenSupersededSession(Session):
+        failures_remaining = 1
+
+        def commit(self):
+            super().commit()
+            if self.__class__.failures_remaining:
+                self.__class__.failures_remaining -= 1
+                with Session(bind=engine) as concurrent_db:
+                    superseded = concurrent_db.get(
+                        models.IngestionJob,
+                        job_id,
+                    )
+                    superseded.status = "queued"
+                    superseded.started_at = None
+                    superseded.document.status = "queued"
+                    concurrent_db.commit()
+                raise OperationalError(
+                    "COMMIT",
+                    {},
+                    RuntimeError("claim acknowledgement lost"),
+                )
+
+    claim_factory = sessionmaker(
+        bind=engine,
+        class_=AcceptedThenSupersededSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    with pytest.raises(OperationalError, match="claim acknowledgement lost"):
+        ingestion_jobs.claim_next_job(claim_factory)
+    with setup_session_factory() as db:
+        superseded = db.get(models.IngestionJob, job_id)
+        assert superseded.status == "queued"
+        assert superseded.started_at is None
+        assert superseded.document.status == "queued"
+
+
+def test_processor_releases_lease_for_an_already_terminal_job(job_database):
+    """A reconciled claim cannot strand a lease if work already terminated.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-terminal-before-process")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/terminal-before-process"},
+        )
+        job.status = "completed"
+        job.completed_at = utc_now()
+        document.status = "ready"
+        db.commit()
+        job_id = job.id
+
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    ingestion_jobs.release_all_operation_leases()
+    ingestion_jobs.retain_operation_lease(
+        job_id,
+        limiter.acquire("ingest:user"),
+    )
+    worker = ingestion_jobs.IngestionJobWorker(
+        session_factory=session_factory,
+        processor=lambda *_args: pytest.fail("terminal job was processed"),
+    )
+    try:
+        worker._process_claimed_job(job_id)
+        assert limiter.active("ingest:user") == 0
+    finally:
+        ingestion_jobs.release_all_operation_leases()
 
 
 def test_two_sessions_have_exactly_one_claim_winner(job_database):
@@ -859,7 +1248,7 @@ def test_transient_claim_failure_does_not_kill_supervisor(
 def test_terminal_commit_failure_compensates_index_and_retains_lease(
     job_database,
 ):
-    """An ambiguous completion leaves recoverable running work, not an index.
+    """An ambiguous completion is requeued without a searchable index.
 
     Args:
         job_database: Isolated file database fixture.
@@ -944,11 +1333,18 @@ def test_terminal_commit_failure_compensates_index_and_retains_lease(
                 FailCompletedCommitSession.failure_seen.wait,
                 1,
             )
-            await asyncio.sleep(0.05)
+            worker._stop_event.set()
+            worker._wake_event.set()
+            assert await wait_for_job_status(
+                setup_session_factory,
+                job_id,
+                "queued",
+            ) == "queued"
             with setup_session_factory() as db:
                 persisted = db.get(models.IngestionJob, job_id)
-                assert persisted.status == "running"
-                assert persisted.document.status == "processing"
+                assert persisted.status == "queued"
+                assert persisted.document.status == "queued"
+                assert persisted.last_error["phase"] == "terminal_commit"
                 assert db.query(models.Chunk).count() == 0
                 assert db.query(models.Embedding).count() == 0
             assert limiter.active("ingest:user") == 1
@@ -960,7 +1356,7 @@ def test_terminal_commit_failure_compensates_index_and_retains_lease(
         assert limiter.active("ingest:user") == 0
         assert ingestion_jobs.recover_abandoned_jobs(
             setup_session_factory,
-        ) == 1
+        ) == 0
         with setup_session_factory() as db:
             recovered = db.get(models.IngestionJob, job_id)
             assert recovered.status == "queued"
@@ -972,7 +1368,7 @@ def test_terminal_commit_failure_compensates_index_and_retains_lease(
 def test_failed_terminal_commit_compensates_partial_index_and_retains_lease(
     job_database,
 ):
-    """A failed-state commit error removes processor checkpoints for recovery.
+    """A failed-state commit error requeues without processor checkpoints.
 
     Args:
         job_database: Isolated file database fixture.
@@ -1057,11 +1453,18 @@ def test_failed_terminal_commit_compensates_partial_index_and_retains_lease(
                 FailFailedCommitSession.failure_seen.wait,
                 1,
             )
-            await asyncio.sleep(0.05)
+            worker._stop_event.set()
+            worker._wake_event.set()
+            assert await wait_for_job_status(
+                setup_session_factory,
+                job_id,
+                "queued",
+            ) == "queued"
             with setup_session_factory() as db:
                 persisted = db.get(models.IngestionJob, job_id)
-                assert persisted.status == "running"
-                assert persisted.document.status == "processing"
+                assert persisted.status == "queued"
+                assert persisted.document.status == "queued"
+                assert persisted.last_error["phase"] == "terminal_commit"
                 assert db.query(models.Chunk).count() == 0
                 assert db.query(models.Embedding).count() == 0
             assert limiter.active("ingest:user") == 1
@@ -1073,9 +1476,167 @@ def test_failed_terminal_commit_compensates_partial_index_and_retains_lease(
         assert limiter.active("ingest:user") == 0
         assert ingestion_jobs.recover_abandoned_jobs(
             setup_session_factory,
-        ) == 1
+        ) == 0
     finally:
         ingestion_jobs.release_all_operation_leases()
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "failed"])
+def test_delete_during_terminal_compensation_releases_running_lease(
+    terminal_status,
+    job_database,
+):
+    """A delete after compensation's first read cannot strand its job lease.
+
+    Args:
+        terminal_status: Terminal commit whose acknowledgement fails.
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    engine, setup_session_factory = job_database
+
+    class FailTerminalCommitSession(Session):
+        failures_remaining = 1
+
+        def commit(self):
+            terminal_dirty = any(
+                isinstance(instance, models.IngestionJob)
+                and instance.status == terminal_status
+                for instance in self.dirty
+            )
+            if terminal_dirty and self.__class__.failures_remaining:
+                self.__class__.failures_remaining -= 1
+                raise OperationalError(
+                    "COMMIT",
+                    {},
+                    RuntimeError("terminal-state commit failed"),
+                )
+            return super().commit()
+
+    worker_session_factory = sessionmaker(
+        bind=engine,
+        class_=FailTerminalCommitSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    with setup_session_factory() as db:
+        add_document(db, "document-delete-during-compensation")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id="document-delete-during-compensation",
+            job_type="url",
+            payload={"url": "https://example.com/delete-compensation"},
+        )
+        db.commit()
+        job_id = job.id
+
+    def processor(db, claimed_job):
+        chunk = models.Chunk(
+            id="delete-compensation-chunk",
+            document_id=claimed_job.document_id,
+            text="partial searchable text",
+        )
+        db.add(chunk)
+        db.flush()
+        db.add(models.Embedding(
+            id="delete-compensation-embedding",
+            chunk_id=chunk.id,
+            vector=b"vector",
+            vector_json=[1.0],
+            model_name="test-model",
+        ))
+        db.commit()
+        if terminal_status == "failed":
+            raise RuntimeError("processor failed after checkpoint")
+        claimed_job.document.status = "ready"
+
+    compensation_read = threading.Event()
+    allow_compensation = threading.Event()
+
+    def pause_before_compensation_requeue(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        context,
+        _executemany,
+    ):
+        normalized = " ".join(statement.lower().split())
+        compiled_parameters = getattr(context, "compiled_parameters", ())
+        new_status = (
+            compiled_parameters[0].get("status")
+            if compiled_parameters
+            else None
+        )
+        if (
+            normalized.startswith("update ingestion_jobs")
+            and new_status == "queued"
+            and not compensation_read.is_set()
+        ):
+            compensation_read.set()
+            assert allow_compensation.wait(timeout=2)
+
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        pause_before_compensation_requeue,
+    )
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    ingestion_jobs.release_all_operation_leases()
+    ingestion_jobs.retain_operation_lease(
+        job_id,
+        limiter.acquire("ingest:user"),
+    )
+
+    async def scenario():
+        worker = ingestion_jobs.IngestionJobWorker(
+            session_factory=worker_session_factory,
+            processor=processor,
+            poll_interval=0.01,
+        )
+        await worker.start()
+        try:
+            assert await asyncio.to_thread(compensation_read.wait, 1)
+
+            def delete_document_and_job():
+                with setup_session_factory() as db:
+                    document = db.get(
+                        models.Document,
+                        "document-delete-during-compensation",
+                    )
+                    db.delete(document)
+                    db.commit()
+
+            await asyncio.to_thread(delete_document_and_job)
+            allow_compensation.set()
+            deadline = asyncio.get_running_loop().time() + 1
+            while (
+                limiter.active("ingest:user") != 0
+                and asyncio.get_running_loop().time() < deadline
+            ):
+                await asyncio.sleep(0.01)
+            assert limiter.active("ingest:user") == 0
+            with setup_session_factory() as db:
+                assert db.get(models.IngestionJob, job_id) is None
+                assert db.query(models.Chunk).count() == 0
+                assert db.query(models.Embedding).count() == 0
+        finally:
+            allow_compensation.set()
+            await worker.stop()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        allow_compensation.set()
+        ingestion_jobs.release_all_operation_leases()
+        event.remove(
+            engine,
+            "before_cursor_execute",
+            pause_before_compensation_requeue,
+        )
 
 
 def test_stop_cleans_global_state_after_unexpected_supervisor_failure(

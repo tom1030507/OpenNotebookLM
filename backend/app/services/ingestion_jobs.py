@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from threading import Lock
+import time
 from typing import Callable, Dict, Optional
 import uuid
 
@@ -100,6 +101,22 @@ def enqueue_ingestion_job_with_result(
     if latest is not None and latest.status == "completed":
         return IngestionEnqueueResult(latest, created_new_active=False)
 
+    _reserve_sqlite_enqueue_transaction(db)
+    # BEGIN IMMEDIATE may have waited behind a winner. Re-read inside the
+    # reserved transaction so a stale optimistic miss cannot insert from an
+    # obsolete WAL snapshot or report a second caller as the creator.
+    active = _active_job(db, document_id)
+    if active is not None:
+        return IngestionEnqueueResult(active, created_new_active=False)
+    latest = (
+        db.query(IngestionJob)
+        .filter(IngestionJob.document_id == document_id)
+        .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
+        .first()
+    )
+    if latest is not None and latest.status == "completed":
+        return IngestionEnqueueResult(latest, created_new_active=False)
+
     candidate = IngestionJob(
         id=str(uuid.uuid4()),
         document_id=document_id,
@@ -132,6 +149,22 @@ def enqueue_ingestion_job_with_result(
     return IngestionEnqueueResult(candidate, created_new_active=True)
 
 
+def _reserve_sqlite_enqueue_transaction(db: Session) -> None:
+    """Reserve SQLite's writer and give the SAVEPOINT a real outer owner."""
+    connection = db.connection()
+    if connection.dialect.name != "sqlite":
+        return
+
+    driver_connection = connection.connection.driver_connection
+    if not driver_connection.in_transaction:
+        # Python's sqlite3 legacy transaction mode does not emit BEGIN for a
+        # SAVEPOINT. RELEASE would therefore commit a persisted-document retry
+        # even though the Session's logical outer transaction later rolls back.
+        # IMMEDIATE also serializes the authoritative retry decision before a
+        # WAL reader can retain a stale miss and fail its later lock upgrade.
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+
 def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
     """Requeue jobs left running by a terminated application process.
 
@@ -147,6 +180,15 @@ def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
             .filter(IngestionJob.status == "running")
             .all()
         )
+        recovery_targets = [
+            (
+                job.id,
+                job.document_id,
+                job.document is not None
+                and job.document.status == "processing",
+            )
+            for job in abandoned
+        ]
         for job in abandoned:
             job.status = "queued"
             job.started_at = None
@@ -154,7 +196,15 @@ def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
             if job.document is not None and job.document.status == "processing":
                 job.document.status = "queued"
                 job.document.error_message = None
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                raise
+            if not _recovery_was_persisted(db, recovery_targets):
+                raise
         return len(abandoned)
 
 
@@ -168,6 +218,7 @@ def claim_next_job(session_factory: sessionmaker) -> Optional[str]:
         Claimed job id, or None when no queued work exists.
     """
     with session_factory() as db:
+        claim_started_at = utc_now()
         oldest_queued_id = (
             select(IngestionJob.id)
             .where(IngestionJob.status == "queued")
@@ -184,24 +235,101 @@ def claim_next_job(session_factory: sessionmaker) -> Optional[str]:
             .values(
                 status="running",
                 attempts=IngestionJob.attempts + 1,
-                started_at=utc_now(),
+                started_at=claim_started_at,
                 completed_at=None,
                 last_error=None,
             )
-            .returning(IngestionJob.id, IngestionJob.document_id)
+            .returning(
+                IngestionJob.id,
+                IngestionJob.document_id,
+                IngestionJob.attempts,
+            )
         ).first()
         if claimed is None:
             db.rollback()
             return None
 
-        job_id, document_id = claimed
+        job_id, document_id, attempts = claimed
         db.execute(
             update(Document)
             .where(Document.id == document_id)
             .values(status="processing", error_message=None)
         )
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                raise
+            if not _claim_was_persisted(
+                db,
+                job_id=job_id,
+                attempts=attempts,
+                started_at=claim_started_at,
+            ):
+                raise
         return job_id
+
+
+def _recovery_was_persisted(db: Session, recovery_targets: list) -> bool:
+    """Confirm an ambiguous recovery commit through a fresh identity map."""
+    with Session(bind=db.get_bind()) as verification_db:
+        for job_id, document_id, document_was_processing in recovery_targets:
+            row = verification_db.execute(
+                select(
+                    IngestionJob.status,
+                    IngestionJob.started_at,
+                    IngestionJob.completed_at,
+                ).where(IngestionJob.id == job_id)
+            ).one_or_none()
+            if row is None:
+                continue
+            if (
+                row.status != "queued"
+                or row.started_at is not None
+                or row.completed_at is not None
+            ):
+                return False
+            if document_was_processing:
+                document_status = verification_db.execute(
+                    select(Document.status).where(Document.id == document_id)
+                ).scalar_one_or_none()
+                if document_status not in (None, "queued"):
+                    return False
+    return True
+
+
+def _claim_was_persisted(
+    db: Session,
+    job_id: str,
+    attempts: int,
+    started_at,
+) -> bool:
+    """Confirm that an ambiguous claim ACK belongs to this exact attempt."""
+    with Session(bind=db.get_bind()) as verification_db:
+        row = verification_db.execute(
+            select(
+                IngestionJob.status,
+                IngestionJob.attempts,
+                IngestionJob.started_at,
+                IngestionJob.document_id,
+            ).where(IngestionJob.id == job_id)
+        ).one_or_none()
+        if row is None:
+            # A delete after the accepted claim still needs the processor's
+            # missing-job path to release the request lease.
+            return True
+        if (
+            row.status != "running"
+            or row.attempts != attempts
+            or row.started_at != started_at
+        ):
+            return False
+        document_status = verification_db.execute(
+            select(Document.status).where(Document.id == row.document_id)
+        ).scalar_one_or_none()
+        return document_status in (None, "processing")
 
 
 def retain_operation_lease(
@@ -487,7 +615,10 @@ class IngestionJobWorker:
             with self.session_factory() as db:
                 job = db.get(IngestionJob, job_id)
                 if job is None or job.status != "running":
-                    terminal_persisted = job is None
+                    terminal_persisted = (
+                        job is None
+                        or job.status in TERMINAL_JOB_STATUSES
+                    )
                     return
                 try:
                     self._delete_document_index(db, job.document_id)
@@ -626,17 +757,51 @@ class IngestionJobWorker:
                 )
                 return False
 
-            self._delete_document_index(db, persisted_job.document_id)
-            if persisted_job.document is not None:
-                persisted_job.document.status = "processing"
-                persisted_job.document.error_message = None
+            document_id = persisted_job.document_id
+            requeued = db.execute(
+                update(IngestionJob)
+                .where(
+                    IngestionJob.id == job_id,
+                    IngestionJob.status == "running",
+                )
+                .values(
+                    status="queued",
+                    started_at=None,
+                    completed_at=None,
+                    last_error={
+                        "type": type(commit_error).__name__,
+                        "message": str(commit_error),
+                        "phase": "terminal_commit",
+                    },
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if requeued.rowcount != 1:
+                db.rollback()
+                return self._job_is_terminal_or_missing(db, job_id)
+
+            # The conditional state transition obtains the writer boundary
+            # before index deletion. A concurrent terminal transition therefore
+            # wins without having its confirmed searchable index erased.
+            self._delete_document_index(db, document_id)
+            db.execute(
+                update(Document)
+                .where(Document.id == document_id)
+                .values(status="queued", error_message=None)
+                .execution_options(synchronize_session=False)
+            )
             db.commit()
+            if self._job_is_terminal_or_missing(db, job_id):
+                return True
             logger.error(
-                "Ingestion terminal commit failed; index compensated",
+                "Ingestion terminal commit failed; job safely requeued",
                 job_id=job_id,
                 error_type=type(commit_error).__name__,
                 error=str(commit_error),
             )
+            # A driver that repeatedly rejects only terminal-state commits
+            # would otherwise make the same durable row spin without yielding.
+            time.sleep(self.poll_interval)
         except Exception as cleanup_error:
             try:
                 db.rollback()
@@ -649,15 +814,35 @@ class IngestionJobWorker:
                     rollback_error=str(rollback_error),
                 )
                 return False
+            try:
+                if self._job_is_terminal_or_missing(db, job_id):
+                    return True
+            except Exception as state_error:
+                logger.error(
+                    "Could not reconcile ingestion job after compensation",
+                    job_id=job_id,
+                    commit_error=str(commit_error),
+                    cleanup_error=str(cleanup_error),
+                    state_error=str(state_error),
+                )
             logger.error(
                 "Ingestion terminal compensation failed",
                 job_id=job_id,
                 commit_error=str(commit_error),
                 cleanup_error=str(cleanup_error),
             )
-        # A running job continues to own its lease and is requeued only by the
-        # next single-process startup recovery.
+        # A requeued/running job continues to own its lease. Either the next
+        # claim transfers it to a processor or an atomic queued delete releases
+        # it; neither path creates an ownerless active row.
         return False
+
+    @staticmethod
+    def _job_is_terminal_or_missing(db: Session, job_id: str) -> bool:
+        """Read durable state without trusting a stale identity-map object."""
+        status = db.execute(
+            select(IngestionJob.status).where(IngestionJob.id == job_id)
+        ).scalar_one_or_none()
+        return status is None or status in TERMINAL_JOB_STATUSES
 
     @staticmethod
     def _process_with_document_service(db: Session, job: IngestionJob) -> None:
