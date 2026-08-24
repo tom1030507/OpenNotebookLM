@@ -7,11 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import models
 from app.services import ingestion_jobs
+from app.services.rate_limit import ConcurrencyLimiter
 from app.utils.time import utc_now
 
 
@@ -286,6 +287,105 @@ def test_enqueue_preserves_failed_history_and_creates_one_retry(job_database):
             "type": "RuntimeError",
             "message": "offline",
         }
+
+
+def test_completed_enqueue_result_does_not_retain_an_unclaimable_lease(
+    job_database,
+):
+    """A completed idempotent enqueue immediately releases its new slot.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-completed-result")
+        completed = models.IngestionJob(
+            id="completed-result-job",
+            document_id=document.id,
+            job_type="url",
+            payload_json={"url": "https://example.com/completed"},
+            status="completed",
+            attempts=1,
+            completed_at=utc_now(),
+        )
+        db.add(completed)
+        db.commit()
+
+        result = ingestion_jobs.enqueue_ingestion_job_with_result(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/completed"},
+        )
+
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    ingestion_jobs.release_all_operation_leases()
+    try:
+        retained = ingestion_jobs.retain_enqueued_operation_lease(
+            result,
+            limiter.acquire("ingest:user"),
+        )
+        assert not result.created_new_active
+        assert not retained
+        assert limiter.active("ingest:user") == 0
+    finally:
+        ingestion_jobs.release_all_operation_leases()
+
+
+def test_active_enqueue_result_cannot_replace_winner_lease_if_job_finishes(
+    job_database,
+):
+    """An active duplicate keeps immutable non-ownership across completion.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-active-result")
+        active = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/active"},
+        )
+        db.commit()
+        result = ingestion_jobs.enqueue_ingestion_job_with_result(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/active"},
+        )
+        active.status = "completed"
+        active.completed_at = utc_now()
+        db.commit()
+
+    limiter = ConcurrencyLimiter(max_concurrent=2)
+    ingestion_jobs.release_all_operation_leases()
+    try:
+        assert ingestion_jobs.retain_operation_lease(
+            active.id,
+            limiter.acquire("ingest:user"),
+        )
+        assert limiter.active("ingest:user") == 1
+        retained = ingestion_jobs.retain_enqueued_operation_lease(
+            result,
+            limiter.acquire("ingest:user"),
+        )
+        assert not result.created_new_active
+        assert not retained
+        assert limiter.active("ingest:user") == 1
+        ingestion_jobs.release_operation_lease(active.id)
+        assert limiter.active("ingest:user") == 0
+    finally:
+        ingestion_jobs.release_all_operation_leases()
 
 
 def test_recovery_requeues_abandoned_running_jobs(job_database):
@@ -686,3 +786,340 @@ def test_notify_from_request_thread_wakes_the_worker_loop(job_database):
             await worker.stop()
 
     asyncio.run(scenario())
+
+
+def test_transient_claim_failure_does_not_kill_supervisor(
+    job_database,
+    monkeypatch,
+):
+    """One SQLite busy claim is retried without losing the retained worker.
+
+    Args:
+        job_database: Isolated file database fixture.
+        monkeypatch: Pytest patch helper.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        add_document(db, "document-transient-claim")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id="document-transient-claim",
+            job_type="url",
+            payload={"url": "https://example.com/transient"},
+        )
+        db.commit()
+        job_id = job.id
+
+    real_claim = ingestion_jobs.claim_next_job
+    claim_calls = 0
+
+    def fail_once_claim(factory):
+        nonlocal claim_calls
+        claim_calls += 1
+        if claim_calls == 1:
+            raise OperationalError(
+                "UPDATE ingestion_jobs",
+                {},
+                RuntimeError("database is locked"),
+            )
+        return real_claim(factory)
+
+    def processor(db, claimed_job):
+        claimed_job.document.status = "ready"
+        db.commit()
+
+    monkeypatch.setattr(ingestion_jobs, "claim_next_job", fail_once_claim)
+
+    async def scenario():
+        worker = ingestion_jobs.IngestionJobWorker(
+            session_factory=session_factory,
+            processor=processor,
+            poll_interval=0.01,
+        )
+        await worker.start()
+        try:
+            assert await wait_for_job_status(
+                session_factory,
+                job_id,
+                "completed",
+                timeout=1,
+            ) == "completed"
+            assert worker._task is not None
+            assert not worker._task.done()
+        finally:
+            await worker.stop()
+
+    asyncio.run(scenario())
+    assert claim_calls >= 2
+
+
+def test_terminal_commit_failure_compensates_index_and_retains_lease(
+    job_database,
+):
+    """An ambiguous completion leaves recoverable running work, not an index.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    engine, setup_session_factory = job_database
+
+    class FailCompletedCommitSession(Session):
+        failures_remaining = 1
+        failure_seen = threading.Event()
+
+        def commit(self):
+            terminal_dirty = any(
+                isinstance(instance, models.IngestionJob)
+                and instance.status == "completed"
+                for instance in self.dirty
+            )
+            if terminal_dirty and self.__class__.failures_remaining:
+                self.__class__.failures_remaining -= 1
+                self.__class__.failure_seen.set()
+                raise OperationalError(
+                    "COMMIT",
+                    {},
+                    RuntimeError("terminal commit failed"),
+                )
+            return super().commit()
+
+    worker_session_factory = sessionmaker(
+        bind=engine,
+        class_=FailCompletedCommitSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    with setup_session_factory() as db:
+        add_document(db, "document-terminal-commit")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id="document-terminal-commit",
+            job_type="url",
+            payload={"url": "https://example.com/terminal"},
+        )
+        db.commit()
+        job_id = job.id
+
+    def processor(db, claimed_job):
+        chunk = models.Chunk(
+            id="terminal-chunk",
+            document_id=claimed_job.document_id,
+            text="committed searchable text",
+        )
+        db.add(chunk)
+        db.flush()
+        db.add(models.Embedding(
+            id="terminal-embedding",
+            chunk_id=chunk.id,
+            vector=b"vector",
+            vector_json=[1.0],
+            model_name="test-model",
+        ))
+        db.commit()
+        claimed_job.document.status = "ready"
+
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    ingestion_jobs.release_all_operation_leases()
+    ingestion_jobs.retain_operation_lease(
+        job_id,
+        limiter.acquire("ingest:user"),
+    )
+
+    async def scenario():
+        worker = ingestion_jobs.IngestionJobWorker(
+            session_factory=worker_session_factory,
+            processor=processor,
+            poll_interval=0.01,
+        )
+        await worker.start()
+        try:
+            assert await asyncio.to_thread(
+                FailCompletedCommitSession.failure_seen.wait,
+                1,
+            )
+            await asyncio.sleep(0.05)
+            with setup_session_factory() as db:
+                persisted = db.get(models.IngestionJob, job_id)
+                assert persisted.status == "running"
+                assert persisted.document.status == "processing"
+                assert db.query(models.Chunk).count() == 0
+                assert db.query(models.Embedding).count() == 0
+            assert limiter.active("ingest:user") == 1
+        finally:
+            await worker.stop()
+
+    try:
+        asyncio.run(scenario())
+        assert limiter.active("ingest:user") == 0
+        assert ingestion_jobs.recover_abandoned_jobs(
+            setup_session_factory,
+        ) == 1
+        with setup_session_factory() as db:
+            recovered = db.get(models.IngestionJob, job_id)
+            assert recovered.status == "queued"
+            assert recovered.document.status == "queued"
+    finally:
+        ingestion_jobs.release_all_operation_leases()
+
+
+def test_failed_terminal_commit_compensates_partial_index_and_retains_lease(
+    job_database,
+):
+    """A failed-state commit error removes processor checkpoints for recovery.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    engine, setup_session_factory = job_database
+
+    class FailFailedCommitSession(Session):
+        failures_remaining = 1
+        failure_seen = threading.Event()
+
+        def commit(self):
+            failed_dirty = any(
+                isinstance(instance, models.IngestionJob)
+                and instance.status == "failed"
+                for instance in self.dirty
+            )
+            if failed_dirty and self.__class__.failures_remaining:
+                self.__class__.failures_remaining -= 1
+                self.__class__.failure_seen.set()
+                raise OperationalError(
+                    "COMMIT",
+                    {},
+                    RuntimeError("failed-state commit failed"),
+                )
+            return super().commit()
+
+    worker_session_factory = sessionmaker(
+        bind=engine,
+        class_=FailFailedCommitSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    with setup_session_factory() as db:
+        add_document(db, "document-failed-terminal")
+        job = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id="document-failed-terminal",
+            job_type="url",
+            payload={"url": "https://example.com/failed-terminal"},
+        )
+        db.commit()
+        job_id = job.id
+
+    def processor(db, claimed_job):
+        chunk = models.Chunk(
+            id="failed-terminal-chunk",
+            document_id=claimed_job.document_id,
+            text="partial searchable text",
+        )
+        db.add(chunk)
+        db.flush()
+        db.add(models.Embedding(
+            id="failed-terminal-embedding",
+            chunk_id=chunk.id,
+            vector=b"vector",
+            vector_json=[1.0],
+            model_name="test-model",
+        ))
+        db.commit()
+        raise RuntimeError("processor failed after checkpoint")
+
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    ingestion_jobs.release_all_operation_leases()
+    ingestion_jobs.retain_operation_lease(
+        job_id,
+        limiter.acquire("ingest:user"),
+    )
+
+    async def scenario():
+        worker = ingestion_jobs.IngestionJobWorker(
+            session_factory=worker_session_factory,
+            processor=processor,
+            poll_interval=0.01,
+        )
+        await worker.start()
+        try:
+            assert await asyncio.to_thread(
+                FailFailedCommitSession.failure_seen.wait,
+                1,
+            )
+            await asyncio.sleep(0.05)
+            with setup_session_factory() as db:
+                persisted = db.get(models.IngestionJob, job_id)
+                assert persisted.status == "running"
+                assert persisted.document.status == "processing"
+                assert db.query(models.Chunk).count() == 0
+                assert db.query(models.Embedding).count() == 0
+            assert limiter.active("ingest:user") == 1
+        finally:
+            await worker.stop()
+
+    try:
+        asyncio.run(scenario())
+        assert limiter.active("ingest:user") == 0
+        assert ingestion_jobs.recover_abandoned_jobs(
+            setup_session_factory,
+        ) == 1
+    finally:
+        ingestion_jobs.release_all_operation_leases()
+
+
+def test_stop_cleans_global_state_after_unexpected_supervisor_failure(
+    job_database,
+    monkeypatch,
+):
+    """A failed supervisor cannot strand its global worker or quota lease.
+
+    Args:
+        job_database: Isolated file database fixture.
+        monkeypatch: Pytest patch helper.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    ingestion_jobs.release_all_operation_leases()
+    ingestion_jobs.retain_operation_lease(
+        "unexpected-supervisor-job",
+        limiter.acquire("ingest:user"),
+    )
+
+    async def scenario():
+        worker = ingestion_jobs.IngestionJobWorker(
+            session_factory=session_factory,
+            processor=lambda _db, _job: None,
+            poll_interval=0.01,
+        )
+
+        async def fail_supervisor():
+            raise RuntimeError("unexpected supervisor failure")
+
+        monkeypatch.setattr(worker, "_run", fail_supervisor)
+        await worker.start()
+        await asyncio.sleep(0)
+        with pytest.raises(RuntimeError, match="unexpected supervisor failure"):
+            await worker.stop()
+        assert worker._task is None
+        assert worker._loop is None
+        assert ingestion_jobs._active_worker is not worker
+
+    try:
+        asyncio.run(scenario())
+        assert limiter.active("ingest:user") == 0
+    finally:
+        ingestion_jobs.release_all_operation_leases()

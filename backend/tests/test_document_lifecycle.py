@@ -2,12 +2,15 @@
 import asyncio
 from io import BytesIO
 from pathlib import Path
+import threading
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.db.database import create_database_engine
 from app.db.models import (
     Base,
     Chunk,
@@ -19,6 +22,7 @@ from app.db.models import (
 )
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services import documents as document_module
+from app.services import ingestion_jobs as ingestion_job_module
 from app.services.documents import DocumentService
 from app.services.ingestion_jobs import (
     IngestionJobWorker,
@@ -175,6 +179,40 @@ class CommitThenFailEmbeddingService:
             db.commit()
             if self.calls == 1 and index == 0:
                 raise RuntimeError("embedding worker crashed")
+        return records
+
+
+class StableEmbeddingService:
+    """Persist one deterministic embedding for every committed chunk."""
+
+    def embed_chunks(self, db, document_id):
+        """Create searchable rows without loading an ML model.
+
+        Args:
+            db: Worker-owned Session.
+            document_id: Document whose chunks should be embedded.
+
+        Returns:
+            Persisted embedding rows.
+        """
+        records = []
+        chunks = (
+            db.query(Chunk)
+            .filter(Chunk.document_id == document_id)
+            .order_by(Chunk.start_offset, Chunk.id)
+            .all()
+        )
+        for index, chunk in enumerate(chunks):
+            record = Embedding(
+                id="stable-embedding-%s" % index,
+                chunk_id=chunk.id,
+                vector=b"vector",
+                vector_json=[float(index)],
+                model_name="test-model",
+            )
+            db.add(record)
+            records.append(record)
+        db.commit()
         return records
 
 
@@ -362,6 +400,110 @@ def test_pdf_commit_failure_releases_lease_and_removes_exact_upload(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("source_type", ["pdf", "url", "youtube"])
+def test_duplicate_enqueue_commit_failure_preserves_winner_lease(
+    source_type,
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """A duplicate request rollback cannot release the active winner's slot.
+
+    Args:
+        source_type: Durable enqueue entry point under test.
+        lifecycle_db: Isolated database Session.
+        tmp_path: Per-test upload directory.
+        monkeypatch: Pytest patch helper.
+
+    Returns:
+        None.
+    """
+    lifecycle_db.add(Document(
+        id="winner-document",
+        title="Existing active source",
+        source_type=source_type,
+        source_url="https://example.com/winner",
+        status="queued",
+    ))
+    lifecycle_db.commit()
+    winner_job = IngestionJob(
+        id="winner-job",
+        document_id="winner-document",
+        job_type=source_type,
+        payload_json={"source": "winner"},
+        status="queued",
+    )
+    lifecycle_db.add(winner_job)
+    lifecycle_db.commit()
+
+    limiter = ConcurrencyLimiter(max_concurrent=2)
+    release_all_operation_leases()
+    retain_operation_lease(
+        winner_job.id,
+        limiter.acquire("ingest:user"),
+    )
+    duplicate_lease = limiter.acquire("ingest:user")
+    duplicate_result = SimpleNamespace(
+        job=winner_job,
+        created_new_active=False,
+    )
+
+    monkeypatch.setattr(
+        document_module,
+        "enqueue_ingestion_job",
+        lambda *_args, **_kwargs: winner_job,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        document_module,
+        "enqueue_ingestion_job_with_result",
+        lambda *_args, **_kwargs: duplicate_result,
+        raising=False,
+    )
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(
+        lifecycle_db,
+        "commit",
+        lambda: (_ for _ in ()).throw(RuntimeError("duplicate commit failed")),
+    )
+    service = queued_service()
+
+    try:
+        with pytest.raises(RuntimeError, match="duplicate commit failed"):
+            if source_type == "pdf":
+                asyncio.run(service.process_pdf_upload(
+                    db=lifecycle_db,
+                    project_id="project-1",
+                    user_id=None,
+                    file=BytesIO(b"duplicate"),
+                    filename="duplicate.pdf",
+                    operation_lease=duplicate_lease,
+                ))
+            elif source_type == "url":
+                asyncio.run(service.process_url(
+                    db=lifecycle_db,
+                    project_id="project-1",
+                    user_id=None,
+                    url="https://example.com/duplicate",
+                    operation_lease=duplicate_lease,
+                ))
+            else:
+                asyncio.run(service.process_youtube(
+                    db=lifecycle_db,
+                    project_id="project-1",
+                    user_id=None,
+                    youtube_url="https://youtu.be/duplicate",
+                    operation_lease=duplicate_lease,
+                ))
+
+        assert limiter.active("ingest:user") == 1
+    finally:
+        release_all_operation_leases()
+        service.executor.shutdown(wait=True)
+
+    assert limiter.active("ingest:user") == 0
+
+
 def test_committed_pdf_survives_process_local_notify_failure(
     lifecycle_db,
     tmp_path,
@@ -531,6 +673,154 @@ def test_successful_document_delete_removes_pdf_after_commit(
     finally:
         release_all_operation_leases()
         service.executor.shutdown(wait=True)
+
+
+def test_delete_claim_race_keeps_running_lease_until_processor_finishes(
+    tmp_path,
+):
+    """A stale queued snapshot cannot release a job that won the claim race.
+
+    Args:
+        tmp_path: Per-test file database directory.
+
+    Returns:
+        None.
+    """
+    engine = create_database_engine(
+        "sqlite:///%s" % (tmp_path / "delete-claim-race.db"),
+        echo=False,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    with session_factory() as db:
+        db.add(Document(
+            id="document-delete-claim-race",
+            title="Delete claim race",
+            source_type="url",
+            source_url="https://example.com/delete-race",
+            status="queued",
+        ))
+        db.commit()
+        job = enqueue_ingestion_job(
+            db,
+            document_id="document-delete-claim-race",
+            job_type="url",
+            payload={"url": "https://example.com/delete-race"},
+        )
+        db.commit()
+        job_id = job.id
+
+    snapshot_ready = threading.Event()
+    allow_delete = threading.Event()
+    processor_started = threading.Event()
+    release_processor = threading.Event()
+
+    def pause_before_atomic_delete(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        context,
+        _executemany,
+    ):
+        normalized = " ".join(statement.lower().split())
+        if (
+            context.execution_options.get("delete_claim_race")
+            and normalized.startswith("delete from ingestion_jobs")
+            and "status" in normalized
+            and not snapshot_ready.is_set()
+        ):
+            snapshot_ready.set()
+            assert allow_delete.wait(timeout=2)
+
+    def pause_after_legacy_snapshot(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        context,
+        _executemany,
+    ):
+        normalized = " ".join(statement.lower().split())
+        if (
+            context.execution_options.get("delete_claim_race")
+            and normalized.startswith("select")
+            and "from ingestion_jobs" in normalized
+            and not snapshot_ready.is_set()
+        ):
+            snapshot_ready.set()
+            assert allow_delete.wait(timeout=2)
+
+    event.listen(engine, "before_cursor_execute", pause_before_atomic_delete)
+    event.listen(engine, "after_cursor_execute", pause_after_legacy_snapshot)
+
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    release_all_operation_leases()
+    retain_operation_lease(
+        job_id,
+        limiter.acquire("ingest:user"),
+    )
+    service = queued_service()
+
+    def blocking_processor(db, claimed_job):
+        document = claimed_job.document
+        processor_started.set()
+        release_processor.wait(timeout=2)
+        document.status = "ready"
+        db.commit()
+
+    def delete_document():
+        with session_factory() as db:
+            db.connection(execution_options={"delete_claim_race": True})
+            return service.delete_document(
+                db,
+                "document-delete-claim-race",
+            )
+
+    async def scenario():
+        delete_task = asyncio.create_task(asyncio.to_thread(delete_document))
+        assert await asyncio.to_thread(snapshot_ready.wait, 1)
+
+        worker = IngestionJobWorker(
+            session_factory=session_factory,
+            processor=blocking_processor,
+            poll_interval=0.01,
+        )
+        await worker.start()
+        try:
+            assert await asyncio.to_thread(processor_started.wait, 1)
+            allow_delete.set()
+            assert await delete_task
+            assert limiter.active("ingest:user") == 1
+        finally:
+            allow_delete.set()
+            release_processor.set()
+            await worker.stop()
+
+    try:
+        asyncio.run(scenario())
+        assert limiter.active("ingest:user") == 0
+    finally:
+        allow_delete.set()
+        release_processor.set()
+        release_all_operation_leases()
+        event.remove(
+            engine,
+            "before_cursor_execute",
+            pause_before_atomic_delete,
+        )
+        event.remove(
+            engine,
+            "after_cursor_execute",
+            pause_after_legacy_snapshot,
+        )
+        service.executor.shutdown(wait=True)
+        engine.dispose()
 
 
 def test_retry_removes_partial_index_before_rebuilding(tmp_path):
@@ -728,6 +1018,119 @@ def test_chunk_ceiling_failure_keeps_actionable_metadata(tmp_path):
             }
             assert db.query(Chunk).count() == 0
             assert db.query(Embedding).count() == 0
+    finally:
+        service.executor.shutdown(wait=True)
+        engine.dispose()
+
+
+def test_successful_retry_clears_stale_chunk_ceiling_metadata(tmp_path):
+    """A recovered source cannot remain labeled as over-limit after success.
+
+    Args:
+        tmp_path: Per-test file database directory.
+
+    Returns:
+        None.
+    """
+    class FailOnceChunker:
+        def __init__(self):
+            self.calls = 0
+            self.delegate = ChunkingService(
+                chunk_size=18,
+                chunk_overlap=0,
+            )
+
+        def chunk_document(self, db, document_id, max_chunks):
+            self.calls += 1
+            if self.calls == 1:
+                raise ChunkLimitExceededError(1001, max_chunks)
+            return self.delegate.chunk_document(
+                db,
+                document_id,
+                max_chunks=max_chunks,
+            )
+
+    engine = create_engine(
+        "sqlite:///%s" % (tmp_path / "chunk-limit-retry.db"),
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    service = DocumentService(
+        chunking_service=FailOnceChunker(),
+        embedding_service=StableEmbeddingService(),
+        max_chunks_per_doc=1000,
+    )
+    service.url_adapter = StaticURLAdapter()
+    with session_factory() as db:
+        db.add(Document(
+            id="document-limit-retry",
+            title="Retry after limit",
+            source_type="url",
+            source_url="https://example.com/limit-retry",
+            status="queued",
+            meta_json={"preserved": True},
+        ))
+        db.commit()
+        first_job = enqueue_ingestion_job(
+            db,
+            document_id="document-limit-retry",
+            job_type="url",
+            payload={"url": "https://example.com/limit-retry"},
+        )
+        db.commit()
+        first_job_id = first_job.id
+
+    async def scenario():
+        worker = IngestionJobWorker(
+            session_factory=session_factory,
+            processor=lambda db, job: service.process_ingestion_job(
+                db,
+                document_id=job.document_id,
+                job_type=job.job_type,
+                payload=job.payload_json,
+            ),
+            poll_interval=0.01,
+        )
+        await worker.start()
+        try:
+            assert await wait_for_terminal_job(
+                session_factory,
+                first_job_id,
+            ) == "failed"
+            with session_factory() as db:
+                failed_document = db.get(Document, "document-limit-retry")
+                assert "indexing_failure" in failed_document.meta_json
+                retry_job = enqueue_ingestion_job(
+                    db,
+                    document_id=failed_document.id,
+                    job_type="url",
+                    payload={"url": "https://example.com/limit-retry"},
+                )
+                db.commit()
+                retry_job_id = retry_job.id
+
+            assert await wait_for_terminal_job(
+                session_factory,
+                retry_job_id,
+            ) == "completed"
+        finally:
+            await worker.stop()
+
+    try:
+        asyncio.run(scenario())
+        with session_factory() as db:
+            recovered_document = db.get(Document, "document-limit-retry")
+            assert recovered_document.status == "ready"
+            assert recovered_document.meta_json["preserved"] is True
+            assert "indexing_failure" not in recovered_document.meta_json
+            assert db.query(Chunk).count() > 0
+            assert db.query(Embedding).count() == db.query(Chunk).count()
     finally:
         service.executor.shutdown(wait=True)
         engine.dispose()

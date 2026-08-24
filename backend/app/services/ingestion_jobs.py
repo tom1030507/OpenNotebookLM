@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from threading import Lock
 from typing import Callable, Dict, Optional
 import uuid
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 import structlog
 
@@ -27,6 +28,14 @@ JobProcessor = Callable[[Session, IngestionJob], None]
 _active_worker: Optional["IngestionJobWorker"] = None
 _lease_lock = Lock()
 _operation_leases: Dict[str, OperationLease] = {}
+
+
+@dataclass(frozen=True)
+class IngestionEnqueueResult:
+    """Durable enqueue row plus immutable ownership for request resources."""
+
+    job: IngestionJob
+    created_new_active: bool
 
 
 def enqueue_ingestion_job(
@@ -50,12 +59,37 @@ def enqueue_ingestion_job(
     Returns:
         The existing idempotent job or the newly queued retry.
     """
+    return enqueue_ingestion_job_with_result(
+        db,
+        document_id=document_id,
+        job_type=job_type,
+        payload=payload,
+    ).job
+
+
+def enqueue_ingestion_job_with_result(
+    db: Session,
+    document_id: str,
+    job_type: str,
+    payload: dict,
+) -> IngestionEnqueueResult:
+    """Enqueue work and report whether this call created the active row.
+
+    Args:
+        db: Session whose surrounding transaction owns the document creation.
+        document_id: Document to extract and index.
+        job_type: One of pdf, url, or youtube.
+        payload: Recoverable source references needed by the worker.
+
+    Returns:
+        The durable job and immutable lease-ownership decision.
+    """
     if job_type not in SUPPORTED_JOB_TYPES:
         raise ValueError("Unsupported ingestion job type: %s" % job_type)
 
     active = _active_job(db, document_id)
     if active is not None:
-        return active
+        return IngestionEnqueueResult(active, created_new_active=False)
 
     latest = (
         db.query(IngestionJob)
@@ -64,7 +98,7 @@ def enqueue_ingestion_job(
         .first()
     )
     if latest is not None and latest.status == "completed":
-        return latest
+        return IngestionEnqueueResult(latest, created_new_active=False)
 
     candidate = IngestionJob(
         id=str(uuid.uuid4()),
@@ -85,13 +119,17 @@ def enqueue_ingestion_job(
         active = _active_job(db, document_id)
         if active is None:
             raise
-        return active
+        return IngestionEnqueueResult(active, created_new_active=False)
 
     document = db.get(Document, document_id)
     if document is not None:
         document.status = "queued"
         document.error_message = None
-    return candidate
+        if "indexing_failure" in (document.meta_json or {}):
+            retry_metadata = dict(document.meta_json)
+            retry_metadata.pop("indexing_failure", None)
+            document.meta_json = retry_metadata
+    return IngestionEnqueueResult(candidate, created_new_active=True)
 
 
 def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
@@ -166,7 +204,10 @@ def claim_next_job(session_factory: sessionmaker) -> Optional[str]:
         return job_id
 
 
-def retain_operation_lease(job_id: str, lease: Optional[OperationLease]) -> None:
+def retain_operation_lease(
+    job_id: str,
+    lease: Optional[OperationLease],
+) -> bool:
     """Transfer an in-process ingestion slot to one durable job.
 
     Args:
@@ -174,16 +215,37 @@ def retain_operation_lease(job_id: str, lease: Optional[OperationLease]) -> None
         lease: Request-acquired operation lease, if rate limiting is enabled.
 
     Returns:
-        None.
+        True only when this call stored the lease for the job.
     """
     if lease is None:
-        return
+        return False
     with _lease_lock:
         if job_id in _operation_leases:
             # An idempotent duplicate does not own a second durable operation.
             lease.release()
-            return
+            return False
         _operation_leases[job_id] = lease
+        return True
+
+
+def retain_enqueued_operation_lease(
+    enqueue_result: IngestionEnqueueResult,
+    lease: Optional[OperationLease],
+) -> bool:
+    """Retain a request slot only for the active row this call created.
+
+    Args:
+        enqueue_result: Immutable result from the enqueue transaction.
+        lease: Request-acquired operation lease, if rate limiting is enabled.
+
+    Returns:
+        True only when this request now owns the job's retained lease.
+    """
+    if not enqueue_result.created_new_active:
+        if lease is not None:
+            lease.release()
+        return False
+    return retain_operation_lease(enqueue_result.job.id, lease)
 
 
 def release_operation_lease(job_id: str) -> None:
@@ -315,12 +377,16 @@ class IngestionJobWorker:
             return
         self._stop_event.set()
         self._wake_event.set()
-        await task
-        self._task = None
-        self._loop = None
-        if _active_worker is self:
-            _active_worker = None
-        release_all_operation_leases()
+        try:
+            await task
+        finally:
+            # A supervisor exception must not leave future notifications aimed
+            # at a dead task or strand request quota until process exit.
+            self._task = None
+            self._loop = None
+            if _active_worker is self:
+                _active_worker = None
+            release_all_operation_leases()
 
     def notify(self) -> None:
         """Wake the queue poller after newly committed work arrives.
@@ -352,10 +418,22 @@ class IngestionJobWorker:
                     len(active_tasks) < self.concurrency
                     and not self._stop_event.is_set()
                 ):
-                    job_id = await asyncio.to_thread(
-                        claim_next_job,
-                        self.session_factory,
-                    )
+                    try:
+                        job_id = await asyncio.to_thread(
+                            claim_next_job,
+                            self.session_factory,
+                        )
+                    except OperationalError as error:
+                        # SQLITE_BUSY is expected under bounded concurrent
+                        # writers. A single contested claim must not kill the
+                        # lifespan supervisor and every later ingestion job.
+                        logger.warning(
+                            "Ingestion job claim failed; retrying",
+                            error_type=type(error).__name__,
+                            error=str(error),
+                        )
+                        await self._wait_for_wake()
+                        continue
                     if job_id is None:
                         break
                     active_tasks.add(asyncio.create_task(
@@ -456,8 +534,18 @@ class IngestionJobWorker:
                                         "action": action,
                                     },
                                 }
-                        db.commit()
-                        terminal_persisted = True
+                        try:
+                            db.commit()
+                            terminal_persisted = True
+                        except Exception as terminal_error:
+                            db.rollback()
+                            terminal_persisted = (
+                                self._compensate_terminal_commit_failure(
+                                    db,
+                                    job_id,
+                                    terminal_error,
+                                )
+                            )
                     else:
                         # Deleting a running document cascades its durable job.
                         # No database row remains to own the process-local slot.
@@ -475,8 +563,19 @@ class IngestionJobWorker:
                     completed_job.status = "completed"
                     completed_job.last_error = None
                     completed_job.completed_at = utc_now()
-                    db.commit()
-                    terminal_persisted = True
+                    try:
+                        db.commit()
+                        terminal_persisted = True
+                    except Exception as error:
+                        db.rollback()
+                        terminal_persisted = (
+                            self._compensate_terminal_commit_failure(
+                                db,
+                                job_id,
+                                error,
+                            )
+                        )
+                        return
                 else:
                     terminal_persisted = True
         finally:
@@ -493,6 +592,72 @@ class IngestionJobWorker:
         ):
             db.delete(chunk)
         db.flush()
+
+    def _compensate_terminal_commit_failure(
+        self,
+        db: Session,
+        job_id: str,
+        commit_error: Exception,
+    ) -> bool:
+        """Remove a committed index when terminal persistence is ambiguous.
+
+        Args:
+            db: Rolled-back worker Session that can start a new transaction.
+            job_id: Job whose terminal-state commit failed.
+            commit_error: Original terminal-state persistence error.
+
+        Returns:
+            True only if the job is already terminal or no longer exists.
+        """
+        try:
+            persisted_job = db.get(IngestionJob, job_id)
+            if persisted_job is None:
+                return True
+            if persisted_job.status in TERMINAL_JOB_STATUSES:
+                # Some drivers can report a failed/unknown commit after the
+                # database accepted it. Never erase a confirmed terminal index.
+                return True
+            if persisted_job.status != "running":
+                logger.error(
+                    "Ingestion terminal commit left unexpected job state",
+                    job_id=job_id,
+                    status=persisted_job.status,
+                    commit_error=str(commit_error),
+                )
+                return False
+
+            self._delete_document_index(db, persisted_job.document_id)
+            if persisted_job.document is not None:
+                persisted_job.document.status = "processing"
+                persisted_job.document.error_message = None
+            db.commit()
+            logger.error(
+                "Ingestion terminal commit failed; index compensated",
+                job_id=job_id,
+                error_type=type(commit_error).__name__,
+                error=str(commit_error),
+            )
+        except Exception as cleanup_error:
+            try:
+                db.rollback()
+            except Exception as rollback_error:
+                logger.error(
+                    "Ingestion terminal compensation rollback failed",
+                    job_id=job_id,
+                    commit_error=str(commit_error),
+                    cleanup_error=str(cleanup_error),
+                    rollback_error=str(rollback_error),
+                )
+                return False
+            logger.error(
+                "Ingestion terminal compensation failed",
+                job_id=job_id,
+                commit_error=str(commit_error),
+                cleanup_error=str(cleanup_error),
+            )
+        # A running job continues to own its lease and is requeued only by the
+        # next single-process startup recovery.
+        return False
 
     @staticmethod
     def _process_with_document_service(db: Session, job: IngestionJob) -> None:

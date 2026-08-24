@@ -6,9 +6,16 @@ from pathlib import Path
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import structlog
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from app.db.models import Chunk, Document, Project, ProjectDocument
+from app.db.models import (
+    Chunk,
+    Document,
+    IngestionJob,
+    Project,
+    ProjectDocument,
+)
 from app.schemas import DocumentCreate
 from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
@@ -16,10 +23,10 @@ from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
 from app.services.embeddings import EmbeddingService
 from app.services.ingestion_jobs import (
-    enqueue_ingestion_job,
+    enqueue_ingestion_job_with_result,
     notify_ingestion_worker,
     release_operation_lease,
-    retain_operation_lease,
+    retain_enqueued_operation_lease,
 )
 from app.services.rate_limit import OperationLease, UnlimitedConcurrencyLease
 from app.utils.time import utc_now_iso
@@ -296,6 +303,7 @@ class DocumentService:
         lease = _operation_lease(operation_lease)
         file_path = None
         retained = False
+        owns_retained_lease = False
         job_id = None
         database_touched = False
         try:
@@ -344,14 +352,18 @@ class DocumentService:
             )
             db.add(project_doc)
 
-            job = enqueue_ingestion_job(
+            enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
                 job_type="pdf",
                 payload={"file_path": str(file_path)},
             )
+            job = enqueue_result.job
             job_id = job.id
-            retain_operation_lease(job_id, operation_lease)
+            owns_retained_lease = retain_enqueued_operation_lease(
+                enqueue_result,
+                operation_lease,
+            )
             db.commit()
             retained = True
             try:
@@ -376,7 +388,7 @@ class DocumentService:
         except Exception as e:
             if database_touched:
                 db.rollback()
-            if job_id is not None and not retained:
+            if owns_retained_lease and not retained:
                 release_operation_lease(job_id)
             elif job_id is None:
                 lease.release()
@@ -500,6 +512,7 @@ class DocumentService:
         lease = _operation_lease(operation_lease)
         job_id = None
         retained = False
+        owns_retained_lease = False
         try:
             # Generate document ID
             doc_id = str(uuid.uuid4())
@@ -527,14 +540,18 @@ class DocumentService:
             )
             db.add(project_doc)
 
-            job = enqueue_ingestion_job(
+            enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
                 job_type="url",
                 payload={"url": url},
             )
+            job = enqueue_result.job
             job_id = job.id
-            retain_operation_lease(job_id, operation_lease)
+            owns_retained_lease = retain_enqueued_operation_lease(
+                enqueue_result,
+                operation_lease,
+            )
             db.commit()
             retained = True
             try:
@@ -555,7 +572,7 @@ class DocumentService:
             
         except Exception as e:
             db.rollback()
-            if job_id is not None and not retained:
+            if owns_retained_lease and not retained:
                 release_operation_lease(job_id)
             elif job_id is None:
                 lease.release()
@@ -688,6 +705,7 @@ class DocumentService:
         lease = _operation_lease(operation_lease)
         job_id = None
         retained = False
+        owns_retained_lease = False
         try:
             # Generate document ID
             doc_id = str(uuid.uuid4())
@@ -715,14 +733,18 @@ class DocumentService:
             )
             db.add(project_doc)
 
-            job = enqueue_ingestion_job(
+            enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
                 job_type="youtube",
                 payload={"youtube_url": youtube_url},
             )
+            job = enqueue_result.job
             job_id = job.id
-            retain_operation_lease(job_id, operation_lease)
+            owns_retained_lease = retain_enqueued_operation_lease(
+                enqueue_result,
+                operation_lease,
+            )
             db.commit()
             retained = True
             try:
@@ -743,7 +765,7 @@ class DocumentService:
             
         except Exception as e:
             db.rollback()
-            if job_id is not None and not retained:
+            if owns_retained_lease and not retained:
                 release_operation_lease(job_id)
             elif job_id is None:
                 lease.release()
@@ -988,17 +1010,25 @@ class DocumentService:
         if not doc:
             return False
 
-        queued_job_ids = [
-            job.id
-            for job in doc.ingestion_jobs
-            if job.status == "queued"
-        ]
-        
         file_path = (
             Path(doc.source_url)
             if doc.source_type == "pdf" and doc.source_url
             else None
         )
+
+        # This conditional DELETE competes for SQLite's writer lock with the
+        # worker's conditional claim UPDATE. Only rows that are still queued
+        # at the write boundary return an id whose request lease may be
+        # released; a claim winner remains owned until its processor exits.
+        queued_job_ids = list(db.execute(
+            delete(IngestionJob)
+            .where(
+                IngestionJob.document_id == doc_id,
+                IngestionJob.status == "queued",
+            )
+            .returning(IngestionJob.id)
+            .execution_options(synchronize_session="fetch")
+        ).scalars())
 
         # Commit the durable state first. Removing the only recoverable PDF
         # before a failed database delete would leave a queued job that can
