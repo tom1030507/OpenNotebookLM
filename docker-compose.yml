@@ -15,6 +15,8 @@ services:
       DB_PATH: /app/data/opennotebook.db
       DATABASE_URL: sqlite:////app/data/opennotebook.db
       EMB_BACKEND: sqlitevec
+      EMB_MODEL_NAME: ${EMB_MODEL_NAME:-intfloat/multilingual-e5-base}
+      EMB_DIMENSION: ${EMB_DIMENSION:-768}
       # sentence-transformers caches downloaded models under $HOME/.cache/torch,
       # which lives in the container's writable layer — recreating the container
       # would re-download gigabytes. Point it at the mounted models volume.
@@ -51,7 +53,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # A first-run model download/load can delay the HTTP listener for over 90s.
+      # Keep those expected connection failures inside the startup grace window.
+      start_period: 10m
+      start_interval: 5s
     restart: unless-stopped
 
   frontend:

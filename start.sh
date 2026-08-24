@@ -71,7 +71,7 @@ if [ "$COMPOSE_STATUS" -ne 0 ]; then
 fi
 
 echo "Starting services..."
-docker compose "${PROFILE_ARGS[@]}" up -d --build --wait --wait-timeout 180
+docker compose "${PROFILE_ARGS[@]}" up -d --build --wait --wait-timeout 900
 COMPOSE_STATUS=$?
 if [ "$COMPOSE_STATUS" -ne 0 ]; then
     echo "ERROR: Compose failed to start services (exit $COMPOSE_STATUS)."

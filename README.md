@@ -103,9 +103,9 @@ first request downloads the embedding model, so expect a slow cold start.
 <details>
 <summary><b>Docker Compose</b> — any platform (recommended)</summary>
 
-Needs Docker 20.10+, Docker Compose 2.20+ (for the retained compatibility
-wrapper), roughly 4 GB of RAM, and 10 GB of disk for the images and embedding
-model.
+Needs Docker 25.0+, Docker Compose 2.20.2+ (for `healthcheck.start_interval`
+and the retained compatibility wrapper), roughly 4 GB of RAM, and 10 GB of
+disk for the images and embedding model.
 
 ```bash
 cp .env.example .env

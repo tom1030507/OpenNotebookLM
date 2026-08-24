@@ -120,7 +120,7 @@ jobs:
           JWT_SECRET_KEY: ci-only-not-a-production-secret
           LLM_MODE: none
         run: |
-          docker compose up -d --wait --wait-timeout 180
+          docker compose up -d --wait --wait-timeout 900
           docker compose exec -T backend sh -eu -c '
             test "$(id -u)" = 1000
             for path in /app/data/.write-probe /app/models/.write-probe /app/uploads/.write-probe; do
@@ -140,7 +140,7 @@ jobs:
           JWT_SECRET_KEY: ci-only-not-a-production-secret
           LLM_MODE: none
         run: |
-          docker compose -f deploy/docker-compose.yml up -d --wait --wait-timeout 180
+          docker compose -f deploy/docker-compose.yml up -d --wait --wait-timeout 900
           docker compose -f deploy/docker-compose.yml exec -T backend sh -eu -c '
             test "$(id -u)" = 1000
             for path in /app/data/.write-probe /app/models/.write-probe /app/uploads/.write-probe; do

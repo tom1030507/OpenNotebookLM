@@ -68,11 +68,13 @@ class LauncherExitTests(unittest.TestCase):
     def run_launcher(
         self,
         profile: str | None = None,
+        required_wait_timeout: int | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run the native launcher with controlled Docker command failures.
 
         Args:
             profile: Optional launcher profile supplied as one quoted argument.
+            required_wait_timeout: Exact wait budget required by the Docker double.
 
         Returns:
             The completed launcher process with captured combined output.
@@ -83,9 +85,8 @@ class LauncherExitTests(unittest.TestCase):
 
         if os.name == "nt":
             shutil.copy2(REPO_ROOT / "start.bat", self.checkout / "start.bat")
-            write_executable(
-                self.bin_dir / "docker.cmd",
-                """@echo off
+            if required_wait_timeout is None:
+                docker_double = """@echo off
 :scan
 if "%~1"=="" exit /b 0
 if "%~1"=="version" exit /b 0
@@ -96,8 +97,29 @@ if "%~1"=="up" (
 )
 shift
 goto scan
-""",
-            )
+"""
+            else:
+                docker_double = f"""@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+set "PREVIOUS="
+set "SAW_UP="
+:scan
+if "%~1"=="" (
+  if defined SAW_UP exit /b 86
+  exit /b 0
+)
+if "%~1"=="version" exit /b 0
+if "%~1"=="config" exit /b 0
+if "%~1"=="up" set "SAW_UP=1"
+if "!PREVIOUS!"=="--wait-timeout" (
+  if "%~1"=="{required_wait_timeout}" exit /b 0
+  exit /b 86
+)
+set "PREVIOUS=%~1"
+shift
+goto scan
+"""
+            write_executable(self.bin_dir / "docker.cmd", docker_double)
             write_executable(
                 self.bin_dir / "docker-compose.cmd",
                 "@echo off\necho synthetic compose failure 1>&2\nexit /b 42\n",
@@ -119,9 +141,8 @@ goto scan
         else:
             launcher = self.checkout / "start.sh"
             shutil.copy2(REPO_ROOT / "start.sh", launcher)
-            write_executable(
-                self.bin_dir / "docker",
-                """#!/bin/sh
+            if required_wait_timeout is None:
+                docker_double = """#!/bin/sh
 for argument in "$@"; do
   [ "$argument" = version ] && exit 0
   [ "$argument" = config ] && exit 0
@@ -131,8 +152,25 @@ for argument in "$@"; do
   fi
 done
 exit 0
-""",
-            )
+"""
+            else:
+                docker_double = f"""#!/bin/sh
+previous=''
+saw_up=0
+for argument in "$@"; do
+  [ "$argument" = version ] && exit 0
+  [ "$argument" = config ] && exit 0
+  [ "$argument" = up ] && saw_up=1
+  if [ "$previous" = --wait-timeout ]; then
+    [ "$argument" = {required_wait_timeout} ] && exit 0
+    exit 86
+  fi
+  previous="$argument"
+done
+[ "$saw_up" -eq 0 ] && exit 0
+exit 86
+"""
+            write_executable(self.bin_dir / "docker", docker_double)
             write_executable(
                 self.bin_dir / "docker-compose",
                 "#!/bin/sh\necho 'synthetic compose failure' >&2\nexit 42\n",
@@ -184,6 +222,17 @@ exit 0
         self.assertFalse(marker.exists(), result.stdout)
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("ERROR: Unknown profile. Use", result.stdout)
+
+    def test_launcher_waits_through_the_cold_model_startup_budget(self) -> None:
+        """A healthy cold start may take the full production wait budget."""
+        env_file = self.checkout / ".env"
+        shutil.copy2(REPO_ROOT / ".env.example", env_file)
+        set_jwt(env_file)
+
+        result = self.run_launcher(required_wait_timeout=900)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(FALSE_SUCCESS_BANNER, result.stdout)
 
     def test_fresh_launcher_rejects_the_copied_blank_jwt(self) -> None:
         """Copying the example may not proceed with its required secret blank."""

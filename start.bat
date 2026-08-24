@@ -67,7 +67,7 @@ if errorlevel 1 (
 )
 
 echo Starting services...
-call docker compose !PROFILE_ARGS! up -d --build --wait --wait-timeout 180
+call docker compose !PROFILE_ARGS! up -d --build --wait --wait-timeout 900
 if errorlevel 1 (
     set "COMPOSE_STATUS=!ERRORLEVEL!"
     echo ERROR: Compose failed to start services ^(exit !COMPOSE_STATUS!^).

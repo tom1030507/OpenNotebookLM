@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -15,14 +16,24 @@ COMPOSE_FILES = (
     REPO_ROOT / "deploy" / "docker-compose.yml",
 )
 TEST_JWT = "compose-contract-only-0123456789abcdef"
+DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
+DEFAULT_EMBEDDING_DIMENSION = "768"
+OBSERVED_COLD_START_SECONDS = 91
+MINIMUM_START_PERIOD_SECONDS = 600
+EXPECTED_WAIT_TIMEOUT_SECONDS = 900
 
 
-def compose_config(compose_file: Path, jwt_secret: str = TEST_JWT) -> dict:
+def compose_config(
+    compose_file: Path,
+    jwt_secret: str = TEST_JWT,
+    environment_overrides: dict[str, str] | None = None,
+) -> dict:
     """Render one production Compose entry point into its normalized model.
 
     Args:
         compose_file: Compose file users may launch.
         jwt_secret: Signing secret written to the controlled environment file.
+        environment_overrides: Controlled host values passed to Compose.
 
     Returns:
         The normalized Compose model decoded from JSON.
@@ -40,8 +51,16 @@ def compose_config(compose_file: Path, jwt_secret: str = TEST_JWT) -> dict:
         env_path = Path(env_file.name)
 
     environment = os.environ.copy()
-    for name in ("JWT_SECRET_KEY", "DEBUG", "CORS_ORIGINS", "BACKEND_INTERNAL_URL"):
+    for name in (
+        "JWT_SECRET_KEY",
+        "DEBUG",
+        "CORS_ORIGINS",
+        "BACKEND_INTERNAL_URL",
+        "EMB_MODEL_NAME",
+        "EMB_DIMENSION",
+    ):
         environment.pop(name, None)
+    environment.update(environment_overrides or {})
 
     try:
         result = subprocess.run(
@@ -71,6 +90,43 @@ def compose_config(compose_file: Path, jwt_secret: str = TEST_JWT) -> dict:
 
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
+
+
+def duration_seconds(value: str) -> int:
+    """Convert a normalized Compose duration to whole seconds.
+
+    Args:
+        value: Normalized duration containing integer `h`, `m`, or `s` parts.
+
+    Returns:
+        The represented number of seconds.
+
+    Raises:
+        AssertionError: If the normalized duration has an unexpected shape.
+    """
+    parts = re.findall(r"(\d+)([hms])", value)
+    reconstructed = "".join(f"{amount}{unit}" for amount, unit in parts)
+    assert parts and reconstructed == value, f"Unexpected Compose duration: {value}"
+    multipliers = {"h": 3600, "m": 60, "s": 1}
+    return sum(int(amount) * multipliers[unit] for amount, unit in parts)
+
+
+def ci_runtime_wait_timeouts() -> list[int]:
+    """Read the wait budgets declared by the two CI runtime smoke commands.
+
+    Returns:
+        Wait-timeout values from root and compatibility runtime smoke commands.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8",
+    )
+    return [
+        int(value)
+        for value in re.findall(
+            r"docker compose[^\n]*\bup -d --wait --wait-timeout (\d+)",
+            workflow,
+        )
+    ]
 
 
 def missing_secret_result(compose_file: Path) -> subprocess.CompletedProcess[str]:
@@ -149,6 +205,83 @@ class ComposeContractTests(unittest.TestCase):
                     frontend["environment"]["BACKEND_INTERNAL_URL"],
                     "http://backend:8000",
                 )
+
+    def test_every_entry_point_defaults_the_embedding_contract(self) -> None:
+        """Cold production starts must use the application's documented model."""
+        for compose_file in COMPOSE_FILES:
+            with self.subTest(compose_file=compose_file):
+                backend_environment = compose_config(compose_file)["services"][
+                    "backend"
+                ]["environment"]
+
+                self.assertEqual(
+                    backend_environment.get("EMB_MODEL_NAME"),
+                    DEFAULT_EMBEDDING_MODEL,
+                )
+                self.assertEqual(
+                    backend_environment.get("EMB_DIMENSION"),
+                    DEFAULT_EMBEDDING_DIMENSION,
+                )
+
+    def test_every_entry_point_forwards_embedding_overrides(self) -> None:
+        """A host-selected model and dimension must reach the backend process."""
+        overrides = {
+            "EMB_MODEL_NAME": "sentence-transformers/paraphrase-MiniLM-L3-v2",
+            "EMB_DIMENSION": "384",
+        }
+
+        for compose_file in COMPOSE_FILES:
+            with self.subTest(compose_file=compose_file):
+                backend_environment = compose_config(
+                    compose_file,
+                    environment_overrides=overrides,
+                )["services"]["backend"]["environment"]
+
+                self.assertEqual(
+                    backend_environment.get("EMB_MODEL_NAME"),
+                    "sentence-transformers/paraphrase-MiniLM-L3-v2",
+                )
+                self.assertEqual(
+                    backend_environment.get("EMB_DIMENSION"),
+                    "384",
+                )
+
+    def test_startup_health_grace_covers_cold_model_bootstrap(self) -> None:
+        """Cold model bootstrap may not exhaust backend health retries."""
+        root_health = compose_config(COMPOSE_FILES[0])["services"]["backend"][
+            "healthcheck"
+        ]
+
+        for compose_file in COMPOSE_FILES:
+            with self.subTest(compose_file=compose_file):
+                health = compose_config(compose_file)["services"]["backend"][
+                    "healthcheck"
+                ]
+                self.assertEqual(health, root_health)
+
+        self.assertIn("start_interval", root_health)
+        start_period = duration_seconds(root_health["start_period"])
+        start_interval = duration_seconds(root_health["start_interval"])
+
+        self.assertGreater(start_period, OBSERVED_COLD_START_SECONDS)
+        self.assertGreaterEqual(start_period, MINIMUM_START_PERIOD_SECONDS)
+        self.assertLessEqual(start_interval, 5)
+
+    def test_ci_wait_budget_covers_normalized_health_failure_boundary(self) -> None:
+        """CI may not stop before Compose could finish backend health retries."""
+        health = compose_config(COMPOSE_FILES[0])["services"]["backend"][
+            "healthcheck"
+        ]
+        start_period = duration_seconds(health["start_period"])
+        interval = duration_seconds(health["interval"])
+        timeout = duration_seconds(health["timeout"])
+        failure_boundary = start_period + health["retries"] * (interval + timeout)
+
+        self.assertEqual(
+            ci_runtime_wait_timeouts(),
+            [EXPECTED_WAIT_TIMEOUT_SECONDS, EXPECTED_WAIT_TIMEOUT_SECONDS],
+        )
+        self.assertGreaterEqual(EXPECTED_WAIT_TIMEOUT_SECONDS, failure_boundary)
 
     def test_persistent_service_state_uses_engine_managed_volumes(self) -> None:
         """Fresh rootful launches must not create root-owned host bind folders."""
