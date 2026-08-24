@@ -7,6 +7,7 @@ import psutil
 
 from app.db.database import get_db
 from app.config import get_settings
+from app.services.retrieval_index import get_retrieval_index
 from app.utils.time import utc_now_iso
 
 router = APIRouter()
@@ -46,6 +47,12 @@ async def health_check():
     memory_info = process.memory_info()
 
     llm_provider, llm_model = _configured_llm()
+    retrieval_status = get_retrieval_index().status()
+    retrieval_payload = (
+        retrieval_status.as_dict()
+        if hasattr(retrieval_status, "as_dict")
+        else dict(retrieval_status)
+    )
 
     return {
         "ok": True,
@@ -53,6 +60,10 @@ async def health_check():
         "version": "0.1.0",
         "environment": settings.app_env,
         "database": "unchecked; use /readyz",
+        # Index status is derived from loaded extension/schema capability only.
+        # It never constructs EmbeddingService or downloads the model, keeping
+        # this liveness endpoint cheap and independent of ML availability.
+        "retrieval": retrieval_payload,
         "system": {
             "cpu_percent": psutil.cpu_percent(),
             "memory_mb": memory_info.rss / 1024 / 1024,

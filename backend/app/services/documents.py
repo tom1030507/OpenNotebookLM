@@ -22,6 +22,7 @@ from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
+from app.services.retrieval_index import get_retrieval_index
 from app.services.ingestion_jobs import (
     enqueue_ingestion_job_with_result,
     notify_ingestion_worker,
@@ -243,9 +244,38 @@ class DocumentService:
         if doc:
             doc.status = "ready"
             doc.error_message = None
+            self._publish_document_index(db, doc_id)
             db.commit()
 
         return "ready"
+
+    def _publish_document_index(self, db: Session, doc_id: str) -> None:
+        """Publish completed vectors through either embedding implementation.
+
+        Args:
+            db: Transaction that is changing the document to ``ready``.
+            doc_id: Document whose index should become searchable.
+
+        Returns:
+            None.
+        """
+        publisher = getattr(
+            self.embedding_service,
+            "publish_document_index",
+            None,
+        )
+        if publisher is not None:
+            publisher(db, doc_id)
+            return
+
+        # Lightweight embedding implementations only promise embed_chunks.
+        # Flush the pending ready state so the general reconciliation path can
+        # derive searchable=True without requiring a model-service method.
+        db.flush()
+        get_retrieval_index().backfill(
+            db,
+            document_ids=[doc_id],
+        )
 
     def _mark_chunk_limit_failed(
         self,
@@ -280,6 +310,7 @@ class DocumentService:
                 # Re-read and re-delete on every attempt. A rollback after a
                 # failed commit restores both the rows and the document, so
                 # retrying only commit would falsely report a clean database.
+                get_retrieval_index().delete_document(db, doc_id)
                 for chunk in (
                     db.query(Chunk)
                     .filter(Chunk.document_id == doc_id)
@@ -358,6 +389,7 @@ class DocumentService:
         """
         db.rollback()
 
+        get_retrieval_index().delete_document(db, doc_id)
         doc = db.query(Document).filter(Document.id == doc_id).first()
         if doc:
             doc.status = "error"
@@ -1071,6 +1103,7 @@ class DocumentService:
         document = db.get(Document, document_id)
         document.status = "ready"
         document.error_message = None
+        self._publish_document_index(db, document_id)
         return "ready"
     
     def get_document_status(self, db: Session, doc_id: str) -> Optional[Document]:
@@ -1123,6 +1156,7 @@ class DocumentService:
         # Commit the durable state first. Removing the only recoverable PDF
         # before a failed database delete would leave a queued job that can
         # never succeed after restart.
+        get_retrieval_index().delete_document(db, doc_id)
         db.delete(doc)
         try:
             db.commit()

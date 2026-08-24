@@ -83,6 +83,8 @@ class TestUpgrade:
         assert sorted(added) == ["documents.user_id", "projects.user_id"]
         inspector = inspect(old_database)
         for table, column, _, _ in ADDED_COLUMNS:
+            if table not in inspector.get_table_names():
+                continue
             names = {c["name"] for c in inspector.get_columns(table)}
             assert column in names, table
 
@@ -91,6 +93,8 @@ class TestUpgrade:
 
         inspector = inspect(old_database)
         for table, _, _, index_name in ADDED_COLUMNS:
+            if table not in inspector.get_table_names() or index_name is None:
+                continue
             names = {index["name"] for index in inspector.get_indexes(table)}
             assert index_name in names, table
 

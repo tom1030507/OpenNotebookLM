@@ -1,9 +1,41 @@
 """Tests for SQLite engine pooling and connection safety."""
 import pytest
+from sqlalchemy import inspect
 from sqlalchemy.pool import StaticPool
 
 from app.db import database
 from app.db.models import Base, Document, IngestionJob
+
+
+def test_added_columns_upgrades_stored_fts_posting_tokens(tmp_path):
+    """An interim retrieval table gains exact indexed tokens idempotently.
+
+    Args:
+        tmp_path: Per-test database directory.
+
+    Returns:
+        None.
+    """
+    engine = database.create_database_engine(
+        "sqlite:///%s" % (tmp_path / "retrieval-upgrade.db"),
+        echo=False,
+    )
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE retrieval_index_entries (id INTEGER PRIMARY KEY)"
+            )
+
+        assert database.ensure_added_columns(engine) == [
+            "retrieval_index_entries.indexed_lexical_text"
+        ]
+        assert "indexed_lexical_text" in {
+            column["name"]
+            for column in inspect(engine).get_columns("retrieval_index_entries")
+        }
+        assert database.ensure_added_columns(engine) == []
+    finally:
+        engine.dispose()
 
 
 def test_file_sqlite_sessions_use_distinct_isolated_connections(tmp_path):
@@ -65,6 +97,45 @@ def test_file_sqlite_sets_pragmas_on_every_connection(tmp_path):
                 assert connection.exec_driver_sql(
                     "PRAGMA journal_mode"
                 ).scalar_one().lower() == "wal"
+    finally:
+        engine.dispose()
+
+
+def test_file_sqlite_loads_sqlite_vec_on_every_connection(tmp_path):
+    """Every pooled connection can execute vec functions before a first query."""
+    engine = database.create_database_engine(
+        "sqlite:///%s" % (tmp_path / "sqlite-vec.db"),
+        echo=False,
+    )
+    try:
+        with engine.connect() as first, engine.connect() as second:
+            assert first.exec_driver_sql("SELECT vec_version()").scalar_one() == "v0.1.9"
+            assert second.exec_driver_sql("SELECT vec_version()").scalar_one() == "v0.1.9"
+    finally:
+        engine.dispose()
+
+
+def test_init_db_creates_retrieval_schema_before_the_first_query(
+    monkeypatch,
+    tmp_path,
+):
+    """Startup publishes active vec/FTS health without waiting for retrieval."""
+    engine = database.create_database_engine(
+        "sqlite:///%s" % (tmp_path / "startup-index.db"),
+        echo=False,
+    )
+    monkeypatch.setattr(database, "engine", engine)
+    monkeypatch.setattr(database.settings, "emb_dimension", 2)
+    try:
+        database.init_db()
+        with engine.connect() as connection:
+            names = set(
+                connection.exec_driver_sql(
+                    "SELECT name FROM sqlite_master"
+                ).scalars()
+            )
+        assert "retrieval_index_vec" in names
+        assert "retrieval_index_fts" in names
     finally:
         engine.dispose()
 

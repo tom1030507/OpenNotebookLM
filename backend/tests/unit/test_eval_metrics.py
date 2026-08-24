@@ -108,3 +108,35 @@ class TestIndexHealth:
         health = eval_metrics.index_health([], chunk_size=512, headings=[])
         assert health["chunks"] == 0
         assert health["share_boilerplate"] == 0.0
+
+
+class TestRetrievalPerformance:
+    """Candidate pool and latency summaries stay comparable between runs."""
+
+    def test_reports_latency_percentiles_and_candidate_means(self):
+        summary = eval_metrics.retrieval_performance([
+            {
+                "latency_ms": 10.0,
+                "dense_candidates": 6,
+                "lexical_candidates": 2,
+                "fused_candidates": 7,
+            },
+            {
+                "latency_ms": 30.0,
+                "dense_candidates": 10,
+                "lexical_candidates": 4,
+                "fused_candidates": 11,
+            },
+        ])
+
+        assert summary["latency_ms_p50"] == 10.0
+        assert summary["latency_ms_p95"] == 30.0
+        assert summary["latency_ms_max"] == 30.0
+        assert summary["dense_candidates_mean"] == 8.0
+        assert summary["lexical_candidates_mean"] == 3.0
+        assert summary["fused_candidates_mean"] == 9.0
+
+    def test_empty_run_reports_zeroes(self):
+        summary = eval_metrics.retrieval_performance([])
+        assert summary["latency_ms_p95"] == 0.0
+        assert summary["dense_candidates_mean"] == 0.0

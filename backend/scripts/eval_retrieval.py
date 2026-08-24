@@ -7,7 +7,7 @@ stack:
 
 The run is self-contained: it builds its own SQLite database, ingests the corpus
 through the real adapters, chunker and embedder, and queries through
-`RAGService._retrieve_chunks`. It never touches `data/opennotebook.db`, and with
+`RAGService.retrieve_with_diagnostics`. It never touches `data/opennotebook.db`, and with
 `LLM_MODE=none` it never calls a model provider.
 
 Results land in `output/rag-eval/<tag>-<timestamp>/` as `metrics.json` plus a
@@ -15,18 +15,22 @@ readable `report.md`, so two runs can be diffed directly.
 """
 import argparse
 import asyncio
+from collections.abc import Mapping
+from contextlib import contextmanager, nullcontext
+from dataclasses import asdict, is_dataclass
 import json
+import os
+import re
 import sys
+from time import perf_counter
 import uuid
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from scripts import eval_corpus, eval_metrics
+from scripts.reindex import apply_and_verify_backfill, unresolved_index_drift
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = BACKEND_DIR.parent
@@ -38,6 +42,126 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output" / "rag-eval"
 
 # Deep enough to score Recall@10; the retriever's own candidate pool is wider.
 EVAL_TOP_K = 10
+SAFE_TAG_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+
+
+class EvalLockError(RuntimeError):
+    """A reusable eval database is already owned by another run."""
+
+
+def safe_tag(value: str) -> str:
+    """Validate a tag before using it in cache and report paths.
+
+    Args:
+        value: User-supplied run label.
+
+    Returns:
+        The unchanged safe label.
+
+    Raises:
+        argparse.ArgumentTypeError: If the tag contains separators, traversal,
+            leading punctuation, or is unreasonably long.
+    """
+    if not SAFE_TAG_PATTERN.fullmatch(value):
+        raise argparse.ArgumentTypeError(
+            "tag must start with a letter or digit and contain only letters, "
+            "digits, dot, underscore, or hyphen (maximum 64 characters)"
+        )
+    return value
+
+
+def index_database_path(cache_dir: Path, tag: str, reuse: bool) -> Path:
+    """Choose a fixed reusable database or a unique per-run database.
+
+    Args:
+        cache_dir: Eval cache directory.
+        tag: Validated run tag.
+        reuse: Whether this run intentionally shares the tag's fixed database.
+
+    Returns:
+        Database path rooted directly under ``cache_dir``.
+    """
+    tag = safe_tag(tag)
+    suffix = "" if reuse else "-" + uuid.uuid4().hex
+    return cache_dir / ("index-%s%s.db" % (tag, suffix))
+
+
+def output_target(output_root: Path, tag: str, run_time) -> Path:
+    """Build a collision-resistant report directory path.
+
+    Args:
+        output_root: Parent directory selected by the caller.
+        tag: Validated run tag.
+        run_time: A UTC datetime for the report.
+
+    Returns:
+        Unique target using microseconds and a random UUID.
+    """
+    tag = safe_tag(tag)
+    stamp = run_time.strftime("%Y%m%d-%H%M%S-%f")
+    return output_root / ("%s-%s-%s" % (tag, stamp, uuid.uuid4().hex))
+
+
+@contextmanager
+def exclusive_eval_lock(lock_path: Path) -> Iterator[None]:
+    """Hold a cross-platform O_EXCL file lock for one reusable eval run.
+
+    Args:
+        lock_path: Lock file adjacent to the fixed eval database.
+
+    Returns:
+        A context manager that yields while this process owns the lock file.
+
+    Raises:
+        EvalLockError: If another run already owns the tag.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(
+            str(lock_path),
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+    except FileExistsError as exc:
+        raise EvalLockError(
+            "reusable eval index is already in use: %s" % lock_path
+        ) from exc
+
+    try:
+        os.write(descriptor, ("pid=%d\n" % os.getpid()).encode("ascii"))
+        yield
+    finally:
+        os.close(descriptor)
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def normalize_index_report(value: Any) -> Dict[str, Any]:
+    """Turn a typed retrieval-index report into JSON-safe dictionary shape.
+
+    Args:
+        value: Mapping, dataclass, or value exposing ``as_dict``/``to_dict``.
+
+    Returns:
+        A shallow dictionary containing the report.
+
+    Raises:
+        TypeError: If the retrieval service violates its conversion contract.
+    """
+    if isinstance(value, Mapping):
+        return dict(value)
+    for method_name in ("as_dict", "to_dict"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            converted = method()
+            if not isinstance(converted, Mapping):
+                raise TypeError("%s() must return a mapping" % method_name)
+            return dict(converted)
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
+    raise TypeError("unsupported retrieval-index report: %r" % (type(value),))
 
 
 def build_session(db_path: Path):
@@ -49,15 +173,13 @@ def build_session(db_path: Path):
     Returns:
         A tuple of (session, engine).
     """
+    from app.db.database import create_database_engine, ensure_added_columns
     from app.db.models import Base
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(
-        "sqlite:///" + db_path.as_posix(),
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    engine = create_database_engine("sqlite:///" + db_path.as_posix(), echo=False)
     Base.metadata.create_all(bind=engine)
+    ensure_added_columns(bind=engine)
     session = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
     return session, engine
 
@@ -151,9 +273,12 @@ def run_queries(db, queries, doc_ids, project_id):
     results = []
     for record in queries:
         expected = {doc_ids[name] for name in record["expect_docs"] if name in doc_ids}
-        chunks = rag._retrieve_chunks(
+        started_at = perf_counter()
+        chunks, diagnostics_value = rag.retrieve_with_diagnostics(
             db=db, query=record["query"], project_id=project_id, top_k=EVAL_TOP_K
         )
+        latency_ms = (perf_counter() - started_at) * 1000.0
+        diagnostics = normalize_index_report(diagnostics_value)
         relevance = [
             chunk["document_id"] in expected
             and eval_metrics.judge(chunk["text"], record["must_contain"])
@@ -167,6 +292,11 @@ def run_queries(db, queries, doc_ids, project_id):
             "query": record["query"],
             "expect_docs": record["expect_docs"],
             "retrieved": len(chunks),
+            "latency_ms": round(latency_ms, 3),
+            "dense_candidates": int(diagnostics.get("dense_candidates", 0)),
+            "lexical_candidates": int(diagnostics.get("lexical_candidates", 0)),
+            "fused_candidates": int(diagnostics.get("fused_candidates", len(chunks))),
+            "active_backend": diagnostics.get("active_backend", "unknown"),
             "relevance": relevance,
             "first_hit_rank": first_hit,
             "boilerplate_ranks": [
@@ -189,8 +319,12 @@ def run_queries(db, queries, doc_ids, project_id):
             ],
         })
         marker = ("HIT@%d" % first_hit) if first_hit else "MISS"
-        print("  %-6s %s/%-5s %-6s retrieved=%d" % (
-            record["id"], record["lang"], record["mode"], marker, len(chunks)), flush=True)
+        print("  %-6s %s/%-5s %-6s retrieved=%d candidates=%d/%d/%d %.1fms" % (
+            record["id"], record["lang"], record["mode"], marker, len(chunks),
+            diagnostics.get("dense_candidates", 0),
+            diagnostics.get("lexical_candidates", 0),
+            diagnostics.get("fused_candidates", len(chunks)),
+            latency_ms), flush=True)
     return results
 
 
@@ -235,8 +369,14 @@ def write_report(target: Path, payload: Dict[str, Any]) -> None:
     Args:
         target: Run directory.
         payload: Everything the run produced.
+
+    Returns:
+        None.
     """
-    target.mkdir(parents=True, exist_ok=True)
+    # The caller gives every run a microsecond/UUID name, and exclusive creation
+    # turns an astronomically unlikely collision into an error instead of an
+    # overwrite of another process's evidence.
+    target.mkdir(parents=True, exist_ok=False)
     (target / "metrics.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -285,6 +425,38 @@ def write_report(target: Path, payload: Dict[str, Any]) -> None:
         "Of the chunks actually retrieved: **%.3f** boilerplate, **%.3f** citation-like." % (
             payload["retrieved_boilerplate_rate"], payload["retrieved_citation_rate"]),
         "",
+        "## Retrieval index",
+        "",
+        "| Field | Value |",
+        "|---|---|",
+    ]
+    for key, value in payload["retrieval_index"].items():
+        lines.append("| `%s` | %s |" % (key, "-" if value is None else value))
+    lines += [
+        "",
+        "## Retrieval performance",
+        "",
+        "Times are measured around retrieval with `perf_counter`; candidate counts are",
+        "reported by the same request, not process-global counters.",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+    ]
+    for key, value in payload["retrieval_performance"].items():
+        formatted = "%.3f" % value if isinstance(value, float) else str(value)
+        lines.append("| `%s` | %s |" % (key, formatted))
+    lines += [
+        "",
+        "| Query | Latency ms | Dense candidates | Lexical candidates | Fused candidates | Backend |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for record in payload["results"]:
+        lines.append("| %s | %.3f | %d | %d | %d | %s |" % (
+            record["id"], record["latency_ms"], record["dense_candidates"],
+            record["lexical_candidates"], record["fused_candidates"],
+            record.get("active_backend", "unknown")))
+    lines += [
+        "",
         "## Misses",
         "",
         "| Query | Lang/Mode | Expected | Question |",
@@ -301,26 +473,16 @@ def write_report(target: Path, payload: Dict[str, Any]) -> None:
     (target / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def main() -> int:
-    """Entry point.
+def run_evaluation(args, output_root: Path) -> int:
+    """Execute one fully isolated or exclusively locked eval run.
+
+    Args:
+        args: Parsed CLI arguments.
+        output_root: Parent directory for report artifacts.
 
     Returns:
         Process exit code.
     """
-    parser = argparse.ArgumentParser(description="Measure RAG retrieval quality.")
-    parser.add_argument("--tag", default="run", help="label for the output directory")
-    parser.add_argument("--refresh-cache", action="store_true",
-                        help="re-fetch the corpus pages over the network")
-    parser.add_argument("--reuse-index", action="store_true",
-                        help="keep a previously built index; only safe when neither "
-                             "extraction nor chunking changed since it was built")
-    parser.add_argument("--out", default=None,
-                        help="directory for run reports; required in the container, "
-                             "where the repo root is not mounted")
-    args = parser.parse_args()
-
-    output_root = Path(args.out) if args.out else DEFAULT_OUTPUT_ROOT
-
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -330,12 +492,13 @@ def main() -> int:
     fetched = eval_corpus.fetch_into_cache(corpus, refresh=args.refresh_cache)
     print("corpus cache: %d pages (%d fetched now)" % (len(corpus), len(fetched)), flush=True)
 
-    index_db = eval_corpus.CACHE_DIR / ("index-" + args.tag + ".db")
+    index_db = index_database_path(
+        eval_corpus.CACHE_DIR,
+        args.tag,
+        reuse=args.reuse_index,
+    )
     project_id = "eval-project"
-    if index_db.exists() and not args.reuse_index:
-        index_db.unlink()
-
-    reused = index_db.exists()
+    reused = args.reuse_index and index_db.exists()
     session, engine = build_session(index_db)
     try:
         from app.db.models import Chunk, Document
@@ -352,6 +515,27 @@ def main() -> int:
             print("ingesting corpus through the real pipeline:", flush=True)
             doc_ids = ingest_corpus(session, corpus, project_id)
 
+        # Lifecycle hooks normally keep both indexes aligned. Backfill here is
+        # an idempotent guard for reused eval databases and makes the active
+        # index shape part of the measurement rather than an assumption.
+        from app.services.retrieval_index import get_retrieval_index
+
+        retrieval_index = get_retrieval_index()
+        index_changes, index_audit, retrieval_index_status = apply_and_verify_backfill(
+            retrieval_index,
+            session,
+            engine,
+            document_ids=list(doc_ids.values()),
+        )
+        print("index reconciliation: added=%s updated=%s removed=%s" % (
+            index_changes.get("added", 0), index_changes.get("updated", 0),
+            index_changes.get("removed", 0)), flush=True)
+        unresolved = unresolved_index_drift(index_audit)
+        if unresolved:
+            raise RuntimeError("retrieval index remains inconsistent after backfill: %s" % (
+                ", ".join("%s=%d" % item for item in sorted(unresolved.items()))
+            ))
+
         chunks = session.query(Chunk).all()
         settings_snapshot = snapshot_settings()
         health = eval_metrics.index_health(
@@ -362,24 +546,32 @@ def main() -> int:
 
         print("querying:", flush=True)
         results = run_queries(session, queries, doc_ids, project_id)
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
         engine.dispose()
 
+    from app.utils.time import utc_now
+
+    run_time = utc_now()
     payload = {
         "tag": args.tag,
-        "run_at": datetime.now().isoformat(timespec="seconds"),
+        "run_at": run_time.isoformat(timespec="seconds"),
         "corpus_size": len(corpus),
         "query_count": len(queries),
         "settings": settings_snapshot,
         "metrics": group_metrics(results),
         "index_health": health,
+        "retrieval_index": retrieval_index_status,
+        "retrieval_performance": eval_metrics.retrieval_performance(results),
         "retrieved_boilerplate_rate": retrieved_share(results, "boilerplate_ranks"),
         "retrieved_citation_rate": retrieved_share(results, "citation_ranks"),
         "results": results,
     }
 
-    target = output_root / (args.tag + "-" + datetime.now().strftime("%Y%m%d-%H%M"))
+    target = output_target(output_root, args.tag, run_time)
     write_report(target, payload)
 
     overall = payload["metrics"]["overall"]
@@ -393,8 +585,54 @@ def main() -> int:
     print("citation-like: index %.3f, retrieved %.3f   boilerplate: index %.3f, retrieved %.3f" % (
         health["share_citation_like"], payload["retrieved_citation_rate"],
         health["share_boilerplate"], payload["retrieved_boilerplate_rate"]))
+    performance = payload["retrieval_performance"]
+    print("retrieval latency ms p50/p95/max %.1f/%.1f/%.1f  candidates dense/lexical/fused %.1f/%.1f/%.1f" % (
+        performance["latency_ms_p50"], performance["latency_ms_p95"],
+        performance["latency_ms_max"], performance["dense_candidates_mean"],
+        performance["lexical_candidates_mean"], performance["fused_candidates_mean"]))
+    print("backend %s  canonical/dense/lexical %s/%s/%s" % (
+        retrieval_index_status.get("active_backend", "unknown"),
+        retrieval_index_status.get("canonical_chunks", "?"),
+        retrieval_index_status.get("dense_rows", "?"),
+        retrieval_index_status.get("lexical_rows", "?")))
     print("report: %s" % target)
     return 0
+
+
+def main(argv=None) -> int:
+    """Parse arguments, acquire any reuse lock, and run the evaluation.
+
+    Args:
+        argv: Optional argument list, for testing.
+
+    Returns:
+        Process exit code; 2 means a reusable index is already locked.
+    """
+    parser = argparse.ArgumentParser(description="Measure RAG retrieval quality.")
+    parser.add_argument("--tag", default="run", type=safe_tag,
+                        help="safe label for cache and output paths")
+    parser.add_argument("--refresh-cache", action="store_true",
+                        help="re-fetch the corpus pages over the network")
+    parser.add_argument("--reuse-index", action="store_true",
+                        help="use/create this tag's fixed index under an exclusive lock; "
+                             "only safe when extraction and chunking are unchanged")
+    parser.add_argument("--out", default=None,
+                        help="directory for run reports; required in the container, "
+                             "where the repo root is not mounted")
+    args = parser.parse_args(argv)
+
+    output_root = Path(args.out) if args.out else DEFAULT_OUTPUT_ROOT
+    lock_context = (
+        exclusive_eval_lock(eval_corpus.CACHE_DIR / ("index-%s.lock" % args.tag))
+        if args.reuse_index
+        else nullcontext()
+    )
+    try:
+        with lock_context:
+            return run_evaluation(args, output_root)
+    except EvalLockError as exc:
+        print("eval error: %s" % exc, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

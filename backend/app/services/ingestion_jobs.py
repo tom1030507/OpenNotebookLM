@@ -15,6 +15,7 @@ import structlog
 
 from app.db.models import Chunk, Document, IngestionJob
 from app.services.chunking import ChunkLimitExceededError
+from app.services.retrieval_index import get_retrieval_index
 from app.services.rate_limit import OperationLease
 from app.utils.time import utc_now
 
@@ -732,6 +733,7 @@ class IngestionJobWorker:
     @staticmethod
     def _delete_document_index(db: Session, document_id: str) -> None:
         """Delete chunks through ORM cascades so embeddings cannot orphan."""
+        get_retrieval_index().delete_document(db, document_id)
         for chunk in (
             db.query(Chunk)
             .filter(Chunk.document_id == document_id)

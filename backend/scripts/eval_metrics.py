@@ -251,3 +251,30 @@ def index_health(chunk_texts: Sequence[str], chunk_size: int, headings: Sequence
         "share_citation_like": sum(1 for text in chunk_texts if is_citation_like(text)) / total,
         "share_with_heading_path": sum(1 for h in headings if h) / total,
     }
+
+
+def retrieval_performance(results: Sequence[Dict[str, float]]) -> Dict[str, float]:
+    """Aggregate request latency and candidate-pool sizes.
+
+    Args:
+        results: Per-query eval rows carrying latency and candidate counts.
+
+    Returns:
+        Comparable latency percentiles and mean candidate counts.
+    """
+    latencies = [float(row.get("latency_ms", 0.0)) for row in results]
+    return {
+        "latency_ms_mean": mean(latencies),
+        "latency_ms_p50": percentile(latencies, 0.50),
+        "latency_ms_p95": percentile(latencies, 0.95),
+        "latency_ms_max": max(latencies, default=0.0),
+        "dense_candidates_mean": mean(
+            float(row.get("dense_candidates", 0)) for row in results
+        ),
+        "lexical_candidates_mean": mean(
+            float(row.get("lexical_candidates", 0)) for row in results
+        ),
+        "fused_candidates_mean": mean(
+            float(row.get("fused_candidates", 0)) for row in results
+        ),
+    }

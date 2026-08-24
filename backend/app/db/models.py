@@ -195,6 +195,61 @@ class Embedding(Base):
     )
 
 
+class RetrievalIndexEntry(Base):
+    """Stable mapping and fallback data for persistent retrieval indexes."""
+    __tablename__ = "retrieval_index_entries"
+
+    # sqlite-vec requires an integer primary key. Keeping it in this ordinary
+    # table gives a chunk a stable id across updates while the virtual-table row
+    # is explicitly deleted and reinserted (vec0 does not support UPSERT).
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chunk_id = Column(
+        String,
+        ForeignKey("chunks.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    document_id = Column(String, nullable=False)
+    vector = Column(LargeBinary, nullable=False)
+    model_name = Column(String)
+    dimension = Column(Integer, nullable=False)
+    source_hash = Column(String, nullable=False)
+    dense_hash = Column(String)
+    lexical_hash = Column(String)
+    lexical_text = Column(Text, nullable=False)
+    # Canonical text can change while FTS5 is unavailable. Retaining the tokens
+    # that produced the actual postings lets recovery issue the required FTS5
+    # external-content delete before inserting the new representation.
+    indexed_lexical_text = Column(Text)
+    searchable = Column(Boolean, default=False, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_retrieval_index_entries_document", "document_id"),
+        Index("idx_retrieval_index_entries_source_hash", "source_hash"),
+        # A vec row can temporarily outlive its mapping when the extension is
+        # unavailable during deletion. SQLite otherwise reuses the deleted
+        # maximum INTEGER PRIMARY KEY, which could attach that orphan vector to
+        # an unrelated new chunk and bypass its document partition.
+        {"sqlite_autoincrement": True},
+    )
+
+
+class RetrievalIndexFTSTombstone(Base):
+    """Deferred FTS posting deletion recorded while FTS5 is unavailable."""
+    __tablename__ = "retrieval_index_fts_tombstones"
+
+    entry_id = Column(Integer, primary_key=True)
+    document_id = Column(String, nullable=False)
+    indexed_lexical_text = Column(Text, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_retrieval_fts_tombstones_document", "document_id"),
+    )
+
+
 class Conversation(Base):
     """Conversation model."""
     __tablename__ = "conversations"

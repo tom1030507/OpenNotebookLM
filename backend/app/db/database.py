@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
 from typing import Generator
 import os
+import sqlite3
 from pathlib import Path
 
 from app.config import get_settings
@@ -68,6 +69,23 @@ def create_database_engine(database_url: str, echo: bool) -> Engine:
         finally:
             cursor.close()
 
+        # SQLite extensions are connection-local. Loading here makes pooled,
+        # reindex, and evaluation connections behave identically; failures are
+        # deliberately non-fatal because RetrievalIndex exposes the named
+        # brute fallback when sqlite-vec cannot be imported or loaded.
+        try:
+            import sqlite_vec
+
+            dbapi_connection.enable_load_extension(True)
+            sqlite_vec.load(dbapi_connection)
+        except (ImportError, AttributeError, OSError, sqlite3.Error):
+            pass
+        finally:
+            try:
+                dbapi_connection.enable_load_extension(False)
+            except (AttributeError, sqlite3.Error):
+                pass
+
     return database_engine
 engine = create_database_engine(settings.database_url, echo=settings.debug)
 
@@ -76,7 +94,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 # Columns added to a model after its table already existed somewhere, as
-# (table, column, type, index name).
+# (table, column, type, optional index name).
 #
 # `Base.metadata.create_all` creates missing *tables* and nothing else: a column
 # added to a model later never reaches a database that already exists. Without
@@ -91,6 +109,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 ADDED_COLUMNS = (
     ("projects", "user_id", "VARCHAR", "idx_projects_user_id"),
     ("documents", "user_id", "VARCHAR", "idx_documents_user_id"),
+    (
+        "retrieval_index_entries",
+        "indexed_lexical_text",
+        "TEXT",
+        None,
+    ),
 )
 
 
@@ -120,10 +144,11 @@ def ensure_added_columns(bind=None):
             connection.execute(
                 text("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, column_type))
             )
-            connection.execute(
-                text("CREATE INDEX IF NOT EXISTS %s ON %s (%s)" % (
-                    index_name, table, column))
-            )
+            if index_name is not None:
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS %s ON %s (%s)" % (
+                        index_name, table, column))
+                )
         added.append("%s.%s" % (table, column))
 
     return added
@@ -133,6 +158,14 @@ def init_db():
     """Initialize database tables, and upgrade an older one in place."""
     Base.metadata.create_all(bind=engine)
     ensure_added_columns()
+    # Import inside startup after models exist to avoid a database/service
+    # import cycle. Committing the virtual-table schema here makes health
+    # diagnostics accurate before the first retrieval request.
+    from app.services.retrieval_index import get_retrieval_index
+
+    with Session(bind=engine) as db:
+        get_retrieval_index().ensure_schema(db, settings.emb_dimension)
+        db.commit()
 
 
 def get_db() -> Generator[Session, None, None]:
