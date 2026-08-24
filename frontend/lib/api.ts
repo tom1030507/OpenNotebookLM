@@ -227,14 +227,8 @@ interface CacheClearResponse {
 }
 
 
-const configuredBaseUrl = (
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-).replace(/\/+$/, '');
-
-/** Absolute base URL of the backend API, including the `/api` prefix. */
-export const API_BASE_URL = configuredBaseUrl.endsWith('/api')
-  ? configuredBaseUrl
-  : `${configuredBaseUrl}/api`;
+/** Same-origin prefix that Next proxies to the internal backend. */
+export const API_BASE_URL = '/api';
 
 /** The API route that streams the file stored for an uploaded document. */
 export const documentFileUrl = (documentId: string): string =>
@@ -252,9 +246,8 @@ export const needsAuthorizedFetch = (document: Document): boolean =>
 
 
 /**
- * Resolve a backend path against the configured API base URL. Every caller
- * goes through this so a missing NEXT_PUBLIC_API_URL cannot produce a
- * relative `/undefined/...` request.
+ * Resolve a backend path against the same-origin API prefix. Next owns the
+ * internal destination so browser bundles never contain Docker-only DNS.
  */
 export const apiUrl = (path: string): string => `${API_BASE_URL}${path}`;
 

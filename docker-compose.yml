@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -9,61 +7,73 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - APP_ENV=production
-      - APP_PORT=8000
-      - DB_PATH=/app/data/opennotebook.db
-      - EMB_BACKEND=sqlitevec
+      APP_ENV: production
+      APP_PORT: 8000
+      DEBUG: ${DEBUG:-false}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      DB_PATH: /app/data/opennotebook.db
+      DATABASE_URL: sqlite:////app/data/opennotebook.db
+      EMB_BACKEND: sqlitevec
+      EMB_MODEL_NAME: ${EMB_MODEL_NAME:-intfloat/multilingual-e5-base}
+      EMB_DIMENSION: ${EMB_DIMENSION:-768}
       # sentence-transformers caches downloaded models under $HOME/.cache/torch,
       # which lives in the container's writable layer — recreating the container
       # would re-download gigabytes. Point it at the mounted models volume.
-      - SENTENCE_TRANSFORMERS_HOME=/app/models
-      - HF_HOME=/app/models
-      - LLM_MODE=${LLM_MODE:-auto}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.6}
+      SENTENCE_TRANSFORMERS_HOME: /app/models
+      HF_HOME: /app/models
+      LLM_MODE: ${LLM_MODE:-auto}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6}
       # Empty means OpenAI itself; set it to redirect this path at Groq,
       # OpenRouter, DeepSeek, or any other chat-completions-compatible provider.
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       # Groq only: parsed, raw, or hidden. Empty for every other provider.
-      - OPENAI_REASONING_FORMAT=${OPENAI_REASONING_FORMAT:-}
+      OPENAI_REASONING_FORMAT: ${OPENAI_REASONING_FORMAT:-}
       # Floor for a request's output budget; reasoning models spend it first.
-      - OPENAI_MIN_MAX_TOKENS=${OPENAI_MIN_MAX_TOKENS:-2048}
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-5}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434/v1}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
-      - ENABLE_YT_TRANSCRIPTION=true
-      - MAX_FILE_SIZE_MB=50
-      - CHUNK_SIZE=512
-      - CHUNK_OVERLAP=50
-      - RETRIEVAL_TOP_K=5
-      - RERANK_ENABLED=true
+      OPENAI_MIN_MAX_TOKENS: ${OPENAI_MIN_MAX_TOKENS:-2048}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-opus-5}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      ENABLE_YT_TRANSCRIPTION: "true"
+      MAX_FILE_SIZE_MB: 50
+      CHUNK_SIZE: 512
+      CHUNK_OVERLAP: 50
+      RETRIEVAL_TOP_K: 5
+      RERANK_ENABLED: "true"
     volumes:
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./uploads:/app/uploads
+      - data:/app/data
+      - models:/app/models
+      - uploads:/app/uploads
     networks:
       - opennotebook
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # A first-run model download/load can delay the HTTP listener for over 90s.
+      # Keep those expected connection failures inside the startup grace window.
+      start_period: 10m
+      start_interval: 5s
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
     container_name: opennotebook-frontend
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000/api
-      - NODE_ENV=production
+      NODE_ENV: production
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - opennotebook
     restart: unless-stopped
@@ -72,10 +82,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: opennotebook-ollama
-    ports:
-      - "11434:11434"
     volumes:
-      - ./models/ollama:/root/.ollama
+      - ollama_models:/root/.ollama
     networks:
       - opennotebook
     restart: unless-stopped
@@ -93,10 +101,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: opennotebook-redis
-    ports:
-      - "6379:6379"
     volumes:
-      - ./data/redis:/data
+      - redis_data:/data
     networks:
       - opennotebook
     restart: unless-stopped
@@ -109,5 +115,12 @@ networks:
 
 volumes:
   data:
+    name: opennotebooklm-data
   models:
+    name: opennotebooklm-models
   uploads:
+    name: opennotebooklm-uploads
+  ollama_models:
+    name: opennotebooklm-ollama-models
+  redis_data:
+    name: opennotebooklm-redis-data

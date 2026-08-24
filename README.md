@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/FastAPI-0.104-009688.svg?logo=fastapi&logoColor=white" alt="FastAPI 0.104">
-  <img src="https://img.shields.io/badge/Next.js-15.4-000000.svg?logo=nextdotjs&logoColor=white" alt="Next.js 15.4">
+  <img src="https://img.shields.io/badge/Next.js-15.5-000000.svg?logo=nextdotjs&logoColor=white" alt="Next.js 15.5">
   <img src="https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white" alt="Docker ready">
 </p>
 
@@ -85,7 +85,8 @@ docker compose ps
 | Frontend | <http://localhost:3000> |
 | API | <http://localhost:8000> |
 | Interactive API docs | <http://localhost:8000/docs> |
-| Health | <http://localhost:8000/healthz> |
+| Liveness | <http://localhost:8000/healthz> |
+| Readiness | <http://localhost:8000/readyz> |
 
 Register on `/login`, create a project, drop in a PDF, and ask it something. The
 first request downloads the embedding model, so expect a slow cold start.
@@ -102,13 +103,27 @@ first request downloads the embedding model, so expect a slow cold start.
 <details>
 <summary><b>Docker Compose</b> — any platform (recommended)</summary>
 
-Needs Docker 20.10+, roughly 4 GB of RAM, and 10 GB of disk for the images and
-the embedding model.
+Needs Docker 25.0+, Docker Compose 2.20.2+ (for `healthcheck.start_interval`
+and the retained compatibility wrapper), roughly 4 GB of RAM, and 10 GB of
+disk for the images and embedding model.
 
 ```bash
 cp .env.example .env
+# Set JWT_SECRET_KEY to a unique random value before Compose can start.
 docker compose up -d --build
 ```
+
+The production Compose file deliberately fails before creating containers when
+`JWT_SECRET_KEY` is missing or empty. Generate one with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. It also defaults
+`DEBUG=false`. The copied `.env.example` allows CORS from
+`http://localhost:3000` and `http://localhost:3001`; set `CORS_ORIGINS` to a
+comma-separated list of your deployed frontend origins.
+
+Browser requests use the same-origin `/api` path. Next proxies that path to
+`BACKEND_INTERNAL_URL` (`http://backend:8000` in Compose), so Docker service
+names never enter the browser bundle. Rebuild the frontend image after changing
+that internal destination because Next compiles rewrites during its build.
 
 The root `docker-compose.yml` also defines optional `ollama` and `redis`
 services, behind profiles:
@@ -119,10 +134,52 @@ docker compose --profile with-cache up -d       # add Redis
 ```
 
 `start.sh` / `start.bat` wrap the same thing: `./start.sh`, `./start.sh with-ollama`,
-`./start.sh with-cache`, `./start.sh full`. Stop with `./stop.sh` or `docker compose down`.
+`./start.sh with-cache`, `./start.sh full`. A freshly copied example has a blank
+JWT secret, so the launcher exits with generation instructions instead of
+claiming the stack started. Stop with `docker compose down`.
 
-Models are cached into the mounted `./models` volume, so recreating the container
-does not re-download them.
+`deploy/docker-compose.yml` remains as a compatibility entry point for existing
+automation. It includes the root Compose model rather than defining another
+image or security policy:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+Ollama and Redis are reachable only on the Compose network. Their profiles do
+not publish host ports; add an explicit loopback-only mapping such as
+`127.0.0.1:11434:11434` in a local override if host tools need direct access.
+
+Database, model, and upload state use Docker-managed named volumes
+(`opennotebooklm-data`, `opennotebooklm-models`, and
+`opennotebooklm-uploads`). Recreating containers or running
+`docker compose down` preserves them; `docker compose down --volumes` deletes
+them.
+
+Earlier versions bind-mounted `./data`, `./models`, and `./uploads`. Only
+`data/opennotebook.db` and `uploads/` are durable user state. `models/` contains
+rebuildable embedding and Ollama caches (including `models/ollama`), while
+`data/redis` is a rebuildable Redis cache. Stop the old stack and back up all
+three directories first. Then, before the first new-version start and with
+`JWT_SECRET_KEY` already set in `.env`, migrate only the durable state once:
+
+```bash
+docker compose build backend
+docker compose create backend
+docker cp data/opennotebook.db opennotebook-backend:/app/data/opennotebook.db
+docker cp uploads/. opennotebook-backend:/app/uploads/
+docker compose run --rm --no-deps --user root backend \
+  sh -c 'chown -R 1000:1000 /app/data /app/uploads'
+docker compose rm -f backend
+```
+
+Skip a `docker cp` line when that old path does not exist. Do not bulk-copy
+`data/` or `models/`: that would put `data/redis` and `models/ollama` into the
+backend volumes instead of the optional services' separate volumes. This
+migration intentionally leaves every cache in the old directories for rollback;
+the new stack re-downloads embedding/Ollama models when used and rebuilds Redis
+cache when its profile is enabled. Remove the old directories only after
+verifying the durable database and uploads in the new stack.
 
 </details>
 
@@ -339,7 +396,7 @@ OpenNotebookLM/
 │   ├── lib/                  # api client, theme, session, speech, datetime
 │   ├── store/                # Zustand store
 │   └── middleware.ts         # session gate for /
-├── deploy/                   # Dockerfile.api, docker-compose.yml, .env.example
+├── deploy/                   # compatibility Compose entry point (includes root)
 └── docker-compose.yml        # backend, frontend, optional ollama and redis
 ```
 
@@ -491,9 +548,9 @@ bge-m3 is the stronger multilingual model and needs no prefixes, but on an 8 GB
 host it OOM-killed a full re-index. Use it only where the memory headroom is real.
 
 sentence-transformers caches models under `$HOME/.cache/torch`. Docker Compose
-redirects that to the mounted `./models` volume so recreating the container does
-not re-download; outside Docker, set `SENTENCE_TRANSFORMERS_HOME` somewhere
-persistent.
+redirects that to the `opennotebooklm-models` named volume so recreating the
+container does not re-download; outside Docker, set
+`SENTENCE_TRANSFORMERS_HOME` somewhere persistent.
 
 Stored vectors are only comparable to vectors produced by the same model.
 **Changing `EMB_MODEL_NAME` invalidates every embedding already in the database**
@@ -568,14 +625,16 @@ Without `JWT_SECRET_KEY`, a development server signs tokens with a key generated
 per process — sessions do not survive a restart. Any non-development deployment
 refuses to start without it.
 
-See [`.env.example`](./.env.example) and [`deploy/.env.example`](./deploy/.env.example).
+See [`.env.example`](./.env.example). Both Compose entry points consume this
+single canonical environment contract.
 
 </details>
 
 ## 🔌 API
 
 Interactive docs at `/docs`, ReDoc at `/redoc`. Every path except `/healthz`,
-`/ready` and the two `/api/auth` credential endpoints requires
+`/readyz` (and its legacy `/ready` alias), and the two `/api/auth` credential
+endpoints requires
 `Authorization: Bearer <token>` and answers `401` without one.
 
 <details>
@@ -583,7 +642,7 @@ Interactive docs at `/docs`, ReDoc at `/redoc`. Every path except `/healthz`,
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/healthz`, `/ready` | Liveness and readiness |
+| `GET` | `/healthz`, `/readyz` | Liveness and readiness |
 | `POST` | `/api/auth/register`, `/api/auth/token` | Create an account, exchange credentials for a token |
 | `GET` | `/api/auth/me` | The account behind a bearer token |
 | `GET`/`POST` | `/api/projects` | List and create projects |
