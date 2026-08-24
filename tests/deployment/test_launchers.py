@@ -65,8 +65,14 @@ class LauncherExitTests(unittest.TestCase):
         """Remove the controlled launcher directory."""
         self.temporary.cleanup()
 
-    def run_launcher(self) -> subprocess.CompletedProcess[str]:
+    def run_launcher(
+        self,
+        profile: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         """Run the native launcher with controlled Docker command failures.
+
+        Args:
+            profile: Optional launcher profile supplied as one quoted argument.
 
         Returns:
             The completed launcher process with captured combined output.
@@ -98,16 +104,21 @@ goto scan
             )
             write_executable(self.bin_dir / "curl.cmd", "@exit /b 1\n")
             write_executable(self.bin_dir / "timeout.cmd", "@exit /b 0\n")
-            command = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", "start.bat"]
+            command = [
+                os.environ.get("COMSPEC", "cmd.exe"),
+                "/d",
+                "/c",
+                "start.bat",
+            ]
+            if profile is not None:
+                write_executable(
+                    self.checkout / "invoke-launcher.cmd",
+                    f'@call start.bat "{profile}"\n@exit /b %ERRORLEVEL%\n',
+                )
+                command[-1] = "invoke-launcher.cmd"
         else:
             launcher = self.checkout / "start.sh"
-            launcher.write_text(
-                (REPO_ROOT / "start.sh").read_text(encoding="utf-8").replace(
-                    "\r\n", "\n",
-                ),
-                encoding="utf-8",
-            )
-            launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
+            shutil.copy2(REPO_ROOT / "start.sh", launcher)
             write_executable(
                 self.bin_dir / "docker",
                 """#!/bin/sh
@@ -128,19 +139,51 @@ exit 0
             )
             write_executable(self.bin_dir / "curl", "#!/bin/sh\nexit 1\n")
             write_executable(self.bin_dir / "sleep", "#!/bin/sh\nexit 0\n")
-            command = ["bash", "start.sh"]
+            command = [str(launcher)]
+            if profile is not None:
+                command.append(profile)
 
-        return subprocess.run(
-            command,
-            cwd=self.checkout,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            errors="replace",
-            check=False,
-        )
+        try:
+            return subprocess.run(
+                command,
+                cwd=self.checkout,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                check=False,
+            )
+        except PermissionError as error:
+            return subprocess.CompletedProcess(
+                command,
+                126,
+                stdout=f"Direct launcher execution failed: {error}\n",
+            )
+
+    @unittest.skipIf(os.name == "nt", "Linux executable-bit contract")
+    def test_fresh_linux_checkout_executes_launcher_directly(self) -> None:
+        """The advertised ``./start.sh`` invocation must reach the launcher."""
+        result = self.run_launcher()
+
+        self.assertNotEqual(result.returncode, 126, result.stdout)
+        self.assertIn("JWT_SECRET_KEY", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "Windows CMD parsing contract")
+    def test_unknown_profile_metacharacters_cannot_execute_commands(self) -> None:
+        """An unknown quoted profile must not become a second CMD command."""
+        env_file = self.checkout / ".env"
+        shutil.copy2(REPO_ROOT / ".env.example", env_file)
+        set_jwt(env_file)
+        marker = self.checkout / "issue53-profile-injected.txt"
+        profile = f"unknown&echo injected>{marker.name}&rem"
+
+        result = self.run_launcher(profile)
+
+        self.assertFalse(marker.exists(), result.stdout)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("ERROR: Unknown profile. Use", result.stdout)
 
     def test_fresh_launcher_rejects_the_copied_blank_jwt(self) -> None:
         """Copying the example may not proceed with its required secret blank."""

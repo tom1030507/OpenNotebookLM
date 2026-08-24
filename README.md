@@ -156,24 +156,30 @@ Database, model, and upload state use Docker-managed named volumes
 `docker compose down` preserves them; `docker compose down --volumes` deletes
 them.
 
-Earlier versions bind-mounted `./data`, `./models`, and `./uploads`. Those host
-directories are left untouched by this upgrade, but Compose does not import them
-automatically. Before the first new-version start, with `JWT_SECRET_KEY` already
-set in `.env`, migrate any existing state once:
+Earlier versions bind-mounted `./data`, `./models`, and `./uploads`. Only
+`data/opennotebook.db` and `uploads/` are durable user state. `models/` contains
+rebuildable embedding and Ollama caches (including `models/ollama`), while
+`data/redis` is a rebuildable Redis cache. Stop the old stack and back up all
+three directories first. Then, before the first new-version start and with
+`JWT_SECRET_KEY` already set in `.env`, migrate only the durable state once:
 
 ```bash
 docker compose build backend
 docker compose create backend
-docker cp data/. opennotebook-backend:/app/data/
-docker cp models/. opennotebook-backend:/app/models/
+docker cp data/opennotebook.db opennotebook-backend:/app/data/opennotebook.db
 docker cp uploads/. opennotebook-backend:/app/uploads/
 docker compose run --rm --no-deps --user root backend \
-  sh -c 'chown -R 1000:1000 /app/data /app/models /app/uploads'
+  sh -c 'chown -R 1000:1000 /app/data /app/uploads'
 docker compose rm -f backend
 ```
 
-Skip a `docker cp` line when that old directory does not exist. Back up the old
-directories before migration; remove them only after verifying the new stack.
+Skip a `docker cp` line when that old path does not exist. Do not bulk-copy
+`data/` or `models/`: that would put `data/redis` and `models/ollama` into the
+backend volumes instead of the optional services' separate volumes. This
+migration intentionally leaves every cache in the old directories for rollback;
+the new stack re-downloads embedding/Ollama models when used and rebuilds Redis
+cache when its profile is enabled. Remove the old directories only after
+verifying the durable database and uploads in the new stack.
 
 </details>
 

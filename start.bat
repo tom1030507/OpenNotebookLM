@@ -42,18 +42,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "REQUESTED_PROFILE=%~1"
 set "PROFILE_ARGS="
-if "%~1"=="with-ollama" (
+if "!REQUESTED_PROFILE!"=="with-ollama" (
     echo Starting with Ollama for local LLM support...
     set "PROFILE_ARGS=--profile with-ollama"
-) else if "%~1"=="with-cache" (
+) else if "!REQUESTED_PROFILE!"=="with-cache" (
     echo Starting with Redis cache...
     set "PROFILE_ARGS=--profile with-cache"
-) else if "%~1"=="full" (
+) else if "!REQUESTED_PROFILE!"=="full" (
     echo Starting with all optional services...
     set "PROFILE_ARGS=--profile with-ollama --profile with-cache"
-) else if not "%~1"=="" (
-    echo ERROR: Unknown profile '%~1'. Use with-ollama, with-cache, or full.
+) else if not "!REQUESTED_PROFILE!"=="" (
+    echo ERROR: Unknown profile. Use with-ollama, with-cache, or full.
     exit /b 2
 )
 
