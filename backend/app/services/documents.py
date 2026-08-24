@@ -1,7 +1,7 @@
 """Document ingestion service."""
 import uuid
 import os
-from typing import Any, Dict, Optional, BinaryIO
+from typing import Any, BinaryIO, Callable, ContextManager, Dict, Optional
 from pathlib import Path
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +9,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.db.models import Document, Project, ProjectDocument
+from app.db.database import get_db_context
 from app.schemas import DocumentCreate
 from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
 from app.config import get_settings
@@ -30,6 +31,7 @@ class DocumentService:
         pdf_adapter: Any | None = None,
         url_adapter: Any | None = None,
         youtube_adapter: Any | None = None,
+        session_context: Callable[[], ContextManager[Session]] = get_db_context,
     ):
         """Initialize document processing dependencies.
 
@@ -39,6 +41,7 @@ class DocumentService:
             pdf_adapter: Optional PDF extraction implementation.
             url_adapter: Optional URL extraction implementation.
             youtube_adapter: Optional YouTube transcript implementation.
+            session_context: Factory that owns each detached worker session.
 
         Returns:
             None.
@@ -58,6 +61,7 @@ class DocumentService:
             chunking_service if chunking_service is not None else ChunkingService()
         )
         self.embedding_service = embedding_service
+        self.session_context = session_context
 
     def _index_document(self, db: Session, doc_id: str, source_label: str) -> str:
         """Chunk and embed a document, then mark it ready.
@@ -184,7 +188,7 @@ class DocumentService:
             db.refresh(document)
             
             # Process asynchronously
-            asyncio.create_task(self._process_pdf_async(db, doc_id, file_path))
+            asyncio.create_task(self._process_pdf_async(doc_id, file_path))
             
             logger.info("PDF upload initiated", 
                        doc_id=doc_id, 
@@ -199,67 +203,70 @@ class DocumentService:
                         error=str(e))
             raise
     
-    async def _process_pdf_async(self, db: Session, doc_id: str, file_path: Path):
+    async def _process_pdf_async(self, doc_id: str, file_path: Path) -> None:
         """Process PDF file asynchronously.
         
         Args:
-            db: Database session
             doc_id: Document ID
             file_path: Path to PDF file
+
+        Returns:
+            None.
         """
-        try:
-            # Update status to processing
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "processing"
-                db.commit()
-            
-            # Extract text in thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self.executor,
-                self.pdf_adapter.extract_text_from_file,
-                str(file_path)
-            )
-            
-            # Store the extracted content, staying in "processing": the source
-            # is not usable until it has been indexed below.
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.content = result["text"]
-                # Reassign rather than mutate: meta_json is a plain JSON
-                # column, so an in-place update is invisible to SQLAlchemy and
-                # never reaches the database.
-                doc.meta_json = {
-                    **(doc.meta_json or {}),
-                    "num_pages": result["num_pages"],
-                    # Keep the per-page text. Dropping it was the only reason
-                    # Chunk.page_num was NULL for every PDF: the chunker has the
-                    # code to map offsets to pages, it just never had the pages.
-                    "pages": result.get("pages", []),
-                    "metadata": result.get("metadata", {}),
-                    "processed_at": utc_now_iso(),
-                }
-                db.commit()
+        with self.session_context() as db:
+            try:
+                # Update status to processing
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "processing"
+                    db.commit()
 
-                status = self._index_document(db, doc_id, "PDF")
+                # Extract text in thread pool
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    self.executor,
+                    self.pdf_adapter.extract_text_from_file,
+                    str(file_path)
+                )
 
-                logger.info("PDF processing completed",
-                           doc_id=doc_id,
-                           num_pages=result["num_pages"],
-                           status=status)
-            
-        except Exception as e:
-            logger.error("Failed to process PDF",
-                        doc_id=doc_id,
-                        error=str(e))
-            
-            # Update status to error
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "error"
-                doc.error_message = str(e)
-                db.commit()
+                # Store the extracted content, staying in "processing": the source
+                # is not usable until it has been indexed below.
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.content = result["text"]
+                    # Reassign rather than mutate: meta_json is a plain JSON
+                    # column, so an in-place update is invisible to SQLAlchemy and
+                    # never reaches the database.
+                    doc.meta_json = {
+                        **(doc.meta_json or {}),
+                        "num_pages": result["num_pages"],
+                        # Keep the per-page text. Dropping it was the only reason
+                        # Chunk.page_num was NULL for every PDF: the chunker has the
+                        # code to map offsets to pages, it just never had the pages.
+                        "pages": result.get("pages", []),
+                        "metadata": result.get("metadata", {}),
+                        "processed_at": utc_now_iso(),
+                    }
+                    db.commit()
+
+                    status = self._index_document(db, doc_id, "PDF")
+
+                    logger.info("PDF processing completed",
+                               doc_id=doc_id,
+                               num_pages=result["num_pages"],
+                               status=status)
+
+            except Exception as e:
+                logger.error("Failed to process PDF",
+                            doc_id=doc_id,
+                            error=str(e))
+
+                # Update status to error
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "error"
+                    doc.error_message = str(e)
+                    db.commit()
     
     async def process_url(
         self,
@@ -312,7 +319,7 @@ class DocumentService:
             db.refresh(document)
             
             # Process asynchronously
-            asyncio.create_task(self._process_url_async(db, doc_id, url))
+            asyncio.create_task(self._process_url_async(doc_id, url))
             
             logger.info("URL processing initiated",
                        doc_id=doc_id,
@@ -327,66 +334,69 @@ class DocumentService:
                         error=str(e))
             raise
     
-    async def _process_url_async(self, db: Session, doc_id: str, url: str):
+    async def _process_url_async(self, doc_id: str, url: str) -> None:
         """Process URL asynchronously.
         
         Args:
-            db: Database session
             doc_id: Document ID
             url: URL to process
+
+        Returns:
+            None.
         """
-        try:
-            # Update status to processing
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "processing"
-                db.commit()
-            
-            # Extract content in thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self.executor,
-                self.url_adapter.extract_content,
-                url
-            )
-            
-            # Store the extracted content, staying in "processing": the source
-            # is not usable until it has been indexed below.
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.content = result["text"]
-                doc.title = result.get("title", url)
-                # Reassign rather than mutate: meta_json is a plain JSON
-                # column, so an in-place update is invisible to SQLAlchemy and
-                # never reaches the database.
-                doc.meta_json = {
-                    **(doc.meta_json or {}),
-                    "metadata": result.get("metadata", {}),
-                    "headings": result.get("headings", []),
-                    "num_links": len(result.get("links", [])),
-                    "processed_at": utc_now_iso(),
-                }
-                db.commit()
+        with self.session_context() as db:
+            try:
+                # Update status to processing
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "processing"
+                    db.commit()
 
-                status = self._index_document(db, doc_id, "URL")
+                # Extract content in thread pool
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    self.executor,
+                    self.url_adapter.extract_content,
+                    url
+                )
 
-                logger.info("URL processing completed",
-                           doc_id=doc_id,
-                           url=url,
-                           status=status)
-            
-        except Exception as e:
-            logger.error("Failed to process URL",
-                        doc_id=doc_id,
-                        url=url,
-                        error=str(e))
-            
-            # Update status to error
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "error"
-                doc.error_message = str(e)
-                db.commit()
+                # Store the extracted content, staying in "processing": the source
+                # is not usable until it has been indexed below.
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.content = result["text"]
+                    doc.title = result.get("title", url)
+                    # Reassign rather than mutate: meta_json is a plain JSON
+                    # column, so an in-place update is invisible to SQLAlchemy and
+                    # never reaches the database.
+                    doc.meta_json = {
+                        **(doc.meta_json or {}),
+                        "metadata": result.get("metadata", {}),
+                        "headings": result.get("headings", []),
+                        "num_links": len(result.get("links", [])),
+                        "processed_at": utc_now_iso(),
+                    }
+                    db.commit()
+
+                    status = self._index_document(db, doc_id, "URL")
+
+                    logger.info("URL processing completed",
+                               doc_id=doc_id,
+                               url=url,
+                               status=status)
+
+            except Exception as e:
+                logger.error("Failed to process URL",
+                            doc_id=doc_id,
+                            url=url,
+                            error=str(e))
+
+                # Update status to error
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "error"
+                    doc.error_message = str(e)
+                    db.commit()
     
     async def process_youtube(
         self,
@@ -443,7 +453,7 @@ class DocumentService:
             db.refresh(document)
             
             # Process asynchronously
-            asyncio.create_task(self._process_youtube_async(db, doc_id, youtube_url))
+            asyncio.create_task(self._process_youtube_async(doc_id, youtube_url))
             
             logger.info("YouTube processing initiated",
                        doc_id=doc_id,
@@ -458,69 +468,72 @@ class DocumentService:
                         error=str(e))
             raise
     
-    async def _process_youtube_async(self, db: Session, doc_id: str, youtube_url: str):
+    async def _process_youtube_async(self, doc_id: str, youtube_url: str) -> None:
         """Process YouTube video asynchronously.
         
         Args:
-            db: Database session
             doc_id: Document ID
             youtube_url: YouTube URL
+
+        Returns:
+            None.
         """
-        try:
-            # Update status to processing
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "processing"
-                db.commit()
-            
-            # Extract transcript in thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self.executor,
-                self.youtube_adapter.extract_transcript,
-                youtube_url
-            )
-            
-            # Store the extracted content, staying in "processing": the source
-            # is not usable until it has been indexed below.
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.content = result["text"]
-                doc.title = f"YouTube: {result.get('video_id', youtube_url)}"
-                # Reassign rather than mutate: meta_json is a plain JSON
-                # column, so an in-place update is invisible to SQLAlchemy and
-                # never reaches the database.
-                doc.meta_json = {
-                    **(doc.meta_json or {}),
-                    "video_id": result.get("video_id"),
-                    "duration": result.get("duration", 0),
-                    "language": result.get("language", "unknown"),
-                    "metadata": result.get("metadata", {}),
-                    "num_segments": len(result.get("segments", [])),
-                    "processed_at": utc_now_iso(),
-                }
-                db.commit()
+        with self.session_context() as db:
+            try:
+                # Update status to processing
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "processing"
+                    db.commit()
 
-                status = self._index_document(db, doc_id, "YouTube")
+                # Extract transcript in thread pool
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    self.executor,
+                    self.youtube_adapter.extract_transcript,
+                    youtube_url
+                )
 
-                logger.info("YouTube processing completed",
-                           doc_id=doc_id,
-                           video_id=result.get("video_id"),
-                           status=status)
-            
-        except Exception as e:
-            logger.error("Failed to process YouTube video",
-                        doc_id=doc_id,
-                        youtube_url=youtube_url,
-                        error_type=type(e).__name__,
-                        error=str(e))
-            
-            # Update status to error
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "error"
-                doc.error_message = str(e)
-                db.commit()
+                # Store the extracted content, staying in "processing": the source
+                # is not usable until it has been indexed below.
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.content = result["text"]
+                    doc.title = f"YouTube: {result.get('video_id', youtube_url)}"
+                    # Reassign rather than mutate: meta_json is a plain JSON
+                    # column, so an in-place update is invisible to SQLAlchemy and
+                    # never reaches the database.
+                    doc.meta_json = {
+                        **(doc.meta_json or {}),
+                        "video_id": result.get("video_id"),
+                        "duration": result.get("duration", 0),
+                        "language": result.get("language", "unknown"),
+                        "metadata": result.get("metadata", {}),
+                        "num_segments": len(result.get("segments", [])),
+                        "processed_at": utc_now_iso(),
+                    }
+                    db.commit()
+
+                    status = self._index_document(db, doc_id, "YouTube")
+
+                    logger.info("YouTube processing completed",
+                               doc_id=doc_id,
+                               video_id=result.get("video_id"),
+                               status=status)
+
+            except Exception as e:
+                logger.error("Failed to process YouTube video",
+                            doc_id=doc_id,
+                            youtube_url=youtube_url,
+                            error_type=type(e).__name__,
+                            error=str(e))
+
+                # Update status to error
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "error"
+                    doc.error_message = str(e)
+                    db.commit()
     
     def get_document_status(self, db: Session, doc_id: str) -> Optional[Document]:
         """Get document processing status.

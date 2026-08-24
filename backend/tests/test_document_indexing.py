@@ -6,6 +6,7 @@ exist when a document starts reporting it. These tests pin that ordering, and
 pin what happens when indexing fails or finds nothing to index.
 """
 import asyncio
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -151,11 +152,18 @@ def db():
     engine.dispose()
 
 
-def build_service(timeline, chunk_failure=None, embed_failure=None, num_chunks=2):
+def build_service(
+    db,
+    timeline,
+    chunk_failure=None,
+    embed_failure=None,
+    num_chunks=2,
+):
     """A DocumentService with the slow, external pieces stubbed out."""
     service = DocumentService(
         chunking_service=FakeChunkingService(timeline, num_chunks, chunk_failure),
         embedding_service=FakeEmbeddingService(timeline, embed_failure),
+        session_context=lambda: nullcontext(db),
     )
     service.pdf_adapter = FakePDFAdapter()
     service.url_adapter = FakeURLAdapter()
@@ -178,9 +186,9 @@ class TestReadyMeansRetrievable:
 
     def test_url_document_is_ready_only_after_indexing(self, db):
         timeline = []
-        service = build_service(timeline)
+        service = build_service(db, timeline)
 
-        asyncio.run(service._process_url_async(db, DOC_ID, "https://example.com"))
+        asyncio.run(service._process_url_async(DOC_ID, "https://example.com"))
 
         # Neither indexing step may see a document that already claims to be
         # ready — that is the window where a query finds nothing.
@@ -192,9 +200,9 @@ class TestReadyMeansRetrievable:
         db.query(Document).filter(Document.id == DOC_ID).update({"source_type": "pdf"})
         db.commit()
         timeline = []
-        service = build_service(timeline)
+        service = build_service(db, timeline)
 
-        asyncio.run(service._process_pdf_async(db, DOC_ID, Path("uploads/example.pdf")))
+        asyncio.run(service._process_pdf_async(DOC_ID, Path("uploads/example.pdf")))
 
         assert timeline == [("chunk", "processing"), ("embed", "processing")]
         assert current_status(db) == "ready"
@@ -204,10 +212,10 @@ class TestReadyMeansRetrievable:
         db.query(Document).filter(Document.id == DOC_ID).update({"source_type": "youtube"})
         db.commit()
         timeline = []
-        service = build_service(timeline)
+        service = build_service(db, timeline)
 
         asyncio.run(
-            service._process_youtube_async(db, DOC_ID, "https://youtu.be/abc123")
+            service._process_youtube_async(DOC_ID, "https://youtu.be/abc123")
         )
 
         assert timeline == [("chunk", "processing"), ("embed", "processing")]
@@ -219,34 +227,42 @@ class TestIndexingFailures:
     """A document that cannot be indexed must not pass itself off as ready."""
 
     def test_embedding_failure_marks_the_document_failed(self, db):
-        service = build_service([], embed_failure=RuntimeError("embedding model exploded"))
+        service = build_service(
+            db,
+            [],
+            embed_failure=RuntimeError("embedding model exploded"),
+        )
 
-        asyncio.run(service._process_url_async(db, DOC_ID, "https://example.com"))
+        asyncio.run(service._process_url_async(DOC_ID, "https://example.com"))
 
         document = db.query(Document).filter(Document.id == DOC_ID).first()
         assert document.status == "error"
         assert "embedding model exploded" in document.error_message
 
     def test_chunking_failure_marks_the_document_failed(self, db):
-        service = build_service([], chunk_failure=RuntimeError("chunker exploded"))
+        service = build_service(
+            db,
+            [],
+            chunk_failure=RuntimeError("chunker exploded"),
+        )
 
-        asyncio.run(service._process_url_async(db, DOC_ID, "https://example.com"))
+        asyncio.run(service._process_url_async(DOC_ID, "https://example.com"))
 
         document = db.query(Document).filter(Document.id == DOC_ID).first()
         assert document.status == "error"
         assert "chunker exploded" in document.error_message
 
     def test_source_without_searchable_text_is_not_ready(self, db):
-        service = build_service([], num_chunks=0)
+        service = build_service(db, [], num_chunks=0)
 
-        asyncio.run(service._process_url_async(db, DOC_ID, "https://example.com"))
+        asyncio.run(service._process_url_async(DOC_ID, "https://example.com"))
 
         document = db.query(Document).filter(Document.id == DOC_ID).first()
         assert document.status == "error"
         assert "searchable text" in document.error_message.lower()
 
     def test_extraction_failure_still_reports_its_own_error(self, db):
-        service = build_service([])
+        service = build_service(db, [])
 
         class ExplodingURLAdapter:
             def extract_content(self, url):
@@ -254,7 +270,7 @@ class TestIndexingFailures:
 
         service.url_adapter = ExplodingURLAdapter()
 
-        asyncio.run(service._process_url_async(db, DOC_ID, "https://example.com"))
+        asyncio.run(service._process_url_async(DOC_ID, "https://example.com"))
 
         document = db.query(Document).filter(Document.id == DOC_ID).first()
         assert document.status == "error"
@@ -265,9 +281,9 @@ class TestProcessingMetadata:
     """meta_json is a plain JSON column, so it has to be reassigned to persist."""
 
     def test_url_processing_metadata_reaches_the_database(self, db):
-        service = build_service([])
+        service = build_service(db, [])
 
-        asyncio.run(service._process_url_async(db, DOC_ID, "https://example.com"))
+        asyncio.run(service._process_url_async(DOC_ID, "https://example.com"))
 
         db.expire_all()
         meta = db.query(Document).filter(Document.id == DOC_ID).first().meta_json
@@ -280,9 +296,9 @@ class TestProcessingMetadata:
     def test_pdf_processing_metadata_reaches_the_database(self, db):
         db.query(Document).filter(Document.id == DOC_ID).update({"source_type": "pdf"})
         db.commit()
-        service = build_service([])
+        service = build_service(db, [])
 
-        asyncio.run(service._process_pdf_async(db, DOC_ID, Path("uploads/example.pdf")))
+        asyncio.run(service._process_pdf_async(DOC_ID, Path("uploads/example.pdf")))
 
         db.expire_all()
         meta = db.query(Document).filter(Document.id == DOC_ID).first().meta_json
@@ -292,10 +308,10 @@ class TestProcessingMetadata:
     def test_youtube_processing_metadata_reaches_the_database(self, db):
         db.query(Document).filter(Document.id == DOC_ID).update({"source_type": "youtube"})
         db.commit()
-        service = build_service([])
+        service = build_service(db, [])
 
         asyncio.run(
-            service._process_youtube_async(db, DOC_ID, "https://youtu.be/abc123")
+            service._process_youtube_async(DOC_ID, "https://youtu.be/abc123")
         )
 
         db.expire_all()
