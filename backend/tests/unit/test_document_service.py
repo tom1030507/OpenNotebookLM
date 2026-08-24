@@ -1,6 +1,8 @@
 """Resource-ceiling tests for document indexing."""
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -216,3 +218,63 @@ def test_persistent_chunk_limit_cleanup_failure_is_not_downgraded(
     assert db.query(Chunk).filter(Chunk.document_id == DOCUMENT_ID).count() == 1_001
     assert db.query(Embedding).count() == 0
     assert commit_calls == 3
+
+
+def test_cleanup_rollback_failure_is_normalized_without_generic_fallback(
+    db,
+    monkeypatch,
+) -> None:
+    """An unsafe session cannot retry or enter the status-only error path."""
+    embedder = RecordingEmbedder()
+    service = DocumentService(
+        chunking_service=CommittingChunker(1_001),
+        embedding_service=embedder,
+    )
+    real_commit = db.commit
+    real_rollback = db.rollback
+    commit_calls = 0
+    rollback_calls = 0
+
+    def fail_first_cleanup_commit() -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 2:
+            raise RuntimeError("cleanup commit failed")
+        real_commit()
+
+    def fail_first_cleanup_rollback() -> None:
+        nonlocal rollback_calls
+        rollback_calls += 1
+        if rollback_calls == 1:
+            raise RuntimeError("cleanup rollback failed")
+        real_rollback()
+
+    generic_fallback = Mock(return_value="error")
+    monkeypatch.setattr(db, "commit", fail_first_cleanup_commit)
+    monkeypatch.setattr(db, "rollback", fail_first_cleanup_rollback)
+    monkeypatch.setattr(service, "_mark_failed", generic_fallback)
+
+    try:
+        with pytest.raises(ChunkLimitPersistenceError) as raised:
+            service._index_document(db, DOCUMENT_ID, "URL")
+    finally:
+        # The service correctly refuses to reuse a session whose rollback
+        # failed. The test owns recovery so it can inspect persisted state.
+        real_rollback()
+        service.executor.shutdown(wait=True)
+
+    assert "cleanup commit failed" in str(raised.value)
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert str(raised.value.__cause__) == "cleanup rollback failed"
+    generic_fallback.assert_not_called()
+    assert commit_calls == 2
+    assert rollback_calls == 1
+    assert embedder.calls == 0
+
+    db.expire_all()
+    document = db.query(Document).filter(Document.id == DOCUMENT_ID).one()
+    assert document.status == "processing"
+    assert document.error_message is None
+    assert document.meta_json == {"source": "kept"}
+    assert db.query(Chunk).filter(Chunk.document_id == DOCUMENT_ID).count() == 1_001
+    assert db.query(Embedding).count() == 0

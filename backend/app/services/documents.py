@@ -187,7 +187,23 @@ class DocumentService:
                 break
             except Exception as error:
                 last_error = error
-                db.rollback()
+                try:
+                    db.rollback()
+                except Exception as rollback_error:
+                    # A failed rollback leaves transaction state unknown. Any
+                    # retry or status-only fallback could commit only part of
+                    # the cleanup, so normalize immediately to the dedicated
+                    # path that every caller already treats as non-recoverable.
+                    logger.error(
+                        "Failed to rollback chunk-limit cleanup",
+                        document_id=doc_id,
+                        commit_error=str(error),
+                        rollback_error=str(rollback_error),
+                    )
+                    raise ChunkLimitPersistenceError(
+                        "Could not safely rollback over-limit cleanup for "
+                        f"document {doc_id} after persistence failure: {error}"
+                    ) from rollback_error
                 logger.warning(
                     "Failed to persist chunk-limit cleanup",
                     document_id=doc_id,
