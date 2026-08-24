@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 
-import { expect, type Page, type TestInfo } from '@playwright/test';
+import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
+
+import type { E2EApi, Project } from './api.js';
 
 export interface Account {
   username: string;
@@ -89,4 +91,48 @@ export async function openAddSourceDialog(page: Page) {
   const dialog = page.getByRole('dialog', { name: 'Add Source' });
   await expect(dialog).toBeVisible();
   return dialog;
+}
+
+export async function setupWorkspace(
+  api: E2EApi,
+  page: Page,
+  testInfo: TestInfo,
+  suffix: string,
+): Promise<{ account: Account; project: Project }> {
+  const account = accountFor(testInfo, suffix);
+  await api.register(account);
+  await api.login(account);
+  const project = await api.createProject(`E2E ${suffix} ${testInfo.retry}`, 'Browser workflow');
+  await loginThroughUi(page, account);
+  await expect(page.getByRole('heading', { name: project.name, exact: true })).toBeVisible();
+  return { account, project };
+}
+
+export function sourceRow(page: Page, title: string): Locator {
+  const sources = page.getByRole('complementary', { name: 'Sources' });
+  return sources
+    .getByText(title, { exact: true })
+    .locator('..')
+    .locator('..')
+    .locator('..');
+}
+
+export async function setupReadyUrlWorkspace(
+  api: E2EApi,
+  page: Page,
+  testInfo: TestInfo,
+  suffix: string,
+): Promise<{ account: Account; project: Project; documentId: string }> {
+  const { account, project } = await setupWorkspace(api, page, testInfo, suffix);
+  const documentId = await api.uploadUrl(project.id, 'https://e2e.invalid/observatory');
+  await api.waitForDocumentReady(documentId);
+  const documentsLoaded = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/projects/${project.id}/documents`)
+      && response.request().method() === 'GET',
+  );
+  await page.reload();
+  expect((await documentsLoaded).status()).toBe(200);
+  await expect(sourceRow(page, 'E2E Observatory Field Notes').getByText('Ready', { exact: true }))
+    .toBeVisible({ timeout: 10_000 });
+  return { account, project, documentId };
 }
