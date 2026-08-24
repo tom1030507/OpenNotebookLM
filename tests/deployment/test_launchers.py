@@ -69,12 +69,14 @@ class LauncherExitTests(unittest.TestCase):
         self,
         profile: str | None = None,
         required_wait_timeout: int | None = None,
+        compose_up_subcommand: str = "up",
     ) -> subprocess.CompletedProcess[str]:
         """Run the native launcher with controlled Docker command failures.
 
         Args:
             profile: Optional launcher profile supplied as one quoted argument.
             required_wait_timeout: Exact wait budget required by the Docker double.
+            compose_up_subcommand: Subcommand substituted for `up` in the test copy.
 
         Returns:
             The completed launcher process with captured combined output.
@@ -84,7 +86,19 @@ class LauncherExitTests(unittest.TestCase):
         environment["CI"] = "1"
 
         if os.name == "nt":
-            shutil.copy2(REPO_ROOT / "start.bat", self.checkout / "start.bat")
+            launcher = self.checkout / "start.bat"
+            shutil.copy2(REPO_ROOT / "start.bat", launcher)
+            if compose_up_subcommand != "up":
+                launcher_source = launcher.read_text(encoding="utf-8")
+                expected_command = " up -d --build --wait "
+                assert launcher_source.count(expected_command) == 1
+                launcher.write_text(
+                    launcher_source.replace(
+                        expected_command,
+                        f" {compose_up_subcommand} -d --build --wait ",
+                    ),
+                    encoding="utf-8",
+                )
             if required_wait_timeout is None:
                 docker_double = """@echo off
 :scan
@@ -103,21 +117,31 @@ goto scan
 setlocal EnableExtensions EnableDelayedExpansion
 set "PREVIOUS="
 set "SAW_UP="
+set "SAW_TIMEOUT="
+set "SAW_METADATA="
 :scan
-if "%~1"=="" (
-  if defined SAW_UP exit /b 86
-  exit /b 0
-)
-if "%~1"=="version" exit /b 0
-if "%~1"=="config" exit /b 0
+if "%~1"=="" goto evaluate
+if "%~1"=="version" set "SAW_METADATA=1"
+if "%~1"=="config" set "SAW_METADATA=1"
 if "%~1"=="up" set "SAW_UP=1"
 if "!PREVIOUS!"=="--wait-timeout" (
-  if "%~1"=="{required_wait_timeout}" exit /b 0
-  exit /b 86
+  if "%~1"=="{required_wait_timeout}" (
+    set "SAW_TIMEOUT=1"
+  ) else (
+    exit /b 86
+  )
 )
 set "PREVIOUS=%~1"
 shift
 goto scan
+:evaluate
+if defined SAW_UP (
+  if defined SAW_TIMEOUT exit /b 0
+  exit /b 86
+)
+if defined SAW_TIMEOUT exit /b 86
+if defined SAW_METADATA exit /b 0
+exit /b 86
 """
             write_executable(self.bin_dir / "docker.cmd", docker_double)
             write_executable(
@@ -141,6 +165,17 @@ goto scan
         else:
             launcher = self.checkout / "start.sh"
             shutil.copy2(REPO_ROOT / "start.sh", launcher)
+            if compose_up_subcommand != "up":
+                launcher_source = launcher.read_text(encoding="utf-8")
+                expected_command = " up -d --build --wait "
+                assert launcher_source.count(expected_command) == 1
+                launcher.write_text(
+                    launcher_source.replace(
+                        expected_command,
+                        f" {compose_up_subcommand} -d --build --wait ",
+                    ),
+                    encoding="utf-8",
+                )
             if required_wait_timeout is None:
                 docker_double = """#!/bin/sh
 for argument in "$@"; do
@@ -157,17 +192,21 @@ exit 0
                 docker_double = f"""#!/bin/sh
 previous=''
 saw_up=0
+saw_timeout=0
+saw_metadata=0
 for argument in "$@"; do
-  [ "$argument" = version ] && exit 0
-  [ "$argument" = config ] && exit 0
+  [ "$argument" = version ] && saw_metadata=1
+  [ "$argument" = config ] && saw_metadata=1
   [ "$argument" = up ] && saw_up=1
   if [ "$previous" = --wait-timeout ]; then
-    [ "$argument" = {required_wait_timeout} ] && exit 0
-    exit 86
+    [ "$argument" = {required_wait_timeout} ] || exit 86
+    saw_timeout=1
   fi
   previous="$argument"
 done
-[ "$saw_up" -eq 0 ] && exit 0
+[ "$saw_up" -eq 1 ] && [ "$saw_timeout" -eq 1 ] && exit 0
+[ "$saw_timeout" -eq 1 ] && exit 86
+[ "$saw_metadata" -eq 1 ] && exit 0
 exit 86
 """
             write_executable(self.bin_dir / "docker", docker_double)
@@ -233,6 +272,20 @@ exit 86
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(FALSE_SUCCESS_BANNER, result.stdout)
+
+    def test_wait_budget_requires_the_compose_up_subcommand(self) -> None:
+        """A timeout on a different Compose command may not satisfy the double."""
+        env_file = self.checkout / ".env"
+        shutil.copy2(REPO_ROOT / ".env.example", env_file)
+        set_jwt(env_file)
+
+        result = self.run_launcher(
+            required_wait_timeout=900,
+            compose_up_subcommand="ps",
+        )
+
+        self.assertEqual(result.returncode, 86, result.stdout)
+        self.assertNotIn(FALSE_SUCCESS_BANNER, result.stdout)
 
     def test_fresh_launcher_rejects_the_copied_blank_jwt(self) -> None:
         """Copying the example may not proceed with its required secret blank."""

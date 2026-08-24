@@ -21,6 +21,7 @@ DEFAULT_EMBEDDING_DIMENSION = "768"
 OBSERVED_COLD_START_SECONDS = 91
 MINIMUM_START_PERIOD_SECONDS = 600
 EXPECTED_WAIT_TIMEOUT_SECONDS = 900
+EXPECTED_HEALTH_FAILURE_BOUNDARY_SECONDS = 730
 
 
 def compose_config(
@@ -127,6 +128,65 @@ def ci_runtime_wait_timeouts() -> list[int]:
             workflow,
         )
     ]
+
+
+def ci_runtime_smoke_steps() -> list[tuple[str, dict[str, str], str]]:
+    """Parse runtime smoke environments and scripts from the CI workflow.
+
+    Returns:
+        Step names paired with their environment mappings and shell scripts.
+    """
+    workflow_lines = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8",
+    ).splitlines()
+    steps: list[tuple[str, dict[str, str], str]] = []
+    current_name: str | None = None
+    current_environment: dict[str, str] = {}
+    current_run_lines: list[str] = []
+    section: str | None = None
+
+    for line in [*workflow_lines, "      - name: end runtime smoke scan"]:
+        if line.startswith("      - name: "):
+            if current_name is not None:
+                steps.append(
+                    (
+                        current_name,
+                        current_environment,
+                        "\n".join(current_run_lines),
+                    )
+                )
+
+            step_name = line.removeprefix("      - name: ")
+            if step_name.startswith("Smoke the ") and step_name.endswith(
+                " entry point"
+            ):
+                current_name = step_name
+                current_environment = {}
+                current_run_lines = []
+            else:
+                current_name = None
+            section = None
+            continue
+
+        if current_name is None:
+            continue
+        if line == "        env:":
+            section = "environment"
+            continue
+        if line == "        run: |":
+            section = "run"
+            continue
+        if section == "environment" and line.startswith("          "):
+            name, value = line.strip().split(":", 1)
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            current_environment[name] = value
+            continue
+        if section == "run" and line.startswith("          "):
+            current_run_lines.append(line[10:])
+
+    return steps
 
 
 def missing_secret_result(compose_file: Path) -> subprocess.CompletedProcess[str]:
@@ -275,13 +335,62 @@ class ComposeContractTests(unittest.TestCase):
         start_period = duration_seconds(health["start_period"])
         interval = duration_seconds(health["interval"])
         timeout = duration_seconds(health["timeout"])
-        failure_boundary = start_period + health["retries"] * (interval + timeout)
+        # A probe that starts inside the grace may consume its timeout before
+        # the regular retry cadence begins after the grace boundary.
+        failure_boundary = (
+            start_period + timeout + health["retries"] * (interval + timeout)
+        )
 
         self.assertEqual(
             ci_runtime_wait_timeouts(),
             [EXPECTED_WAIT_TIMEOUT_SECONDS, EXPECTED_WAIT_TIMEOUT_SECONDS],
         )
+        self.assertEqual(
+            failure_boundary,
+            EXPECTED_HEALTH_FAILURE_BOUNDARY_SECONDS,
+        )
         self.assertGreaterEqual(EXPECTED_WAIT_TIMEOUT_SECONDS, failure_boundary)
+
+    def test_ci_runtime_smokes_pin_and_verify_the_small_embedding_model(self) -> None:
+        """Each fresh CI volume must use and inspect the controlled small model."""
+        expected_steps = (
+            ("Smoke the root production entry point", COMPOSE_FILES[0]),
+            ("Smoke the deploy compatibility entry point", COMPOSE_FILES[1]),
+        )
+        steps = ci_runtime_smoke_steps()
+
+        self.assertEqual(
+            [name for name, _environment, _script in steps],
+            [name for name, _compose_file in expected_steps],
+        )
+        for (name, environment, script), (_expected_name, compose_file) in zip(
+            steps,
+            expected_steps,
+            strict=True,
+        ):
+            with self.subTest(step=name):
+                self.assertEqual(
+                    environment.get("EMB_MODEL_NAME"),
+                    "sentence-transformers/paraphrase-MiniLM-L3-v2",
+                )
+                self.assertEqual(environment.get("EMB_DIMENSION"), "384")
+
+                backend_environment = compose_config(
+                    compose_file,
+                    environment_overrides=environment,
+                )["services"]["backend"]["environment"]
+                self.assertEqual(
+                    backend_environment["EMB_MODEL_NAME"],
+                    "sentence-transformers/paraphrase-MiniLM-L3-v2",
+                )
+                self.assertEqual(backend_environment["EMB_DIMENSION"], "384")
+
+                self.assertIn(
+                    'test "$EMB_MODEL_NAME" = '
+                    '"sentence-transformers/paraphrase-MiniLM-L3-v2"',
+                    script,
+                )
+                self.assertIn('test "$EMB_DIMENSION" = "384"', script)
 
     def test_persistent_service_state_uses_engine_managed_volumes(self) -> None:
         """Fresh rootful launches must not create root-owned host bind folders."""
