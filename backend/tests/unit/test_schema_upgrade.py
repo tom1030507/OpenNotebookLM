@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import create_engine, inspect
 
 from app.db.database import ADDED_COLUMNS, ensure_added_columns
+from app.db.models import Base
 
 # The shape these two tables had before ownership existed.
 OLD_SCHEMA = (
@@ -66,7 +67,11 @@ def old_database(tmp_path):
     connection.commit()
     connection.close()
 
-    return create_engine("sqlite:///%s" % path)
+    engine = create_engine("sqlite:///%s" % path)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 class TestUpgrade:
@@ -101,6 +106,39 @@ class TestUpgrade:
     def test_running_twice_changes_nothing(self, old_database):
         assert ensure_added_columns(old_database)
         assert ensure_added_columns(old_database) == []
+
+    def test_existing_database_gains_durable_jobs_idempotently(
+        self,
+        old_database,
+    ):
+        """A pre-feature file gains one queue table without changing old rows.
+
+        Args:
+            old_database: Database with pre-ownership documents and projects.
+
+        Returns:
+            None.
+        """
+        for _attempt in range(2):
+            Base.metadata.create_all(old_database)
+            ensure_added_columns(old_database)
+
+        inspector = inspect(old_database)
+        assert inspector.get_table_names().count("ingestion_jobs") == 1
+        with old_database.connect() as connection:
+            projects = list(connection.exec_driver_sql(
+                "SELECT id, name FROM projects"
+            ))
+            documents = list(connection.exec_driver_sql(
+                "SELECT id, title, status FROM documents"
+            ))
+            jobs = connection.exec_driver_sql(
+                "SELECT COUNT(*) FROM ingestion_jobs"
+            ).scalar_one()
+
+        assert projects == [("project-1", "Existing work")]
+        assert documents == [("document-1", "Existing upload", "ready")]
+        assert jobs == 0
 
     def test_a_database_with_no_tables_is_left_alone(self, tmp_path):
         engine = create_engine("sqlite:///%s" % (tmp_path / "empty.db"))

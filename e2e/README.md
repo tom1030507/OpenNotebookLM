@@ -306,14 +306,15 @@ The following fresh local checks completed on 2026-08-24:
 - New backend unit tests prove service creation is lazy and dependency
   overrides select the deterministic services.
 - The supported native ARM64 backend image built successfully, and its full
-  suite passed **698 tests** with 1 skip in 111.68 seconds.
+  suite passed **760 tests** with 1 skip in 216.16 seconds after integrating
+  the durable ingestion worker from the latest `master`.
 - `cd frontend && npm test` passed **41 files / 412 tests**; `npm run lint`,
   `npm run build`, and `cd e2e && npm run typecheck` also passed.
-- `cd e2e && npm test` passed **33 tests** in 1.5 minutes, with no unexpected
+- `cd e2e && npm test` passed **33 tests** in 1.6 minutes, with no unexpected
   skips. It intentionally excludes exactly one opt-in test: `full-rag.spec.ts`.
 - `cd e2e && npm run test:full-rag` passed **1 test** using production-aligned
-  Torch 2.13, Transformers 5.5, and sentence-transformers 5.7. The 1.9-minute
-  cold-cache run included model startup; the browser workflow itself took 10.1
+  Torch 2.13, Transformers 5.5, and sentence-transformers 5.7. The latest
+  warm-cache run took 32.6 seconds; the browser workflow itself took 10.7
   seconds and used `LLM_MODE=none`.
 - The tracked-artifact audit contains no runtime database, uploads, model cache,
   Playwright report, trace, screenshot, or video.

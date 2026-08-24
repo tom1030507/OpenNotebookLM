@@ -1,9 +1,10 @@
 """Export service for converting conversations and projects to various formats."""
 import json
 import os
+from pathlib import Path
 import tempfile
 import zipfile
-from typing import Optional, Tuple, Any, Dict, List
+from typing import Tuple, Any, Dict, List
 from sqlalchemy.orm import Session
 import structlog
 
@@ -13,6 +14,12 @@ from app.db.models import (
 from app.utils.time import utc_now
 
 logger = structlog.get_logger()
+MAX_BATCH_EXPORT_CONVERSATIONS = 100
+_BATCH_EXPORT_EXTENSIONS = {
+    "json": ".json",
+    "markdown": ".md",
+    "txt": ".txt",
+}
 
 
 class ExportService:
@@ -327,38 +334,65 @@ class ExportService:
         format: str = "json"
     ) -> str:
         """Export multiple conversations to a ZIP file.
-        
-        Returns: Path to the created ZIP file
+
+        Args:
+            db: Database session used to load conversations.
+            conversation_ids: IDs to export, including repeated entries.
+            format: Member export format.
+
+        Returns:
+            Path to the created ZIP file.
+
+        Raises:
+            ValueError: If the batch exceeds the bounded export limit.
         """
-        # Create temporary directory
-        with tempfile.TemporaryDirectory() as temp_dir:
-            exported_files = []
-            
-            for conv_id in conversation_ids:
-                conversation = db.query(Conversation).filter(
-                    Conversation.id == conv_id
-                ).first()
-                
-                if not conversation:
-                    logger.warning(f"Conversation {conv_id} not found")
-                    continue
-                
-                # Export conversation
-                content, _, filename = self.export_conversation(
-                    db, conversation, format, include_citations=True
-                )
-                
-                # Write to temp file
-                file_path = os.path.join(temp_dir, filename)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                
-                exported_files.append((file_path, filename))
-            
-            # Create ZIP file
-            zip_path = tempfile.mktemp(suffix='.zip')
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for file_path, filename in exported_files:
-                    zipf.write(file_path, filename)
-            
+        if len(conversation_ids) > MAX_BATCH_EXPORT_CONVERSATIONS:
+            raise ValueError(
+                "A batch export may contain at most "
+                f"{MAX_BATCH_EXPORT_CONVERSATIONS} conversations"
+            )
+
+        archive_fd, zip_path = tempfile.mkstemp(suffix=".zip")
+        try:
+            # ZipFile reopens by path. Closing the reserved descriptor first is
+            # required on Windows, where a second open may otherwise fail.
+            os.close(archive_fd)
+        except BaseException:
+            Path(zip_path).unlink(missing_ok=True)
+            raise
+
+        extension = _BATCH_EXPORT_EXTENSIONS.get(format, ".txt")
+        try:
+            with zipfile.ZipFile(
+                zip_path,
+                "w",
+                zipfile.ZIP_DEFLATED,
+            ) as archive:
+                for ordinal, conv_id in enumerate(conversation_ids, start=1):
+                    conversation = db.query(Conversation).filter(
+                        Conversation.id == conv_id
+                    ).first()
+
+                    if not conversation:
+                        logger.warning(f"Conversation {conv_id} not found")
+                        continue
+
+                    content, _, _filename = self.export_conversation(
+                        db,
+                        conversation,
+                        format,
+                        include_citations=True,
+                    )
+                    # Database IDs and titles must not become archive paths:
+                    # they can contain traversal or Windows-invalid characters.
+                    archive.writestr(
+                        f"conversation_{ordinal:03d}{extension}",
+                        content,
+                    )
+
             return zip_path
+        except BaseException:
+            # The caller owns cleanup only after a complete archive is returned.
+            # Until then this service must remove exactly what it allocated.
+            Path(zip_path).unlink(missing_ok=True)
+            raise

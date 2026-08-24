@@ -5,8 +5,10 @@ from pathlib import Path
 from fastapi import FastAPI
 import structlog
 
-from app.db.database import init_db
+from app.config import get_settings
+from app.db.database import SessionLocal, init_db
 from app.services.auth import get_auth_service
+from app.services.ingestion_jobs import IngestionJobWorker
 
 logger = structlog.get_logger()
 
@@ -35,6 +37,21 @@ async def lifespan(app: FastAPI):
     Path("./models").mkdir(exist_ok=True)
     Path("./uploads").mkdir(exist_ok=True)
 
-    yield
+    settings = get_settings()
+    ingestion_worker = IngestionJobWorker(
+        session_factory=SessionLocal,
+        processor=getattr(app.state, "ingestion_job_processor", None),
+        concurrency=settings.ingestion_worker_concurrency,
+    )
+    await ingestion_worker.start()
+    app.state.ingestion_worker = ingestion_worker
+    logger.info(
+        "Durable ingestion worker started",
+        concurrency=settings.ingestion_worker_concurrency,
+    )
 
-    logger.info("Shutting down OpenNotebookLM")
+    try:
+        yield
+    finally:
+        await ingestion_worker.stop()
+        logger.info("Shutting down OpenNotebookLM")

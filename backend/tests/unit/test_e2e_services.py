@@ -6,7 +6,7 @@ import pickle
 import subprocess
 from pathlib import Path
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -379,7 +379,7 @@ def test_runtime_root_rejects_external_alias_to_an_internal_child(tmp_path):
 
 
 def test_fast_overrides_select_the_deterministic_service_graph(monkeypatch):
-    """FastAPI overrides must replace both production embedding boundaries."""
+    """Fast overrides must replace both route and durable-worker boundaries."""
     class StubRAGService:
         """No-file stand-in matching the route tests' unused dependency stub."""
 
@@ -404,3 +404,25 @@ def test_fast_overrides_select_the_deterministic_service_graph(monkeypatch):
     assert isinstance(document_service.url_adapter, FixedURLAdapter)
     assert isinstance(document_service.youtube_adapter, FixedYouTubeAdapter)
     assert isinstance(rag_service, real_rag.RAGService)
+
+    calls = []
+    document_service.process_ingestion_job = lambda db, **kwargs: calls.append(
+        (db, kwargs)
+    )
+    database = object()
+    application.state.ingestion_job_processor(
+        database,
+        SimpleNamespace(
+            document_id="document-id",
+            job_type="url",
+            payload_json={"url": "https://e2e.invalid/source"},
+        ),
+    )
+    assert calls == [(
+        database,
+        {
+            "document_id": "document-id",
+            "job_type": "url",
+            "payload": {"url": "https://e2e.invalid/source"},
+        },
+    )]

@@ -14,6 +14,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       DB_PATH: /app/data/opennotebook.db
       DATABASE_URL: sqlite:////app/data/opennotebook.db
+      INGESTION_WORKER_CONCURRENCY: "${INGESTION_WORKER_CONCURRENCY:-1}"
       EMB_BACKEND: sqlitevec
       EMB_MODEL_NAME: ${EMB_MODEL_NAME:-intfloat/multilingual-e5-base}
       EMB_DIMENSION: ${EMB_DIMENSION:-768}

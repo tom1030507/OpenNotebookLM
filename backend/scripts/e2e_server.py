@@ -116,8 +116,27 @@ def install_fast_overrides(application: Any) -> None:
         embedding_service=embedding,
         llm_service=LLMService(),
     )
+
+    def process_ingestion_job(db: Any, job: Any) -> str:
+        """Run durable E2E jobs through the deterministic document graph.
+
+        Args:
+            db: Worker-owned database session.
+            job: Claimed durable ingestion job.
+
+        Returns:
+            The final document status.
+        """
+        return document_service.process_ingestion_job(
+            db,
+            document_id=job.document_id,
+            job_type=job.job_type,
+            payload=dict(job.payload_json or {}),
+        )
+
     application.dependency_overrides[get_document_service] = lambda: document_service
     application.dependency_overrides[get_rag_service] = lambda: rag_service
+    application.state.ingestion_job_processor = process_ingestion_job
 
 
 def create_application() -> tuple[Any, Any]:
