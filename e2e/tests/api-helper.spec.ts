@@ -38,3 +38,17 @@ test('models nullable titles and raw persisted conversation messages through the
     expect(Array.isArray(message.citations)).toBe(true);
   }
 });
+
+test('renames and deletes a conversation through authenticated APIs', async ({ api }, testInfo) => {
+  const account = accountFor(testInfo, 'conversation-api');
+  await api.register(account);
+  await api.login(account);
+  const project = await api.createProject('Conversation API Project');
+  const conversation = await api.createConversation(project.id, 'Initial title');
+
+  const renamed = await api.renameConversation(conversation.id, 'Renamed title');
+  expect(renamed.title).toBe('Renamed title');
+  await api.deleteConversation(conversation.id);
+  expect((await api.listConversations(project.id)).map((item) => item.id))
+    .not.toContain(conversation.id);
+});

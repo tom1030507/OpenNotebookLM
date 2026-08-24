@@ -163,6 +163,19 @@ export class E2EApi {
     }));
   }
 
+  async renameConversation(conversationId: string, title: string): Promise<Conversation> {
+    return this.json(await this.request.put(`${runtime.apiUrl}/conversations/${conversationId}`, {
+      headers: this.authorization(),
+      data: { title },
+    }));
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    await this.json(await this.request.delete(`${runtime.apiUrl}/conversations/${conversationId}`, {
+      headers: this.authorization(),
+    }));
+  }
+
   async conversation(conversationId: string): Promise<ConversationDetail> {
     return this.json(await this.request.get(`${runtime.apiUrl}/conversations/${conversationId}`, {
       headers: this.authorization(),
