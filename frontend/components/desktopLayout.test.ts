@@ -106,7 +106,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useStore.setState(originalStoreState, true);
+  useStore.getState().resetForTests();
   vi.restoreAllMocks();
 });
 

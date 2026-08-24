@@ -69,7 +69,6 @@ const summary = (modelUsed = 'test-model'): VideoSummary => ({
   ],
 });
 
-const initialState = useStore.getState();
 
 interface Utterance {
   text: string;
@@ -127,18 +126,17 @@ beforeEach(() => {
     projects: [project],
     documents: [source],
   });
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:video-summary'),
-    revokeObjectURL: vi.fn(),
-  });
+  class TestURL extends URL {}
+  TestURL.createObjectURL = vi.fn(() => 'blob:video-summary');
+  TestURL.revokeObjectURL = vi.fn();
+  vi.stubGlobal('URL', TestURL);
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  useStore.setState(initialState, true);
+  useStore.getState().resetForTests();
 });
 
 describe('Studio video summary', () => {

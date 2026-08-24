@@ -25,6 +25,7 @@ export default function useDocumentStatusWatch() {
   const documents = useStore((state) => state.documents);
   const notifyOnProcessingComplete = useStore((state) => state.notifyOnProcessingComplete);
   const watchedStatuses = useRef(new Map<string, DocumentStatus>());
+  const pollGeneration = useRef(0);
   // A plain string so the effect only restarts when the pending set changes.
   const pendingIds = useStore((state) => state.documents
     .filter((document) => isPending(document.status))
@@ -34,17 +35,48 @@ export default function useDocumentStatusWatch() {
   useEffect(() => {
     if (!projectId || !pendingIds) return;
 
+    const generation = pollGeneration.current + 1;
+    pollGeneration.current = generation;
+    let cancelled = false;
     let polls = 0;
-    const timer = setInterval(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+
+    const schedule = () => {
+      timer = setTimeout(() => {
+        void poll();
+      }, POLL_INTERVAL_MS);
+    };
+
+    const poll = async () => {
+      if (cancelled || pollGeneration.current !== generation) return;
+
       polls += 1;
       if (polls > MAX_POLLS) {
-        clearInterval(timer);
         return;
       }
-      void refreshDocuments(projectId);
-    }, POLL_INTERVAL_MS);
 
-    return () => clearInterval(timer);
+      controller = new AbortController();
+      try {
+        await refreshDocuments(
+          projectId,
+          controller.signal,
+          () => !cancelled && pollGeneration.current === generation,
+        );
+      } finally {
+        if (!cancelled && pollGeneration.current === generation && polls < MAX_POLLS) {
+          schedule();
+        }
+      }
+    };
+
+    schedule();
+
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      if (timer) clearTimeout(timer);
+    };
   }, [projectId, pendingIds, refreshDocuments]);
 
   // Polling is what notices that a source has settled, so this is where the
