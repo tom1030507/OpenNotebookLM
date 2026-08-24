@@ -78,6 +78,20 @@ class TestSentenceSplitting:
             "overall.\nDone!",
         ]
 
+    def test_cjk_closing_marks_continue_as_a_separate_bounded_piece(self):
+        service = ChunkingService(chunk_size=10, chunk_overlap=0)
+        text = "a" * 9 + "。』NEXT."
+
+        assert list(service._iter_sentences(text)) == [
+            "a" * 9 + "。",
+            "』",
+            "NEXT.",
+        ]
+        assert [chunk["text"] for chunk in service._chunk_text_content(text)] == [
+            "a" * 9 + "。",
+            "』\nNEXT.",
+        ]
+
 
 class TestChunkSize:
     """No chunk may exceed the configured size."""
@@ -212,6 +226,16 @@ class TestOffsets:
         for chunk in chunks:
             assert 0 <= chunk["metadata"]["start_char"] <= len(text)
             assert chunk["metadata"]["end_char"] <= len(text) + 1
+
+    def test_short_line_passes_through_with_its_original_end_offset(self):
+        text = "First sentence. Second sentence."
+        service = ChunkingService(chunk_size=512, chunk_overlap=0)
+
+        chunks = service._chunk_text_content(text)
+
+        assert [chunk["text"] for chunk in chunks] == [text]
+        assert chunks[0]["metadata"]["start_char"] == 0
+        assert chunks[0]["metadata"]["end_char"] == len(text)
 
 
 class TestRuntMerging:

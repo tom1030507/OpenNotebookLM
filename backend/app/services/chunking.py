@@ -296,6 +296,29 @@ class ChunkingService:
             if heading_handled:
                 continue
 
+            # Preserve the historical short-line contract exactly. Sentence
+            # streaming is only needed when a line extends beyond one bounded
+            # window; splitting short lines changes their text separators and
+            # makes offsets drift from the source.
+            line_probe_end = min(content_start + self.chunk_size + 1, length)
+            newline = text.find("\n", content_start, line_probe_end)
+            short_line_end: Optional[int] = None
+            if newline >= 0:
+                short_line_end = newline
+            elif length - content_start <= self.chunk_size:
+                short_line_end = length
+            if short_line_end is not None:
+                line = text[content_start:short_line_end].strip()
+                if line:
+                    yield _Block(
+                        text=line,
+                        start=content_start,
+                        end=content_start + len(line),
+                        heading_path=" > ".join(title for _, title in stack),
+                    )
+                offset = short_line_end + 1
+                continue
+
             output_cursor = content_start
             fragments = self._iter_bounded_fragments(
                 text,
@@ -888,8 +911,35 @@ class ChunkingService:
             value is the first source index after the line or input.
         """
         length = len(text)
+        cjk_closing_pending = False
 
         while start < length:
+            if cjk_closing_pending:
+                closing_start = start
+                closing_end = start
+                closing_limit = min(start + self.chunk_size, length)
+                while closing_end < closing_limit:
+                    if self._scan_character(text, closing_end) not in CLOSING_MARKS:
+                        break
+                    closing_end += 1
+
+                if closing_end > closing_start:
+                    yield text[closing_start:closing_end]
+                    start = closing_end
+                    if start >= length:
+                        return length + 1
+                    if closing_end == closing_limit:
+                        continue
+
+                cjk_closing_pending = False
+                while start < length:
+                    char = self._scan_character(text, start)
+                    if stop_at_newline and char == "\n":
+                        return start + 1
+                    if not char.isspace():
+                        break
+                    start += 1
+
             window_end = min(start + self.chunk_size, length)
             index = start
 
@@ -907,10 +957,18 @@ class ChunkingService:
                     char,
                 )
                 if sentence_end is not None:
+                    closing_crosses_window = (
+                        char in CJK_TERMINATORS
+                        and sentence_end == window_end
+                        and sentence_end < length
+                    )
                     fragment = text[start:sentence_end].strip()
                     if fragment:
                         yield fragment
                     start = sentence_end
+                    if closing_crosses_window:
+                        cjk_closing_pending = True
+                        break
                     while start < length:
                         char = self._scan_character(text, start)
                         if stop_at_newline and char == "\n":
