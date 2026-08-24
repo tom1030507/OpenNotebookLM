@@ -1,12 +1,17 @@
 # OpenNotebookLM End-to-End Test Suite Implementation Plan
 
+> **Historical implementation record:** Version pins and runtime details in
+> this task-by-task plan reflect the original implementation sequence. Use
+> `e2e/README.md`, the tracked requirements files, and the current workflow as
+> the authoritative operating contract.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build deterministic browser-to-database E2E coverage for OpenNotebookLM's critical workflows, plus an opt-in full production-embedding retrieval test.
 
 **Architecture:** Playwright drives a real Chromium browser against isolated Next.js and FastAPI processes on ports 3100 and 8100. The fast project keeps the real routers, ownership checks, services, SQLite persistence, PDF extraction, chunking, and LLM fallback while injecting deterministic embeddings and fixed URL/YouTube adapters; the nightly project uses the production embedding service. Every run owns a validated directory under `output/e2e/<run-id>` and retains complete diagnostics only when it fails.
 
-**Tech Stack:** Python 3.10, FastAPI 0.104.1, SQLAlchemy 2.0.23, SQLite, Next.js 15.4.6, TypeScript, Node.js 22, Playwright 1.62.1, Chromium, pdf-lib 1.17.1, GitHub Actions
+**Tech Stack:** Python 3.10, FastAPI, SQLAlchemy, SQLite, Next.js, TypeScript, Node.js 22, Playwright, Chromium, pdf-lib, GitHub Actions
 
 **Spec:** `e2e/README.md`
 

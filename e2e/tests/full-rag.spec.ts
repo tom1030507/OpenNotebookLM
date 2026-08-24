@@ -77,7 +77,7 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   const dialog = await openAddSourceDialog(page);
   await dialog.locator('input[type="file"]').setInputFiles(filePath);
   const uploadResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/upload`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/upload`
       && response.request().method() === 'POST',
   );
   await dialog.getByRole('button', { name: 'Upload 1 file(s)', exact: true }).click();
@@ -101,7 +101,7 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   const question = 'What is the emergency observatory access identifier?';
   await page.getByPlaceholder('Ask anything about your sources...').fill(question);
   const queryResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/query`
+    (response) => response.url() === `${runtime.browserApiUrl}/query`
       && response.request().method() === 'POST',
   );
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -137,7 +137,7 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
 
   const conversationTitle = `${question.substring(0, 50)}...`;
   const listReloaded = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/conversations`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
       && response.request().method() === 'GET',
   );
   await page.reload();
@@ -148,7 +148,7 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
     .getByText(conversationTitle, { exact: true });
   await expect(conversationItem).toBeVisible();
   const detailReloaded = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/conversations/${conversationId}`
+    (response) => response.url() === `${runtime.browserApiUrl}/conversations/${conversationId}`
       && response.request().method() === 'GET',
   );
   await conversationItem.click();

@@ -1,10 +1,30 @@
 """URL content extraction adapter."""
+import asyncio
 import re
-from typing import Dict, List, Optional
-from urllib.parse import urlparse
+import socket
+import threading
+import time
+from concurrent.futures import (
+    Executor,
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FutureTimeoutError,
+)
+from typing import Callable, Dict, List, Optional
+from urllib.parse import urljoin, urlparse
 import structlog
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup, NavigableString
+from urllib3 import connection as urllib3_connection_module
+from urllib3 import connectionpool
+from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+from urllib3.util import connection as urllib3_connection
+
+from app.utils.network import (
+    UnsafeURLError,
+    resolve_public_http_url,
+)
 
 try:
     # readability-lxml exports `Document`. An earlier version of this module
@@ -17,6 +37,433 @@ except ImportError:  # pragma: no cover - depends on the environment
     HAS_READABILITY = False
 
 logger = structlog.get_logger()
+
+MAX_URL_DOWNLOAD_MB = 10
+MAX_URL_DOWNLOAD_BYTES = MAX_URL_DOWNLOAD_MB * 1024 * 1024
+MAX_URL_REDIRECTS = 5
+URL_STREAM_BLOCK_BYTES = 64 * 1024
+URL_DOWNLOAD_WORKERS = 4
+REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+ACCEPTED_CONTENT_TYPES = frozenset({
+    "text/html",
+    "application/xhtml+xml",
+    "text/plain",
+})
+_URL_DOWNLOAD_EXECUTOR = ThreadPoolExecutor(
+    max_workers=URL_DOWNLOAD_WORKERS,
+    thread_name_prefix="url-download",
+)
+
+
+def _require_supported_requests_transport() -> None:
+    """Fail before serving requests when the DNS-pin hook is unavailable."""
+    if not callable(getattr(HTTPAdapter, "get_connection_with_tls_context", None)):
+        raise RuntimeError(
+            "Requests transport hook get_connection_with_tls_context is unavailable; "
+            "install requests==2.34.2 with urllib3==2.7.0"
+        )
+
+
+class _SocketCancellationHandle:
+    """Own one socket reference and close or abort it exactly once."""
+
+    def __init__(self, owned_socket):
+        """Retain the sole cleanup claim for a socket reference.
+
+        Args:
+            owned_socket: Real or duplicated socket this handle must release.
+        """
+        self._socket = owned_socket
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        """Interrupt blocking socket work, then release this handle.
+
+        Returns:
+            None after this caller or an earlier cleanup retires the handle.
+        """
+        owned_socket = self._claim()
+        if owned_socket is None:
+            return
+        try:
+            owned_socket.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            # A peer may race the deadline and close first. The descriptor is
+            # still ours to close, but that race does not change the outcome.
+            pass
+        finally:
+            owned_socket.close()
+
+    def close(self) -> None:
+        """Release this handle without aborting a live shared connection.
+
+        Returns:
+            None after this caller or an earlier cleanup retires the handle.
+        """
+        owned_socket = self._claim()
+        if owned_socket is not None:
+            owned_socket.close()
+
+    def _claim(self):
+        """Return the socket to one cleanup caller and retire the handle."""
+        with self._lock:
+            owned_socket = self._socket
+            self._socket = None
+        return owned_socket
+
+
+class _FetchControl:
+    """Thread-safe cancellation and active transport registry for one fetch."""
+
+    def __init__(self):
+        self._cancelled = False
+        self._closeables = []
+        self._socket_handles = []
+        self._lock = threading.Lock()
+
+    def register(self, closeable) -> None:
+        """Register an active session, response, or socket for cancellation."""
+        should_close = False
+        with self._lock:
+            if self._cancelled:
+                should_close = True
+            elif closeable not in self._closeables:
+                self._closeables.append(closeable)
+        if should_close:
+            self._close(closeable)
+
+    def unregister(self, closeable) -> None:
+        """Stop retaining a transport that has already been closed."""
+        with self._lock:
+            if closeable in self._closeables:
+                self._closeables.remove(closeable)
+
+    def register_socket_handle(self, handle: _SocketCancellationHandle) -> None:
+        """Register an OS-level socket handle for prompt interruption.
+
+        Args:
+            handle: Exact-once handle for an active socket reference.
+
+        Returns:
+            None after registration or immediate cancellation.
+        """
+        should_cancel = False
+        with self._lock:
+            if self._cancelled:
+                should_cancel = True
+            elif handle not in self._socket_handles:
+                self._socket_handles.append(handle)
+        if should_cancel:
+            handle.cancel()
+
+    def unregister_socket_handle(self, handle: _SocketCancellationHandle) -> None:
+        """Stop retaining a socket handle whose connection is complete.
+
+        Args:
+            handle: Exact-once handle no longer needed for interruption.
+
+        Returns:
+            None after removing the handle if it remained registered.
+        """
+        with self._lock:
+            if handle in self._socket_handles:
+                self._socket_handles.remove(handle)
+
+    def cancel(self) -> None:
+        """Close active transports and prevent a later one from opening."""
+        with self._lock:
+            self._cancelled = True
+            socket_handles = list(reversed(self._socket_handles))
+            closeables = list(reversed(self._closeables))
+            self._socket_handles.clear()
+            self._closeables.clear()
+        # Shutdown the OS connection before asking higher-level response and
+        # session objects to clean up. Those objects may not own the checked-out
+        # pool connection while Requests is blocked in TLS or response headers.
+        for handle in socket_handles:
+            handle.cancel()
+        for closeable in closeables:
+            self._close(closeable)
+
+    def raise_if_cancelled(self) -> None:
+        """Raise the stable deadline error after cancellation."""
+        with self._lock:
+            cancelled = self._cancelled
+        if cancelled:
+            raise UnsafeURLError("URL download exceeded the time limit")
+
+    @staticmethod
+    def _close(closeable) -> None:
+        """Best-effort close without hiding the caller's timeout refusal."""
+        try:
+            closeable.close()
+        except Exception:
+            # Cancellation is already returning a stable timeout. A close race
+            # must not replace it with a transport-specific cleanup exception.
+            pass
+
+
+class URLFetchOperation:
+    """A bounded caller-facing handle for one fixed-pool URL extraction."""
+
+    def __init__(
+        self,
+        future: Future,
+        control: _FetchControl,
+        timeout_seconds: float,
+    ):
+        """Store the underlying worker and its absolute caller deadline.
+
+        Args:
+            future: Actual fixed-pool extraction future.
+            control: Registry used to interrupt active transports.
+            timeout_seconds: Total caller wall-clock allowance from submission.
+        """
+        self.future = future
+        self._control = control
+        self._deadline = time.monotonic() + timeout_seconds
+
+    def result(self):
+        """Wait only until the global deadline and return extracted content.
+
+        Returns:
+            Extracted URL content dictionary.
+
+        Raises:
+            UnsafeURLError: When the global caller deadline expires.
+        """
+        try:
+            return self.future.result(timeout=self._remaining())
+        except FutureTimeoutError as exc:
+            self._abort()
+            raise UnsafeURLError("URL download exceeded the time limit") from exc
+
+    async def wait(self):
+        """Asynchronously wait only until the same global deadline.
+
+        Returns:
+            Extracted URL content dictionary.
+
+        Raises:
+            UnsafeURLError: When the global caller deadline expires.
+            asyncio.CancelledError: When the awaiting request is cancelled.
+        """
+        wrapped = asyncio.wrap_future(self.future)
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(wrapped),
+                timeout=self._remaining(),
+            )
+        except asyncio.TimeoutError as exc:
+            self._abort()
+            raise UnsafeURLError("URL download exceeded the time limit") from exc
+        except asyncio.CancelledError:
+            self._abort()
+            raise
+
+    def _remaining(self) -> float:
+        """Return non-negative caller time remaining."""
+        return max(0.0, self._deadline - time.monotonic())
+
+    def _abort(self) -> None:
+        """Cancel queued work and interrupt active transports where possible."""
+        self._control.cancel()
+        self.future.cancel()
+
+
+class _PinnedConnectionMixin:
+    """Connect an urllib3 connection to a pre-validated literal address."""
+
+    def __init__(
+        self,
+        *args,
+        pinned_address: str,
+        fetch_control: Optional[_FetchControl] = None,
+        **kwargs,
+    ):
+        """Store the address that DNS validation approved.
+
+        Args:
+            *args: Positional connection arguments.
+            pinned_address: Literal public IP used for the socket.
+            fetch_control: Optional deadline cancellation registry.
+            **kwargs: Keyword connection arguments.
+        """
+        self._pinned_address = pinned_address
+        self._fetch_control = fetch_control
+        self._transport_lock = threading.Lock()
+        self._handshake_handle = None
+        self._connected_handle = None
+        super().__init__(*args, **kwargs)
+
+    def _new_conn(self):
+        """Open a socket without performing a second DNS lookup.
+
+        Returns:
+            A connected socket.
+        """
+        try:
+            connected_socket = urllib3_connection.create_connection(
+                (self._pinned_address, self.port),
+                self.timeout,
+                source_address=self.source_address,
+                socket_options=self.socket_options,
+            )
+            if self._fetch_control is not None:
+                # CPython detaches this raw socket while constructing an
+                # SSLSocket. A duplicate descriptor still refers to the same
+                # OS connection, so shutdown interrupts a handshake even while
+                # neither the old raw object nor urllib3 owns the final wrapper.
+                handshake_handle = _SocketCancellationHandle(
+                    connected_socket.dup()
+                )
+                with self._transport_lock:
+                    self._handshake_handle = handshake_handle
+                self._fetch_control.register_socket_handle(handshake_handle)
+                try:
+                    self._fetch_control.raise_if_cancelled()
+                except Exception:
+                    self._release_handshake_handle()
+                    connected_socket.close()
+                    raise
+            return connected_socket
+        except (TimeoutError, socket.timeout) as exc:
+            raise ConnectTimeoutError(
+                self,
+                "Connection to %s timed out" % self.host,
+            ) from exc
+        except OSError as exc:
+            raise NewConnectionError(
+                self,
+                "Failed to connect to validated address: %s" % exc,
+            ) from exc
+
+    def connect(self) -> None:
+        """Track the final transport across raw-to-TLS socket ownership.
+
+        Returns:
+            None after urllib3 establishes and registers its final socket.
+        """
+        try:
+            super().connect()
+        except BaseException:
+            self._release_handshake_handle()
+            raise
+
+        connected_socket = self.sock
+        if self._fetch_control is not None and connected_socket is not None:
+            connected_handle = _SocketCancellationHandle(connected_socket)
+            with self._transport_lock:
+                self._connected_handle = connected_handle
+            # Register the final socket before releasing the duplicate so there
+            # is no uninterruptible gap at the TLS ownership handoff.
+            self._fetch_control.register_socket_handle(connected_handle)
+        self._release_handshake_handle()
+        if self._fetch_control is not None:
+            self._fetch_control.raise_if_cancelled()
+
+    def close(self) -> None:
+        """Release registered socket ownership without descriptor leaks.
+
+        Returns:
+            None after both cancellation handles and connection state close.
+        """
+        self._release_handshake_handle(cancel=True)
+        with self._transport_lock:
+            connected_handle = self._connected_handle
+            self._connected_handle = None
+        if connected_handle is not None:
+            if self._fetch_control is not None:
+                self._fetch_control.unregister_socket_handle(connected_handle)
+            connected_handle.close()
+            # urllib3's parent close must still reset connection state, but the
+            # exact-once handle already owns and closed this socket.
+            self.sock = None
+        super().close()
+
+    def _release_handshake_handle(self, cancel: bool = False) -> None:
+        """Retire the raw-socket duplicate after TLS adopts the connection."""
+        with self._transport_lock:
+            handshake_handle = self._handshake_handle
+            self._handshake_handle = None
+        if handshake_handle is None:
+            return
+        if self._fetch_control is not None:
+            self._fetch_control.unregister_socket_handle(handshake_handle)
+        if cancel:
+            handshake_handle.cancel()
+        else:
+            handshake_handle.close()
+
+
+class _PinnedHTTPConnection(_PinnedConnectionMixin, urllib3_connection_module.HTTPConnection):
+    """HTTP connection whose socket target is a validated IP."""
+
+
+class _PinnedHTTPSConnection(_PinnedConnectionMixin, urllib3_connection_module.HTTPSConnection):
+    """HTTPS connection that keeps the URL hostname for SNI verification."""
+
+
+class _PinnedHTTPConnectionPool(connectionpool.HTTPConnectionPool):
+    """Pool using DNS-pinned HTTP connections."""
+
+    ConnectionCls = _PinnedHTTPConnection
+
+
+class _PinnedHTTPSConnectionPool(connectionpool.HTTPSConnectionPool):
+    """Pool using DNS-pinned HTTPS connections."""
+
+    ConnectionCls = _PinnedHTTPSConnection
+
+
+class _PinnedHTTPAdapter(HTTPAdapter):
+    """Requests adapter that connects to one validated address per attempt."""
+
+    def __init__(
+        self,
+        pinned_address: str,
+        fetch_control: Optional[_FetchControl] = None,
+    ):
+        """Initialize an adapter for a single literal IP.
+
+        Args:
+            pinned_address: Public address approved by URL validation.
+            fetch_control: Optional deadline cancellation registry.
+        """
+        _require_supported_requests_transport()
+        self._pinned_address = pinned_address
+        self._fetch_control = fetch_control
+        super().__init__(max_retries=0)
+
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+        """Build a one-origin pool whose sockets cannot re-resolve DNS.
+
+        Args:
+            request: Prepared requests request.
+            verify: TLS verification configuration.
+            proxies: Ignored; outbound imports never trust environment proxies.
+            cert: Optional client certificate configuration.
+
+        Returns:
+            A pinned HTTP or HTTPS connection pool.
+        """
+        host_params, pool_kwargs = self.build_connection_pool_key_attributes(
+            request,
+            verify,
+            cert,
+        )
+        pool_kwargs["pinned_address"] = self._pinned_address
+        pool_kwargs["fetch_control"] = self._fetch_control
+        pool_class = (
+            _PinnedHTTPSConnectionPool
+            if host_params["scheme"] == "https"
+            else _PinnedHTTPConnectionPool
+        )
+        return pool_class(
+            host=host_params["host"],
+            port=host_params["port"],
+            **pool_kwargs,
+        )
 
 # Containers that are never article content. Removing them before extraction is
 # what keeps navigation, edit links, language lists, maintenance banners and
@@ -103,16 +550,48 @@ BLOCK_COVERAGE_FLOOR = 0.4
 class URLAdapter:
     """Adapter for extracting content from URLs."""
 
-    def __init__(self, timeout: int = 30, use_readability: bool = True):
+    def __init__(
+        self,
+        timeout: int = 30,
+        use_readability: bool = True,
+        resolver: Callable = socket.getaddrinfo,
+        session=None,
+        connect_timeout: int = 5,
+        max_download_bytes: int = MAX_URL_DOWNLOAD_BYTES,
+        max_redirects: int = MAX_URL_REDIRECTS,
+        max_download_seconds: int = 30,
+        clock: Callable[[], float] = time.monotonic,
+        executor: Optional[Executor] = None,
+    ):
         """Initialize URL adapter.
 
         Args:
             timeout: Request timeout in seconds
             use_readability: Whether to fall back to readability when the page
-                exposes no recognisable content container
+                exposes no recognisable content container.
+            resolver: DNS resolver compatible with ``socket.getaddrinfo``.
+            session: Optional requests-like session for tests. Production uses
+                a DNS-pinned session per request.
+            connect_timeout: Socket connection timeout in seconds.
+            max_download_bytes: Maximum decompressed response bytes.
+            max_redirects: Maximum manually validated redirects.
+            max_download_seconds: Total wall-clock cap across redirects/body.
+            clock: Monotonic seconds provider, injectable for tests.
+            executor: Optional fixed-size executor. Production shares a bounded
+                process-wide pool so stalled DNS cannot create one thread per
+                request.
         """
+        _require_supported_requests_transport()
         self.timeout = timeout
+        self.connect_timeout = connect_timeout
         self.use_readability = use_readability and HAS_READABILITY
+        self.resolver = resolver
+        self.session = session
+        self.max_download_bytes = max_download_bytes
+        self.max_redirects = max_redirects
+        self.max_download_seconds = max_download_seconds
+        self.clock = clock
+        self.executor = executor or _URL_DOWNLOAD_EXECUTOR
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -126,33 +605,48 @@ class URLAdapter:
         Returns:
             Dictionary containing extracted content and metadata
         """
+        return self.start_extract_content(url).result()
+
+    def start_extract_content(self, url: str) -> URLFetchOperation:
+        """Submit extraction to the fixed worker pool without waiting.
+
+        Args:
+            url: User-supplied URL to validate and extract.
+
+        Returns:
+            Operation exposing both the bounded wait and actual worker future.
+        """
+        control = _FetchControl()
+        future = self.executor.submit(self._extract_content, url, control)
+        return URLFetchOperation(future, control, self.max_download_seconds)
+
+    def _extract_content(self, url: str, control: _FetchControl) -> Dict[str, any]:
+        """Run validation, download, and parsing inside one bounded worker."""
         try:
-            # Fetch the page
-            response = requests.get(url, headers=self.headers, timeout=self.timeout)
-            response.raise_for_status()
+            final_url, body = self._download(url, control)
 
             # Parse with BeautifulSoup
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = BeautifulSoup(body, 'html.parser')
 
             # Read metadata before pruning, so <title> and <meta> survive
-            metadata = self._extract_metadata(soup, url)
+            metadata = self._extract_metadata(soup, final_url)
 
             self._strip_non_content(soup)
             self._inline_math(soup)
 
-            content = self._extract_main_content(soup, url)
+            content = self._extract_main_content(soup, final_url)
 
             # Extract headings structure from the pruned document
             headings = self._extract_headings(soup)
 
             return {
-                "url": url,
+                "url": final_url,
                 "title": metadata.get("title", ""),
                 "text": content["text"],
                 "html": content.get("html", ""),
                 "metadata": metadata,
                 "headings": headings,
-                "links": self._extract_links(soup, url),
+                "links": self._extract_links(soup, final_url),
             }
 
         except requests.RequestException as e:
@@ -161,6 +655,155 @@ class URLAdapter:
         except Exception as e:
             logger.error("Failed to extract content from URL", url=url, error=str(e))
             raise
+
+    def _download(self, url: str, control: _FetchControl):
+        """Download a validated response while checking every redirect hop.
+
+        Args:
+            url: Initial user-supplied URL.
+            control: Cancellation registry for this extraction.
+
+        Returns:
+            A pair of final normalized URL and its capped body bytes.
+
+        Raises:
+            UnsafeURLError: If a hop, content type, redirect count, or body size
+                violates the import policy.
+        """
+        current_url = url
+        redirect_count = 0
+        started_at = self.clock()
+
+        while True:
+            control.raise_if_cancelled()
+            self._ensure_within_time_limit(started_at)
+            current_url, addresses = resolve_public_http_url(
+                current_url,
+                resolver=self.resolver,
+            )
+            control.raise_if_cancelled()
+            response = self._request(current_url, addresses, control)
+            control.register(response)
+            try:
+                if response.status_code in REDIRECT_STATUSES:
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise UnsafeURLError("Redirect response has no destination")
+                    if redirect_count >= self.max_redirects:
+                        raise UnsafeURLError("URL exceeded the redirect limit")
+                    current_url = urljoin(current_url, location)
+                    redirect_count += 1
+                    continue
+
+                response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "")
+                media_type = content_type.split(";", 1)[0].strip().lower()
+                if media_type not in ACCEPTED_CONTENT_TYPES:
+                    raise UnsafeURLError("URL response content type is not accepted")
+
+                content_length = response.headers.get("Content-Length")
+                if content_length:
+                    try:
+                        declared_bytes = int(content_length)
+                    except ValueError as exc:
+                        raise UnsafeURLError("URL response has invalid Content-Length") from exc
+                    if declared_bytes > self.max_download_bytes:
+                        raise UnsafeURLError(
+                            "URL response exceeds the %sMB limit"
+                            % self._download_limit_mb()
+                        )
+
+                body = bytearray()
+                for block in response.iter_content(chunk_size=URL_STREAM_BLOCK_BYTES):
+                    self._ensure_within_time_limit(started_at)
+                    if not block:
+                        continue
+                    if len(body) + len(block) > self.max_download_bytes:
+                        raise UnsafeURLError(
+                            "URL response exceeds the %sMB limit"
+                            % self._download_limit_mb()
+                        )
+                    body.extend(block)
+                self._ensure_within_time_limit(started_at)
+                return current_url, bytes(body)
+            finally:
+                response.close()
+                control.unregister(response)
+                owned_session = getattr(response, "_opennotebook_session", None)
+                if owned_session is not None:
+                    owned_session.close()
+                    control.unregister(owned_session)
+
+    def _ensure_within_time_limit(self, started_at: float) -> None:
+        """Refuse a download whose total wall-clock cap has elapsed.
+
+        Args:
+            started_at: Monotonic timestamp captured before URL validation.
+
+        Raises:
+            UnsafeURLError: If the configured total duration is exceeded.
+        """
+        if self.clock() - started_at > self.max_download_seconds:
+            raise UnsafeURLError("URL download exceeded the time limit")
+
+    def _request(
+        self,
+        url: str,
+        addresses: List[str],
+        control: _FetchControl,
+    ):
+        """Open one streamed request pinned to the validated DNS result.
+
+        Args:
+            url: Normalized destination URL.
+            addresses: Public IP strings resolved during validation.
+            control: Cancellation registry for this extraction.
+
+        Returns:
+            A streamed requests response.
+        """
+        options = {
+            "headers": self.headers,
+            "timeout": (self.connect_timeout, self.timeout),
+            "stream": True,
+            "allow_redirects": False,
+        }
+        if self.session is not None:
+            control.register(self.session)
+            control.raise_if_cancelled()
+            return self.session.get(url, **options)
+
+        last_error = None
+        scheme = urlparse(url).scheme
+        for address in addresses:
+            session = requests.Session()
+            session.trust_env = False
+            control.register(session)
+            session.mount(
+                scheme + "://",
+                _PinnedHTTPAdapter(address, fetch_control=control),
+            )
+            try:
+                control.raise_if_cancelled()
+                response = session.get(url, **options)
+            except requests.RequestException as exc:
+                session.close()
+                control.unregister(session)
+                last_error = exc
+                continue
+            response._opennotebook_session = session
+            return response
+
+        if last_error is not None:
+            raise last_error
+        raise UnsafeURLError("URL hostname resolved to no usable address")
+
+    def _download_limit_mb(self):
+        """Return the configured cap in compact user-facing mebibytes."""
+        mebibyte = 1024 * 1024
+        if self.max_download_bytes % mebibyte == 0:
+            return self.max_download_bytes // mebibyte
+        return self.max_download_bytes / mebibyte
 
     def _extract_metadata(self, soup: BeautifulSoup, url: str) -> Dict[str, str]:
         """Extract metadata from HTML."""

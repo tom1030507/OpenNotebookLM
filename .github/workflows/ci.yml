@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+        env:
+          BACKEND_INTERNAL_URL: http://backend:8000
+      - run: npm audit --omit=dev --audit-level=critical
+
+  launchers:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Test launcher failure paths
+        run: python -m unittest -v tests.deployment.test_launchers
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Audit Python dependencies
+        uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: backend/requirements.txt
+          # OSV audits the local `+cpu` torch build; PyPI's service skips local
+          # version identifiers even though they share the upstream source.
+          vulnerability-service: osv
+      - run: docker build --tag opennotebook-backend-ci ./backend
+      - uses: actions/cache@v4
+        with:
+          path: .ci-model-cache
+          key: backend-test-model-paraphrase-minilm-l3-v2
+      - name: Prepare the model cache for the image user
+        run: |
+          mkdir -p .ci-model-cache
+          sudo chown -R 1000:1000 .ci-model-cache
+      - name: Run backend tests in the supported image
+        run: >-
+          docker run --rm
+          --volume "$PWD:/source:ro"
+          --volume "$PWD/.ci-model-cache:/model-cache"
+          --tmpfs /test-workspace:rw,uid=1000,gid=1000,mode=0755
+          --workdir /source
+          --env PYTHONPATH=/test-workspace/backend
+          --env LLM_MODE=none
+          --env EMB_MODEL_NAME=sentence-transformers/paraphrase-MiniLM-L3-v2
+          --env EMB_DIMENSION=384
+          --env SENTENCE_TRANSFORMERS_HOME=/model-cache
+          --env HF_HOME=/model-cache
+          opennotebook-backend-ci
+          sh -eu -c
+          'cp -R /source/backend /test-workspace/backend
+          && cp /source/.env.example /test-workspace/.env.example
+          && cp /source/docker-compose.yml /test-workspace/docker-compose.yml
+          && cd /test-workspace/backend
+          && python -m pytest tests -q'
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Test every production Compose entry point
+        run: python -m unittest -v tests.deployment.test_compose_contract
+      - name: Verify both entry points reject a missing JWT secret
+        run: |
+          if JWT_SECRET_KEY= docker compose config >/dev/null 2>&1; then
+            echo 'Root Compose unexpectedly accepted an empty JWT secret'
+            exit 1
+          fi
+          if JWT_SECRET_KEY= docker compose -f deploy/docker-compose.yml config >/dev/null 2>&1; then
+            echo 'Deploy wrapper unexpectedly accepted an empty JWT secret'
+            exit 1
+          fi
+      - name: Validate both production Compose entry points
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+        run: |
+          docker compose config
+          docker compose -f deploy/docker-compose.yml config
+      - name: Build both production Compose entry points
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+        run: |
+          docker compose build
+          docker compose -f deploy/docker-compose.yml build
+      - name: Smoke the root production entry point
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+          LLM_MODE: none
+          EMB_MODEL_NAME: sentence-transformers/paraphrase-MiniLM-L3-v2
+          EMB_DIMENSION: '384'
+        run: |
+          docker compose up -d --wait --wait-timeout 900
+          docker compose exec -T backend sh -eu -c '
+            test "$(id -u)" = 1000
+            test "$EMB_MODEL_NAME" = "sentence-transformers/paraphrase-MiniLM-L3-v2"
+            test "$EMB_DIMENSION" = "384"
+            for path in /app/data/.write-probe /app/models/.write-probe /app/uploads/.write-probe; do
+              touch "$path"
+              rm "$path"
+            done
+          '
+          curl --fail http://127.0.0.1:8000/readyz
+          curl --fail http://127.0.0.1:3000/login
+      - name: Clean the root production smoke
+        if: always()
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+        run: docker compose down --volumes --remove-orphans
+      - name: Smoke the deploy compatibility entry point
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+          LLM_MODE: none
+          EMB_MODEL_NAME: sentence-transformers/paraphrase-MiniLM-L3-v2
+          EMB_DIMENSION: '384'
+        run: |
+          docker compose -f deploy/docker-compose.yml up -d --wait --wait-timeout 900
+          docker compose -f deploy/docker-compose.yml exec -T backend sh -eu -c '
+            test "$(id -u)" = 1000
+            test "$EMB_MODEL_NAME" = "sentence-transformers/paraphrase-MiniLM-L3-v2"
+            test "$EMB_DIMENSION" = "384"
+            for path in /app/data/.write-probe /app/models/.write-probe /app/uploads/.write-probe; do
+              touch "$path"
+              rm "$path"
+            done
+          '
+          curl --fail http://127.0.0.1:8000/readyz
+          curl --fail http://127.0.0.1:3000/login
+      - name: Clean the deploy production smoke
+        if: always()
+        env:
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+        run: docker compose -f deploy/docker-compose.yml down --volumes --remove-orphans

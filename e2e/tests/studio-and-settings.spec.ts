@@ -41,7 +41,7 @@ function observeExportRequest(page: Page, endpoint: string): () => void {
 test('renders a fallback mind map from ready source structure', async ({ api, page }, testInfo) => {
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'mind-map');
   const responsePromise = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/mindmap`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/mindmap`
       && response.request().method() === 'GET',
   );
   await page
@@ -68,7 +68,7 @@ test('renders a fallback mind map from ready source structure', async ({ api, pa
 
 test('downloads a Markdown project report', async ({ api, page }, testInfo) => {
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'report');
-  const endpoint = `${runtime.apiUrl}/export/project/${project.id}/summary`;
+  const endpoint = `${runtime.browserApiUrl}/export/project/${project.id}/summary`;
   const assertOneExportRequest = observeExportRequest(page, endpoint);
   const responsePromise = page.waitForResponse(
     (response) => response.url() === endpoint
@@ -97,7 +97,7 @@ test('exports the current project as Markdown', async ({ api, page }, testInfo) 
   await page.getByRole('banner').getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export Project' });
   await dialog.getByRole('radio', { name: /markdown/i }).check();
-  const endpoint = `${runtime.apiUrl}/export/project/${project.id}?format=markdown`;
+  const endpoint = `${runtime.browserApiUrl}/export/project/${project.id}?format=markdown`;
   const assertOneExportRequest = observeExportRequest(page, endpoint);
   const responsePromise = page.waitForResponse(
     (response) => response.url() === endpoint
@@ -127,13 +127,13 @@ test('exports the selected conversation as Markdown', async ({ api, page }, test
   const conversation = await api.createConversation(project.id, conversationTitle);
   await api.query(project.id, conversation.id, 'What is the observatory access code?');
   const conversationsLoaded = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/conversations`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
       && response.request().method() === 'GET',
   );
   await page.reload();
   expect((await conversationsLoaded).status()).toBe(200);
   const detailLoaded = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/conversations/${conversation.id}`
+    (response) => response.url() === `${runtime.browserApiUrl}/conversations/${conversation.id}`
       && response.request().method() === 'GET',
   );
   await page
@@ -145,7 +145,7 @@ test('exports the selected conversation as Markdown', async ({ api, page }, test
   await page.getByRole('banner').getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export Conversation' });
   await dialog.getByRole('radio', { name: /markdown/i }).check();
-  const endpoint = `${runtime.apiUrl}/export/conversation/${conversation.id}?format=markdown`;
+  const endpoint = `${runtime.browserApiUrl}/export/conversation/${conversation.id}?format=markdown`;
   const assertOneExportRequest = observeExportRequest(page, endpoint);
   const responsePromise = page.waitForResponse(
     (response) => response.url()
@@ -172,7 +172,7 @@ test('renders the silent fallback video summary', async ({ api, page }, testInfo
   });
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'video-summary');
   const responsePromise = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/video-summary`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/video-summary`
       && response.request().method() === 'GET',
   );
   await page
@@ -203,7 +203,7 @@ test('shows the unsupported audio fallback without host speech hardware', async 
   });
   page.on('request', (request) => {
     if (
-      request.url().startsWith(`${runtime.apiUrl}/export/project/`)
+      request.url().startsWith(`${runtime.browserApiUrl}/export/project/`)
       && request.url().endsWith('/summary')
       && request.method() === 'GET'
     ) {

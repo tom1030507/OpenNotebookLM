@@ -30,11 +30,11 @@ pip install -r requirements.txt
 ### 3. Setup Environment
 
 ```bash
-# Copy environment template
-copy ..\deploy\.env.example .env
+# Copy the canonical environment template
+copy ..\.env.example .env
 
 # Or on Linux/Mac
-cp ../deploy/.env.example .env
+cp ../.env.example .env
 ```
 
 ## Running the Server

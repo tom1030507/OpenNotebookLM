@@ -449,14 +449,15 @@ class TestCacheIsolation:
         assert env.bob.delete(
             "/api/cache/invalidate/document/%s" % document_id).status_code == 404
 
-    def test_warming_someone_elses_project_is_not_found(self, env):
-        project_id = make_project(env.alice)
-        assert env.bob.post("/api/cache/warmup/%s" % project_id).status_code == 404
-
     def test_your_own_project_can_be_invalidated(self, env):
         project_id = make_project(env.bob, BOB_PROJECT)
         assert env.bob.delete(
             "/api/cache/invalidate/project/%s" % project_id).status_code == 200
+
+    def test_your_own_document_can_be_invalidated(self, env):
+        document_id = make_document(env.session, env.bob_user)
+        assert env.bob.delete(
+            "/api/cache/invalidate/document/%s" % document_id).status_code == 200
 
 
 class TestOwnerlessRowsBelongToNobody:

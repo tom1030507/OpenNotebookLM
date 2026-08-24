@@ -65,7 +65,7 @@ test('tolerates a registered auth-token 401 when its console error arrives first
     text: () => 'Failed to load resource: the server responded with a status of 401 (Unauthorized)',
   });
   harness.emit('response', {
-    url: () => 'http://127.0.0.1:8100/api/auth/token',
+    url: () => 'http://localhost:3100/api/auth/token',
     status: () => 401,
     request: () => ({ method: () => 'POST' }),
   });

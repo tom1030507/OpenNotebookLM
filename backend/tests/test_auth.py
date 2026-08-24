@@ -6,10 +6,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.db.models import Base, User
 from app.routers import auth
+from app.routers.rate_limit import get_rate_limiter
 from app.services.auth import AuthService, get_auth_service
+from app.services.rate_limit import SlidingWindowRateLimiter
 
 app = FastAPI()
 app.include_router(auth.router, prefix="/api")
@@ -39,6 +42,8 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 app.dependency_overrides[get_auth_service] = lambda: test_auth_service
+disabled_rate_limiter = SlidingWindowRateLimiter(enabled=False)
+app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
 
 Base.metadata.create_all(bind=engine)
 
@@ -244,3 +249,70 @@ def test_jwt_secret_is_required_outside_development():
     assert resolve_jwt_secret_key(
         Settings(app_env="production", jwt_secret_key="supplied")
     ) == "supplied"
+
+
+def test_fourth_registration_from_one_client_ip_returns_429_with_retry_after():
+    """Public account creation is limited to three attempts per IP per hour."""
+    limiter = SlidingWindowRateLimiter(clock=lambda: 0.0)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    try:
+        responses = [register("rate-register-%s" % index) for index in range(4)]
+    finally:
+        app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 429]
+    assert responses[-1].headers["Retry-After"] == "3600"
+
+
+def test_eleventh_login_from_one_client_ip_returns_429_with_retry_after():
+    """Password verification is limited to ten attempts per IP per minute."""
+    limiter = SlidingWindowRateLimiter()
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    try:
+        responses = [get_token("missing-rate-user") for _ in range(11)]
+    finally:
+        app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
+
+    assert [response.status_code for response in responses[:10]] == [401] * 10
+    assert responses[-1].status_code == 429
+    assert responses[-1].headers["Retry-After"] == "60"
+
+
+def test_production_registration_is_closed_by_default():
+    """Production refuses public enrollment unless an operator opts in."""
+    app.dependency_overrides[get_settings] = lambda: Settings(app_env="production")
+    try:
+        response = register("closed-production")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Public registration is disabled"
+
+
+def test_development_registration_remains_open_by_default():
+    """Local development preserves the existing no-configuration signup flow."""
+    app.dependency_overrides[get_settings] = lambda: Settings(app_env="development")
+    try:
+        response = register("open-development")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 200
+
+
+def test_development_can_explicitly_disable_rate_limits():
+    """Local tests and trusted development can switch limiter state off."""
+    limiter = SlidingWindowRateLimiter(clock=lambda: 0.0)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        app_env="development",
+        rate_limit_enabled=False,
+    )
+    try:
+        responses = [register("no-limit-%s" % index) for index in range(4)]
+    finally:
+        app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert [response.status_code for response in responses] == [200] * 4

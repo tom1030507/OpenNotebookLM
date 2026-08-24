@@ -5,7 +5,7 @@ import { runtime } from './runtime.js';
 const frontendOrigin = new URL(runtime.frontendUrl).origin;
 const backendApiUrl = new URL(runtime.apiUrl);
 const backendApiPath = backendApiUrl.pathname.replace(/\/$/, '');
-const authTokenUrl = `${runtime.apiUrl}/auth/token`;
+const authTokenUrl = `${runtime.browserApiUrl}/auth/token`;
 const browserResource401 = /^Failed to load resource: the server responded with a status of 401\b/;
 
 export function isApplicationUrl(candidate: string): boolean {

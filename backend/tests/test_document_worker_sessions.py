@@ -15,16 +15,18 @@ from app.services.documents import DocumentService
 class ReadyChunkingService:
     """Return a searchable chunk without involving the real chunker."""
 
-    def chunk_document(self, db, document_id):
+    def chunk_document(self, db, document_id, max_chunks=None):
         """Return one chunk marker for the indexed document.
 
         Args:
             db: Worker-owned database session.
             document_id: Document being indexed.
+            max_chunks: Optional production chunk ceiling, unused by this fake.
 
         Returns:
             A non-empty chunk collection.
         """
+        del max_chunks
         return [document_id]
 
 

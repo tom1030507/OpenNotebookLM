@@ -145,6 +145,7 @@ def create_application() -> tuple[Any, Any]:
             "DB_PATH": str(database),
             "DATABASE_URL": f"sqlite:///{database.as_posix()}",
             "JWT_SECRET_KEY": "e2e-only-signing-key-not-a-secret",
+            "ALLOW_PUBLIC_REGISTRATION": "true",
             "LLM_MODE": "none",
             "OPENAI_API_KEY": "",
             "CLAUDE_API_KEY": "",

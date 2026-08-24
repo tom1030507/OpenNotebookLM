@@ -52,6 +52,14 @@ class TestSentenceSplitting:
         sentences = service._split_sentences("Dr. Vaswani wrote it. It was 2017.")
         assert sentences[0] == "Dr. Vaswani wrote it."
 
+    def test_abbreviation_suffix_inside_a_word_ends_a_sentence(self):
+        service = ChunkingService()
+
+        assert service._split_sentences("fooApprox. Next.") == [
+            "fooApprox.",
+            "Next.",
+        ]
+
     def test_initials_do_not_end_a_sentence(self):
         service = ChunkingService()
         assert len(service._split_sentences("The U.S. team shipped it.")) == 1
@@ -63,7 +71,34 @@ class TestSentenceSplitting:
     def test_closing_quote_stays_with_its_sentence(self):
         service = ChunkingService()
         sentences = service._split_sentences("他說「這樣可以。」然後離開了。")
-        assert sentences[0].endswith("」")
+        assert sentences == ["他說「這樣可以。」", "然後離開了。"]
+
+    def test_bounded_scanner_preserves_language_boundary_semantics(self):
+        service = ChunkingService(chunk_size=20, chunk_overlap=0)
+        text = "Dr. Ada met the U.S. team. The score was 3.14 overall. Done!"
+
+        chunks = service._chunk_text_content(text)
+
+        assert [chunk["text"] for chunk in chunks] == [
+            "Dr. Ada met the",
+            "U.S. team.",
+            "The score was 3.14",
+            "overall.\nDone!",
+        ]
+
+    def test_cjk_closing_marks_continue_as_a_separate_bounded_piece(self):
+        service = ChunkingService(chunk_size=10, chunk_overlap=0)
+        text = "a" * 9 + "。』NEXT."
+
+        assert list(service._iter_sentences(text)) == [
+            "a" * 9 + "。",
+            "』",
+            "NEXT.",
+        ]
+        assert [chunk["text"] for chunk in service._chunk_text_content(text)] == [
+            "a" * 9 + "。",
+            "』\nNEXT.",
+        ]
 
 
 class TestChunkSize:
@@ -87,6 +122,18 @@ class TestChunkSize:
         service = ChunkingService(chunk_size=100, chunk_overlap=0)
         chunks = service._chunk_text_content("x" * 350)
         assert all(len(chunk["text"]) <= 100 for chunk in chunks)
+
+    def test_hard_split_preserves_word_and_comma_boundaries(self):
+        service = ChunkingService(chunk_size=10, chunk_overlap=0)
+
+        assert list(service._hard_split("abcdefgh,ijklmnop")) == [
+            "abcdefgh",
+            ",ijklmnop",
+        ]
+        assert list(service._hard_split("alpha beta gamma")) == [
+            "alpha",
+            "beta gamma",
+        ]
 
     def test_the_limit_holds_with_overlap_enabled(self):
         # The overlap used to be prepended to a fresh chunk without rechecking
@@ -162,6 +209,15 @@ class TestHeadings:
         chunks = ChunkingService(chunk_size=512, chunk_overlap=0)._chunk_text_content(self.SECTIONED)
         assert not any(chunk["text"].startswith("#") for chunk in chunks)
 
+    def test_attacker_sized_heading_candidate_is_bounded_content(self):
+        service = ChunkingService(chunk_size=100, chunk_overlap=0)
+        text = "# " + "x" * 250
+
+        chunks = service._chunk_text_content(text)
+
+        assert chunks[0]["text"].startswith("# ")
+        assert all(chunk["metadata"]["heading_path"] is None for chunk in chunks)
+
 
 class TestOffsets:
     """Offsets have to be usable, which means monotonic."""
@@ -178,6 +234,41 @@ class TestOffsets:
         for chunk in chunks:
             assert 0 <= chunk["metadata"]["start_char"] <= len(text)
             assert chunk["metadata"]["end_char"] <= len(text) + 1
+
+    def test_short_line_passes_through_with_its_original_end_offset(self):
+        text = "First sentence. Second sentence."
+        service = ChunkingService(chunk_size=512, chunk_overlap=0)
+
+        chunks = service._chunk_text_content(text)
+
+        assert [chunk["text"] for chunk in chunks] == [text]
+        assert chunks[0]["metadata"]["start_char"] == 0
+        assert chunks[0]["metadata"]["end_char"] == len(text)
+
+    @pytest.mark.parametrize(
+        ("text", "chunk_size"),
+        [
+            ("First sentence. Second sentence.", 16),
+            ("alpha beta gamma delta", 6),
+        ],
+    )
+    def test_long_line_fragment_offsets_select_their_exact_source_text(
+        self,
+        text,
+        chunk_size,
+    ):
+        service = ChunkingService(chunk_size=chunk_size, chunk_overlap=0)
+
+        blocks = list(service._to_blocks(text))
+        chunks = service._chunk_text_content(text)
+
+        assert len(blocks) >= 2
+        for block in blocks:
+            assert text[block.start:block.end] == block.text
+        for chunk in chunks:
+            start = chunk["metadata"]["start_char"]
+            end = chunk["metadata"]["end_char"]
+            assert text[start:end] == chunk["text"]
 
 
 class TestRuntMerging:
@@ -211,6 +302,9 @@ class TestPdfPages:
         )
         service = ChunkingService(chunk_size=60, chunk_overlap=0)
         chunks = service._chunk_pdf_content(document)
+
+        for block in service._to_blocks(document.content):
+            assert document.content[block.start:block.end] == block.text
 
         assert {chunk["metadata"]["page_num"] for chunk in chunks} == {1, 2, 3}
         assert chunks[0]["metadata"]["page_num"] == 1

@@ -1,7 +1,7 @@
 """Document ingestion router."""
 from functools import lru_cache
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 import structlog
 
@@ -11,9 +11,22 @@ from app.schemas import (
     DocumentResponse, DocumentStatusResponse
 )
 from app.db.models import User
+from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
 from app.config import get_settings
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_document, require_project
+from app.routers.rate_limit import (
+    acquire_account_lease,
+    enforce_account_rate_limit,
+    get_concurrency_limiter,
+    get_rate_limiter,
+)
+from app.services.rate_limit import (
+    ConcurrencyLimiter,
+    SlidingWindowRateLimiter,
+    UnlimitedConcurrencyLease,
+)
+from app.utils.network import UnsafeURLError
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -38,20 +51,77 @@ def get_document_service() -> Any:
     return DocumentService()
 
 
+def _begin_ingestion(
+    user_id: str,
+    request_limiter: SlidingWindowRateLimiter,
+    concurrency_limiter: ConcurrencyLimiter,
+):
+    """Apply the per-account import rate and active-operation boundaries.
+
+    Args:
+        user_id: Authenticated account identifier.
+        request_limiter: Sliding-window request limiter.
+        concurrency_limiter: Active-operation limiter.
+
+    Returns:
+        An operation lease whose ownership transfers to DocumentService.
+    """
+    if not settings.rate_limit_enabled:
+        return UnlimitedConcurrencyLease()
+    enforce_account_rate_limit(
+        request_limiter,
+        "ingest",
+        user_id,
+        limit=10,
+        window_seconds=60,
+    )
+    return acquire_account_lease(concurrency_limiter, "ingest", user_id)
+
+
 @router.post("/projects/{project_id}/upload", response_model=FileUploadResponse)
 async def upload_file(
     project_id: str,
+    request: Request,
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     document_service: Any = Depends(get_document_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
-    """Upload a file to one of the caller's projects.
-    
-    Supports PDF files for now.
+    """Stream a PDF into one of the caller's projects.
+
+    Args:
+        project_id: Project receiving the document.
+        request: Incoming request, used for early Content-Length rejection.
+        file: Multipart PDF upload.
+        title: Optional document title.
+        db: Database session.
+        current_user: Authenticated caller.
+        request_limiter: Per-account ingestion request limiter.
+        concurrency_limiter: Per-account active-ingestion limiter.
+
+    Returns:
+        Created document identifier and queued status.
     """
     require_project(db, project_id, current_user)
+
+    declared_length = request.headers.get("Content-Length")
+    if declared_length is not None:
+        try:
+            declared_bytes = int(declared_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+        if declared_bytes < 0:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+        if declared_bytes > (
+            settings.max_file_size_bytes + MULTIPART_ENVELOPE_ALLOWANCE_BYTES
+        ):
+            raise HTTPException(
+                status_code=413,
+                detail=f"File size exceeds maximum of {settings.max_file_size_mb}MB",
+            )
     
     # Validate file type
     if not file.filename.lower().endswith('.pdf'):
@@ -60,18 +130,23 @@ async def upload_file(
             detail="Only PDF files are supported in this version"
         )
     
-    # Check file size
-    file_size = 0
-    contents = await file.read()
-    file_size = len(contents)
-    await file.seek(0)  # Reset file pointer
-    
-    if file_size > settings.max_file_size_bytes:
+    # Starlette has already counted the multipart part while spooling it. Use
+    # that count for an early refusal, then the service enforces the same limit
+    # again while copying in bounded blocks so a missing size cannot bypass it.
+    if file.size is not None and file.size > settings.max_file_size_bytes:
         raise HTTPException(
-            status_code=400,
+            status_code=413,
             detail=f"File size exceeds maximum of {settings.max_file_size_mb}MB"
         )
-    
+    lease = _begin_ingestion(
+        current_user.id,
+        request_limiter,
+        concurrency_limiter,
+    )
+    # Import after dependency resolution so importing the router never crosses
+    # the optional ML boundary through the document service module.
+    from app.services.documents import UploadTooLargeError
+
     try:
         # Process the upload
         document = await document_service.process_pdf_upload(
@@ -80,7 +155,8 @@ async def upload_file(
             user_id=current_user.id,
             file=file.file,
             filename=file.filename,
-            title=title
+            title=title,
+            operation_lease=lease,
         )
         
         return FileUploadResponse(
@@ -89,6 +165,8 @@ async def upload_file(
             message="File uploaded successfully. Processing started."
         )
         
+    except UploadTooLargeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
     except Exception as e:
         logger.error("File upload failed", 
                     project_id=project_id,
@@ -104,10 +182,29 @@ async def upload_url(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     document_service: Any = Depends(get_document_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
-    """Add a URL document to one of the caller's projects."""
+    """Add a bounded public URL document to one caller-owned project.
+
+    Args:
+        project_id: Project receiving the document.
+        request: URL and optional title.
+        db: Database session.
+        current_user: Authenticated caller.
+        request_limiter: Per-account ingestion request limiter.
+        concurrency_limiter: Per-account active-ingestion limiter.
+
+    Returns:
+        Created document identifier and queued status.
+    """
     require_project(db, project_id, current_user)
     
+    lease = _begin_ingestion(
+        current_user.id,
+        request_limiter,
+        concurrency_limiter,
+    )
     try:
         # Process the URL
         document = await document_service.process_url(
@@ -115,7 +212,8 @@ async def upload_url(
             project_id=project_id,
             user_id=current_user.id,
             url=request.url,
-            title=request.title
+            title=request.title,
+            operation_lease=lease,
         )
         
         return FileUploadResponse(
@@ -124,6 +222,8 @@ async def upload_url(
             message="URL added successfully. Content extraction started."
         )
         
+    except UnsafeURLError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("URL processing failed",
                     project_id=project_id,
@@ -139,8 +239,22 @@ async def upload_youtube(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     document_service: Any = Depends(get_document_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
-    """Add a YouTube video transcript to one of the caller's projects."""
+    """Add a YouTube transcript to one caller-owned project.
+
+    Args:
+        project_id: Project receiving the document.
+        request: Video URL and optional title.
+        db: Database session.
+        current_user: Authenticated caller.
+        request_limiter: Per-account ingestion request limiter.
+        concurrency_limiter: Per-account active-ingestion limiter.
+
+    Returns:
+        Created document identifier and queued status.
+    """
     require_project(db, project_id, current_user)
     
     if not settings.enable_yt_transcription:
@@ -148,7 +262,11 @@ async def upload_youtube(
             status_code=400,
             detail="YouTube transcription is disabled"
         )
-    
+    lease = _begin_ingestion(
+        current_user.id,
+        request_limiter,
+        concurrency_limiter,
+    )
     try:
         # Process the YouTube URL
         document = await document_service.process_youtube(
@@ -156,7 +274,8 @@ async def upload_youtube(
             project_id=project_id,
             user_id=current_user.id,
             youtube_url=request.youtube_url,
-            title=request.title
+            title=request.title,
+            operation_lease=lease,
         )
         
         return FileUploadResponse(

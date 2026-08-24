@@ -17,7 +17,7 @@ test('answers from a ready source and persists messages and citation after reloa
 
   await page.getByPlaceholder('Ask anything about your sources...').fill(question);
   const queryResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/query`
+    (response) => response.url() === `${runtime.browserApiUrl}/query`
       && response.request().method() === 'POST',
   );
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -48,7 +48,7 @@ test('answers from a ready source and persists messages and citation after reloa
   // The browser creates this shortened title before it issues /api/query.
   const conversationTitle = `${question.substring(0, 50)}...`;
   const listReloaded = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/conversations`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
       && response.request().method() === 'GET',
   );
   await page.reload();
@@ -59,7 +59,7 @@ test('answers from a ready source and persists messages and citation after reloa
     .getByText(conversationTitle, { exact: true });
   await expect(conversationItem).toBeVisible();
   const detailReloaded = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/conversations/${conversationId}`
+    (response) => response.url() === `${runtime.browserApiUrl}/conversations/${conversationId}`
       && response.request().method() === 'GET',
   );
   await conversationItem.click();
@@ -89,7 +89,7 @@ test('creates, renames, selects, and deletes conversations', async ({ api, page 
     .filter({ hasText: 'New Conversation' })
     .first();
   const createdResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/conversations`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
       && response.request().method() === 'POST',
   );
   await fullTextNewButton.click();
@@ -106,7 +106,7 @@ test('creates, renames, selects, and deletes conversations', async ({ api, page 
   const editingInput = panel.locator('input[type="text"]');
   const editingRow = editingInput.locator('..');
   const renamedResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/conversations/${first.id}`
+    (response) => response.url() === `${runtime.browserApiUrl}/conversations/${first.id}`
       && response.request().method() === 'PUT',
   );
   await editingInput.fill('Renamed E2E Conversation');
@@ -115,14 +115,14 @@ test('creates, renames, selects, and deletes conversations', async ({ api, page 
   await expect(panel.getByText('Renamed E2E Conversation', { exact: true })).toBeVisible();
 
   const secondResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/projects/${project.id}/conversations`
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
       && response.request().method() === 'POST',
   );
   await fullTextNewButton.click();
   expect((await secondResponse).status()).toBe(200);
 
   const selectedResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/conversations/${first.id}`
+    (response) => response.url() === `${runtime.browserApiUrl}/conversations/${first.id}`
       && response.request().method() === 'GET',
   );
   const renamedTitle = panel.getByText('Renamed E2E Conversation', { exact: true });
@@ -137,7 +137,7 @@ test('creates, renames, selects, and deletes conversations', async ({ api, page 
     await confirmation.accept();
   });
   const deletedResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/conversations/${first.id}`
+    (response) => response.url() === `${runtime.browserApiUrl}/conversations/${first.id}`
       && response.request().method() === 'DELETE',
   );
   await renamedActionContainer.hover();

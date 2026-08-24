@@ -1,5 +1,5 @@
-"""Health check router."""
-from fastapi import APIRouter, Depends
+"""Process liveness and database readiness routes."""
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
@@ -32,15 +32,15 @@ def _configured_llm() -> tuple:
 
 
 @router.get("/healthz")
-async def health_check(db: Session = Depends(get_db)):
-    """Health check endpoint."""
-    try:
-        # Check database connection
-        db.execute(text("SELECT 1"))
-        db_status = "healthy"
-    except Exception as e:
-        db_status = f"unhealthy: {str(e)}"
-    
+async def health_check():
+    """Report process liveness without depending on external resources.
+
+    Args:
+        None.
+
+    Returns:
+        Process, environment, and configured model metadata.
+    """
     # Get system metrics
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
@@ -48,11 +48,11 @@ async def health_check(db: Session = Depends(get_db)):
     llm_provider, llm_model = _configured_llm()
 
     return {
-        "ok": db_status == "healthy",
+        "ok": True,
         "timestamp": utc_now_iso(),
         "version": "0.1.0",
         "environment": settings.app_env,
-        "database": db_status,
+        "database": "unchecked; use /readyz",
         "system": {
             "cpu_percent": psutil.cpu_percent(),
             "memory_mb": memory_info.rss / 1024 / 1024,
@@ -73,19 +73,27 @@ async def health_check(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/ready")
-async def readiness_check(db: Session = Depends(get_db)):
-    """Readiness check endpoint."""
+@router.get("/ready", include_in_schema=False)
+@router.get("/readyz")
+async def readiness_check(
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Report whether the database can accept application traffic.
+
+    Args:
+        response: HTTP response whose status reflects readiness.
+        db: Request-scoped database session.
+
+    Returns:
+        ``ok=true`` when the query succeeds, otherwise ``ok=false``.
+    """
     try:
-        # Check database
         db.execute(text("SELECT 1"))
-        
-        # Check required directories
-        required_dirs = ["./data", "./models", "./uploads"]
-        for dir_path in required_dirs:
-            if not os.path.exists(dir_path):
-                return {"ready": False, "reason": f"Directory {dir_path} not found"}
-        
-        return {"ready": True}
-    except Exception as e:
-        return {"ready": False, "reason": str(e)}
+    except Exception:
+        # Database errors can contain connection strings or credentials. The
+        # status is actionable to an orchestrator without exposing internals.
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False}
+
+    return {"ok": True}

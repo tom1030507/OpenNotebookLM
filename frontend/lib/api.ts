@@ -221,20 +221,8 @@ interface ErrorResponse {
   detail?: string | ValidationErrorItem[];
 }
 
-interface CacheClearResponse {
-  /** -1 when the backend flushed a Redis database it cannot count. */
-  cleared: number;
-}
-
-
-const configuredBaseUrl = (
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-).replace(/\/+$/, '');
-
-/** Absolute base URL of the backend API, including the `/api` prefix. */
-export const API_BASE_URL = configuredBaseUrl.endsWith('/api')
-  ? configuredBaseUrl
-  : `${configuredBaseUrl}/api`;
+/** Same-origin prefix that Next proxies to the internal backend. */
+export const API_BASE_URL = '/api';
 
 /** The API route that streams the file stored for an uploaded document. */
 export const documentFileUrl = (documentId: string): string =>
@@ -252,9 +240,8 @@ export const needsAuthorizedFetch = (document: Document): boolean =>
 
 
 /**
- * Resolve a backend path against the configured API base URL. Every caller
- * goes through this so a missing NEXT_PUBLIC_API_URL cannot produce a
- * relative `/undefined/...` request.
+ * Resolve a backend path against the same-origin API prefix. Next owns the
+ * internal destination so browser bundles never contain Docker-only DNS.
  */
 export const apiUrl = (path: string): string => `${API_BASE_URL}${path}`;
 
@@ -744,13 +731,6 @@ const api = {
     return requestText(`/export/project/${projectId}/summary`);
   },
 
-  /** Drop the server's cached query results and embeddings. */
-  async clearCache(): Promise<number> {
-    const response = await requestJson<CacheClearResponse>('/cache/clear', {
-      method: 'DELETE',
-    });
-    return response.cleared;
-  },
 };
 
 

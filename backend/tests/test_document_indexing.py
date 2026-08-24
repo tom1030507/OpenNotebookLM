@@ -15,7 +15,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base, Chunk, Document, Embedding, Project, ProjectDocument
-from app.services.documents import DocumentService
+from app.services.documents import ChunkLimitPersistenceError, DocumentService
+from app.services.rate_limit import ConcurrencyLimiter
 
 
 PROJECT_ID = "project-1"
@@ -35,7 +36,8 @@ class FakeChunkingService:
         self.num_chunks = num_chunks
         self.failure = failure
 
-    def chunk_document(self, db, document_id):
+    def chunk_document(self, db, document_id, max_chunks=None):
+        del max_chunks
         self.timeline.append(("chunk", current_status(db, document_id)))
 
         if self.failure:
@@ -275,6 +277,73 @@ class TestIndexingFailures:
         document = db.query(Document).filter(Document.id == DOC_ID).first()
         assert document.status == "error"
         assert "site unreachable" in document.error_message
+
+    def test_background_failure_releases_the_ingestion_lease(self, db):
+        """A failed background import cannot permanently consume a slot."""
+        service = build_service(db, [])
+        limiter = ConcurrencyLimiter(max_concurrent=1)
+        lease = limiter.acquire("ingest:user")
+
+        class ExplodingURLAdapter:
+            def extract_content(self, url):
+                raise RuntimeError("site unreachable")
+
+        service.url_adapter = ExplodingURLAdapter()
+
+        asyncio.run(service._process_url_async(
+            DOC_ID,
+            "https://example.com",
+            operation_lease=lease,
+        ))
+
+        assert limiter.active("ingest:user") == 0
+
+    @pytest.mark.parametrize("source_type", ["pdf", "url", "youtube"])
+    def test_chunk_cleanup_persistence_failure_escapes_background_processors(
+        self,
+        db,
+        monkeypatch,
+        source_type,
+    ):
+        """All processors preserve the dedicated failure and release the lease."""
+        service = build_service(db, [])
+        limiter = ConcurrencyLimiter(max_concurrent=1)
+        lease = limiter.acquire("ingest:user")
+
+        def fail_indexing(_db, _doc_id, _source_label):
+            raise ChunkLimitPersistenceError(
+                "could not persist over-limit cleanup"
+            )
+
+        monkeypatch.setattr(service, "_index_document", fail_indexing)
+
+        if source_type == "pdf":
+            operation = service._process_pdf_async(
+                DOC_ID,
+                Path("uploads/example.pdf"),
+                operation_lease=lease,
+            )
+        elif source_type == "url":
+            operation = service._process_url_async(
+                DOC_ID,
+                "https://example.com",
+                operation_lease=lease,
+            )
+        else:
+            operation = service._process_youtube_async(
+                DOC_ID,
+                "https://youtu.be/abc123",
+                operation_lease=lease,
+            )
+
+        with pytest.raises(ChunkLimitPersistenceError):
+            asyncio.run(operation)
+
+        db.expire_all()
+        document = db.query(Document).filter(Document.id == DOC_ID).one()
+        assert document.status == "processing"
+        assert document.error_message is None
+        assert limiter.active("ingest:user") == 0
 
 
 class TestProcessingMetadata:

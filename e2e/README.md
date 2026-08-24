@@ -150,6 +150,7 @@ uploads target is an error, never a cleanup request.
 The server starts with:
 
 - APP_ENV=test
+- ALLOW_PUBLIC_REGISTRATION=true
 - a run-specific DB_PATH and DATABASE_URL
 - a fixed, non-secret test JWT key
 - LLM_MODE=none
@@ -157,10 +158,11 @@ The server starts with:
 - CORS limited to the E2E frontend origin
 - one backend worker
 
-The frontend starts with NEXT_PUBLIC_API_URL set to the isolated backend's
-http://127.0.0.1:8100/api address. Startup waits for backend readiness and the
-frontend login page; a timeout reports both server logs instead of continuing
-with a half-started stack.
+The frontend starts with BACKEND_INTERNAL_URL set to the isolated backend's
+http://127.0.0.1:8100 origin. Browser requests remain same-origin under `/api`,
+and Next.js proxies them to that backend. Startup waits for backend readiness
+and the frontend login page; a timeout reports both server logs instead of
+continuing with a half-started stack.
 
 Every test owns a unique username and email derived from the run and test IDs.
 Tests do not depend on execution order. The authentication specs create their
@@ -303,16 +305,16 @@ The following fresh local checks completed on 2026-08-24:
 
 - New backend unit tests prove service creation is lazy and dependency
   overrides select the deterministic services.
-- `docker run --rm --platform linux/amd64 ... python -m pytest tests -q` passed
-  **539 tests**, with 11 warnings, in 111.38 seconds. It used a read-only local
-  sentence-transformers cache mount under Docker Desktop emulation.
-- `cd frontend && npm test` passed **40 files / 408 tests** in 27.84 seconds;
-  `npm run lint` completed with no warnings or errors; `cd e2e && npm run
-  typecheck` also passed.
-- `cd e2e && npm test` passed **33 tests** in 1.3 minutes, with no unexpected
+- The supported native ARM64 backend image built successfully, and its full
+  suite passed **698 tests** with 1 skip in 111.68 seconds.
+- `cd frontend && npm test` passed **41 files / 412 tests**; `npm run lint`,
+  `npm run build`, and `cd e2e && npm run typecheck` also passed.
+- `cd e2e && npm test` passed **33 tests** in 1.5 minutes, with no unexpected
   skips. It intentionally excludes exactly one opt-in test: `full-rag.spec.ts`.
-- `cd e2e && npm run test:full-rag` passed **1 test** in 28.8 seconds with
-  locally cached CPU model weights and `LLM_MODE=none`.
+- `cd e2e && npm run test:full-rag` passed **1 test** using production-aligned
+  Torch 2.13, Transformers 5.5, and sentence-transformers 5.7. The 1.9-minute
+  cold-cache run included model startup; the browser workflow itself took 10.1
+  seconds and used `LLM_MODE=none`.
 - The tracked-artifact audit contains no runtime database, uploads, model cache,
   Playwright report, trace, screenshot, or video.
 

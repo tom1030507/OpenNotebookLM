@@ -7,10 +7,14 @@ test('serves the isolated backend and protects the workspace', async ({ page, re
   expect(health.ok()).toBe(true);
   expect(await health.json()).toMatchObject({
     ok: true,
-    database: 'healthy',
+    database: 'unchecked; use /readyz',
     environment: 'test',
     config: { llm_mode: 'none', debug: false },
   });
+
+  const readiness = await request.get('http://127.0.0.1:8100/readyz');
+  expect(readiness.ok()).toBe(true);
+  expect(await readiness.json()).toEqual({ ok: true });
 
   await page.goto('/');
   await expect(page).toHaveURL(`${runtime.frontendUrl}/login`);

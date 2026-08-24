@@ -13,6 +13,7 @@ export interface RuntimePaths {
   htmlReport: string;
   runId: string;
   apiUrl: string;
+  browserApiUrl: string;
   frontendUrl: string;
 }
 
@@ -123,6 +124,7 @@ export const runtime: RuntimePaths = {
   htmlReport: path.join(root, 'playwright-report'),
   runId,
   apiUrl: 'http://127.0.0.1:8100/api',
+  browserApiUrl: 'http://localhost:3100/api',
   frontendUrl: 'http://localhost:3100',
 };
 
@@ -172,4 +174,5 @@ export const serverEnvironment: Record<string, string> = {
   E2E_API_URL: runtime.apiUrl,
   E2E_FRONTEND_URL: runtime.frontendUrl,
   NEXT_PUBLIC_API_URL: runtime.apiUrl,
+  BACKEND_INTERNAL_URL: new URL(runtime.apiUrl).origin,
 };

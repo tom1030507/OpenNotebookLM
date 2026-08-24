@@ -1,46 +1,20 @@
 """Main FastAPI application."""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import logging
-import structlog
-from pathlib import Path
 
 from app.config import get_settings
-from app.db.database import init_db
+from app.lifecycle import lifespan
 from app.routers import (
     auth, projects, ingest, query, export, health, files, mindmap, video
 )
 from app.api import cache
 from app.utils.logging import setup_logging
+from app.middleware.upload_body_limit import UploadBodyLimitMiddleware
 
 # Setup logging
 setup_logging()
-logger = structlog.get_logger()
 
 settings = get_settings()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan events."""
-    # Startup
-    logger.info("Starting OpenNotebookLM", version="0.1.0")
-    
-    # Initialize database
-    init_db()
-    logger.info("Database initialized")
-    
-    # Ensure required directories exist
-    Path("./data").mkdir(exist_ok=True)
-    Path("./models").mkdir(exist_ok=True)
-    Path("./uploads").mkdir(exist_ok=True)
-    
-    yield
-    
-    # Shutdown
-    logger.info("Shutting down OpenNotebookLM")
-
 
 # Create FastAPI app
 app = FastAPI(
@@ -51,7 +25,14 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-# Configure CORS
+# Starlette makes the most recently added middleware outermost. The upload
+# guard must remain ahead of routing/form parsing, while CORS must wrap its
+# direct 413 so browser clients are allowed to read the stable error response.
+app.add_middleware(
+    UploadBodyLimitMiddleware,
+    max_file_size_bytes=settings.max_file_size_bytes,
+    configured_limit_mb=settings.max_file_size_mb,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -75,13 +56,21 @@ app.include_router(cache.router)  # Cache management endpoints
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
+    """Describe the running service and its discovery endpoints.
+
+    Args:
+        None.
+
+    Returns:
+        Basic application metadata and health endpoint locations.
+    """
     return {
         "name": settings.app_name,
         "version": "0.1.0",
         "status": "running",
         "docs": "/docs",
         "health": "/healthz",
+        "readiness": "/readyz",
     }
 
 

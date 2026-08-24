@@ -47,7 +47,7 @@ describe('API client', () => {
       document_count: 0,
       conversation_count: 0,
     }]);
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/projects');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects');
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Accept')).toBe(
       'application/json',
     );
@@ -84,7 +84,7 @@ describe('API client', () => {
 
   it('points an uploaded document at the API file route', async () => {
     // The backend stores a path on its own disk, which the browser cannot
-    // fetch: it has to become an absolute URL on the API origin.
+    // fetch: it has to become a protected route on the frontend origin.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{
       id: 'document-1',
       title: 'Paper',
@@ -101,7 +101,7 @@ describe('API client', () => {
     const [document] = await api.getDocuments('project-1');
 
     expect(document.url).toBe(
-      'http://localhost:8000/api/docs/document-1/file',
+      '/api/docs/document-1/file',
     );
   });
 
@@ -157,14 +157,14 @@ describe('API client', () => {
       type: 'pdf',
     }));
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:8000/api/projects/project-1/upload',
+      '/api/projects/project-1/upload',
     );
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
       method: 'POST',
       body: expect.any(FormData),
     }));
     expect(fetchMock.mock.calls[1][0]).toBe(
-      'http://localhost:8000/api/docs/document-1',
+      '/api/docs/document-1',
     );
   });
 
@@ -218,7 +218,7 @@ describe('API client', () => {
     });
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      `http://localhost:8000/api/projects/project-1/${endpoint}`,
+      `/api/projects/project-1/${endpoint}`,
     );
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual(payload);
   });
@@ -271,22 +271,13 @@ describe('API client', () => {
     await api.deleteDocument('project-1', 'document-1');
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:8000/api/projects/project-1/documents/document-1',
+      '/api/projects/project-1/documents/document-1',
     );
     expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
   });
 
-  it('clears the server cache and reports how much it dropped', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-      cleared: 7,
-      pattern: null,
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(api.clearCache()).resolves.toBe(7);
-
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/cache/clear');
-    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+  it('does not expose process-wide cache clearing to browser callers', () => {
+    expect('clearCache' in api).toBe(false);
   });
 
   it('normalizes a missing conversation title for string-only UI controls', async () => {
@@ -328,7 +319,7 @@ describe('API client', () => {
       message_count: 2,
     }));
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:8000/api/conversations/conversation-1',
+      '/api/conversations/conversation-1',
     );
     expect(fetchMock.mock.calls[0][1].method).toBe('PUT');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
@@ -352,7 +343,7 @@ describe('API client', () => {
       query: 'Question',
       conversation_id: 'conversation-1',
     })).resolves.toEqual(expect.objectContaining({ answer: 'Answer' }));
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/query');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/query');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
       project_id: 'project-1',
       query: 'Question',
@@ -382,7 +373,7 @@ describe('API client', () => {
     })).rejects.toThrow('String should have at least 8 characters');
   });
 
-  it('signs in against the configured API base URL, not a bare env value', async () => {
+  it('signs in through the same-origin API route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       access_token: 'a-signed-token',
       token_type: 'bearer',
@@ -392,7 +383,7 @@ describe('API client', () => {
     await expect(api.login({ username: 'ada', password: 'lovelace-1843' }))
       .resolves.toEqual({ access_token: 'a-signed-token', token_type: 'bearer' });
 
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/token');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/token');
     expect(fetchMock.mock.calls[0][1].method).toBe('POST');
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Content-Type')).toBe(
       'application/x-www-form-urlencoded',
@@ -402,7 +393,7 @@ describe('API client', () => {
     );
   });
 
-  it('registers against the configured API base URL', async () => {
+  it('registers through the same-origin API route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       id: 'user-1',
       username: 'ada',
@@ -417,7 +408,7 @@ describe('API client', () => {
       password: 'lovelace-1843',
     });
 
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/register');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/register');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
       username: 'ada',
       email: 'ada@example.com',
@@ -437,7 +428,7 @@ describe('API client', () => {
     await expect(api.getAccount('a-signed-token')).resolves.toEqual(
       expect.objectContaining({ username: 'ada', email: 'ada@example.com' }),
     );
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/api/auth/me');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/me');
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Authorization')).toBe(
       'Bearer a-signed-token',
     );
@@ -463,7 +454,7 @@ describe('API client', () => {
 
     expect(await blob.text()).toBe('# Conversation');
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:8000/api/export/conversation/conversation-1?format=markdown',
+      '/api/export/conversation/conversation-1?format=markdown',
     );
   });
 
@@ -502,7 +493,7 @@ describe('API client', () => {
     expect(blob).toHaveBeenCalledOnce();
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/docs/document-1/file',
+      '/api/docs/document-1/file',
       expect.objectContaining({ headers: expect.any(Headers) }),
     );
   });
