@@ -41,9 +41,9 @@ services:
       RETRIEVAL_TOP_K: 5
       RERANK_ENABLED: "true"
     volumes:
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./uploads:/app/uploads
+      - data:/app/data
+      - models:/app/models
+      - uploads:/app/uploads
     networks:
       - opennotebook
     healthcheck:
@@ -78,7 +78,7 @@ services:
     image: ollama/ollama:latest
     container_name: opennotebook-ollama
     volumes:
-      - ./models/ollama:/root/.ollama
+      - ollama_models:/root/.ollama
     networks:
       - opennotebook
     restart: unless-stopped
@@ -97,7 +97,7 @@ services:
     image: redis:7-alpine
     container_name: opennotebook-redis
     volumes:
-      - ./data/redis:/data
+      - redis_data:/data
     networks:
       - opennotebook
     restart: unless-stopped
@@ -110,5 +110,12 @@ networks:
 
 volumes:
   data:
+    name: opennotebooklm-data
   models:
+    name: opennotebooklm-models
   uploads:
+    name: opennotebooklm-uploads
+  ollama_models:
+    name: opennotebooklm-ollama-models
+  redis_data:
+    name: opennotebooklm-redis-data

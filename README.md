@@ -103,8 +103,9 @@ first request downloads the embedding model, so expect a slow cold start.
 <details>
 <summary><b>Docker Compose</b> — any platform (recommended)</summary>
 
-Needs Docker 20.10+, roughly 4 GB of RAM, and 10 GB of disk for the images and
-the embedding model.
+Needs Docker 20.10+, Docker Compose 2.20+ (for the retained compatibility
+wrapper), roughly 4 GB of RAM, and 10 GB of disk for the images and embedding
+model.
 
 ```bash
 cp .env.example .env
@@ -133,14 +134,46 @@ docker compose --profile with-cache up -d       # add Redis
 ```
 
 `start.sh` / `start.bat` wrap the same thing: `./start.sh`, `./start.sh with-ollama`,
-`./start.sh with-cache`, `./start.sh full`. Stop with `./stop.sh` or `docker compose down`.
+`./start.sh with-cache`, `./start.sh full`. A freshly copied example has a blank
+JWT secret, so the launcher exits with generation instructions instead of
+claiming the stack started. Stop with `docker compose down`.
+
+`deploy/docker-compose.yml` remains as a compatibility entry point for existing
+automation. It includes the root Compose model rather than defining another
+image or security policy:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+```
 
 Ollama and Redis are reachable only on the Compose network. Their profiles do
 not publish host ports; add an explicit loopback-only mapping such as
 `127.0.0.1:11434:11434` in a local override if host tools need direct access.
 
-Models are cached into the mounted `./models` volume, so recreating the container
-does not re-download them.
+Database, model, and upload state use Docker-managed named volumes
+(`opennotebooklm-data`, `opennotebooklm-models`, and
+`opennotebooklm-uploads`). Recreating containers or running
+`docker compose down` preserves them; `docker compose down --volumes` deletes
+them.
+
+Earlier versions bind-mounted `./data`, `./models`, and `./uploads`. Those host
+directories are left untouched by this upgrade, but Compose does not import them
+automatically. Before the first new-version start, with `JWT_SECRET_KEY` already
+set in `.env`, migrate any existing state once:
+
+```bash
+docker compose build backend
+docker compose create backend
+docker cp data/. opennotebook-backend:/app/data/
+docker cp models/. opennotebook-backend:/app/models/
+docker cp uploads/. opennotebook-backend:/app/uploads/
+docker compose run --rm --no-deps --user root backend \
+  sh -c 'chown -R 1000:1000 /app/data /app/models /app/uploads'
+docker compose rm -f backend
+```
+
+Skip a `docker cp` line when that old directory does not exist. Back up the old
+directories before migration; remove them only after verifying the new stack.
 
 </details>
 
@@ -357,7 +390,7 @@ OpenNotebookLM/
 │   ├── lib/                  # api client, theme, session, speech, datetime
 │   ├── store/                # Zustand store
 │   └── middleware.ts         # session gate for /
-├── deploy/                   # Dockerfile.api, docker-compose.yml, .env.example
+├── deploy/                   # compatibility Compose entry point (includes root)
 └── docker-compose.yml        # backend, frontend, optional ollama and redis
 ```
 
@@ -509,9 +542,9 @@ bge-m3 is the stronger multilingual model and needs no prefixes, but on an 8 GB
 host it OOM-killed a full re-index. Use it only where the memory headroom is real.
 
 sentence-transformers caches models under `$HOME/.cache/torch`. Docker Compose
-redirects that to the mounted `./models` volume so recreating the container does
-not re-download; outside Docker, set `SENTENCE_TRANSFORMERS_HOME` somewhere
-persistent.
+redirects that to the `opennotebooklm-models` named volume so recreating the
+container does not re-download; outside Docker, set
+`SENTENCE_TRANSFORMERS_HOME` somewhere persistent.
 
 Stored vectors are only comparable to vectors produced by the same model.
 **Changing `EMB_MODEL_NAME` invalidates every embedding already in the database**
@@ -586,7 +619,8 @@ Without `JWT_SECRET_KEY`, a development server signs tokens with a key generated
 per process — sessions do not survive a restart. Any non-development deployment
 refuses to start without it.
 
-See [`.env.example`](./.env.example) and [`deploy/.env.example`](./deploy/.env.example).
+See [`.env.example`](./.env.example). Both Compose entry points consume this
+single canonical environment contract.
 
 </details>
 

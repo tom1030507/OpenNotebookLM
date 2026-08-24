@@ -2,8 +2,8 @@
 
 `Settings` forbids keys it does not declare, so an example file that documents a
 setting nobody reads does not merely mislead — it stops the process from
-starting. These tests exist because both example files are the documented way to
-create a `.env` (see AGENTS.md), and one of them could not be loaded at all.
+starting. This test covers the root example, the single canonical deployment
+configuration shipped by the repository.
 """
 from pathlib import Path
 
@@ -14,7 +14,6 @@ from app.config import Settings
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_FILES = [
     REPO_ROOT / ".env.example",
-    REPO_ROOT / "deploy" / ".env.example",
 ]
 
 
