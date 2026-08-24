@@ -1,8 +1,42 @@
 import { readFile } from 'node:fs/promises';
 
+import type { Page } from '@playwright/test';
+
 import { test, expect } from '../support/fixtures.js';
 import { runtime } from '../support/runtime.js';
 import { setupReadyUrlWorkspace, setupWorkspace } from '../support/ui.js';
+
+function observeExportRequest(page: Page, endpoint: string): () => void {
+  const requests: Array<{ authorization: boolean; method: string; navigation: boolean; type: string }> = [];
+  const responses: Array<{ authorization: boolean; status: number }> = [];
+  page.on('request', (request) => {
+    if (request.url() === endpoint) {
+      requests.push({
+        authorization: Boolean(request.headers().authorization),
+        method: request.method(),
+        navigation: request.isNavigationRequest(),
+        type: request.resourceType(),
+      });
+    }
+  });
+  page.on('response', (response) => {
+    if (response.url() === endpoint) {
+      responses.push({
+        authorization: Boolean(response.request().headers().authorization),
+        status: response.status(),
+      });
+    }
+  });
+  return () => {
+    expect(requests).toEqual([{
+      authorization: true,
+      method: 'GET',
+      navigation: false,
+      type: 'fetch',
+    }]);
+    expect(responses).toEqual([{ authorization: true, status: 200 }]);
+  };
+}
 
 test('renders a fallback mind map from ready source structure', async ({ api, page }, testInfo) => {
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'mind-map');
@@ -29,12 +63,15 @@ test('renders a fallback mind map from ready source structure', async ({ api, pa
   );
   await expect(dialog).toContainText('Observatory Operations');
   await dialog.getByRole('button', { name: 'Close mind map dialog', exact: true }).click();
+  await expect(dialog).toBeHidden();
 });
 
 test('downloads a Markdown project report', async ({ api, page }, testInfo) => {
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'report');
+  const endpoint = `${runtime.apiUrl}/export/project/${project.id}/summary`;
+  const assertOneExportRequest = observeExportRequest(page, endpoint);
   const responsePromise = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/export/project/${project.id}/summary`
+    (response) => response.url() === endpoint
       && response.request().method() === 'GET',
   );
   const downloadPromise = page.waitForEvent('download');
@@ -42,12 +79,17 @@ test('downloads a Markdown project report', async ({ api, page }, testInfo) => {
     .getByRole('complementary', { name: 'Studio' })
     .getByRole('button', { name: 'Report', exact: true })
     .click();
-  expect((await responsePromise).status()).toBe(200);
+  const response = await responsePromise;
+  expect(response.status()).toBe(200);
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe(`${project.name} report.md`);
   const savedPath = await download.path();
   expect(savedPath).not.toBeNull();
   expect(await readFile(savedPath as string, 'utf8')).toContain(`# Project Summary: ${project.name}`);
+  await expect(
+    page.getByRole('complementary', { name: 'Studio' }).getByRole('button', { name: 'Report' }),
+  ).toBeEnabled();
+  assertOneExportRequest();
 });
 
 test('exports the current project as Markdown', async ({ api, page }, testInfo) => {
@@ -55,8 +97,10 @@ test('exports the current project as Markdown', async ({ api, page }, testInfo) 
   await page.getByRole('banner').getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export Project' });
   await dialog.getByRole('radio', { name: /markdown/i }).check();
+  const endpoint = `${runtime.apiUrl}/export/project/${project.id}?format=markdown`;
+  const assertOneExportRequest = observeExportRequest(page, endpoint);
   const responsePromise = page.waitForResponse(
-    (response) => response.url() === `${runtime.apiUrl}/export/project/${project.id}?format=markdown`
+    (response) => response.url() === endpoint
       && response.request().method() === 'GET',
   );
   const downloadPromise = page.waitForEvent('download');
@@ -68,7 +112,13 @@ test('exports the current project as Markdown', async ({ api, page }, testInfo) 
   );
   const savedPath = await download.path();
   expect(savedPath).not.toBeNull();
-  expect(await readFile(savedPath as string, 'utf8')).toContain(project.name);
+  const markdown = await readFile(savedPath as string, 'utf8');
+  expect(markdown).toContain(`# ${project.name}`);
+  expect(markdown).toContain('## Documents');
+  expect(markdown).toContain('### E2E Observatory Field Notes');
+  expect(markdown).not.toContain(`# Project Summary: ${project.name}`);
+  await expect(dialog.getByText('Exported!', { exact: true })).toBeVisible();
+  assertOneExportRequest();
 });
 
 test('exports the selected conversation as Markdown', async ({ api, page }, testInfo) => {
@@ -95,9 +145,11 @@ test('exports the selected conversation as Markdown', async ({ api, page }, test
   await page.getByRole('banner').getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export Conversation' });
   await dialog.getByRole('radio', { name: /markdown/i }).check();
+  const endpoint = `${runtime.apiUrl}/export/conversation/${conversation.id}?format=markdown`;
+  const assertOneExportRequest = observeExportRequest(page, endpoint);
   const responsePromise = page.waitForResponse(
     (response) => response.url()
-      === `${runtime.apiUrl}/export/conversation/${conversation.id}?format=markdown`
+      === endpoint
       && response.request().method() === 'GET',
   );
   const downloadPromise = page.waitForEvent('download');
@@ -110,6 +162,8 @@ test('exports the selected conversation as Markdown', async ({ api, page }, test
   const markdown = await readFile(savedPath as string, 'utf8');
   expect(markdown).toContain('What is the observatory access code?');
   expect(markdown).toContain('ORBIT-7319');
+  await expect(dialog.getByText('Exported!', { exact: true })).toBeVisible();
+  assertOneExportRequest();
 });
 
 test('renders the silent fallback video summary', async ({ api, page }, testInfo) => {

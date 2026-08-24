@@ -466,4 +466,20 @@ describe('API client', () => {
       'http://localhost:8000/api/export/conversation/conversation-1?format=markdown',
     );
   });
+
+  it('detaches fetched export bytes before the browser download uses them', async () => {
+    const arrayBuffer = vi.fn().mockResolvedValue(new TextEncoder().encode('# Export').buffer);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'text/markdown' }),
+      arrayBuffer,
+    }));
+
+    const blob = await api.exportProject('project-1', 'markdown');
+
+    expect(arrayBuffer).toHaveBeenCalledOnce();
+    expect(blob.type).toBe('text/markdown');
+    await expect(blob.text()).resolves.toBe('# Export');
+  });
 });

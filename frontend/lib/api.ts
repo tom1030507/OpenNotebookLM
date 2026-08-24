@@ -415,7 +415,11 @@ const requestBlob = async (path: string): Promise<Blob> => {
   });
   await guard(path, response, snapshot);
 
-  return response.blob();
+  // Chrome's download manager can retain a network-backed response Blob and
+  // replay its protected URL without the bearer header. Copying the bytes makes
+  // the later UI download depend only on browser-owned Blob data.
+  const content = await response.arrayBuffer();
+  return new Blob([content], { type: response.headers.get('Content-Type') || '' });
 };
 
 
