@@ -44,6 +44,74 @@ class ChunkLimitPersistenceError(RuntimeError):
     """Raised when an over-limit chunk set cannot be atomically cleaned up."""
 
 
+class EnqueueCommitUncertainError(RuntimeError):
+    """Raised when durable enqueue state cannot be safely reconciled."""
+
+
+def _commit_ingestion_enqueue(
+    db: Session,
+    document_id: str,
+    project_id: str,
+    job_id: str,
+    job_type: str,
+    payload: dict,
+) -> None:
+    """Commit an enqueue, accepting a lost acknowledgement of exact state."""
+    try:
+        db.commit()
+        return
+    except Exception as commit_error:
+        try:
+            db.rollback()
+        except Exception as rollback_error:
+            raise EnqueueCommitUncertainError(
+                "Could not reconcile enqueue commit for job %s" % job_id
+            ) from rollback_error
+
+        try:
+            with Session(bind=db.get_bind()) as verification_db:
+                document = verification_db.get(Document, document_id)
+                job = verification_db.get(IngestionJob, job_id)
+                project_document = verification_db.get(
+                    ProjectDocument,
+                    (project_id, document_id),
+                )
+                durable_pair_matches = (
+                    document is not None
+                    and project_document is not None
+                    and job is not None
+                    and job.document_id == document_id
+                    and job.job_type == job_type
+                    and job.payload_json == payload
+                )
+                durable_pair_absent = (
+                    document is None
+                    and project_document is None
+                    and job is None
+                )
+        except Exception as verification_error:
+            # The source and lease must remain recoverable if the durable state
+            # cannot be read; destructive request cleanup could orphan a row
+            # whose COMMIT was actually accepted by the database.
+            raise EnqueueCommitUncertainError(
+                "Could not verify enqueue commit for job %s" % job_id
+            ) from verification_error
+
+        if durable_pair_matches:
+            logger.warning(
+                "Ingestion enqueue commit acknowledgement was lost",
+                document_id=document_id,
+                job_id=job_id,
+            )
+            return
+        if durable_pair_absent:
+            raise commit_error
+        raise EnqueueCommitUncertainError(
+            "Ingestion enqueue commit left inconsistent state for job %s"
+            % job_id
+        ) from commit_error
+
+
 def _operation_lease(lease: Optional[OperationLease]) -> OperationLease:
     """Return a concrete operation ownership handle."""
     return lease if lease is not None else UnlimitedConcurrencyLease()
@@ -364,7 +432,14 @@ class DocumentService:
                 enqueue_result,
                 operation_lease,
             )
-            db.commit()
+            _commit_ingestion_enqueue(
+                db,
+                document_id=doc_id,
+                project_id=project_id,
+                job_id=job_id,
+                job_type="pdf",
+                payload={"file_path": str(file_path)},
+            )
             retained = True
             try:
                 notify_ingestion_worker()
@@ -388,6 +463,8 @@ class DocumentService:
         except Exception as e:
             if database_touched:
                 db.rollback()
+            if isinstance(e, EnqueueCommitUncertainError):
+                retained = True
             if owns_retained_lease and not retained:
                 release_operation_lease(job_id)
             elif job_id is None:
@@ -552,7 +629,14 @@ class DocumentService:
                 enqueue_result,
                 operation_lease,
             )
-            db.commit()
+            _commit_ingestion_enqueue(
+                db,
+                document_id=doc_id,
+                project_id=project_id,
+                job_id=job_id,
+                job_type="url",
+                payload={"url": url},
+            )
             retained = True
             try:
                 notify_ingestion_worker()
@@ -572,6 +656,8 @@ class DocumentService:
             
         except Exception as e:
             db.rollback()
+            if isinstance(e, EnqueueCommitUncertainError):
+                retained = True
             if owns_retained_lease and not retained:
                 release_operation_lease(job_id)
             elif job_id is None:
@@ -745,7 +831,14 @@ class DocumentService:
                 enqueue_result,
                 operation_lease,
             )
-            db.commit()
+            _commit_ingestion_enqueue(
+                db,
+                document_id=doc_id,
+                project_id=project_id,
+                job_id=job_id,
+                job_type="youtube",
+                payload={"youtube_url": youtube_url},
+            )
             retained = True
             try:
                 notify_ingestion_worker()
@@ -765,6 +858,8 @@ class DocumentService:
             
         except Exception as e:
             db.rollback()
+            if isinstance(e, EnqueueCommitUncertainError):
+                retained = True
             if owns_retained_lease and not retained:
                 release_operation_lease(job_id)
             elif job_id is None:
@@ -957,9 +1052,9 @@ class DocumentService:
                 "processed_at": utc_now_iso(),
             }
 
-        # A durable content checkpoint avoids repeating a successful external
-        # extraction after a later model/process crash. Retrying still rebuilds
-        # the index from scratch, so these commits cannot create duplicates.
+        # A durable content checkpoint preserves the latest extracted text if a
+        # later model/process step fails. Retries still repeat extraction and
+        # rebuild the index from scratch, so these commits cannot duplicate it.
         db.commit()
         chunks = self.chunking_service.chunk_document(
             db,
@@ -1036,9 +1131,29 @@ class DocumentService:
         db.delete(doc)
         try:
             db.commit()
-        except Exception:
-            db.rollback()
-            raise
+        except Exception as commit_error:
+            try:
+                db.rollback()
+            except Exception:
+                raise
+            try:
+                with Session(bind=db.get_bind()) as verification_db:
+                    delete_was_persisted = (
+                        verification_db.get(Document, doc_id) is None
+                        and verification_db.query(IngestionJob).filter(
+                            IngestionJob.document_id == doc_id,
+                        ).first() is None
+                    )
+            except Exception:
+                # A source file and its lease are safer retained than deleted
+                # while the durable outcome cannot be read.
+                raise commit_error
+            if not delete_was_persisted:
+                raise commit_error
+            logger.warning(
+                "Document delete commit acknowledgement was lost",
+                document_id=doc_id,
+            )
         for job_id in queued_job_ids:
             release_operation_lease(job_id)
 

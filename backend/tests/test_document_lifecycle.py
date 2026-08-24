@@ -66,6 +66,37 @@ def lifecycle_db():
         engine.dispose()
 
 
+@pytest.fixture
+def lifecycle_file_db(tmp_path):
+    """Create a file database so reconciliation uses another connection.
+
+    Args:
+        tmp_path: Per-test temporary directory.
+
+    Returns:
+        A Session connected to an isolated file SQLite database.
+    """
+    engine = create_database_engine(
+        "sqlite:///%s" % (tmp_path / "lifecycle.db"),
+        echo=False,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=True,
+    )
+    db = session_factory()
+    db.add(Project(id="project-1", name="Durable imports"))
+    db.commit()
+    try:
+        yield db
+    finally:
+        db.close()
+        engine.dispose()
+
+
 class MustNotChunk:
     """Fail if request-bound code reaches indexing."""
 
@@ -401,6 +432,104 @@ def test_pdf_commit_failure_releases_lease_and_removes_exact_upload(
 
 
 @pytest.mark.parametrize("source_type", ["pdf", "url", "youtube"])
+def test_enqueue_accepts_a_commit_acknowledgement_failure(
+    source_type,
+    lifecycle_file_db,
+    tmp_path,
+    monkeypatch,
+):
+    """A durable document/job pair is success when only its commit ACK fails.
+
+    Args:
+        source_type: Durable enqueue entry point under test.
+        lifecycle_file_db: Isolated file database Session.
+        tmp_path: Per-test upload directory.
+        monkeypatch: Pytest patch helper.
+
+    Returns:
+        None.
+    """
+    original_commit = lifecycle_file_db.commit
+    failures_remaining = 1
+
+    def accepted_then_raised_commit():
+        nonlocal failures_remaining
+        original_commit()
+        if failures_remaining:
+            failures_remaining -= 1
+            raise RuntimeError("commit acknowledgement lost")
+
+    monkeypatch.setattr(
+        lifecycle_file_db,
+        "commit",
+        accepted_then_raised_commit,
+    )
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    notifications = []
+    monkeypatch.setattr(
+        document_module,
+        "notify_ingestion_worker",
+        lambda: notifications.append("notified"),
+    )
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    lease = limiter.acquire("ingest:user")
+    release_all_operation_leases()
+    service = queued_service()
+    try:
+        if source_type == "pdf":
+            document = asyncio.run(service.process_pdf_upload(
+                db=lifecycle_file_db,
+                project_id="project-1",
+                user_id=None,
+                file=BytesIO(b"durable after lost acknowledgement"),
+                filename="source.pdf",
+                operation_lease=lease,
+            ))
+        elif source_type == "url":
+            document = asyncio.run(service.process_url(
+                db=lifecycle_file_db,
+                project_id="project-1",
+                user_id=None,
+                url="https://example.com/commit-ack",
+                operation_lease=lease,
+            ))
+        else:
+            document = asyncio.run(service.process_youtube(
+                db=lifecycle_file_db,
+                project_id="project-1",
+                user_id=None,
+                youtube_url="https://youtu.be/commit-ack",
+                operation_lease=lease,
+            ))
+
+        fresh_factory = sessionmaker(
+            bind=lifecycle_file_db.get_bind(),
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+        )
+        with fresh_factory() as fresh_db:
+            persisted = fresh_db.get(Document, document.id)
+            job = fresh_db.query(IngestionJob).filter(
+                IngestionJob.document_id == document.id,
+            ).one()
+            assert persisted.status == "queued"
+            assert job.status == "queued"
+            assert fresh_db.query(ProjectDocument).filter(
+                ProjectDocument.document_id == document.id,
+            ).count() == 1
+            if source_type == "pdf":
+                assert Path(persisted.source_url).exists()
+        assert notifications == ["notified"]
+        assert limiter.active("ingest:user") == 1
+    finally:
+        release_all_operation_leases()
+        service.executor.shutdown(wait=True)
+
+    assert limiter.active("ingest:user") == 0
+
+
+@pytest.mark.parametrize("source_type", ["pdf", "url", "youtube"])
 def test_duplicate_enqueue_commit_failure_preserves_winner_lease(
     source_type,
     lifecycle_db,
@@ -469,7 +598,10 @@ def test_duplicate_enqueue_commit_failure_preserves_winner_lease(
     service = queued_service()
 
     try:
-        with pytest.raises(RuntimeError, match="duplicate commit failed"):
+        with pytest.raises(
+            document_module.EnqueueCommitUncertainError,
+            match="inconsistent state",
+        ):
             if source_type == "pdf":
                 asyncio.run(service.process_pdf_upload(
                     db=lifecycle_db,
@@ -668,6 +800,78 @@ def test_successful_document_delete_removes_pdf_after_commit(
             lifecycle_db,
             "document-delete-succeeds",
         )
+        assert not source_path.exists()
+        assert limiter.active("ingest:user") == 0
+    finally:
+        release_all_operation_leases()
+        service.executor.shutdown(wait=True)
+
+
+def test_document_delete_accepts_a_commit_acknowledgement_failure(
+    lifecycle_file_db,
+    tmp_path,
+    monkeypatch,
+):
+    """A committed delete finishes file and lease cleanup when its ACK fails.
+
+    Args:
+        lifecycle_file_db: Isolated file database Session.
+        tmp_path: Per-test source directory.
+        monkeypatch: Pytest patch helper.
+
+    Returns:
+        None.
+    """
+    source_path = tmp_path / "delete-ack-source.pdf"
+    source_path.write_bytes(b"delete after durable commit")
+    lifecycle_file_db.add(Document(
+        id="document-delete-ack",
+        title="Delete acknowledgement",
+        source_type="pdf",
+        source_url=str(source_path),
+        status="queued",
+    ))
+    lifecycle_file_db.commit()
+    job = enqueue_ingestion_job(
+        lifecycle_file_db,
+        document_id="document-delete-ack",
+        job_type="pdf",
+        payload={"file_path": str(source_path)},
+    )
+    lifecycle_file_db.commit()
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    release_all_operation_leases()
+    retain_operation_lease(job.id, limiter.acquire("ingest:user"))
+    original_commit = lifecycle_file_db.commit
+    failures_remaining = 1
+
+    def accepted_then_raised_commit():
+        nonlocal failures_remaining
+        original_commit()
+        if failures_remaining:
+            failures_remaining -= 1
+            raise RuntimeError("delete acknowledgement lost")
+
+    monkeypatch.setattr(
+        lifecycle_file_db,
+        "commit",
+        accepted_then_raised_commit,
+    )
+    service = queued_service()
+    try:
+        assert service.delete_document(
+            lifecycle_file_db,
+            "document-delete-ack",
+        )
+        fresh_factory = sessionmaker(
+            bind=lifecycle_file_db.get_bind(),
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+        )
+        with fresh_factory() as fresh_db:
+            assert fresh_db.get(Document, "document-delete-ack") is None
+            assert fresh_db.get(IngestionJob, job.id) is None
         assert not source_path.exists()
         assert limiter.active("ingest:user") == 0
     finally:
