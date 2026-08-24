@@ -221,10 +221,38 @@ class DocumentService:
         if doc:
             doc.status = "ready"
             doc.error_message = None
-            self.embedding_service.publish_document_index(db, doc_id)
+            self._publish_document_index(db, doc_id)
             db.commit()
 
         return "ready"
+
+    def _publish_document_index(self, db: Session, doc_id: str) -> None:
+        """Publish completed vectors through either embedding implementation.
+
+        Args:
+            db: Transaction that is changing the document to ``ready``.
+            doc_id: Document whose index should become searchable.
+
+        Returns:
+            None.
+        """
+        publisher = getattr(
+            self.embedding_service,
+            "publish_document_index",
+            None,
+        )
+        if publisher is not None:
+            publisher(db, doc_id)
+            return
+
+        # Lightweight embedding implementations only promise embed_chunks.
+        # Flush the pending ready state so the general reconciliation path can
+        # derive searchable=True without requiring a model-service method.
+        db.flush()
+        get_retrieval_index().backfill(
+            db,
+            document_ids=[doc_id],
+        )
 
     def _mark_chunk_limit_failed(
         self,
@@ -1065,7 +1093,7 @@ class DocumentService:
         document = db.get(Document, document_id)
         document.status = "ready"
         document.error_message = None
-        self.embedding_service.publish_document_index(db, document_id)
+        self._publish_document_index(db, document_id)
         return "ready"
     
     def get_document_status(self, db: Session, doc_id: str) -> Optional[Document]:

@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import pickle
-import sys
 import types
-from dataclasses import dataclass
 
 import numpy as np
 import pytest
@@ -14,39 +12,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-
-@dataclass
-class IndexedChunk:
-    """Test copy of the frozen lifecycle payload."""
-
-    chunk_id: str
-    document_id: str
-    text: str
-    vector: object
-    model_name: str | None = None
-    heading_path: str | None = None
-    searchable: bool = False
-
-
-@dataclass
-class RetrievalCandidate:
-    """Test copy of the frozen candidate payload."""
-
-    chunk_id: str
-    document_id: str
-    score: float
-
-
-_retrieval_index = None
-retrieval_index_stub = types.ModuleType("app.services.retrieval_index")
-retrieval_index_stub.IndexedChunk = IndexedChunk
-retrieval_index_stub.RetrievalCandidate = RetrievalCandidate
-retrieval_index_stub.get_retrieval_index = lambda: _retrieval_index
-sys.modules.setdefault("app.services.retrieval_index", retrieval_index_stub)
-
 from app.db.models import Base, Chunk, Document, Embedding  # noqa: E402
 from app.routers import health  # noqa: E402
 from app.services import chunking, documents, embeddings, ingestion_jobs, rag  # noqa: E402
+from app.services.retrieval_index import (  # noqa: E402
+    IndexedChunk,
+    RetrievalCandidate,
+)
 
 
 @pytest.fixture
@@ -473,12 +445,14 @@ def test_health_normalizes_retrieval_status_without_loading_embedding_model(
 ):
     """Liveness must expose index selection from a dataclass-like status."""
     status_payload = {
-        "requested_backend": "sqlitevec",
-        "configured_backend": "sqlitevec",
-        "active_dense_backend": "sqlitevec",
-        "active_lexical_backend": "fts5",
-        "available": True,
-        "version": "0.1.9",
+        "requested_backend": "sqlitevec+fts5",
+        "configured_backend": "sqlitevec+fts5",
+        "active_backend": "sqlitevec+fts5",
+        "dense_backend": "sqlitevec",
+        "lexical_backend": "fts5",
+        "dense_available": True,
+        "lexical_available": True,
+        "sqlitevec_version": "0.1.9",
         "fallback_reason": None,
     }
     index = types.SimpleNamespace(

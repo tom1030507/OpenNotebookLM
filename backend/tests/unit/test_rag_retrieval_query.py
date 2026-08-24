@@ -8,6 +8,7 @@ to be cut.
 """
 import importlib
 import sys
+import types
 import uuid
 from unittest import mock
 
@@ -46,29 +47,81 @@ class RecordingEmbeddingService:
     def __init__(self):
         self.queries = []
 
-    def search_similar_chunks(self, db, query, document_ids=None, top_k=5, threshold=0.0):
-        """Record the query and return one usable chunk.
+    def generate_embedding(self, text, **_kwargs):
+        """Record the query and return one deterministic vector.
 
         Args:
-            db: Unused.
-            query: The search string under test.
-            document_ids: Unused.
-            top_k: Unused.
-            threshold: Unused.
+            text: The search string under test.
+            _kwargs: Embedding options unused by this double.
 
         Returns:
-            A single result shaped like the real dense search.
+            A two-dimensional query vector.
         """
-        self.queries.append(query)
+        self.queries.append(text)
+        return [1.0, 0.0]
+
+
+class RecordingRetrievalIndex:
+    """Return one indexed candidate without touching the canonical table."""
+
+    def dense_search(self, _db, _vector, **_kwargs):
+        """Return the candidate used by the conversation assertions.
+
+        Args:
+            _db: Unused request session.
+            _vector: Unused deterministic query vector.
+            _kwargs: Scope and ranking options unused by this double.
+
+        Returns:
+            One dense candidate.
+        """
+        return [types.SimpleNamespace(
+            chunk_id="chunk-1",
+            document_id="document-1",
+            score=0.71,
+        )]
+
+    def lexical_search(self, _db, _query, **_kwargs):
+        """Keep this test focused on which text is embedded.
+
+        Args:
+            _db: Unused request session.
+            _query: Unused lexical query.
+            _kwargs: Scope and ranking options unused by this double.
+
+        Returns:
+            No lexical candidates.
+        """
+        return []
+
+    def hydrate(self, _db, _chunk_ids):
+        """Hydrate the fixed candidate in the production payload shape.
+
+        Args:
+            _db: Unused request session.
+            _chunk_ids: Bounded ids requested by RAG.
+
+        Returns:
+            One hydrated chunk payload.
+        """
         return [{
             "chunk_id": "chunk-1",
             "document_id": "document-1",
             "document_title": "Transformer",
             "text": "Scaled dot-product attention compares queries against keys.",
-            "score": 0.71,
             "metadata": {"page_num": None, "timestamp": None,
                          "section": "Attention", "heading_path": "Transformer > Attention"},
         }]
+
+    def status(self):
+        """Report the deterministic backend used by this test double.
+
+        Returns:
+            Dataclass-like status payload.
+        """
+        return types.SimpleNamespace(
+            as_dict=lambda: {"active_backend": "test-index"}
+        )
 
 
 class RecordingLLMService:
@@ -125,11 +178,17 @@ def service():
     """A RAGService with both heavy dependencies replaced."""
     module = real_rag_module()
     embeddings = RecordingEmbeddingService()
+    retrieval_index = RecordingRetrievalIndex()
     llm = RecordingLLMService()
     with mock.patch.object(module, "EmbeddingService", lambda: embeddings), \
+         mock.patch.object(
+             module,
+             "get_retrieval_index",
+             lambda: retrieval_index,
+         ), \
          mock.patch.object(module, "LLMService", lambda: llm):
         instance = module.RAGService()
-    return instance, embeddings, llm
+        yield instance, embeddings, llm
 
 
 class TestConversationRetrievalQuery:

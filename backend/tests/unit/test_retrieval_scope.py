@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import types
 import uuid
 from unittest import mock
 
@@ -50,29 +51,112 @@ def real_rag_module():
 
 
 class RecordingEmbeddingService:
-    """Records the document scope the dense search was asked for."""
+    """Returns a deterministic vector without loading the model."""
 
     def __init__(self):
         self.calls = []
 
-    def search_similar_chunks(self, db, query, document_ids=None, top_k=5, threshold=0.0):
-        """Record the scope and return nothing.
-
-        Returning nothing keeps the assertions about *scope* rather than about
-        ranking; the lexical half still runs against the real rows.
+    def generate_embedding(self, query, **_kwargs):
+        """Record the query and return a two-dimensional vector.
 
         Args:
-            db: Unused.
-            query: Unused.
-            document_ids: The scope under test.
-            top_k: Unused.
-            threshold: Unused.
+            query: Search text under test.
+            _kwargs: Embedding options unused by this double.
 
         Returns:
-            An empty candidate list.
+            A deterministic query vector.
         """
-        self.calls.append(document_ids)
+        self.calls.append(query)
+        return [1.0, 0.0]
+
+
+class RecordingRetrievalIndex:
+    """Apply and record document scope at the indexed-search boundary."""
+
+    def __init__(self):
+        self.dense_calls = []
+        self.lexical_calls = []
+
+    def dense_search(self, _db, _vector, document_ids=None, **_kwargs):
+        """Record dense scope and return no candidates.
+
+        Args:
+            _db: Unused request session.
+            _vector: Unused deterministic query vector.
+            document_ids: Document scope under test.
+            _kwargs: Ranking options unused by this double.
+
+        Returns:
+            No dense candidates.
+        """
+        self.dense_calls.append(document_ids)
         return []
+
+    def lexical_search(self, db, _query, document_ids=None, top_k=5):
+        """Record lexical scope and return matching canonical chunk ids.
+
+        Args:
+            db: Request session containing the fixture chunks.
+            _query: Unused lexical query.
+            document_ids: Document scope under test.
+            top_k: Maximum candidate count.
+
+        Returns:
+            Scoped lexical candidates.
+        """
+        self.lexical_calls.append(document_ids)
+        rows = db.query(Chunk).order_by(Chunk.id)
+        if document_ids is not None:
+            rows = rows.filter(Chunk.document_id.in_(document_ids))
+        return [
+            types.SimpleNamespace(
+                chunk_id=chunk.id,
+                document_id=chunk.document_id,
+                score=1.0,
+            )
+            for chunk in rows.limit(top_k).all()
+        ]
+
+    def hydrate(self, db, chunk_ids):
+        """Hydrate the bounded candidate ids in their requested order.
+
+        Args:
+            db: Request session containing the fixture chunks.
+            chunk_ids: Bounded candidate ids.
+
+        Returns:
+            Hydrated payloads in candidate order.
+        """
+        rows = db.query(Chunk, Document.title).join(
+            Document,
+            Document.id == Chunk.document_id,
+        ).filter(Chunk.id.in_(chunk_ids)).all()
+        payloads = {
+            chunk.id: {
+                "chunk_id": chunk.id,
+                "document_id": chunk.document_id,
+                "document_title": title,
+                "text": chunk.text,
+                "metadata": {
+                    "page_num": chunk.page_num,
+                    "timestamp": chunk.ts_start,
+                    "section": None,
+                    "heading_path": chunk.heading_path,
+                },
+            }
+            for chunk, title in rows
+        }
+        return [payloads[chunk_id] for chunk_id in chunk_ids]
+
+    def status(self):
+        """Report the deterministic test backend.
+
+        Returns:
+            Dataclass-like status payload.
+        """
+        return types.SimpleNamespace(
+            as_dict=lambda: {"active_backend": "test-index"}
+        )
 
 
 class RecordingLLMService:
@@ -132,40 +216,48 @@ def service():
     """A RAGService with both heavy dependencies replaced."""
     module = real_rag_module()
     embeddings = RecordingEmbeddingService()
+    retrieval_index = RecordingRetrievalIndex()
     with mock.patch.object(module, "EmbeddingService", lambda: embeddings), \
+         mock.patch.object(
+             module,
+             "get_retrieval_index",
+             lambda: retrieval_index,
+         ), \
          mock.patch.object(module, "LLMService", RecordingLLMService):
         instance = module.RAGService()
-    return instance, embeddings
+        yield instance, retrieval_index
 
 
 class TestScopeReachesTheSearch:
     """The allowed set is what the dense search is told to look at."""
 
     def test_scope_is_passed_through(self, db, service):
-        instance, embeddings = service
+        instance, retrieval_index = service
 
         instance._retrieve_chunks(db=db, query="positional encoding",
                                   allowed_document_ids=[ALICE_DOC])
 
-        assert embeddings.calls == [[ALICE_DOC]]
+        assert retrieval_index.dense_calls == [[ALICE_DOC]]
 
     def test_no_scope_means_no_filter(self, db, service):
         # Only callers outside the request path, such as the eval harness, pass
         # None. The API always supplies a list.
-        instance, embeddings = service
+        instance, retrieval_index = service
 
         instance._retrieve_chunks(db=db, query="positional encoding")
 
-        assert embeddings.calls == [None]
+        assert retrieval_index.dense_calls == [None]
 
     def test_an_empty_scope_searches_nothing(self, db, service):
-        instance, embeddings = service
+        instance, retrieval_index = service
 
         result = instance._retrieve_chunks(db=db, query="positional encoding",
                                            allowed_document_ids=[])
 
         assert result == []
-        assert embeddings.calls == [], "the search should not have been reached"
+        assert retrieval_index.dense_calls == [], (
+            "the search should not have been reached"
+        )
 
 
 class TestScopeNarrowsTheProject:
@@ -173,43 +265,50 @@ class TestScopeNarrowsTheProject:
 
     def test_project_and_scope_are_intersected(self, db, service):
         # The project holds both documents; only Alice's is allowed.
-        instance, embeddings = service
+        instance, retrieval_index = service
 
         instance._retrieve_chunks(db=db, query="positional encoding",
                                   project_id=PROJECT,
                                   allowed_document_ids=[ALICE_DOC])
 
-        assert embeddings.calls == [[ALICE_DOC]]
+        assert retrieval_index.dense_calls == [[ALICE_DOC]]
 
     def test_a_project_of_someone_elses_documents_yields_nothing(self, db, service):
-        instance, embeddings = service
+        instance, retrieval_index = service
 
         result = instance._retrieve_chunks(db=db, query="positional encoding",
                                            project_id=PROJECT,
                                            allowed_document_ids=["document-nobody"])
 
         assert result == []
-        assert embeddings.calls == []
+        assert retrieval_index.dense_calls == []
 
 
 class TestLexicalHalfIsScopedToo:
     """BM25 runs its own query, so it needs the same limit."""
 
     def test_only_allowed_chunks_are_candidates(self, db, service):
-        instance, _ = service
+        instance, retrieval_index = service
 
-        candidates = instance._lexical_candidates(
-            db, "positional encoding", [ALICE_DOC], 10)
+        candidates = instance._retrieve_chunks(
+            db=db,
+            query="positional encoding",
+            allowed_document_ids=[ALICE_DOC],
+        )
 
         assert [c["document_id"] for c in candidates] == [ALICE_DOC]
+        assert retrieval_index.lexical_calls == [[ALICE_DOC]]
 
     def test_without_the_limit_both_are_candidates(self, db, service):
-        instance, _ = service
+        instance, retrieval_index = service
 
-        candidates = instance._lexical_candidates(
-            db, "positional encoding", None, 10)
+        candidates = instance._retrieve_chunks(
+            db=db,
+            query="positional encoding",
+        )
 
         assert {c["document_id"] for c in candidates} == {ALICE_DOC, BOB_DOC}
+        assert retrieval_index.lexical_calls == [None]
 
     def test_fused_results_stay_inside_the_scope(self, db, service):
         instance, _ = service
