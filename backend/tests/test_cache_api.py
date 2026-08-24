@@ -172,14 +172,14 @@ def test_owned_resources_can_be_invalidated(
     """Removing broad controls must preserve useful owned invalidation."""
     cache_api_env.active_user["value"] = cache_api_env.alice
     invalidator = f"invalidate_{resource}_cache"
-    monkeypatch.setattr(cache_api.cache_service, invalidator, lambda _id: 2)
+    monkeypatch.setattr(cache_api.cache_service, invalidator, lambda _id: 1)
     resource_id = PROJECT_ID if resource == "project" else DOCUMENT_ID
 
     response = cache_api_env.client.delete(path.format(resource_id))
 
     assert response.status_code == 200
     assert response.json() == {
-        "invalidated": 2,
+        "invalidated": 1,
         "target_type": resource,
         "target_id": resource_id,
     }

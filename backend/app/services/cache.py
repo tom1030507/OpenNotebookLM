@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-import fnmatch
 from itertools import islice
 import json
 import pickle
+import secrets
 import threading
 import time
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 import structlog
@@ -27,7 +27,7 @@ from app.config import get_settings
 logger = structlog.get_logger()
 
 _CONFIGURED_VALUE = object()
-CACHE_SCAN_BATCH_SIZE = 100
+CACHE_INVALIDATION_SCOPE_COUNT = 1
 MEMORY_CLEANUP_BATCH_SIZE = 64
 
 
@@ -89,6 +89,7 @@ class CacheService:
         self._lock = threading.RLock()
         self.cache_backend = redis_client
         self.in_memory_cache: OrderedDict[str, _MemoryEntry] = OrderedDict()
+        self._scope_versions: OrderedDict[str, str] = OrderedDict()
         self.cache_stats = {
             "hits": 0,
             "misses": 0,
@@ -140,13 +141,92 @@ class CacheService:
         """Prefix one logical cache key with the application namespace."""
         return f"{self.namespace}:{key}"
 
-    def _namespaced_pattern(self, pattern: str) -> str:
-        """Prefix one internal invalidation pattern with the namespace."""
-        return f"{self.namespace}:{pattern}"
-
     def _get_key(self, prefix: str, key: str) -> str:
         """Build a logical key from a resource prefix and value."""
         return f"{prefix}:{key}"
+
+    @staticmethod
+    def _new_scope_version() -> str:
+        """Return an opaque version that can never alias an implicit default."""
+        return secrets.token_hex(16)
+
+    @staticmethod
+    def _decode_scope_version(value: Any) -> str:
+        """Normalize Redis bytes and in-memory strings to one token type."""
+        if isinstance(value, bytes):
+            return value.decode("utf-8")
+        return str(value)
+
+    def _scope_version(self, scope_type: str, scope_id: str) -> str:
+        """Return the current opaque version for one ownership scope."""
+        version_key = self._get_key(f"version:{scope_type}", scope_id)
+        if self.cache_backend is not None:
+            namespaced_key = self._namespaced_key(version_key)
+            candidate = self._new_scope_version()
+            # SET NX and then GET makes concurrent first users agree on the
+            # winner. If an eviction removes the marker, a fresh random token
+            # is created instead of falling back to a generation that may have
+            # stale values, so old data cannot resurrect.
+            self.cache_backend.set(namespaced_key, candidate, nx=True)
+            version = self.cache_backend.get(namespaced_key)
+            if version is None:
+                raise RuntimeError(
+                    f"Redis did not persist cache version for {scope_type} scope"
+                )
+            return self._decode_scope_version(version)
+
+        with self._lock:
+            version = self._scope_versions.get(version_key)
+            if version is None:
+                version = self._new_scope_version()
+                self._scope_versions[version_key] = version
+            self._scope_versions.move_to_end(version_key)
+            while len(self._scope_versions) > self.max_entries:
+                self._scope_versions.popitem(last=False)
+            return version
+
+    def _versioned_key(
+        self,
+        scope_type: str,
+        scope_id: str,
+        value_type: str,
+        value_id: str,
+    ) -> Optional[str]:
+        """Build a value key under the scope's current opaque version."""
+        try:
+            version = self._scope_version(scope_type, scope_id)
+        except Exception as error:
+            logger.error(
+                "Cache version lookup error",
+                scope_type=scope_type,
+                error=str(error),
+            )
+            return None
+        return self._get_key(
+            f"{value_type}:{scope_id}:{version}",
+            value_id,
+        )
+
+    def _rotate_scope_version(self, scope_type: str, scope_id: str) -> int:
+        """Make every TTL value in one scope unreachable in constant work."""
+        version_key = self._get_key(f"version:{scope_type}", scope_id)
+        version = self._new_scope_version()
+        if self.cache_backend is not None:
+            stored = self.cache_backend.set(
+                self._namespaced_key(version_key),
+                version,
+            )
+            if not stored:
+                raise RuntimeError(
+                    f"Redis did not rotate cache version for {scope_type} scope"
+                )
+        else:
+            with self._lock:
+                self._scope_versions[version_key] = version
+                self._scope_versions.move_to_end(version_key)
+                while len(self._scope_versions) > self.max_entries:
+                    self._scope_versions.popitem(last=False)
+        return CACHE_INVALIDATION_SCOPE_COUNT
 
     def _serialize(self, value: Any) -> bytes:
         """Serialize one value for Redis storage."""
@@ -303,39 +383,6 @@ class CacheService:
             logger.error("Cache delete error", error=str(error))
             return False
 
-    def _redis_keys(self, pattern: str) -> Iterator[Any]:
-        """Yield Redis keys matching one already-namespaced pattern."""
-        yield from self.cache_backend.scan_iter(
-            match=pattern,
-            count=CACHE_SCAN_BATCH_SIZE,
-        )
-
-    def _delete_pattern(self, pattern: str) -> int:
-        """Delete one internal, namespaced resource pattern in bounded batches."""
-        namespaced_pattern = self._namespaced_pattern(pattern)
-        if self.cache_backend is not None:
-            deleted = 0
-            batch: List[str] = []
-            for key in self._redis_keys(namespaced_pattern):
-                batch.append(key)
-                if len(batch) == CACHE_SCAN_BATCH_SIZE:
-                    deleted += int(self.cache_backend.delete(*batch))
-                    batch.clear()
-            if batch:
-                deleted += int(self.cache_backend.delete(*batch))
-            self._increment_stat("deletes", deleted)
-            return deleted
-
-        with self._lock:
-            keys = [
-                key for key in self.in_memory_cache
-                if fnmatch.fnmatchcase(key, namespaced_pattern)
-            ]
-            for key in keys:
-                del self.in_memory_cache[key]
-            self.cache_stats["deletes"] += len(keys)
-            return len(keys)
-
     def cache_query_result(
         self,
         project_id: str,
@@ -354,7 +401,9 @@ class CacheService:
         Returns:
             True when stored.
         """
-        key = self._get_key(f"query:{project_id}", query)
+        key = self._versioned_key("project", project_id, "query", query)
+        if key is None:
+            return False
         return self.set(key, result, ttl)
 
     def get_cached_query(
@@ -371,7 +420,9 @@ class CacheService:
         Returns:
             Cached response data, or None.
         """
-        key = self._get_key(f"query:{project_id}", query)
+        key = self._versioned_key("project", project_id, "query", query)
+        if key is None:
+            return None
         return self.get(key, data_type="json")
 
     def cache_embedding(
@@ -392,7 +443,14 @@ class CacheService:
         Returns:
             True when stored.
         """
-        key = self._get_key(f"embedding:{document_id}", chunk_id)
+        key = self._versioned_key(
+            "document",
+            document_id,
+            "embedding",
+            chunk_id,
+        )
+        if key is None:
+            return False
         return self.set(key, embedding, ttl)
 
     def get_cached_embedding(
@@ -409,7 +467,14 @@ class CacheService:
         Returns:
             Cached numpy vector, or None.
         """
-        key = self._get_key(f"embedding:{document_id}", chunk_id)
+        key = self._versioned_key(
+            "document",
+            document_id,
+            "embedding",
+            chunk_id,
+        )
+        if key is None:
+            return None
         return self.get(key, data_type="numpy")
 
     def cache_chunk(
@@ -430,7 +495,14 @@ class CacheService:
         Returns:
             True when stored.
         """
-        key = self._get_key(f"chunk:{document_id}", chunk_id)
+        key = self._versioned_key(
+            "document",
+            document_id,
+            "chunk",
+            chunk_id,
+        )
+        if key is None:
+            return False
         return self.set(key, chunk_data, ttl)
 
     def get_cached_chunk(
@@ -447,7 +519,14 @@ class CacheService:
         Returns:
             Cached chunk payload, or None.
         """
-        key = self._get_key(f"chunk:{document_id}", chunk_id)
+        key = self._versioned_key(
+            "document",
+            document_id,
+            "chunk",
+            chunk_id,
+        )
+        if key is None:
+            return None
         return self.get(key, data_type="json")
 
     def invalidate_project_cache(self, project_id: str) -> int:
@@ -457,9 +536,10 @@ class CacheService:
             project_id: Owned project id.
 
         Returns:
-            Number of entries actually deleted.
+            Number of logical project scopes invalidated (always one on
+            success). Physical TTL values expire or are evicted later.
         """
-        return self._delete_pattern(f"query:{project_id}:*")
+        return self._rotate_scope_version("project", project_id)
 
     def invalidate_document_cache(self, document_id: str) -> int:
         """Invalidate cached chunks and embeddings for one document.
@@ -468,15 +548,10 @@ class CacheService:
             document_id: Owned document id.
 
         Returns:
-            Number of entries actually deleted.
+            Number of logical document scopes invalidated (always one on
+            success). Physical TTL values expire or are evicted later.
         """
-        return sum(
-            self._delete_pattern(pattern)
-            for pattern in (
-                f"embedding:{document_id}:*",
-                f"chunk:{document_id}:*",
-            )
-        )
+        return self._rotate_scope_version("document", document_id)
 
     def get_stats(self) -> Dict[str, Any]:
         """Return internal cache counters and backend data.
@@ -495,11 +570,10 @@ class CacheService:
                 stats.update({
                     "backend": "redis",
                     "used_memory": info.get("used_memory_human", "N/A"),
-                    "total_keys": sum(
-                        1 for _key in self._redis_keys(
-                            self._namespaced_pattern("*")
-                        )
-                    ),
+                    # Redis DBSIZE is constant work. This internal diagnostic
+                    # reports the shared database total rather than scanning
+                    # the namespace and turning stats into unbounded work.
+                    "total_keys": int(self.cache_backend.dbsize()),
                     "connected_clients": info.get("connected_clients", 0),
                 })
             except Exception:

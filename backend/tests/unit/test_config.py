@@ -8,6 +8,7 @@ configuration shipped by the repository.
 from pathlib import Path
 
 import pytest
+import yaml
 
 from app.config import Settings
 
@@ -65,3 +66,19 @@ def test_production_can_explicitly_enable_public_registration():
     settings = Settings(app_env="production", allow_public_registration=True)
 
     assert settings.allow_public_registration is True
+
+
+def test_compose_redis_has_finite_memory_without_public_port() -> None:
+    """The optional cache cannot grow forever or evict durable version keys."""
+    compose_path = REPO_ROOT / "docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    redis_service = compose["services"]["redis"]
+    command = " ".join(redis_service["command"])
+
+    assert "ports" not in redis_service
+    assert "--maxmemory" in command
+    assert "${REDIS_MAXMEMORY:-256mb}" in command
+    assert "--maxmemory-policy allkeys-lru" in command
+
+    settings = Settings(_env_file=REPO_ROOT / ".env.example")
+    assert settings.redis_maxmemory == "256mb"

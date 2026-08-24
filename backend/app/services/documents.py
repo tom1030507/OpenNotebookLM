@@ -20,10 +20,15 @@ from app.utils.time import utc_now_iso
 
 logger = structlog.get_logger()
 PDF_UPLOAD_BLOCK_BYTES = 1024 * 1024
+CHUNK_LIMIT_CLEANUP_ATTEMPTS = 2
 
 
 class UploadTooLargeError(ValueError):
     """Raised when an upload crosses the configured byte limit."""
+
+
+class ChunkLimitPersistenceError(RuntimeError):
+    """Raised when an over-limit chunk set cannot be atomically cleaned up."""
 
 
 def _operation_lease(lease: Optional[OperationLease]) -> OperationLease:
@@ -96,6 +101,11 @@ class DocumentService:
 
             embeddings = self.embedding_service.embed_chunks(db, doc_id)
             logger.info(f"Generated {len(embeddings)} embeddings for {source_label} document {doc_id}")
+        except ChunkLimitPersistenceError:
+            # A status-only fallback would retain the already committed chunk
+            # rows. Preserve the dedicated failure so the caller can surface a
+            # database incident without pretending cleanup succeeded.
+            raise
         except Exception as e:
             logger.error(f"Failed to chunk/embed {source_label} document: {e}")
             return self._mark_failed(db, doc_id, f"Indexing failed: {e}")
@@ -144,33 +154,52 @@ class DocumentService:
             f"{self.max_chunks_per_doc}. {action}"
         )
 
-        try:
-            for chunk in (
-                db.query(Chunk)
-                .filter(Chunk.document_id == doc_id)
-                .all()
-            ):
-                db.delete(chunk)
+        last_error = None
+        for attempt in range(1, CHUNK_LIMIT_CLEANUP_ATTEMPTS + 1):
+            try:
+                # Re-read and re-delete on every attempt. A rollback after a
+                # failed commit restores both the rows and the document, so
+                # retrying only commit would falsely report a clean database.
+                for chunk in (
+                    db.query(Chunk)
+                    .filter(Chunk.document_id == doc_id)
+                    .all()
+                ):
+                    db.delete(chunk)
 
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc:
-                doc.status = "error"
-                doc.error_message = message
-                # SQLAlchemy cannot detect an in-place mutation of this plain
-                # JSON column, which would commit the status without the reason.
-                doc.meta_json = {
-                    **(doc.meta_json or {}),
-                    "indexing_failure": {
-                        "code": "chunk_limit_exceeded",
-                        "chunk_count": chunk_count,
-                        "max_chunks": self.max_chunks_per_doc,
-                        "action": action,
-                    },
-                }
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    doc.status = "error"
+                    doc.error_message = message
+                    # SQLAlchemy cannot detect an in-place mutation of this
+                    # plain JSON column, which would commit the status without
+                    # the actionable reason.
+                    doc.meta_json = {
+                        **(doc.meta_json or {}),
+                        "indexing_failure": {
+                            "code": "chunk_limit_exceeded",
+                            "chunk_count": chunk_count,
+                            "max_chunks": self.max_chunks_per_doc,
+                            "action": action,
+                        },
+                    }
+                db.commit()
+                break
+            except Exception as error:
+                last_error = error
+                db.rollback()
+                logger.warning(
+                    "Failed to persist chunk-limit cleanup",
+                    document_id=doc_id,
+                    attempt=attempt,
+                    max_attempts=CHUNK_LIMIT_CLEANUP_ATTEMPTS,
+                    error=str(error),
+                )
+        else:
+            raise ChunkLimitPersistenceError(
+                f"Could not persist over-limit cleanup for document {doc_id} "
+                f"after {CHUNK_LIMIT_CLEANUP_ATTEMPTS} attempts"
+            ) from last_error
 
         logger.warning(
             "Document exceeded chunk limit",
@@ -372,6 +401,12 @@ class DocumentService:
             
         except asyncio.CancelledError:
             raise
+        except ChunkLimitPersistenceError:
+            logger.critical(
+                "PDF chunk-limit cleanup could not be persisted",
+                doc_id=doc_id,
+            )
+            raise
         except Exception as e:
             logger.error("Failed to process PDF",
                         doc_id=doc_id,
@@ -567,6 +602,12 @@ class DocumentService:
             
         except asyncio.CancelledError:
             raise
+        except ChunkLimitPersistenceError:
+            logger.critical(
+                "URL chunk-limit cleanup could not be persisted",
+                doc_id=doc_id,
+            )
+            raise
         except Exception as e:
             if extraction_future is not None and not extraction_future.done():
                 lease.defer_release_until(extraction_future)
@@ -731,6 +772,12 @@ class DocumentService:
                            status=status)
             
         except asyncio.CancelledError:
+            raise
+        except ChunkLimitPersistenceError:
+            logger.critical(
+                "YouTube chunk-limit cleanup could not be persisted",
+                doc_id=doc_id,
+            )
             raise
         except Exception as e:
             logger.error("Failed to process YouTube video",

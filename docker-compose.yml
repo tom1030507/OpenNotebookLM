@@ -120,6 +120,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: opennotebook-redis
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
     volumes:
       - redis_data:/data
     networks:

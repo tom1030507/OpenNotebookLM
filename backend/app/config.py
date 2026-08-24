@@ -134,6 +134,9 @@ class Settings(BaseSettings):
 
     # Cache
     redis_url: Optional[str] = None
+    # Compose consumes this value for Redis itself. It is declared here too so
+    # copying the canonical .env example cannot fail Settings extra-key checks.
+    redis_maxmemory: str = "256mb"
     cache_namespace: str = "opennotebooklm"
     cache_max_entries: int = 10000
     

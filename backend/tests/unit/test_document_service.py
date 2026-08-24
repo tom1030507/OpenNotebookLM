@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base, Chunk, Document, Embedding
-from app.services.documents import DocumentService
+from app.services.documents import ChunkLimitPersistenceError, DocumentService
 
 
 DOCUMENT_ID = "document-1"
@@ -142,3 +142,77 @@ def test_one_thousand_and_one_chunks_fail_before_embedding_and_are_removed(db) -
     assert embedder.calls == 0
     assert db.query(Chunk).filter(Chunk.document_id == DOCUMENT_ID).count() == 0
     assert db.query(Embedding).count() == 0
+
+
+def test_chunk_limit_cleanup_retries_the_entire_transaction(db, monkeypatch) -> None:
+    """A transient cleanup commit failure cannot retain committed chunk rows."""
+    embedder = RecordingEmbedder()
+    service = DocumentService(
+        chunking_service=CommittingChunker(1_001),
+        embedding_service=embedder,
+    )
+    real_commit = db.commit
+    commit_calls = 0
+
+    def fail_first_cleanup_commit() -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 2:
+            raise RuntimeError("transient commit failure")
+        real_commit()
+
+    monkeypatch.setattr(db, "commit", fail_first_cleanup_commit)
+
+    try:
+        status = service._index_document(db, DOCUMENT_ID, "URL")
+    finally:
+        service.executor.shutdown(wait=True)
+
+    db.expire_all()
+    document = db.query(Document).filter(Document.id == DOCUMENT_ID).one()
+    assert status == document.status == "error"
+    assert document.error_message == LIMIT_MESSAGE
+    assert document.meta_json["indexing_failure"]["chunk_count"] == 1_001
+    assert embedder.calls == 0
+    assert db.query(Chunk).filter(Chunk.document_id == DOCUMENT_ID).count() == 0
+    assert db.query(Embedding).count() == 0
+    assert commit_calls == 3
+
+
+def test_persistent_chunk_limit_cleanup_failure_is_not_downgraded(
+    db,
+    monkeypatch,
+) -> None:
+    """Repeated persistence failure must escape the generic status-only path."""
+    embedder = RecordingEmbedder()
+    service = DocumentService(
+        chunking_service=CommittingChunker(1_001),
+        embedding_service=embedder,
+    )
+    real_commit = db.commit
+    commit_calls = 0
+
+    def fail_every_cleanup_commit() -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls > 1:
+            raise RuntimeError("database remains unavailable")
+        real_commit()
+
+    monkeypatch.setattr(db, "commit", fail_every_cleanup_commit)
+
+    try:
+        with pytest.raises(ChunkLimitPersistenceError):
+            service._index_document(db, DOCUMENT_ID, "URL")
+    finally:
+        service.executor.shutdown(wait=True)
+
+    db.expire_all()
+    document = db.query(Document).filter(Document.id == DOCUMENT_ID).one()
+    assert document.status == "processing"
+    assert document.error_message is None
+    assert document.meta_json == {"source": "kept"}
+    assert embedder.calls == 0
+    assert db.query(Chunk).filter(Chunk.document_id == DOCUMENT_ID).count() == 1_001
+    assert db.query(Embedding).count() == 0
+    assert commit_calls == 3

@@ -721,7 +721,10 @@ without them cannot collect the tests.
 - **Caching defaults to bounded in-memory storage outside Compose.** Set
   `REDIS_URL` for a shared cache, or enable Compose's `with-cache` profile. Redis
   stays on the internal network; without it, each backend process keeps at most
-  `CACHE_MAX_ENTRIES` entries and loses them on restart.
+  `CACHE_MAX_ENTRIES` entries and loses them on restart. Compose caps Redis at
+  `REDIS_MAXMEMORY` (256 MB by default) with `allkeys-lru`; resource invalidation
+  rotates an opaque project/document version in constant work, while unreachable
+  values retain their TTL and are reclaimed by expiry or eviction.
 - **YouTube import depends on YouTube.** The pinned
   `youtube-transcript-api==0.6.1` scrapes the watch page, and YouTube rate-limits
   it — imports can fail with an XML parse error on a blocked response even though

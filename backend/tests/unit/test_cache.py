@@ -13,7 +13,7 @@ import pytest
 
 from app.config import get_settings
 import app.services.cache as cache_module
-from app.services.cache import CacheService
+from app.services.cache import CACHE_INVALIDATION_SCOPE_COUNT, CacheService
 
 
 class FakeClock:
@@ -33,10 +33,13 @@ class FakeRedis:
     """Small Redis-compatible store that preserves delete-count semantics."""
 
     def __init__(self, clock: FakeClock | None = None):
-        self.values: dict[str, bytes] = {}
+        self.values: dict[str, bytes | str] = {}
         self.ttls: dict[str, int] = {}
         self.expires_at: dict[str, float] = {}
         self.setex_calls: list[tuple[str, int, bytes]] = []
+        self.set_calls: list[tuple[str, bytes | str, bool]] = []
+        self.delete_calls: list[tuple[str, ...]] = []
+        self.scan_calls = 0
         self.clock = clock
 
     def ping(self) -> bool:
@@ -51,7 +54,10 @@ class FakeRedis:
             self.delete(key)
         return self.values.get(key)
 
-    def set(self, key: str, value: bytes) -> bool:
+    def set(self, key: str, value: bytes | str, nx: bool = False) -> bool:
+        self.set_calls.append((key, value, nx))
+        if nx and key in self.values:
+            return False
         self.values[key] = value
         self.ttls.pop(key, None)
         self.expires_at.pop(key, None)
@@ -66,6 +72,7 @@ class FakeRedis:
         return True
 
     def delete(self, *keys: str) -> int:
+        self.delete_calls.append(keys)
         deleted = 0
         for key in keys:
             if key in self.values:
@@ -76,6 +83,7 @@ class FakeRedis:
         return deleted
 
     def scan_iter(self, match: str, count: int):
+        self.scan_calls += 1
         del count
         return iter([
             key for key in list(self.values)
@@ -225,6 +233,52 @@ def test_concurrent_gets_and_sets_keep_size_and_stats_consistent() -> None:
     assert stats["total_keys"] <= 64
 
 
+def test_concurrent_workers_cross_exact_expiry_without_stale_values() -> None:
+    """Boundary contention cannot revive entries or corrupt bounded counters."""
+    worker_count = 32
+    clock = FakeClock()
+    service = CacheService(
+        redis_url=None,
+        namespace="test-app",
+        max_entries=worker_count * 2,
+        clock=clock,
+    )
+    before_threads = threading.active_count()
+    before_boundary = threading.Barrier(worker_count + 1)
+    after_boundary = threading.Barrier(worker_count + 1)
+
+    for worker in range(worker_count):
+        assert service.set(f"old-{worker}", worker, ttl=5)
+
+    def cross_boundary(worker: int) -> None:
+        assert service.get(f"old-{worker}") == worker
+        before_boundary.wait()
+        after_boundary.wait()
+        assert service.get(f"old-{worker}") is None
+        assert service.set(f"new-{worker}", worker, ttl=5)
+        assert service.get(f"new-{worker}") == worker
+        assert service.delete(f"new-{worker}")
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [
+            executor.submit(cross_boundary, worker)
+            for worker in range(worker_count)
+        ]
+        before_boundary.wait()
+        clock.advance(5)
+        after_boundary.wait()
+        for future in futures:
+            future.result()
+
+    stats = service.get_stats()
+    assert stats["sets"] == worker_count * 2
+    assert stats["hits"] == worker_count * 2
+    assert stats["misses"] == worker_count
+    assert stats["deletes"] == worker_count * 2
+    assert stats["total_keys"] == 0
+    assert threading.active_count() == before_threads
+
+
 def test_basic_memory_values_and_high_level_helpers(memory_cache: CacheService) -> None:
     """Bounding the cache must preserve JSON, numpy, and deletion behavior."""
     query_result = {"answer": "AI", "sources": []}
@@ -237,7 +291,10 @@ def test_basic_memory_values_and_high_level_helpers(memory_cache: CacheService) 
         memory_cache.get_cached_embedding("document", "chunk"),
         embedding,
     )
-    assert memory_cache.delete("query:project:question")
+    assert (
+        memory_cache.invalidate_project_cache("project")
+        == CACHE_INVALIDATION_SCOPE_COUNT
+    )
     assert memory_cache.get_cached_query("project", "question") is None
 
 
@@ -327,8 +384,8 @@ def test_redis_namespaces_isolate_identical_logical_keys() -> None:
     assert second.get("shared") == "second"
 
 
-def test_redis_document_invalidation_counts_actual_deletes_and_keeps_sentinels() -> None:
-    """Counting SCAN results or flushing the DB would over-report or erase peers."""
+def test_redis_document_invalidation_is_constant_work_and_keeps_sentinels() -> None:
+    """One version rotation replaces work proportional to the Redis keyspace."""
     redis_backend = FakeRedis()
     service = CacheService(
         redis_url="redis://unused",
@@ -340,13 +397,149 @@ def test_redis_document_invalidation_counts_actual_deletes_and_keeps_sentinels()
     assert service.cache_chunk("document", "two", {"text": "two"})
     assert service.cache_chunk("other-document", "three", {"text": "three"})
     redis_backend.values["other-app:chunk:document:sentinel"] = b"sentinel"
+    for index in range(5_000):
+        redis_backend.values[f"unrelated:{index}"] = b"noise"
+    set_calls_before = len(redis_backend.set_calls)
 
-    deleted = service.invalidate_document_cache("document")
+    invalidated = service.invalidate_document_cache("document")
 
-    assert deleted == 2
-    assert "test-app:chunk:other-document:three" in redis_backend.values
+    assert invalidated == CACHE_INVALIDATION_SCOPE_COUNT
+    assert len(redis_backend.set_calls) == set_calls_before + 1
+    assert redis_backend.delete_calls == []
+    assert redis_backend.scan_calls == 0
+    assert service.get_cached_embedding("document", "one") is None
+    assert service.get_cached_chunk("document", "two") is None
+    assert service.get_cached_chunk("other-document", "three") == {"text": "three"}
     assert "other-app:chunk:document:sentinel" in redis_backend.values
-    assert service.get_stats()["deletes"] == 2
+    assert service.cache_stats["deletes"] == 0
+
+
+def test_missing_redis_version_never_resurrects_generation_zero_data() -> None:
+    """Recreated durable state uses a fresh token rather than a stale default."""
+    redis_backend = FakeRedis()
+    service = CacheService(
+        redis_url="redis://unused",
+        redis_client=redis_backend,
+        namespace="test-app",
+        max_entries=10,
+    )
+    embedding = np.array([1.0])
+    assert service.cache_embedding("document", "chunk", embedding)
+    assert np.allclose(
+        service.get_cached_embedding("document", "chunk"),
+        embedding,
+    )
+
+    version_key = "test-app:version:document:document"
+    old_version = redis_backend.values.pop(version_key)
+
+    assert service.get_cached_embedding("document", "chunk") is None
+    assert redis_backend.values[version_key] != old_version
+
+
+def test_redis_generation_state_and_values_are_namespace_isolated() -> None:
+    """Rotating one application's document cannot invalidate its peer."""
+    redis_backend = FakeRedis()
+    first = CacheService(
+        redis_url="redis://unused",
+        redis_client=redis_backend,
+        namespace="first-app",
+        max_entries=10,
+    )
+    second = CacheService(
+        redis_url="redis://unused",
+        redis_client=redis_backend,
+        namespace="second-app",
+        max_entries=10,
+    )
+    embedding = np.array([1.0])
+    assert first.cache_embedding("document", "chunk", embedding)
+    assert second.cache_embedding("document", "chunk", embedding)
+
+    first.invalidate_document_cache("document")
+
+    assert first.get_cached_embedding("document", "chunk") is None
+    assert np.allclose(
+        second.get_cached_embedding("document", "chunk"),
+        embedding,
+    )
+
+
+def test_redis_rotation_is_visible_across_service_instances() -> None:
+    """Workers sharing a namespace must read the version from Redis each time."""
+    redis_backend = FakeRedis()
+    first = CacheService(
+        redis_url="redis://unused",
+        redis_client=redis_backend,
+        namespace="shared-app",
+        max_entries=10,
+    )
+    second = CacheService(
+        redis_url="redis://unused",
+        redis_client=redis_backend,
+        namespace="shared-app",
+        max_entries=10,
+    )
+    embedding = np.array([1.0])
+    assert first.cache_embedding("document", "chunk", embedding)
+    assert np.allclose(
+        second.get_cached_embedding("document", "chunk"),
+        embedding,
+    )
+
+    first.invalidate_document_cache("document")
+
+    assert second.get_cached_embedding("document", "chunk") is None
+
+
+def test_redis_rotation_failure_is_not_reported_as_success() -> None:
+    """An ownership API must surface a failed marker write instead of lying."""
+    class FailingRotationRedis(FakeRedis):
+        def set(self, key: str, value: bytes | str, nx: bool = False) -> bool:
+            """Reject rotations but allow first-use marker creation.
+
+            Args:
+                key: Redis key.
+                value: Redis value.
+                nx: Whether this is a first-use marker creation.
+
+            Returns:
+                False for a rotation, otherwise the fake Redis result.
+            """
+            if not nx:
+                return False
+            return super().set(key, value, nx=nx)
+
+    service = CacheService(
+        redis_url="redis://unused",
+        redis_client=FailingRotationRedis(),
+        namespace="test-app",
+        max_entries=10,
+    )
+
+    with pytest.raises(RuntimeError, match="did not rotate"):
+        service.invalidate_document_cache("document")
+
+
+def test_late_writer_using_old_redis_version_stays_unreachable() -> None:
+    """A writer paused across rotation cannot publish into the new scope."""
+    redis_backend = FakeRedis()
+    service = CacheService(
+        redis_url="redis://unused",
+        redis_client=redis_backend,
+        namespace="test-app",
+        max_entries=10,
+    )
+    old_version = service._scope_version("document", "document")
+
+    service.invalidate_document_cache("document")
+    assert service.set(
+        f"embedding:document:{old_version}:late",
+        np.array([1.0]),
+        ttl=60,
+    )
+
+    assert service.get_cached_embedding("document", "late") is None
 
 
 def test_memory_project_invalidation_is_scoped_to_the_named_project() -> None:
@@ -359,6 +552,9 @@ def test_memory_project_invalidation_is_scoped_to_the_named_project() -> None:
     assert service.cache_query_result("project-one", "q", {"answer": 1})
     assert service.cache_query_result("project-two", "q", {"answer": 2})
 
-    assert service.invalidate_project_cache("project-one") == 1
+    assert (
+        service.invalidate_project_cache("project-one")
+        == CACHE_INVALIDATION_SCOPE_COUNT
+    )
     assert service.get_cached_query("project-one", "q") is None
     assert service.get_cached_query("project-two", "q") == {"answer": 2}

@@ -43,7 +43,7 @@ async def invalidate_project_cache(
         current_user: Authenticated caller.
 
     Returns:
-        Number of project cache entries invalidated.
+        Number of logical project cache scopes invalidated.
     """
     require_project(db, project_id, current_user)
 
@@ -73,7 +73,7 @@ async def invalidate_document_cache(
         current_user: Authenticated caller.
 
     Returns:
-        Number of document cache entries invalidated.
+        Number of logical document cache scopes invalidated.
     """
     require_document(db, document_id, current_user)
 
