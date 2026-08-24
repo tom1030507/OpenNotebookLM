@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 import structlog
 import uuid
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.services.rag import RAGService
 from app.services.projects import ProjectService
@@ -54,7 +54,6 @@ logger = structlog.get_logger()
 
 # Initialize services
 rag_service = RAGService()
-settings = get_settings()
 
 
 class QueryRequest(BaseModel):
@@ -108,6 +107,7 @@ def query(
     current_user: User = Depends(get_current_user),
     request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
+    settings: Settings = Depends(get_settings),
 ):
     """Process a rate- and concurrency-bounded RAG query.
 
@@ -117,6 +117,7 @@ def query(
         current_user: Authenticated caller.
         request_limiter: Per-account sliding-window limiter.
         concurrency_limiter: Per-account active-operation limiter.
+        settings: Current application abuse-control settings.
 
     Returns:
         Answer, source, model, usage, and conversation metadata.

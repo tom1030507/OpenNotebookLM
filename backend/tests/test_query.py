@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.routers import query
 from app.routers.auth import get_current_user
@@ -22,7 +23,13 @@ QUERY_RESULT = {
 }
 
 
-def query_client(monkeypatch, rag_service, request_limiter=None, concurrency=None):
+def query_client(
+    monkeypatch,
+    rag_service,
+    request_limiter=None,
+    concurrency=None,
+    route_settings=None,
+):
     """Build a query client with external retrieval and authentication isolated.
 
     Args:
@@ -30,6 +37,8 @@ def query_client(monkeypatch, rag_service, request_limiter=None, concurrency=Non
         rag_service: RAG service double used by the production route.
         request_limiter: Optional request-rate limiter.
         concurrency: Optional concurrency limiter.
+        route_settings: Optional settings supplied through FastAPI dependency
+            injection.
 
     Returns:
         TestClient serving the real query route.
@@ -42,6 +51,8 @@ def query_client(monkeypatch, rag_service, request_limiter=None, concurrency=Non
     app.dependency_overrides[get_db] = lambda: object()
     app.dependency_overrides[get_rate_limiter] = lambda: request_limiter
     app.dependency_overrides[get_concurrency_limiter] = lambda: concurrency
+    if route_settings is not None:
+        app.dependency_overrides[get_settings] = lambda: route_settings
     monkeypatch.setattr(query, "owned_document_ids", lambda *args: [])
     monkeypatch.setattr(query, "rag_service", rag_service)
     return TestClient(app)
@@ -117,6 +128,32 @@ def test_disabled_controls_ignore_an_exhausted_query_rate_window(monkeypatch):
         FastRAG(),
         request_limiter=limiter,
     ).post("/api/query", json={"query": "hello"})
+
+    assert response.status_code == 200
+
+
+def test_disabled_query_controls_follow_settings_override_after_cache_reset(
+    monkeypatch,
+):
+    """A cache reset cannot leave query on an obsolete settings object."""
+    limiter = SlidingWindowRateLimiter()
+    for _ in range(30):
+        assert limiter.check("query:user-a", 30, 60).allowed
+
+    class FastRAG:
+        def query(self, **kwargs):
+            return QUERY_RESULT
+
+    get_settings.cache_clear()
+    try:
+        response = query_client(
+            monkeypatch,
+            FastRAG(),
+            request_limiter=limiter,
+            route_settings=Settings(rate_limit_enabled=False),
+        ).post("/api/query", json={"query": "hello"})
+    finally:
+        get_settings.cache_clear()
 
     assert response.status_code == 200
 
