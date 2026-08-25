@@ -18,6 +18,16 @@ export default function BrandLogo({ label, ...props }: BrandLogoProps) {
       data-brand-logo="true"
       focusable="false"
     >
+      <rect
+        x="1"
+        y="1"
+        width="62"
+        height="62"
+        rx="13"
+        fill="#F8FAFC"
+        stroke="#E2E8F0"
+        strokeWidth="1"
+      />
       <image
         href="/brand-logo-f.png"
         width="64"
