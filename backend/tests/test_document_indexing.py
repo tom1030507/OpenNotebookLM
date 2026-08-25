@@ -211,16 +211,6 @@ class TestYouTubeFallbackWiring:
                 constructed["fallback"] = audio_transcriber
 
         monkeypatch.setattr(
-            documents_module,
-            "settings",
-            SimpleNamespace(
-                yt_whisper_fallback_enabled=True,
-                yt_whisper_model="base",
-                yt_max_duration_seconds=1800,
-                yt_whisper_cache_dir="./models/whisper",
-            ),
-        )
-        monkeypatch.setattr(
             audio_module, "YouTubeAudioTranscriber", RecordingAudioTranscriber
         )
         monkeypatch.setattr(
@@ -231,6 +221,12 @@ class TestYouTubeFallbackWiring:
             embedding_service=FakeEmbeddingService([]),
             pdf_adapter=FakePDFAdapter(),
             url_adapter=FakeURLAdapter(),
+        )
+        service.settings = SimpleNamespace(
+            yt_whisper_fallback_enabled=True,
+            yt_whisper_model="base",
+            yt_max_duration_seconds=1800,
+            yt_whisper_cache_dir="./models/whisper",
         )
 
         adapter = service._get_youtube_adapter()
@@ -250,11 +246,6 @@ class TestYouTubeFallbackWiring:
                 constructed["fallback"] = audio_transcriber
 
         monkeypatch.setattr(
-            documents_module,
-            "settings",
-            SimpleNamespace(yt_whisper_fallback_enabled=False),
-        )
-        monkeypatch.setattr(
             documents_module, "YouTubeAdapter", RecordingYouTubeAdapter
         )
         service = DocumentService(
@@ -263,6 +254,7 @@ class TestYouTubeFallbackWiring:
             pdf_adapter=FakePDFAdapter(),
             url_adapter=FakeURLAdapter(),
         )
+        service.settings = SimpleNamespace(yt_whisper_fallback_enabled=False)
 
         service._get_youtube_adapter()
 

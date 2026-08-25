@@ -191,15 +191,15 @@ class DocumentService:
             return self.youtube_adapter
 
         audio_transcriber = None
-        if settings.yt_whisper_fallback_enabled:
+        if self.settings.yt_whisper_fallback_enabled:
             # Import lazily so disabling the fallback keeps Whisper and yt-dlp
             # out of the ordinary caption-only request path.
             from app.adapters.youtube_audio import YouTubeAudioTranscriber
 
             audio_transcriber = YouTubeAudioTranscriber(
-                model_name=settings.yt_whisper_model,
-                max_duration_seconds=settings.yt_max_duration_seconds,
-                cache_dir=settings.yt_whisper_cache_dir,
+                model_name=self.settings.yt_whisper_model,
+                max_duration_seconds=self.settings.yt_max_duration_seconds,
+                cache_dir=self.settings.yt_whisper_cache_dir,
             )
 
         self.youtube_adapter = YouTubeAdapter(
