@@ -3,7 +3,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  FileText,
   Settings as SettingsIcon,
   ChevronDown,
   Download,
@@ -25,6 +24,7 @@ import useDialogFocus from '@/hooks/useDialogFocus';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { applyThemePreference, initializeTheme, type Theme } from '@/lib/theme';
 import { clearSession } from '@/lib/session';
+import BrandLogo from '@/components/BrandLogo';
 import {
   COMPACT_TOP_NAV_MEDIA_QUERY,
   TOP_NAV_ACTIONS,
@@ -64,6 +64,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const router = useRouter();
   const { openProjectDialog } = useProjectDialog();
   const isCompact = useMediaQuery(COMPACT_TOP_NAV_MEDIA_QUERY);
+  const displayedTitle = currentProject ? currentProject.name : notebookTitle;
 
   useDialogFocus({
     isOpen: showMoreActions,
@@ -187,16 +188,15 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
     <>
       <header className="h-14 border-b border-[var(--border)] bg-[var(--card)] flex items-center px-4 gap-4">
         {/* Logo */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center">
-            <FileText className="w-4 h-4 text-white" />
-          </div>
-        </div>
+        <BrandLogo
+          label={displayedTitle === 'OpenNotebookLM' ? undefined : 'OpenNotebookLM logo'}
+          className="w-8 h-8 shrink-0"
+        />
 
         {/* Notebook Title — truncates so the controls keep their tap targets */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <h1 className="text-base font-medium text-[var(--foreground)] truncate">
-            {currentProject ? currentProject.name : notebookTitle}
+            {displayedTitle}
           </h1>
           {currentConversation && (
             <>

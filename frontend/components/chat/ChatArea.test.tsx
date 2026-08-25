@@ -70,6 +70,51 @@ afterEach(() => {
 
 
 describe('ChatArea', () => {
+  it('uses the shared brand mark decoratively in the empty welcome state', () => {
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [],
+      currentConversation: null,
+      messages: [],
+    });
+
+    const { container } = render(
+      <ChatArea onAddSourcesOpenChange={() => undefined} />,
+    );
+    const welcome = container.querySelector('[data-layout="welcome-icon"]');
+    const logo = welcome?.querySelector('[data-brand-logo="true"]');
+
+    expect(logo).not.toBeNull();
+    expect(logo?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('uses the shared brand mark decoratively for assistant messages', () => {
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation: conversation('conversation-1', project.id),
+      messages: [{
+        id: 'message-assistant',
+        conversation_id: 'conversation-1',
+        role: 'assistant',
+        content: 'A concise answer.',
+        citations: [],
+        created_at: '2026-08-23T00:00:00Z',
+      }],
+    });
+
+    const { container } = render(
+      <ChatArea onAddSourcesOpenChange={() => undefined} />,
+    );
+    const logos = container.querySelectorAll('[data-brand-logo="true"]');
+
+    expect(screen.getByText('A concise answer.')).toBeTruthy();
+    expect(logos).toHaveLength(1);
+    expect(logos[0].getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('keeps a failed question visible and retries it without duplicate messages', async () => {
     const question = 'What does this source say?';
     vi.spyOn(api, 'query')
@@ -108,7 +153,9 @@ describe('ChatArea', () => {
       currentConversation: conversation('conversation-1', project.id),
       messages: [],
     });
-    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+    render(
+      <ChatArea onAddSourcesOpenChange={() => undefined} />,
+    );
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
@@ -599,7 +646,9 @@ describe('ChatArea', () => {
       messages: [],
       sendQuery: async () => queryRequest.promise,
     });
-    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+    const { container } = render(
+      <ChatArea onAddSourcesOpenChange={() => undefined} />,
+    );
 
     fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'What does this source say?' },
@@ -608,6 +657,9 @@ describe('ChatArea', () => {
 
     expect(screen.queryByText('Add a source to get started')).toBeNull();
     expect(screen.getByText('What does this source say?')).not.toBeNull();
+    const streamingLogo = container.querySelector('[data-brand-logo="true"]');
+    expect(streamingLogo).not.toBeNull();
+    expect(streamingLogo?.getAttribute('aria-hidden')).toBe('true');
 
     await act(async () => {
       queryRequest.resolve();

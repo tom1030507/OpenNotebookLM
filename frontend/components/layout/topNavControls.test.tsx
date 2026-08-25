@@ -95,6 +95,29 @@ afterEach(() => {
 });
 
 describe('TopNav controls that were previously inert', () => {
+  it('uses the shared OpenNotebookLM brand mark in the workspace header', () => {
+    const { container } = renderTopNav();
+
+    expect(screen.getByRole('img', { name: 'OpenNotebookLM logo' })).toBeTruthy();
+    expect(
+      container.querySelector('[data-brand-layer="primary"]')?.getAttribute('fill'),
+    ).toBe('#155EEF');
+    expect(
+      container.querySelector('[data-brand-layer="secondary"]')?.getAttribute('fill'),
+    ).toBe('#1F2937');
+  });
+
+  it('keeps the header mark decorative when the product name is already the title', () => {
+    useStore.setState({ currentProject: null, projects: [] });
+    const { container } = renderTopNav();
+
+    expect(screen.getByRole('heading', { name: 'OpenNotebookLM' })).toBeTruthy();
+    expect(screen.queryByRole('img', { name: 'OpenNotebookLM logo' })).toBeNull();
+    expect(
+      container.querySelector('[data-brand-logo="true"]')?.getAttribute('aria-hidden'),
+    ).toBe('true');
+  });
+
   it('does not restore account A data when its project fetch resolves after account B starts', async () => {
     const accountAProject = { ...project, name: 'Account A project' };
     const accountAConversation = {

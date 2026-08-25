@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Send,
   Paperclip,
-  Sparkles,
   Upload,
   ChevronRight,
   Loader2
@@ -17,6 +16,7 @@ import {
 import MarkdownRenderer from '../MarkdownRenderer';
 import { requestAddSources } from '../sourceActions';
 import type { Message } from '@/lib/api';
+import BrandLogo from '../BrandLogo';
 
 interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
@@ -35,9 +35,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
   return (
     <div className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       {message.role === 'assistant' && (
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center flex-shrink-0">
-          <Sparkles className="w-4 h-4 text-white" />
-        </div>
+        <BrandLogo className="w-8 h-8 flex-shrink-0" />
       )}
       <div
         className={`max-w-[70%] ${
@@ -253,13 +251,10 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             >
               <div
                 data-layout="welcome-icon"
-                className="mx-auto rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center"
+                className="mx-auto flex items-center justify-center"
                 style={welcomeHeroStyles.icon}
               >
-                <Sparkles
-                  className="text-white"
-                  style={welcomeHeroStyles.glyph}
-                />
+                <BrandLogo className="w-full h-full" />
               </div>
               
               <h2
@@ -321,9 +316,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               
               {isStreaming && (
                 <div className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
-                    <Sparkles className="w-4 h-4 text-white" />
-                  </div>
+                  <BrandLogo className="w-8 h-8 flex-shrink-0" />
                   <div className="bg-[var(--card)] border border-[var(--border)] rounded-lg px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce" />
