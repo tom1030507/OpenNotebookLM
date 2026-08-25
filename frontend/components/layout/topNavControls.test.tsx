@@ -99,12 +99,9 @@ describe('TopNav controls that were previously inert', () => {
     const { container } = renderTopNav();
 
     expect(screen.getByRole('img', { name: 'OpenNotebookLM logo' })).toBeTruthy();
-    expect(
-      container.querySelector('[data-brand-layer="primary"]')?.getAttribute('fill'),
-    ).toBe('#155EEF');
-    expect(
-      container.querySelector('[data-brand-layer="secondary"]')?.getAttribute('fill'),
-    ).toBe('#1F2937');
+    expect(container.querySelector('image')?.getAttribute('href')).toBe(
+      '/brand-logo-f.png',
+    );
   });
 
   it('keeps the header mark decorative when the product name is already the title', () => {

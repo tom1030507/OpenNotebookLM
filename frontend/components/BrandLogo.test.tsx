@@ -21,12 +21,9 @@ describe('BrandLogo', () => {
     expect(screen.queryByRole('img', { name: 'OpenNotebookLM logo' })).toBeNull();
     expect(logo?.getAttribute('aria-hidden')).toBe('true');
     expect(logo?.getAttribute('viewBox')).toBe('0 0 64 64');
-    expect(
-      container.querySelector('[data-brand-layer="primary"]')?.getAttribute('fill'),
-    ).toBe('#155EEF');
-    expect(
-      container.querySelector('[data-brand-layer="secondary"]')?.getAttribute('fill'),
-    ).toBe('#1F2937');
+    expect(container.querySelector('image')?.getAttribute('href')).toBe(
+      '/brand-logo-f.png',
+    );
   });
 
   it('keeps its label semantics authoritative over conflicting SVG props', () => {
