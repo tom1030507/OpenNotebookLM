@@ -16,6 +16,7 @@ import {
 import api from '@/lib/api';
 import { storeSession, type SessionUser } from '@/lib/session';
 import useStore from '@/store/useStore';
+import BrandLogo from '@/components/BrandLogo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -106,9 +107,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo/Title */}
         <div className="text-center mb-8">
-          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center">
-            <span className="text-3xl font-bold text-white">ON</span>
-          </div>
+          <BrandLogo
+            className="w-20 h-20 mx-auto mb-4"
+          />
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             OpenNotebookLM
           </h1>
