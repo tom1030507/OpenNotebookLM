@@ -138,3 +138,36 @@ def test_compose_redis_has_finite_memory_without_public_port() -> None:
 
     settings = Settings(_env_file=REPO_ROOT / ".env.example")
     assert settings.redis_maxmemory == "256mb"
+
+
+def test_youtube_whisper_defaults(monkeypatch):
+    """Captionless videos use the bounded local fallback by default."""
+    for variable in (
+        "YT_WHISPER_FALLBACK_ENABLED",
+        "YT_WHISPER_MODEL",
+        "YT_MAX_DURATION_SECONDS",
+        "YT_WHISPER_CACHE_DIR",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.yt_whisper_fallback_enabled is True
+    assert settings.yt_whisper_model == "base"
+    assert settings.yt_max_duration_seconds == 1800
+    assert settings.yt_whisper_cache_dir == "./models/whisper"
+
+
+def test_youtube_whisper_environment_overrides(monkeypatch):
+    """Deployments can tune or disable local audio transcription."""
+    monkeypatch.setenv("YT_WHISPER_FALLBACK_ENABLED", "false")
+    monkeypatch.setenv("YT_WHISPER_MODEL", "small")
+    monkeypatch.setenv("YT_MAX_DURATION_SECONDS", "900")
+    monkeypatch.setenv("YT_WHISPER_CACHE_DIR", "./cache/whisper")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.yt_whisper_fallback_enabled is False
+    assert settings.yt_whisper_model == "small"
+    assert settings.yt_max_duration_seconds == 900
+    assert settings.yt_whisper_cache_dir == "./cache/whisper"

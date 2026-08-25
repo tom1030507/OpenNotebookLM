@@ -1,14 +1,17 @@
 """YouTube transcript extraction adapter."""
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs
 import structlog
 
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
     HAS_YOUTUBE_API = True
+    CAPTION_UNAVAILABLE_ERRORS = (NoTranscriptFound, TranscriptsDisabled)
 except ImportError:
     HAS_YOUTUBE_API = False
+    CAPTION_UNAVAILABLE_ERRORS = ()
 
 logger = structlog.get_logger()
 
@@ -16,16 +19,25 @@ logger = structlog.get_logger()
 class YouTubeAdapter:
     """Adapter for extracting transcripts from YouTube videos."""
     
-    def __init__(self, languages: List[str] = None):
+    def __init__(
+        self,
+        languages: List[str] = None,
+        audio_transcriber: Optional[Any] = None,
+    ):
         """Initialize YouTube adapter.
         
         Args:
             languages: Preferred languages for transcript (default: ['en'])
+            audio_transcriber: Optional local audio fallback implementation.
+
+        Returns:
+            None.
         """
         if not HAS_YOUTUBE_API:
             raise ImportError("youtube-transcript-api is not installed")
         
         self.languages = languages or ['en', 'zh-TW', 'zh-CN', 'zh']
+        self.audio_transcriber = audio_transcriber
     
     def extract_transcript(self, url: str) -> Dict[str, any]:
         """Extract transcript from a YouTube video.
@@ -35,6 +47,28 @@ class YouTubeAdapter:
             
         Returns:
             Dictionary containing transcript and metadata
+        """
+        try:
+            return self._extract_caption_transcript(url)
+        except CAPTION_UNAVAILABLE_ERRORS as exc:
+            if self.audio_transcriber is None:
+                raise
+
+            logger.info(
+                "YouTube captions unavailable; using local audio transcription",
+                video_id=self._extract_video_id(url),
+                error_type=type(exc).__name__,
+            )
+            return self.audio_transcriber.transcribe(url)
+
+    def _extract_caption_transcript(self, url: str) -> Dict[str, any]:
+        """Extract only YouTube-provided captions for one video.
+
+        Args:
+            url: YouTube video URL.
+
+        Returns:
+            Dictionary containing caption text, timestamps and metadata.
         """
         try:
             # Extract video ID
@@ -96,6 +130,7 @@ class YouTubeAdapter:
                 "language": transcript_lang,
                 "is_generated": transcript.is_generated if hasattr(transcript, 'is_generated') else False,
                 "duration": processed["duration"],
+                "transcription_source": "youtube_captions",
             }
             
             return {
@@ -106,6 +141,7 @@ class YouTubeAdapter:
                 "duration": processed["duration"],
                 "metadata": metadata,
                 "language": transcript_lang,
+                "transcription_source": "youtube_captions",
             }
             
         except Exception as e:

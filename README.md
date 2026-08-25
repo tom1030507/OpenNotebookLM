@@ -665,6 +665,11 @@ improve on their own.
 | `DEDUPE_JACCARD` | Token overlap at which two candidates are one passage | `0.9` |
 | `CONTEXT_CHAR_BUDGET` | Ceiling on retrieved context in a prompt | `12000` |
 | `RERANK_ENABLED` | Legacy heuristic re-ranker, used when `HYBRID_ENABLED=false` | `true` |
+| **YouTube** | | |
+| `YT_WHISPER_FALLBACK_ENABLED` | Transcribe audio when captions are unavailable | `true` |
+| `YT_WHISPER_MODEL` | Local multilingual Whisper model | `base` |
+| `YT_MAX_DURATION_SECONDS` | Longest video accepted by local Whisper | `1800` |
+| `YT_WHISPER_CACHE_DIR` | Persistent Whisper model cache | `./models/whisper` |
 | **Database** | | |
 | `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/opennotebook.db` |
 | `INGESTION_WORKER_CONCURRENCY` | Simultaneous durable ingestion jobs (`1`–`16`) | `1` |
@@ -813,6 +818,41 @@ $env:E2E_PYTHON = (Resolve-Path 'backend\venv\Scripts\python.exe')
 npm --prefix e2e run test:full-rag
 ```
 
+## Local YouTube audio transcription fallback
+
+When YouTube has no manual or generated captions, ingestion falls back to
+local speech-to-text rather than reject an otherwise accessible video. The
+existing caption path remains first because it is faster and avoids downloading
+media. Only explicit `TranscriptsDisabled` and `NoTranscriptFound` responses
+activate the fallback; private, missing, region-blocked and transiently failing
+videos keep their original error so a network problem is not disguised as a
+long transcription job.
+
+The fallback is isolated behind a `YouTubeAudioTranscriber` adapter. It uses
+`yt-dlp` to inspect one video without playlist expansion, rejects live videos,
+unknown durations and durations above 1,800 seconds before downloading, then
+downloads the best available audio into a temporary directory. Multilingual
+OpenAI Whisper `base` runs locally with automatic language detection. Its text
+and timestamped segments are normalized to the existing YouTube adapter result,
+so document chunking, embeddings and the `queued` / `processing` / `ready` /
+`error` lifecycle do not change. Temporary media is deleted on both success and
+failure.
+
+The Whisper model is loaded lazily, cached under `models/whisper`, and reused by
+the process. A process-wide lock permits one Whisper transcription at a time;
+additional imports remain `processing` rather than competing for all CPU and
+memory. The initial settings are `YT_WHISPER_FALLBACK_ENABLED=true`,
+`YT_WHISPER_MODEL=base`, `YT_MAX_DURATION_SECONDS=1800` and
+`YT_WHISPER_CACHE_DIR=./models/whisper`. Disabling the fallback restores the
+caption-only behavior without changing the API.
+
+Deployment adds the `yt-dlp` and `openai-whisper` Python packages and the
+`ffmpeg` system package. No database migration or frontend contract changes are
+required. Unit tests will cover caption-first behavior, fallback eligibility,
+duration and playlist rejection, output normalization, single-job locking and
+temporary-file cleanup. Service tests will verify that fallback output reaches
+the existing index and that failures remain visible on the document.
+
 ## ⚠ Known limitations
 
 <details>
@@ -829,10 +869,10 @@ npm --prefix e2e run test:full-rag
   (256 MB by default) with `allkeys-lru`; resource invalidation rotates an opaque
   version in constant work, while unreachable values are reclaimed by TTL or
   eviction.
-- **YouTube import depends on YouTube.** The pinned
-  `youtube-transcript-api==0.6.1` scrapes the watch page, and YouTube rate-limits
-  it — imports can fail with an XML parse error on a blocked response even though
-  the code is correct.
+- **YouTube import still depends on YouTube.** Caption retrieval can be
+  rate-limited and audio download can be blocked even when the code is correct.
+  Captionless videos fall back to local Whisper, which can take roughly the
+  video's duration on a CPU-only machine and is limited to 30 minutes.
 - **Studio's video summary is not a video file.** The backend returns a scene
   script and the browser plays it as a narrated slideshow, reading the narration
   out with the Web Speech API — the same split the audio summary uses. There is

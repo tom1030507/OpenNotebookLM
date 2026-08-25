@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     # YouTube
     enable_yt_transcription: bool = True
     yt_api_key: Optional[str] = None
+    yt_whisper_fallback_enabled: bool = True
+    yt_whisper_model: str = "base"
+    yt_max_duration_seconds: int = 1800
+    yt_whisper_cache_dir: str = "./models/whisper"
     
     # File Upload
     max_file_size_mb: int = 50
