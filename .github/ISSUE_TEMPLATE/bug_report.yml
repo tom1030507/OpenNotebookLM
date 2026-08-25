@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible problem in OpenNotebookLM
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve OpenNotebookLM. Please search existing issues before filing a new report, and remove API keys, tokens, personal data, and private source content from logs.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find a duplicate.
+          required: true
+        - label: I reproduced the problem on the latest release or the current `master` branch.
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem description
+      description: Describe what went wrong and how it affected your work.
+      placeholder: A clear and concise description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reliable sequence that demonstrates the problem.
+      placeholder: |
+        1. Start OpenNotebookLM with ...
+        2. Import ...
+        3. Open ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the release or commit, OS, installation method, browser, and relevant model provider.
+      placeholder: |
+        - OpenNotebookLM: v0.1.0
+        - OS: Ubuntu 24.04
+        - Installation: Docker Compose
+        - Browser: Firefox 141
+        - Model provider: Ollama
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and additional context
+      description: Paste relevant logs or screenshots after removing secrets and private content.
+      render: shell
