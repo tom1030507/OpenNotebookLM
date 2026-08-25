@@ -181,6 +181,32 @@ class DocumentService:
             else self.settings.max_chunks_per_doc
         )
 
+    def _get_youtube_adapter(self) -> Any:
+        """Return the configured caption adapter and optional audio fallback.
+
+        Returns:
+            The process-local YouTube ingestion adapter.
+        """
+        if self.youtube_adapter is not None:
+            return self.youtube_adapter
+
+        audio_transcriber = None
+        if settings.yt_whisper_fallback_enabled:
+            # Import lazily so disabling the fallback keeps Whisper and yt-dlp
+            # out of the ordinary caption-only request path.
+            from app.adapters.youtube_audio import YouTubeAudioTranscriber
+
+            audio_transcriber = YouTubeAudioTranscriber(
+                model_name=settings.yt_whisper_model,
+                max_duration_seconds=settings.yt_max_duration_seconds,
+                cache_dir=settings.yt_whisper_cache_dir,
+            )
+
+        self.youtube_adapter = YouTubeAdapter(
+            audio_transcriber=audio_transcriber
+        )
+        return self.youtube_adapter
+
     def _index_document(self, db: Session, doc_id: str, source_label: str) -> str:
         """Chunk and embed a document, then mark it ready.
 
@@ -829,6 +855,9 @@ class DocumentService:
         retained = False
         owns_retained_lease = False
         try:
+            # Initialize YouTube adapter if needed
+            self._get_youtube_adapter()
+
             # Generate document ID
             doc_id = str(uuid.uuid4())
             
@@ -954,6 +983,9 @@ class DocumentService:
                             "language": result.get("language", "unknown"),
                             "metadata": result.get("metadata", {}),
                             "num_segments": len(result.get("segments", [])),
+                            "transcription_source": result.get(
+                                "transcription_source", "youtube_captions"
+                            ),
                             "processed_at": utc_now_iso(),
                         }
                         db.commit()

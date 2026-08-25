@@ -8,6 +8,7 @@ pin what happens when indexing fails or finds nothing to index.
 import asyncio
 from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -118,8 +119,12 @@ class FakeYouTubeAdapter:
             "video_id": "abc123",
             "duration": 42.0,
             "language": "en",
-            "metadata": {"channel": "Example"},
+            "metadata": {
+                "channel": "Example",
+                "transcription_source": "whisper",
+            },
             "segments": [{"text": "Spoken words."}],
+            "transcription_source": "whisper",
         }
 
 
@@ -181,6 +186,87 @@ def embedding_count(db, doc_id=DOC_ID):
         .filter(Chunk.document_id == doc_id)
         .count()
     )
+
+
+class TestYouTubeFallbackWiring:
+    """Build the optional audio fallback from deployment settings."""
+
+    def test_enabled_fallback_receives_all_settings(self, monkeypatch):
+        """The service must pass exact model and resource limits to the adapter."""
+        import app.adapters.youtube_audio as audio_module
+        import app.services.documents as documents_module
+
+        constructed = {}
+
+        class RecordingAudioTranscriber:
+            def __init__(self, model_name, max_duration_seconds, cache_dir):
+                constructed["audio"] = (
+                    model_name,
+                    max_duration_seconds,
+                    cache_dir,
+                )
+
+        class RecordingYouTubeAdapter:
+            def __init__(self, audio_transcriber=None):
+                constructed["fallback"] = audio_transcriber
+
+        monkeypatch.setattr(
+            documents_module,
+            "settings",
+            SimpleNamespace(
+                yt_whisper_fallback_enabled=True,
+                yt_whisper_model="base",
+                yt_max_duration_seconds=1800,
+                yt_whisper_cache_dir="./models/whisper",
+            ),
+        )
+        monkeypatch.setattr(
+            audio_module, "YouTubeAudioTranscriber", RecordingAudioTranscriber
+        )
+        monkeypatch.setattr(
+            documents_module, "YouTubeAdapter", RecordingYouTubeAdapter
+        )
+        service = DocumentService(
+            chunking_service=FakeChunkingService([]),
+            embedding_service=FakeEmbeddingService([]),
+            pdf_adapter=FakePDFAdapter(),
+            url_adapter=FakeURLAdapter(),
+        )
+
+        adapter = service._get_youtube_adapter()
+
+        assert constructed["audio"] == ("base", 1800, "./models/whisper")
+        assert constructed["fallback"] is not None
+        assert adapter is service.youtube_adapter
+
+    def test_disabled_fallback_keeps_caption_only_adapter(self, monkeypatch):
+        """Turning the feature off must not construct or import a Whisper model."""
+        import app.services.documents as documents_module
+
+        constructed = {}
+
+        class RecordingYouTubeAdapter:
+            def __init__(self, audio_transcriber=None):
+                constructed["fallback"] = audio_transcriber
+
+        monkeypatch.setattr(
+            documents_module,
+            "settings",
+            SimpleNamespace(yt_whisper_fallback_enabled=False),
+        )
+        monkeypatch.setattr(
+            documents_module, "YouTubeAdapter", RecordingYouTubeAdapter
+        )
+        service = DocumentService(
+            chunking_service=FakeChunkingService([]),
+            embedding_service=FakeEmbeddingService([]),
+            pdf_adapter=FakePDFAdapter(),
+            url_adapter=FakeURLAdapter(),
+        )
+
+        service._get_youtube_adapter()
+
+        assert constructed["fallback"] is None
 
 
 class TestReadyMeansRetrievable:
@@ -387,4 +473,6 @@ class TestProcessingMetadata:
         meta = db.query(Document).filter(Document.id == DOC_ID).first().meta_json
         assert meta["video_id"] == "abc123"
         assert meta["num_segments"] == 1
+        assert meta["transcription_source"] == "whisper"
+        assert meta["metadata"]["transcription_source"] == "whisper"
         assert "processed_at" in meta

@@ -11,6 +11,12 @@ from types import SimpleNamespace
 import pytest
 
 from app.adapters.youtube import YouTubeAdapter
+from youtube_transcript_api._errors import (
+    NoTranscriptFound,
+    TooManyRequests,
+    TranscriptsDisabled,
+    VideoUnavailable,
+)
 
 youtube_transcript_api = pytest.importorskip("youtube_transcript_api")
 _api = importlib.import_module("youtube_transcript_api._api")
@@ -133,6 +139,8 @@ class TestYouTubeAdapterAgainstInstalledLibrary:
         }
         assert result["duration"] == 5.0
         assert result["metadata"]["is_generated"] is True
+        assert result["transcription_source"] == "youtube_captions"
+        assert result["metadata"]["transcription_source"] == "youtube_captions"
 
     def test_extract_transcript_requests_video_id_not_url(self, session):
         """The watch page must be fetched by video ID, not by the full URL."""
@@ -164,3 +172,79 @@ class TestYouTubeAdapterLibrarySurface:
         assert "youtube-transcript-api" in message
         assert "list_transcripts" in message
         assert "list" in message
+
+
+class FakeAudioTranscriber:
+    """Record fallback calls and return a recognizable local transcript."""
+
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, url):
+        """Return one controlled Whisper result."""
+        self.calls.append(url)
+        return {
+            "video_id": VIDEO_ID,
+            "url": url,
+            "text": "locally transcribed",
+            "segments": [],
+            "duration": 10.0,
+            "language": "en",
+            "metadata": {"transcription_source": "whisper"},
+            "transcription_source": "whisper",
+        }
+
+
+class TestYouTubeAdapterAudioFallback:
+    """Use local audio only for explicit caption-unavailable responses."""
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            TranscriptsDisabled(VIDEO_ID),
+            NoTranscriptFound(VIDEO_ID, ["en"], {}),
+        ],
+    )
+    def test_caption_unavailable_uses_audio_transcriber(self, monkeypatch, failure):
+        """Disabled or absent captions activate exactly one local fallback."""
+        fallback = FakeAudioTranscriber()
+        adapter = YouTubeAdapter(audio_transcriber=fallback)
+
+        def fail_to_list(video_id):
+            del video_id
+            raise failure
+
+        monkeypatch.setattr(adapter, "_list_transcripts", fail_to_list)
+
+        result = adapter.extract_transcript(
+            "https://www.youtube.com/watch?v={id}".format(id=VIDEO_ID)
+        )
+
+        assert result["transcription_source"] == "whisper"
+        assert fallback.calls == [
+            "https://www.youtube.com/watch?v={id}".format(id=VIDEO_ID)
+        ]
+
+    @pytest.mark.parametrize(
+        "failure",
+        [VideoUnavailable(VIDEO_ID), TooManyRequests(VIDEO_ID)],
+    )
+    def test_non_caption_failure_does_not_use_audio_transcriber(
+        self, monkeypatch, failure
+    ):
+        """Unavailable media and rate limits must retain their real errors."""
+        fallback = FakeAudioTranscriber()
+        adapter = YouTubeAdapter(audio_transcriber=fallback)
+
+        def fail_to_list(video_id):
+            del video_id
+            raise failure
+
+        monkeypatch.setattr(adapter, "_list_transcripts", fail_to_list)
+
+        with pytest.raises(type(failure)):
+            adapter.extract_transcript(
+                "https://www.youtube.com/watch?v={id}".format(id=VIDEO_ID)
+            )
+
+        assert fallback.calls == []
