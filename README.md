@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/assets/logo.svg" alt="OpenNotebookLM" width="120" height="120">
+  <img src=".github/assets/logo.png" alt="OpenNotebookLM" width="120" height="120">
 </p>
 
 <h1 align="center">OpenNotebookLM</h1>
