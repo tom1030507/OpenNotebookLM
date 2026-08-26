@@ -24,6 +24,9 @@ describe('BrandLogo', () => {
     expect(container.querySelector('image')?.getAttribute('href')).toBe(
       '/brand-logo-f.png',
     );
+    expect(container.querySelector('image')?.getAttribute('transform')).toBe(
+      'translate(1.5 -1.5)',
+    );
   });
 
   it('keeps its label semantics authoritative over conflicting SVG props', () => {

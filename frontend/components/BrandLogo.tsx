@@ -32,6 +32,7 @@ export default function BrandLogo({ label, ...props }: BrandLogoProps) {
         href="/brand-logo-f.png"
         width="64"
         height="64"
+        transform="translate(1.5 -1.5)"
         preserveAspectRatio="xMidYMid meet"
       />
     </svg>
