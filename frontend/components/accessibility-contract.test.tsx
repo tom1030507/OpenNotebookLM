@@ -152,6 +152,7 @@ const dialogTitleIds = (dialogs: HTMLElement[]) => dialogs.map((dialog) => (
 
 describe('workspace accessibility contract', () => {
   it('gives every confirmed icon-only workspace control a Traditional Chinese accessible name', () => {
+    configureSourcesStore();
     renderWorkspace(
       <>
         <TopNav />

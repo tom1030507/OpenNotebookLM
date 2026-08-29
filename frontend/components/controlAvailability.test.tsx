@@ -31,19 +31,31 @@ afterEach(() => {
 
 
 describe('workspace control availability', () => {
-  it('disables source entry points and does not request the dialog without a project', () => {
-    let requestedOpen = false;
-    render(<ChatArea onAddSourcesOpenChange={(isOpen) => { requestedOpen = isOpen; }} />);
+  it('offers a working project action when source actions are unavailable', () => {
+    const { container } = render(
+      <ProjectDialogProvider>
+        <ChatArea onAddSourcesOpenChange={() => undefined} />
+      </ProjectDialogProvider>,
+    );
 
-    const uploadButton = screen.getByRole('button', { name: 'Upload sources' });
-    const attachmentButton = screen.getByRole('button', { name: 'Attach file' });
-    expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
-    expect((attachmentButton as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('Select or create a project before adding sources')).not.toBeNull();
+    expect(screen.getByRole('heading', { name: 'Create a project to get started' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Upload sources' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Attach file' })).toBeNull();
+    expect(screen.queryByText('Select or create a project before adding sources')).toBeNull();
+    expect(
+      container.querySelector('[data-layout="chat-composer"]')?.className.split(/\s+/),
+    ).toContain('p-3');
 
-    fireEvent.click(uploadButton);
-    fireEvent.click(attachmentButton);
-    expect(requestedOpen).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'New Project' }));
+    expect(screen.getByRole('dialog', { name: 'Create New Project' })).toBeTruthy();
+  });
+
+  it('disables project creation outside the dialog provider', () => {
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    expect(
+      (screen.getByRole('button', { name: 'New Project' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it('exposes notifications and help as working controls', () => {
