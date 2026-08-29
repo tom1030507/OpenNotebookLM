@@ -49,7 +49,7 @@ def get_video_summary_service() -> VideoSummaryService:
     return _service
 
 
-@router.get(
+@router.post(
     "/projects/{project_id}/video-summary",
     response_model=VideoSummaryResponse,
 )

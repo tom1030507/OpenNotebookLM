@@ -155,12 +155,17 @@ def test_project_summary_only_includes_own_documents(two_projects_with_own_docum
     Returns:
         None.
     """
-    response = client.get("/api/export/project/project-a/summary")
+    response = client.post("/api/export/project/project-a/summary")
 
     assert response.status_code == 200
     assert "**Documents**: 1" in response.text
     assert "Only In A" in response.text
     assert "Only In B" not in response.text
+
+
+def test_get_cannot_generate_a_project_summary(two_projects_with_own_documents):
+    """Reading a URL must not run the project generation command."""
+    assert client.get("/api/export/project/project-a/summary").status_code == 405
 
 
 @pytest.fixture

@@ -140,7 +140,7 @@ async def export_project(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/export/project/{project_id}/summary")
+@router.post("/export/project/{project_id}/summary")
 async def export_project_summary(
     project_id: str,
     db: Session = Depends(get_db),

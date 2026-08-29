@@ -120,7 +120,7 @@ def empty_project():
 
 def test_the_script_opens_on_the_project(two_projects_with_own_documents):
     """The title card is the only place the whole project is stated."""
-    response = client.get("/api/projects/project-a/video-summary")
+    response = client.post("/api/projects/project-a/video-summary")
 
     assert response.status_code == 200
     body = response.json()
@@ -131,7 +131,7 @@ def test_the_script_opens_on_the_project(two_projects_with_own_documents):
 
 def test_each_source_gets_a_scene(two_projects_with_own_documents):
     """One scene per source, and only this project's sources."""
-    body = client.get("/api/projects/project-a/video-summary").json()
+    body = client.post("/api/projects/project-a/video-summary").json()
 
     sources = [scene for scene in body["scenes"] if scene["kind"] == "source"]
     assert [scene["source_label"] for scene in sources] == ["Only In A"]
@@ -140,21 +140,21 @@ def test_each_source_gets_a_scene(two_projects_with_own_documents):
 
 def test_another_projects_sources_are_absent(two_projects_with_own_documents):
     """A summary must not leak a sibling project's sources."""
-    assert "Only In B" not in client.get(
+    assert "Only In B" not in client.post(
         "/api/projects/project-a/video-summary",
     ).text
 
 
 def test_headings_become_the_slide(two_projects_with_own_documents):
     """Without a model, the document's own structure is what is on screen."""
-    body = client.get("/api/projects/project-a/video-summary").json()
+    body = client.post("/api/projects/project-a/video-summary").json()
 
     assert body["scenes"][1]["bullets"] == ["Rainfall"]
 
 
 def test_the_script_closes_on_a_recap(two_projects_with_own_documents):
     """The last scene is a recap, composed from the scenes before it."""
-    body = client.get("/api/projects/project-a/video-summary").json()
+    body = client.post("/api/projects/project-a/video-summary").json()
 
     assert body["scenes"][-1]["kind"] == "closing"
     assert body["scenes"][-1]["bullets"] == ["Only In A"]
@@ -162,7 +162,7 @@ def test_the_script_closes_on_a_recap(two_projects_with_own_documents):
 
 def test_every_scene_has_narration(two_projects_with_own_documents):
     """The scene advances when the voice finishes, so silence would stall it."""
-    body = client.get("/api/projects/project-a/video-summary").json()
+    body = client.post("/api/projects/project-a/video-summary").json()
 
     assert all(scene["narration"].strip() for scene in body["scenes"])
 
@@ -171,7 +171,7 @@ def test_scene_count_and_duration_describe_the_script(
     two_projects_with_own_documents,
 ):
     """Title, one source, closing — and long enough to be worth playing."""
-    body = client.get("/api/projects/project-a/video-summary").json()
+    body = client.post("/api/projects/project-a/video-summary").json()
 
     assert body["scene_count"] == 3
     assert body["scene_count"] == len(body["scenes"])
@@ -180,21 +180,21 @@ def test_scene_count_and_duration_describe_the_script(
 
 def test_the_model_is_reported(two_projects_with_own_documents):
     """`model_used` distinguishes a written script from an extracted one."""
-    body = client.get("/api/projects/project-a/video-summary").json()
+    body = client.post("/api/projects/project-a/video-summary").json()
 
     assert body["model_used"] == "fallback"
 
 
 def test_generated_at_carries_a_utc_designator(two_projects_with_own_documents):
     """A designator-less timestamp is read as local time by the browser."""
-    body = client.get("/api/projects/project-a/video-summary").json()
+    body = client.post("/api/projects/project-a/video-summary").json()
 
     assert body["generated_at"].endswith("Z") or body["generated_at"].endswith("+00:00")
 
 
 def test_an_empty_project_still_answers(empty_project):
     """A project with no sources answers, rather than failing."""
-    response = client.get("/api/projects/project-empty/video-summary")
+    response = client.post("/api/projects/project-empty/video-summary")
 
     assert response.status_code == 200
     body = response.json()
@@ -203,17 +203,22 @@ def test_an_empty_project_still_answers(empty_project):
 
 def test_a_missing_project_is_not_found():
     """An id that names nothing answers 404, not 500."""
-    assert client.get("/api/projects/nope/video-summary").status_code == 404
+    assert client.post("/api/projects/nope/video-summary").status_code == 404
 
 
 def test_an_anonymous_caller_is_refused():
     """Every data-bearing route sits behind the token check."""
     anonymous = client.__class__(app)
 
-    assert anonymous.get("/api/projects/project-a/video-summary").status_code == 401
+    assert anonymous.post("/api/projects/project-a/video-summary").status_code == 401
     assert client.__class__(
         app, headers=auth_headers(),
-    ).get("/api/projects/project-a/video-summary").status_code in (200, 404)
+    ).post("/api/projects/project-a/video-summary").status_code in (200, 404)
+
+
+def test_get_cannot_generate_a_video_summary(two_projects_with_own_documents):
+    """Reading a URL must not run the project generation command."""
+    assert client.get("/api/projects/project-a/video-summary").status_code == 405
 
 
 def test_the_route_is_not_a_coroutine():
