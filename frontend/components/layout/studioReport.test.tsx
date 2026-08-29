@@ -86,6 +86,18 @@ describe('Studio report', () => {
     expect((screen.getByRole('button', { name: /^Report/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('announces while the report is being generated', async () => {
+    vi.spyOn(api, 'exportProjectSummary').mockReturnValue(new Promise(() => undefined));
+    render(<StudioPanel />);
+
+    const report = screen.getByRole('button', { name: 'Report' });
+    fireEvent.click(report);
+
+    await waitFor(() => expect(report.getAttribute('title')).toBe('Generating report…'));
+    const hintId = report.getAttribute('aria-describedby');
+    expect(hintId && document.getElementById(hintId)?.textContent).toBe('Generating report…');
+  });
+
   it('surfaces a failure without leaving the button stuck', async () => {
     vi.spyOn(api, 'exportProjectSummary').mockRejectedValue(new Error('nope'));
     render(<StudioPanel />);

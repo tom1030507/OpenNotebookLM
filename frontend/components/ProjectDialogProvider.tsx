@@ -39,3 +39,13 @@ export function useProjectDialog() {
 
   return context;
 }
+
+/**
+ * Read project-dialog controls when the caller may render without a provider.
+ *
+ * Returns:
+ *   Dialog controls inside ProjectDialogProvider, otherwise null.
+ */
+export function useOptionalProjectDialog() {
+  return useContext(ProjectDialogContext);
+}

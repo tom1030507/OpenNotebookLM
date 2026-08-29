@@ -11,9 +11,9 @@ import { DrawerFocusController } from './drawerFocusController';
 
 interface ResponsiveLayoutProps {
   children: React.ReactNode;
-  sidebar?: React.ReactNode;
-  conversationPanel?: React.ReactNode;
-  rightPanel?: React.ReactNode;
+  sidebar?: WorkspacePanel;
+  conversationPanel?: WorkspacePanel;
+  rightPanel?: WorkspacePanel;
   /**
    * Grid track sizing for the desktop layout. Applied unconditionally but only
    * takes effect at `lg` and up, where the container becomes a grid; below that
@@ -22,6 +22,8 @@ interface ResponsiveLayoutProps {
    */
   desktopStyle?: React.CSSProperties;
 }
+
+type WorkspacePanel = React.ReactNode | ((isDrawer: boolean) => React.ReactNode);
 
 const FOCUSABLE_DRAWER_ELEMENTS = [
   'a[href]',
@@ -51,7 +53,7 @@ export default function ResponsiveLayout({
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerFocusControllerRef = useRef<DrawerFocusController | null>(null);
   const layout = getResponsiveLayoutContract(activePanel);
-  const panels: Record<WorkspacePanelId, React.ReactNode> = {
+  const panels: Record<WorkspacePanelId, WorkspacePanel> = {
     sources: sidebar,
     conversations: conversationPanel,
     studio: rightPanel,
@@ -169,6 +171,8 @@ export default function ResponsiveLayout({
           // One mount per panel: the active one is promoted to a drawer in
           // place, so opening it never duplicates its state or its fetches.
           const isDrawer = layout.drawerPanelId === item;
+          const panel = panels[item];
+          const panelContent = typeof panel === 'function' ? panel(isDrawer) : panel;
 
           return (
             <div
@@ -205,7 +209,7 @@ export default function ResponsiveLayout({
                 </header>
               )}
               <div className={isDrawer ? 'min-h-0 flex-1 overflow-hidden' : 'contents'}>
-                {panels[item]}
+                {panelContent}
               </div>
             </div>
           );

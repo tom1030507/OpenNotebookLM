@@ -75,11 +75,11 @@ describe('workspace copy is English', () => {
     expect(screen.getByText(/to upload PDFs, URLs, or YouTube videos/)).toBeTruthy();
   });
 
-  it('renders English copy for the no-project empty state', () => {
+  it('does not repeat the no-project prompt in the simplified Sources panel', () => {
     useStore.setState({ projects: [], currentProject: null });
     render(<SourcesPanelHarness />);
 
-    expect(screen.getByText('Select or create a project to get started')).toBeTruthy();
+    expect(screen.queryByText('Select or create a project to get started')).toBeNull();
   });
 
   it('renders English copy for the sources search empty state', () => {
@@ -100,11 +100,12 @@ describe('workspace copy is English', () => {
   });
 
   it('renders English copy for the chat composer placeholders in both states', () => {
+    useStore.setState({ currentProject: null });
     const { unmount } = render(<ChatArea onAddSourcesOpenChange={() => {}} />);
-    expect(screen.getByPlaceholderText('Add sources to start chatting')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Create a project to start chatting')).toBeTruthy();
     unmount();
 
-    useStore.setState({ documents: [readyDocument] });
+    useStore.setState({ currentProject: project, documents: [readyDocument] });
     render(<ChatArea onAddSourcesOpenChange={() => {}} />);
     expect(screen.getByPlaceholderText('Ask anything about your sources...')).toBeTruthy();
   });
