@@ -1,0 +1,40 @@
+<!--
+  The product mark, redrawn for a favicon rather than scaled down to one. Every
+  edge is heavier and every node larger than the component draws them, because
+  at 16px the component's lightest edge lands under one device pixel and
+  renders as a grey smear instead of a line. The arrangement is unchanged, so
+  the silhouette still matches the mark in the nav.
+
+  The gradient repeats the primary and accent tokens as literal hex: a favicon
+  is fetched as an image, outside the document, and never sees the theme's
+  custom properties.
+
+  Keep custom property names out of this comment. A double hyphen is illegal
+  inside an XML comment, which makes the whole file undecodable as an image and
+  shows nothing at all in the tab.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
+  <defs>
+    <linearGradient id="mark" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1a73e8"/>
+      <stop offset="1" stop-color="#9b51e0"/>
+    </linearGradient>
+  </defs>
+
+  <g stroke="url(#mark)" fill="none" stroke-linecap="round">
+    <path d="M12 12 4.5 9.3" stroke-width="2.6"/>
+    <path d="M12 12 9.3 4.5" stroke-width="1.8"/>
+    <path d="M12 12 18.1 6.9" stroke-width="2.2"/>
+    <path d="M12 12 19.5 14.7" stroke-width="3"/>
+    <path d="M12 12 9.9 19.7" stroke-width="1.6"/>
+  </g>
+
+  <g fill="url(#mark)">
+    <circle cx="12" cy="12" r="3.8"/>
+    <circle cx="4.5" cy="9.3" r="2"/>
+    <circle cx="9.3" cy="4.5" r="1.5"/>
+    <circle cx="18.1" cy="6.9" r="1.8"/>
+    <circle cx="19.5" cy="14.7" r="2.2"/>
+    <circle cx="9.9" cy="19.7" r="1.4"/>
+  </g>
+</svg>
