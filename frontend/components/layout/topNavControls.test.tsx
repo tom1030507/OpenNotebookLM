@@ -101,9 +101,12 @@ describe('TopNav controls that were previously inert', () => {
     const { container } = renderTopNav();
 
     expect(screen.getByRole('img', { name: 'OpenNotebookLM logo' })).toBeTruthy();
-    expect(container.querySelector('image')?.getAttribute('href')).toBe(
-      '/brand-logo-f.png',
-    );
+    // The mark is drawn inline, so the header does not wait on a request for
+    // its own logo.
+    expect(container.querySelector('image')).toBeNull();
+    expect(
+      container.querySelector('[data-brand-logo="true"]')?.getAttribute('viewBox'),
+    ).toBe('0 0 24 24');
   });
 
   it('keeps the header mark decorative when the product name is already the title', () => {
