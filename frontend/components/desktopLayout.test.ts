@@ -2,7 +2,7 @@
 
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import Home from '@/app/page';
@@ -168,29 +168,56 @@ describe('desktop workspace layout', () => {
     expect(actions?.style.gap).toContain('cqw');
   });
 
-  test('reclaims the conversation track without a project and restores it on selection', () => {
+  test('pins the desktop grid row to the available workspace height', () => {
+    const { container } = render(createElement(Home));
+    const workspace = container.querySelector<HTMLElement>(
+      '[data-layout="desktop-workspace"]',
+    );
+
+    expect(workspace?.style.gridTemplateRows).toBe('minmax(0, 1fr)');
+  });
+
+  test('keeps the start of an overflowing welcome screen reachable', () => {
+    const { container } = render(createElement(Home));
+    const hero = container.querySelector<HTMLElement>(
+      '[data-layout="welcome-hero"]',
+    );
+    const frameClasses = hero?.parentElement?.className.split(/\s+/) ?? [];
+
+    expect(frameClasses).toContain('min-h-full');
+    expect(frameClasses).not.toContain('h-full');
+  });
+
+  test('uses a focused no-project layout and restores the full workspace on selection', () => {
     useStore.setState({ currentProject: null, currentConversation: null });
     const { container } = render(createElement(Home));
     const workspace = container.querySelector<HTMLElement>(
       '[data-layout="desktop-workspace"]',
     );
+    const studio = screen.getByRole('complementary', { name: 'Studio' });
+    const focusedState = {
+      ...initialDesktopWorkspaceState,
+      studio: true,
+    };
     const noProjectColumns = getDesktopWorkspaceStyle(
-      initialDesktopWorkspaceState,
+      focusedState,
       false,
     ).gridTemplateColumns;
 
     expect(workspace?.style.gridTemplateColumns).toBe(noProjectColumns);
     expect(noProjectColumns).toBe(
-      'clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 clamp(12rem, 15vw, 17rem)',
+      'clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 3rem',
     );
     expect(
       resolveDesktopWorkspaceMetrics(
         1024,
-        initialDesktopWorkspaceState,
+        focusedState,
         false,
       ).center,
-    ).toBe(640);
+    ).toBe(784);
+    expect(studio.getAttribute('data-panel-state')).toBe('collapsed');
     expect(screen.queryByRole('heading', { name: 'Conversations' })).toBeNull();
+    expect(screen.queryByText('Select or create a project to get started')).toBeNull();
 
     act(() => {
       useStore.setState({ currentProject: project });
@@ -200,6 +227,7 @@ describe('desktop workspace layout', () => {
       getDesktopWorkspaceStyle(initialDesktopWorkspaceState, true)
         .gridTemplateColumns,
     );
+    expect(studio.getAttribute('data-panel-state')).toBe('expanded');
     expect(screen.getByRole('heading', { name: 'Conversations' })).toBeTruthy();
   });
 
@@ -211,8 +239,21 @@ describe('desktop workspace layout', () => {
 
     expect(firstMarkup).toBe(secondMarkup);
     expect(firstMarkup).toContain(
-      'grid-template-columns:clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 clamp(12rem, 15vw, 17rem)',
+      'grid-template-columns:clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 3rem',
     );
+  });
+
+  test('opens the no-project Studio drawer with its full content visible', () => {
+    useStore.setState({ currentProject: null, currentConversation: null });
+    render(createElement(Home));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Studio panel' }));
+    const drawer = screen.getByRole('dialog', { name: 'Studio panel' });
+    const studio = within(drawer).getByRole('complementary', { name: 'Studio' });
+
+    expect(studio.getAttribute('data-panel-state')).toBe('expanded');
+    expect(within(drawer).queryByRole('button', { name: 'Expand Studio' })).toBeNull();
+    expect(within(drawer).getByRole('button', { name: 'Audio summary' })).toBeTruthy();
   });
 
   test('collapses and restores Sources through Home without losing local state or focus', () => {

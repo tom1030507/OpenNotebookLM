@@ -5,6 +5,7 @@ import {
   Send,
   Paperclip,
   Upload,
+  FolderPlus,
   ChevronRight,
   Loader2
 } from 'lucide-react';
@@ -17,6 +18,7 @@ import MarkdownRenderer from '../MarkdownRenderer';
 import { requestAddSources } from '../sourceActions';
 import type { Message } from '@/lib/api';
 import BrandLogo from '../BrandLogo';
+import { useOptionalProjectDialog } from '../ProjectDialogProvider';
 
 interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
@@ -75,6 +77,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [pendingQuery, setPendingQuery] = useState<PendingQuery | null>(null);
   const nextRequestIdRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const projectDialog = useOptionalProjectDialog();
   
   const currentProject = useStore((state) => state.currentProject);
   const currentConversation = useStore((state) => state.currentConversation);
@@ -202,7 +205,6 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'ready');
   const canChat = currentProject && hasDocuments;
   const canAddSources = Boolean(currentProject);
-  const sourceActionHelperText = 'Select or create a project before adding sources';
   const pendingQueryIsActive = pendingQuery !== null
     && pendingQuery.projectId === currentProject?.id
     && pendingQuery.conversationId === (currentConversation?.id ?? null);
@@ -240,7 +242,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {visibleMessages.length === 0 ? (
           <div
-            className="h-full flex flex-col items-center justify-center py-8"
+            className="min-h-full flex flex-col items-center justify-center py-8"
             style={welcomeHeroStyles.frame}
           >
             {/* Welcome Screen */}
@@ -261,50 +263,64 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 className="leading-tight font-normal mb-4"
                 style={welcomeHeroStyles.title}
               >
-                Add a source to get started
+                {currentProject
+                  ? 'Add a source to get started'
+                  : 'Create a project to get started'}
               </h2>
               
               <p className="max-w-2xl mx-auto text-base text-[var(--muted-foreground)] mb-8">
-                NotebookLM can be inaccurate. Please verify its responses.
+                {currentProject
+                  ? 'NotebookLM can be inaccurate. Please verify its responses.'
+                  : 'Projects keep your sources and conversations organized.'}
               </p>
 
-              {/* Upload Button */}
               <button
-                onClick={handleRequestAddSources}
-                disabled={!canAddSources}
-                aria-label="Upload sources"
-                aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
+                type="button"
+                onClick={currentProject
+                  ? handleRequestAddSources
+                  : projectDialog?.openProjectDialog}
+                disabled={!currentProject && !projectDialog}
                 className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
               >
-                <Upload className="w-5 h-5" />
-                <span>Upload sources</span>
+                {currentProject ? (
+                  <>
+                    <Upload className="w-5 h-5" />
+                    <span>Upload sources</span>
+                  </>
+                ) : (
+                  <>
+                  <FolderPlus className="w-5 h-5" />
+                  <span>New Project</span>
+                  </>
+                )}
               </button>
 
-              {/* Quick Actions */}
-              <div
-                data-layout="welcome-actions"
-                className="grid text-left"
-                style={welcomeHeroStyles.actions}
-              >
+              {currentProject && (
                 <div
-                  className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
-                  style={welcomeHeroStyles.card}
+                  data-layout="welcome-actions"
+                  className="grid text-left"
+                  style={welcomeHeroStyles.actions}
                 >
-                  <h3 className="font-medium text-base mb-1.5">Quick start</h3>
-                  <p className="text-sm text-[var(--muted-foreground)]">
-                    Upload PDFs, web pages, or YouTube videos
-                  </p>
+                  <div
+                    className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
+                    style={welcomeHeroStyles.card}
+                  >
+                    <h3 className="font-medium text-base mb-1.5">Quick start</h3>
+                    <p className="text-sm text-[var(--muted-foreground)]">
+                      Upload PDFs, web pages, or YouTube videos
+                    </p>
+                  </div>
+                  <div
+                    className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
+                    style={welcomeHeroStyles.card}
+                  >
+                    <h3 className="font-medium text-base mb-1.5">Smart answers</h3>
+                    <p className="text-sm text-[var(--muted-foreground)]">
+                      Answers based on your documents
+                    </p>
+                  </div>
                 </div>
-                <div
-                  className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
-                  style={welcomeHeroStyles.card}
-                >
-                  <h3 className="font-medium text-base mb-1.5">Smart answers</h3>
-                  <p className="text-sm text-[var(--muted-foreground)]">
-                    Answers based on your documents
-                  </p>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         ) : (
@@ -345,19 +361,22 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-[var(--border)] bg-[var(--card)] p-4">
+      <div
+        data-layout="chat-composer"
+        className={`border-t border-[var(--border)] bg-[var(--card)] ${currentProject ? 'p-4' : 'p-3'}`}
+      >
         <div className="max-w-3xl mx-auto">
-          <div className="min-w-0 flex items-end gap-3">
-            <button
-              onClick={handleRequestAddSources}
-              disabled={!canAddSources}
-              aria-label={'Attach file'}
-              title={'Attach file'}
-              aria-describedby={!canAddSources ? 'source-action-helper' : undefined}
-              className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-base"
-            >
-              <Paperclip className="w-5 h-5" />
-            </button>
+          <div className={`min-w-0 flex items-end ${currentProject ? 'gap-3' : 'gap-2'}`}>
+            {currentProject && (
+              <button
+                onClick={handleRequestAddSources}
+                aria-label={'Attach file'}
+                title={'Attach file'}
+                className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base"
+              >
+                <Paperclip className="w-5 h-5" />
+              </button>
+            )}
             
             <div className="min-w-0 flex-1 relative">
               <textarea
@@ -369,7 +388,13 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     handleSend();
                   }
                 }}
-                placeholder={canChat ? 'Ask anything about your sources...' : 'Add sources to start chatting'}
+                placeholder={
+                  !currentProject
+                    ? 'Create a project to start chatting'
+                    : canChat
+                      ? 'Ask anything about your sources...'
+                      : 'Add sources to start chatting'
+                }
                 className="w-full px-4 py-3 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
                 rows={1}
                 disabled={!canChat || isStreaming}
@@ -387,7 +412,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               aria-label={'Send message'}
               title={'Send message'}
               disabled={!inputValue.trim() || !canChat || isStreaming}
-              className="flex-shrink-0 p-3 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base">
+              className={`flex-shrink-0 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base ${currentProject ? 'p-3' : 'p-2.5'}`}>
               {isStreaming ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
@@ -395,14 +420,6 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               )}
             </button>
           </div>
-          {!canAddSources && (
-            <p
-              id="source-action-helper"
-              className="mt-2 text-xs text-[var(--muted-foreground)]"
-            >
-              {sourceActionHelperText}
-            </p>
-          )}
           
           {/* New Chat Button */}
           {messages.length > 0 && (

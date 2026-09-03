@@ -7,10 +7,16 @@ export interface DesktopWorkspaceState {
   studio: boolean;
 }
 
-export type DesktopWorkspaceAction = {
-  type: 'toggle-panel';
-  panel: CollapsibleDesktopPanel;
-};
+export type DesktopWorkspaceAction =
+  | {
+      type: 'toggle-panel';
+      panel: CollapsibleDesktopPanel;
+    }
+  | {
+      type: 'set-panel';
+      panel: CollapsibleDesktopPanel;
+      collapsed: boolean;
+    };
 
 export interface DesktopWorkspaceMetrics {
   sources: number;
@@ -72,6 +78,15 @@ export function desktopWorkspaceReducer(
   state: DesktopWorkspaceState,
   action: DesktopWorkspaceAction,
 ): DesktopWorkspaceState {
+  if (action.type === 'set-panel') {
+    if (state[action.panel] === action.collapsed) return state;
+
+    return {
+      ...state,
+      [action.panel]: action.collapsed,
+    };
+  }
+
   return {
     ...state,
     [action.panel]: !state[action.panel],
@@ -120,6 +135,7 @@ export function getDesktopWorkspaceStyle(
 
   return {
     gridTemplateColumns: `${sources} minmax(0, 1fr) ${conversations} ${studio}`,
+    gridTemplateRows: 'minmax(0, 1fr)',
   };
 }
 

@@ -580,7 +580,7 @@ describe('ChatArea', () => {
     });
 
     expect(useStore.getState().currentProject).toBeNull();
-    expect(screen.getByText('Add a source to get started')).toBeTruthy();
+    expect(screen.getByText('Create a project to get started')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(query).toHaveBeenCalledTimes(1);
   });

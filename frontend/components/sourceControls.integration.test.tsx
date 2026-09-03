@@ -264,10 +264,10 @@ describe('unavailable workspace controls', () => {
   it('offers every Studio output now that each one has a backend', () => {
     render(<StudioPanel />);
 
-    expect(screen.getByText('Studio outputs')).not.toBeNull();
-    expect(
-      screen.getByText(/Audio summaries, video summaries, reports and mind maps are\s+all available/),
-    ).not.toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Studio outputs' })).toBeNull();
+    expect(screen.queryByText(
+      /Audio summaries, video summaries, reports and mind maps are\s+all available/,
+    )).toBeNull();
 
     // Nothing in the Studio track is marked as unbuilt any more. "More options"
     // is still disabled, but it is not one of the outputs.
@@ -283,5 +283,19 @@ describe('unavailable workspace controls', () => {
       (screen.getByRole('button', { name: 'Video summary' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(screen.getByText('Add a source first')).not.toBeNull();
+  });
+
+  it('keeps Studio status hints accessible without showing card subtitles', () => {
+    render(<StudioPanel />);
+
+    for (const name of ['Audio summary', 'Video summary', 'Mind map', 'Report']) {
+      const option = screen.getByRole('button', { name });
+      const hintId = option.getAttribute('aria-describedby');
+      const hint = hintId ? document.getElementById(hintId) : null;
+
+      expect(option.querySelector('p')).toBeNull();
+      expect(hint?.classList.contains('sr-only')).toBe(true);
+      expect(option.getAttribute('title')).toBe(hint?.textContent);
+    }
   });
 });

@@ -272,89 +272,82 @@ export default function SourcesPanel({
       </div>
 
       {/* Sources List */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {!currentProject ? (
-          <div className="text-center py-8">
-            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
-              <FolderOpen className="w-8 h-8 text-[var(--muted-foreground)]" />
+      {currentProject && (
+        <div className="flex-1 overflow-y-auto p-4">
+          {loadingDocuments ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
             </div>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              Select or create a project to get started
-            </p>
-          </div>
-        ) : loadingDocuments ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
-          </div>
-        ) : filteredDocuments.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
-              <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
-            </div>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              {searchQuery ? 'No sources found' : 'No sources yet'}
-            </p>
-            {!searchQuery && (
-              <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
+          ) : filteredDocuments.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-[var(--muted)] flex items-center justify-center">
+                <FileText className="w-8 h-8 text-[var(--muted-foreground)]" />
+              </div>
+              <p className="text-sm text-[var(--muted-foreground)]">
+                {searchQuery ? 'No sources found' : 'No sources yet'}
               </p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredDocuments.map((doc) => (
-              <div
-                key={doc.id}
-                className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
-                onClick={() => setPreviewDocument(doc)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-[var(--muted)] rounded">
-                    {getSourceIcon(doc.type)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium truncate">
-                      {doc.name}
-                    </h3>
-                    <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                      {STATUS_LABELS[doc.status] ?? doc.status}
-                    </p>
-                    {doc.status === 'error' && doc.error_message && (
-                      <p className="text-xs text-[var(--error)] mt-1 break-words">
-                        {doc.error_message}
+              {!searchQuery && (
+                <p className="text-xs text-[var(--muted-foreground)] mt-2">
+                  Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredDocuments.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
+                  onClick={() => setPreviewDocument(doc)}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-[var(--muted)] rounded">
+                      {getSourceIcon(doc.type)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-medium truncate">
+                        {doc.name}
+                      </h3>
+                      <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                        {STATUS_LABELS[doc.status] ?? doc.status}
                       </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPreviewDocument(doc);
-                      }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
-                      aria-label={'Preview document'}
-                      title={'Preview document'}
-                    >
-                      <Eye className="w-3 h-3" />
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteDocument(doc.id);
-                      }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
-                      aria-label={'Delete document'}
-                      title={'Delete document'}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                      {doc.status === 'error' && doc.error_message && (
+                        <p className="text-xs text-[var(--error)] mt-1 break-words">
+                          {doc.error_message}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewDocument(doc);
+                        }}
+                        className="p-1 hover:bg-[var(--muted)] rounded"
+                        aria-label={'Preview document'}
+                        title={'Preview document'}
+                      >
+                        <Eye className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDocument(doc.id);
+                        }}
+                        className="p-1 hover:bg-[var(--muted)] rounded"
+                        aria-label={'Delete document'}
+                        title={'Delete document'}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       </div>
 
       {/* Upload Modal */}

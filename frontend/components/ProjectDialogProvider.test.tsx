@@ -19,6 +19,7 @@ vi.mock('@/lib/api', () => ({ default: apiMock }));
 import ProjectDialogProvider from './ProjectDialogProvider';
 import TopNav from './layout/TopNav';
 import SourcesPanel from './layout/SourcesPanel';
+import ChatArea from './chat/ChatArea';
 import useStore from '@/store/useStore';
 
 // TopNav navigates on sign-out.
@@ -119,6 +120,23 @@ describe('ProjectDialogProvider', () => {
       expect(screen.queryByRole('dialog', { name: 'Create New Project' })).toBeNull();
     });
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(createdProject.id);
+  });
+
+  it('moves focus from the central creation CTA to Upload sources after creation', async () => {
+    const user = userEvent.setup();
+    apiMock.createProject.mockResolvedValue(createdProject);
+    render(
+      <ProjectDialogProvider>
+        <ChatArea onAddSourcesOpenChange={() => undefined} />
+      </ProjectDialogProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'New Project' }));
+    await user.type(screen.getByRole('textbox', { name: /Project Name/ }), createdProject.name);
+    await user.click(screen.getByRole('button', { name: 'Create Project' }));
+
+    const uploadSources = await screen.findByRole('button', { name: 'Upload sources' });
+    expect(document.activeElement).toBe(uploadSources);
   });
 
   it('keeps the dialog open and displays the API error when creation fails', async () => {
