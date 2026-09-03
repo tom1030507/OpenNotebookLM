@@ -49,7 +49,7 @@ def get_mindmap_service() -> MindMapService:
     return _service
 
 
-@router.get("/projects/{project_id}/mindmap", response_model=MindMapResponse)
+@router.post("/projects/{project_id}/mindmap", response_model=MindMapResponse)
 def project_mindmap(
     project_id: str,
     db: Session = Depends(get_db),

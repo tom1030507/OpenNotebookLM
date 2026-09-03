@@ -383,7 +383,7 @@ class TestExportIsolation:
 
     def test_exporting_someone_elses_summary_is_not_found(self, env):
         project_id = make_project(env.alice)
-        assert env.bob.get("/api/export/project/%s/summary" % project_id).status_code == 404
+        assert env.bob.post("/api/export/project/%s/summary" % project_id).status_code == 404
 
     def test_exporting_someone_elses_conversation_is_not_found(self, env):
         conversation_id = make_conversation(env.alice, make_project(env.alice))
@@ -406,13 +406,13 @@ class TestMindMapIsolation:
 
     def test_mapping_someone_elses_project_is_not_found(self, env):
         project_id = make_project(env.alice)
-        assert env.bob.get("/api/projects/%s/mindmap" % project_id).status_code == 404
+        assert env.bob.post("/api/projects/%s/mindmap" % project_id).status_code == 404
 
     def test_your_own_project_can_be_mapped(self, env):
         """Pins that the route exists: an unmounted route also answers 404."""
         project_id = make_project(env.alice)
 
-        response = env.alice.get("/api/projects/%s/mindmap" % project_id)
+        response = env.alice.post("/api/projects/%s/mindmap" % project_id)
 
         assert response.status_code == 200
         assert response.json()["root"]["label"] == ALICE_PROJECT
@@ -423,14 +423,14 @@ class TestVideoSummaryIsolation:
 
     def test_summarising_someone_elses_project_is_not_found(self, env):
         project_id = make_project(env.alice)
-        assert env.bob.get(
+        assert env.bob.post(
             "/api/projects/%s/video-summary" % project_id).status_code == 404
 
     def test_your_own_project_can_be_summarised(self, env):
         """Pins that the route exists: an unmounted route also answers 404."""
         project_id = make_project(env.alice)
 
-        response = env.alice.get("/api/projects/%s/video-summary" % project_id)
+        response = env.alice.post("/api/projects/%s/video-summary" % project_id)
 
         assert response.status_code == 200
         assert response.json()["scenes"][0]["headline"] == ALICE_PROJECT

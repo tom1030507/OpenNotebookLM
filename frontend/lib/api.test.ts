@@ -127,6 +127,40 @@ describe('API client', () => {
     expect(document.url).toBe(url);
   });
 
+  it.each([
+    {
+      output: 'mind map',
+      path: '/api/projects/project-1/mindmap',
+      request: () => api.fetchProjectMindMap('project-1'),
+    },
+    {
+      output: 'video summary',
+      path: '/api/projects/project-1/video-summary',
+      request: () => api.fetchProjectVideoSummary('project-1'),
+    },
+    {
+      output: 'report',
+      path: '/api/export/project/project-1/summary',
+      request: () => api.exportProjectSummary('project-1'),
+    },
+    {
+      output: 'audio summary',
+      path: '/api/export/project/project-1/summary',
+      request: () => api.fetchProjectSummaryText('project-1'),
+    },
+  ])('sends an explicit POST command for the $output', async ({ path, request }) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(path);
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      method: 'POST',
+    }));
+  });
+
   it('fetches the complete document after a file upload', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

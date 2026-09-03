@@ -6,7 +6,7 @@ import { test, expect } from '../support/fixtures.js';
 import { runtime } from '../support/runtime.js';
 import { setupReadyUrlWorkspace, setupWorkspace } from '../support/ui.js';
 
-function observeExportRequest(page: Page, endpoint: string): () => void {
+function observeExportRequest(page: Page, endpoint: string, method = 'GET'): () => void {
   const requests: Array<{ authorization: boolean; method: string; navigation: boolean; type: string }> = [];
   const responses: Array<{ authorization: boolean; status: number }> = [];
   page.on('request', (request) => {
@@ -30,7 +30,7 @@ function observeExportRequest(page: Page, endpoint: string): () => void {
   return () => {
     expect(requests).toEqual([{
       authorization: true,
-      method: 'GET',
+      method,
       navigation: false,
       type: 'fetch',
     }]);
@@ -42,7 +42,7 @@ test('renders a fallback mind map from ready source structure', async ({ api, pa
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'mind-map');
   const responsePromise = page.waitForResponse(
     (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/mindmap`
-      && response.request().method() === 'GET',
+      && response.request().method() === 'POST',
   );
   await page
     .getByRole('complementary', { name: 'Studio' })
@@ -69,10 +69,10 @@ test('renders a fallback mind map from ready source structure', async ({ api, pa
 test('downloads a Markdown project report', async ({ api, page }, testInfo) => {
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'report');
   const endpoint = `${runtime.browserApiUrl}/export/project/${project.id}/summary`;
-  const assertOneExportRequest = observeExportRequest(page, endpoint);
+  const assertOneExportRequest = observeExportRequest(page, endpoint, 'POST');
   const responsePromise = page.waitForResponse(
     (response) => response.url() === endpoint
-      && response.request().method() === 'GET',
+      && response.request().method() === 'POST',
   );
   const downloadPromise = page.waitForEvent('download');
   await page
@@ -173,7 +173,7 @@ test('renders the silent fallback video summary', async ({ api, page }, testInfo
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'video-summary');
   const responsePromise = page.waitForResponse(
     (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/video-summary`
-      && response.request().method() === 'GET',
+      && response.request().method() === 'POST',
   );
   await page
     .getByRole('complementary', { name: 'Studio' })
@@ -205,7 +205,7 @@ test('shows the unsupported audio fallback without host speech hardware', async 
     if (
       request.url().startsWith(`${runtime.browserApiUrl}/export/project/`)
       && request.url().endsWith('/summary')
-      && request.method() === 'GET'
+      && request.method() === 'POST'
     ) {
       summaryRequested = true;
     }

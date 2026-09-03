@@ -394,10 +394,14 @@ const requestJson = async <T>(
 };
 
 
-const fetchBlobResponse = async (path: string): Promise<Response> => {
-  const headers = requestHeaders('*/*');
+const fetchBlobResponse = async (
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> => {
+  const headers = requestHeaders('*/*', init);
   const snapshot = snapshotSessionCredential(headers.get('Authorization'));
   const response = await fetch(apiUrl(path), {
+    ...init,
     headers,
   });
   await guard(path, response, snapshot);
@@ -408,8 +412,11 @@ const requestBlob = async (path: string): Promise<Blob> => {
   return (await fetchBlobResponse(path)).blob();
 };
 
-const requestDetachedExportBlob = async (path: string): Promise<Blob> => {
-  const response = await fetchBlobResponse(path);
+const requestDetachedExportBlob = async (
+  path: string,
+  init: RequestInit = {},
+): Promise<Blob> => {
+  const response = await fetchBlobResponse(path, init);
 
   // In reproducible Chromium/Playwright export flows, a response-backed Blob
   // can trigger a later protected URL request without the bearer header. Copy
@@ -419,10 +426,14 @@ const requestDetachedExportBlob = async (path: string): Promise<Blob> => {
 };
 
 
-const requestText = async (path: string): Promise<string> => {
-  const headers = requestHeaders('text/plain, text/markdown, */*');
+const requestText = async (
+  path: string,
+  init: RequestInit = {},
+): Promise<string> => {
+  const headers = requestHeaders('text/plain, text/markdown, */*', init);
   const snapshot = snapshotSessionCredential(headers.get('Authorization'));
   const response = await fetch(apiUrl(path), {
+    ...init,
     headers,
   });
   await guard(path, response, snapshot);
@@ -715,20 +726,28 @@ const api = {
   },
 
   fetchProjectMindMap(projectId: string): Promise<MindMap> {
-    return requestJson<MindMap>(`/projects/${projectId}/mindmap`);
+    return requestJson<MindMap>(`/projects/${projectId}/mindmap`, {
+      method: 'POST',
+    });
   },
 
   fetchProjectVideoSummary(projectId: string): Promise<VideoSummary> {
-    return requestJson<VideoSummary>(`/projects/${projectId}/video-summary`);
+    return requestJson<VideoSummary>(`/projects/${projectId}/video-summary`, {
+      method: 'POST',
+    });
   },
 
   exportProjectSummary(projectId: string): Promise<Blob> {
-    return requestDetachedExportBlob(`/export/project/${projectId}/summary`);
+    return requestDetachedExportBlob(`/export/project/${projectId}/summary`, {
+      method: 'POST',
+    });
   },
 
   /** The same summary as text, for reading aloud rather than downloading. */
   fetchProjectSummaryText(projectId: string): Promise<string> {
-    return requestText(`/export/project/${projectId}/summary`);
+    return requestText(`/export/project/${projectId}/summary`, {
+      method: 'POST',
+    });
   },
 
 };

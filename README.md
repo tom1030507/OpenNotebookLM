@@ -733,9 +733,9 @@ endpoints requires
 | `GET`/`PUT`/`DELETE` | `/api/conversations/{id}` | Read, rename, delete a conversation |
 | `GET` | `/api/export/conversation/{id}` | Export one conversation (markdown, json, txt) |
 | `GET` | `/api/export/project/{id}` | Export a project (markdown, json) |
-| `GET` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
-| `GET` | `/api/projects/{id}/mindmap` | Mind map of a project; returns `root`, `node_count`, `model_used` |
-| `GET` | `/api/projects/{id}/video-summary` | Scene script for Studio's video summary; returns `scenes`, `estimated_seconds`, `model_used` |
+| `POST` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
+| `POST` | `/api/projects/{id}/mindmap` | Mind map of a project; returns `root`, `node_count`, `model_used` |
+| `POST` | `/api/projects/{id}/video-summary` | Scene script for Studio's video summary; returns `scenes`, `estimated_seconds`, `model_used` |
 | `DELETE` | `/api/cache/invalidate/project/{id}`, `/api/cache/invalidate/document/{id}` | Invalidate cache entries after an ownership check |
 
 `/api/docs/{id}/file` is no exception to the bearer-token rule, which is why the

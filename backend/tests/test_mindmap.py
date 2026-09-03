@@ -134,7 +134,7 @@ def empty_project():
 
 def test_the_root_is_the_project(two_projects_with_own_documents):
     """The map is rooted in the project it was asked about."""
-    response = client.get("/api/projects/project-a/mindmap")
+    response = client.post("/api/projects/project-a/mindmap")
 
     assert response.status_code == 200
     body = response.json()
@@ -145,7 +145,7 @@ def test_the_root_is_the_project(two_projects_with_own_documents):
 
 def test_each_source_is_a_branch(two_projects_with_own_documents):
     """One branch per source, and only this project's sources."""
-    body = client.get("/api/projects/project-a/mindmap").json()
+    body = client.post("/api/projects/project-a/mindmap").json()
 
     branches = body["root"]["children"]
     assert [branch["label"] for branch in branches] == ["Only In A"]
@@ -154,12 +154,12 @@ def test_each_source_is_a_branch(two_projects_with_own_documents):
 
 def test_another_projects_sources_are_absent(two_projects_with_own_documents):
     """A mind map must not leak a sibling project's sources."""
-    assert "Only In B" not in client.get("/api/projects/project-a/mindmap").text
+    assert "Only In B" not in client.post("/api/projects/project-a/mindmap").text
 
 
 def test_headings_become_topics(two_projects_with_own_documents):
     """The second level is the document's own structure."""
-    body = client.get("/api/projects/project-a/mindmap").json()
+    body = client.post("/api/projects/project-a/mindmap").json()
 
     topics = body["root"]["children"][0]["children"]
     assert [topic["label"] for topic in topics] == ["Rainfall"]
@@ -167,26 +167,26 @@ def test_headings_become_topics(two_projects_with_own_documents):
 
 def test_node_count_covers_the_whole_tree(two_projects_with_own_documents):
     """Root, one document, one topic."""
-    assert client.get("/api/projects/project-a/mindmap").json()["node_count"] == 3
+    assert client.post("/api/projects/project-a/mindmap").json()["node_count"] == 3
 
 
 def test_the_model_is_reported(two_projects_with_own_documents):
     """`model_used` distinguishes a generated map from an extracted one."""
-    body = client.get("/api/projects/project-a/mindmap").json()
+    body = client.post("/api/projects/project-a/mindmap").json()
 
     assert body["model_used"] == "fallback"
 
 
 def test_generated_at_carries_a_utc_designator(two_projects_with_own_documents):
     """A designator-less timestamp is read as local time by the browser."""
-    generated_at = client.get("/api/projects/project-a/mindmap").json()["generated_at"]
+    generated_at = client.post("/api/projects/project-a/mindmap").json()["generated_at"]
 
     assert generated_at.endswith("Z") or generated_at.endswith("+00:00")
 
 
 def test_an_empty_project_maps_to_a_lone_root(empty_project):
     """A project with no sources answers, rather than failing."""
-    response = client.get("/api/projects/project-empty/mindmap")
+    response = client.post("/api/projects/project-empty/mindmap")
 
     assert response.status_code == 200
     assert response.json()["root"]["children"] == []
@@ -195,17 +195,22 @@ def test_an_empty_project_maps_to_a_lone_root(empty_project):
 
 def test_a_missing_project_is_not_found():
     """An id that names nothing answers 404, not 500."""
-    assert client.get("/api/projects/nope/mindmap").status_code == 404
+    assert client.post("/api/projects/nope/mindmap").status_code == 404
 
 
 def test_an_anonymous_caller_is_refused():
     """Every data-bearing route sits behind the token check."""
     anonymous = client.__class__(app)
 
-    assert anonymous.get("/api/projects/project-a/mindmap").status_code == 401
+    assert anonymous.post("/api/projects/project-a/mindmap").status_code == 401
     assert client.__class__(
         app, headers=auth_headers(),
-    ).get("/api/projects/project-a/mindmap").status_code in (200, 404)
+    ).post("/api/projects/project-a/mindmap").status_code in (200, 404)
+
+
+def test_get_cannot_generate_a_mind_map(two_projects_with_own_documents):
+    """Reading a URL must not run the project generation command."""
+    assert client.get("/api/projects/project-a/mindmap").status_code == 405
 
 
 def test_the_route_is_not_a_coroutine():

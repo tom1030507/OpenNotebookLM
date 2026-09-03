@@ -100,6 +100,19 @@ afterEach(() => {
 });
 
 describe('StudioPanel', () => {
+  it('uses non-submit controls for every generation action', () => {
+    render(<StudioPanel />);
+
+    for (const name of [
+      'Audio summary',
+      'Video summary',
+      'Mind map',
+      'Report',
+    ]) {
+      expect(screen.getByRole('button', { name }).getAttribute('type')).toBe('button');
+    }
+  });
+
   it('does not open project A results after switching to project B', async () => {
     const response = deferred<MindMap>();
     vi.spyOn(api, 'fetchProjectMindMap').mockReturnValue(response.promise);

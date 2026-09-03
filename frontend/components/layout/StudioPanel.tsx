@@ -387,6 +387,7 @@ export default function StudioPanel({
               return (
                 <button
                   key={option.id}
+                  type="button"
                   onClick={optionAction(option)}
                   disabled={optionDisabled(option)}
                   aria-label={optionLabel(option)}
