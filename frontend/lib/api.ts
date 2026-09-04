@@ -213,6 +213,18 @@ export interface Account {
   created_at: string;
 }
 
+/** Credentials the sign-in page may present as ready to use. */
+export interface DemoAccountHint {
+  username: string;
+  password: string;
+}
+
+interface DemoAccountResponse {
+  enabled: boolean;
+  username: string | null;
+  password: string | null;
+}
+
 interface ValidationErrorItem {
   msg?: string;
 }
@@ -561,6 +573,21 @@ const api = {
       method: 'POST',
       body: JSON.stringify(account),
     });
+  },
+
+  /** Read the demo credentials this deployment publishes, if any. */
+  async getDemoAccount(): Promise<DemoAccountHint | null> {
+    try {
+      const hint = await requestJson<DemoAccountResponse>('/auth/demo-account');
+      if (!hint.enabled || !hint.username || !hint.password) {
+        return null;
+      }
+      return { username: hint.username, password: hint.password };
+    } catch {
+      // A hint is a convenience. A backend that cannot answer must not be the
+      // reason somebody with real credentials cannot reach the sign-in form.
+      return null;
+    }
   },
 
   /** Read the account a token belongs to. */

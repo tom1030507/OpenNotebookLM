@@ -67,6 +67,18 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class DemoAccountResponse(BaseModel):
+    """Schema for the demo credentials the sign-in page may offer.
+
+    Deliberately unauthenticated: a deployment that publishes a demo account
+    has to be able to tell anyone standing at the sign-in page what it is.
+    `enabled` is false whenever there is nothing safe or true to publish.
+    """
+    enabled: bool
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
 # Project schemas
 class ProjectBase(BaseModel):
     """Base project schema."""

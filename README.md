@@ -346,6 +346,18 @@ directory as `metrics.json` and `report.md`.
 <details>
 <summary><b>Who can read what</b> — sign-in and ownership</summary>
 
+Every startup keeps a **demo account** present — `demo` / `demo1234` by
+default — so a fresh install is not a locked door, and the sign-in page shows
+those credentials with a button that fills the form. An account that already
+exists is never modified, so changing `DEMO_PASSWORD` does not rotate a
+password already in the database; when the stored password stops matching, the
+sign-in page quietly stops offering it.
+
+> **Set `SEED_DEMO_USER=false` on any deployment other people can reach.**
+> While it is on, anyone who can open the sign-in page can read a working
+> username and password. Deleting the account is not enough — the next restart
+> recreates it.
+
 Development keeps registration on `/login` open through
 `POST /api/auth/register`; passwords are hashed with bcrypt. Production closes
 public registration unless `ALLOW_PUBLIC_REGISTRATION=true` is set. Bootstrap
@@ -678,6 +690,10 @@ improve on their own.
 | `JWT_ALGORITHM` | Signing algorithm | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime | `720` |
 | `ALLOW_PUBLIC_REGISTRATION` | Public signup; defaults on only in development | environment-dependent |
+| `SEED_DEMO_USER` | Keep a demo account present and publish it on the sign-in page | `true` |
+| `DEMO_USERNAME` | Demo account username | `demo` |
+| `DEMO_EMAIL` | Demo account email | `demo@example.com` |
+| `DEMO_PASSWORD` | Demo account password (min 8 characters) | `demo1234` |
 | **Uploads** | | |
 | `MAX_FILE_SIZE_MB` | Upload limit | `50` |
 | `ALLOWED_FILE_TYPES` | Accepted extensions | `pdf,txt,md` |

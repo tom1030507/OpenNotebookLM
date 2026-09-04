@@ -124,7 +124,15 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 720
     allow_public_registration: Optional[bool] = None
-    
+
+    # A demo account the deployment keeps present so a fresh database is not a
+    # locked door. Its credentials are published on the sign-in page, so any
+    # deployment reachable by anyone else must set SEED_DEMO_USER=false.
+    seed_demo_user: bool = True
+    demo_username: str = "demo"
+    demo_email: str = "demo@example.com"
+    demo_password: str = "demo1234"
+
     # Monitoring
     enable_metrics: bool = True
     log_level: str = "INFO"

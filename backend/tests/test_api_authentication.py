@@ -58,6 +58,10 @@ PUBLIC_PATHS = frozenset({
     # exchange credentials for one.
     "/api/auth/register",
     "/api/auth/token",
+    # The sign-in page has to be able to say which demo credentials work
+    # before anybody holds one. It returns nothing at all unless this
+    # deployment deliberately published a demo account.
+    "/api/auth/demo-account",
     # FastAPI's own docs. They describe the API's shape and return none of its
     # data; the endpoints they describe are all protected.
     "/openapi.json",

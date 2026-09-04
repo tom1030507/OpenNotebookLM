@@ -316,3 +316,84 @@ def test_development_can_explicitly_disable_rate_limits():
         app.dependency_overrides.pop(get_settings, None)
 
     assert [response.status_code for response in responses] == [200] * 4
+
+
+def demo_settings(**overrides):
+    """Build settings describing a deployment that offers a demo account."""
+    fields = {
+        "app_env": "production",
+        "seed_demo_user": True,
+        "demo_username": "demo",
+        "demo_email": "demo@example.com",
+        "demo_password": "demo1234",
+    }
+    fields.update(overrides)
+    return Settings(**fields)
+
+
+def test_demo_account_hint_offers_credentials_that_actually_sign_in():
+    """The sign-in page is told the demo credentials only when they work."""
+    with TestingSessionLocal() as db:
+        test_auth_service.register_user(db, "demo", "demo@example.com", "demo1234")
+
+    app.dependency_overrides[get_settings] = lambda: demo_settings()
+    try:
+        response = client.get("/api/auth/demo-account")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "enabled": True,
+        "username": "demo",
+        "password": "demo1234",
+    }
+    assert get_token("demo", "demo1234").status_code == 200
+
+
+def test_demo_account_hint_is_withheld_when_the_deployment_opted_out():
+    """A deployment with seeding off publishes no credentials at all."""
+    app.dependency_overrides[get_settings] = lambda: demo_settings(seed_demo_user=False)
+    try:
+        response = client.get("/api/auth/demo-account")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 200
+    assert response.json() == {"enabled": False, "username": None, "password": None}
+
+
+def test_demo_account_hint_is_withheld_once_the_password_no_longer_matches():
+    """A demo password changed by hand stops being published."""
+    with TestingSessionLocal() as db:
+        test_auth_service.register_user(
+            db,
+            "demo-rotated",
+            "demo-rotated@example.com",
+            "not-the-configured-one",
+        )
+
+    app.dependency_overrides[get_settings] = lambda: demo_settings(
+        demo_username="demo-rotated",
+        demo_email="demo-rotated@example.com",
+    )
+    try:
+        response = client.get("/api/auth/demo-account")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.json() == {"enabled": False, "username": None, "password": None}
+
+
+def test_demo_account_hint_is_withheld_when_the_account_is_absent():
+    """Nothing is published for an account that does not exist."""
+    app.dependency_overrides[get_settings] = lambda: demo_settings(
+        demo_username="never-seeded",
+        demo_email="never-seeded@example.com",
+    )
+    try:
+        response = client.get("/api/auth/demo-account")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.json() == {"enabled": False, "username": None, "password": None}
