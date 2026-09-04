@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   LogIn, 
@@ -11,9 +11,10 @@ import {
   Eye,
   EyeOff,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  KeyRound
 } from 'lucide-react';
-import api from '@/lib/api';
+import api, { type DemoAccountHint } from '@/lib/api';
 import { storeSession, type SessionUser } from '@/lib/session';
 import useStore from '@/store/useStore';
 import BrandLogo from '@/components/BrandLogo';
@@ -24,6 +25,34 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [demoAccount, setDemoAccount] = useState<DemoAccountHint | null>(null);
+
+  // A deployment that seeded a demo account publishes its credentials here so
+  // a first-time visitor is not staring at a form they have no account for.
+  // It resolves to null whenever there is nothing to offer.
+  useEffect(() => {
+    let active = true;
+    api.getDemoAccount().then((hint) => {
+      if (active) {
+        setDemoAccount(hint);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const fillWithDemoAccount = () => {
+    if (!demoAccount) {
+      return;
+    }
+    setFormData((current) => ({
+      ...current,
+      username: demoAccount.username,
+      password: demoAccount.password,
+    }));
+    setError('');
+  };
   
   // Form data
   const [formData, setFormData] = useState({
@@ -120,6 +149,29 @@ export default function LoginPage() {
 
         {/* Form Card */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8">
+          {isLogin && demoAccount && (
+            <div
+              data-testid="demo-account-hint"
+              className="mb-4 rounded-lg border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-900/30"
+            >
+              <div className="flex items-start gap-2">
+                <KeyRound className="mt-0.5 w-4 h-4 shrink-0 text-purple-600 dark:text-purple-300" />
+                <div className="text-sm text-purple-900 dark:text-purple-100">
+                  <p className="font-medium">You can sign in with the demo account</p>
+                  <p className="mt-1 font-mono text-xs break-all">
+                    {demoAccount.username} / {demoAccount.password}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={fillWithDemoAccount}
+                className="mt-3 w-full py-1.5 px-3 rounded-md border border-purple-300 text-sm font-medium text-purple-700 hover:bg-purple-100 transition-colors dark:border-purple-700 dark:text-purple-200 dark:hover:bg-purple-800/40"
+              >
+                Use demo account
+              </button>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Username */}
             <div>

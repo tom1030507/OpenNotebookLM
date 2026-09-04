@@ -7,8 +7,14 @@ import structlog
 from app.db.database import get_db
 from app.config import Settings, get_settings
 from app.db.models import User
-from app.schemas import TokenResponse, UserRegister, UserResponse
+from app.schemas import (
+    DemoAccountResponse,
+    TokenResponse,
+    UserRegister,
+    UserResponse,
+)
 from app.services.auth import AuthService, DuplicateUserError, get_auth_service
+from app.services.bootstrap import advertised_demo_account
 from app.routers.rate_limit import limit_login, limit_registration
 
 router = APIRouter()
@@ -140,3 +146,42 @@ async def login(
 async def get_me(current_user: User = Depends(get_current_user)):
     """Return the account the presented token belongs to."""
     return current_user
+
+
+@router.get(
+    "/auth/demo-account",
+    response_model=DemoAccountResponse,
+    dependencies=[Depends(limit_login)],
+)
+async def get_demo_account(
+    db: Session = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
+    settings: Settings = Depends(get_settings),
+):
+    """Tell the sign-in page which demo credentials it may offer.
+
+    Args:
+        db: Database session.
+        auth_service: Password hashing/account service.
+        settings: Demo-account policy for this deployment.
+
+    Returns:
+        The advertisable credentials, or a disabled response when there are
+        none. The stored password is verified, so this never advertises one
+        that would fail to sign in.
+    """
+    account = advertised_demo_account(
+        db,
+        auth_service,
+        enabled=settings.seed_demo_user,
+        username=settings.demo_username,
+        email=settings.demo_email,
+        password=settings.demo_password,
+    )
+    if account is None:
+        return DemoAccountResponse(enabled=False)
+    return DemoAccountResponse(
+        enabled=True,
+        username=account.username,
+        password=account.password,
+    )

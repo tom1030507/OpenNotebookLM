@@ -364,4 +364,51 @@ describe('login page', () => {
     expect(push).not.toHaveBeenCalled();
     expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeUndefined();
   });
+  it('offers the demo account the backend publishes', async () => {
+    vi.spyOn(api, 'getDemoAccount').mockResolvedValue({
+      username: 'demo',
+      password: 'demo1234',
+    });
+
+    render(<LoginPage />);
+
+    const hint = await screen.findByTestId('demo-account-hint');
+    expect(hint.textContent).toContain('demo');
+    expect(hint.textContent).toContain('demo1234');
+  });
+
+  it('fills the sign-in form from the published demo account', async () => {
+    vi.spyOn(api, 'getDemoAccount').mockResolvedValue({
+      username: 'demo',
+      password: 'demo1234',
+    });
+    const login = vi.spyOn(api, 'login').mockResolvedValue({
+      access_token: 'a-signed-token',
+      token_type: 'bearer',
+    });
+    vi.spyOn(api, 'getAccount').mockResolvedValue({
+      id: 'user-1',
+      username: 'demo',
+      email: 'demo@example.com',
+      created_at: '2026-01-01T00:00:00Z',
+    });
+
+    render(<LoginPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /use demo account/i }));
+    submit();
+
+    await waitFor(() => expect(login).toHaveBeenCalledWith({
+      username: 'demo',
+      password: 'demo1234',
+    }));
+  });
+
+  it('shows no demo hint when the deployment publishes none', async () => {
+    vi.spyOn(api, 'getDemoAccount').mockResolvedValue(null);
+
+    render(<LoginPage />);
+
+    await waitFor(() => expect(api.getDemoAccount).toHaveBeenCalled());
+    expect(screen.queryByTestId('demo-account-hint')).toBeNull();
+  });
 });

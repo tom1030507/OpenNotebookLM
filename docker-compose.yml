@@ -54,6 +54,13 @@ services:
       RATE_LIMIT_MAX_KEYS: "${RATE_LIMIT_MAX_KEYS:-10000}"
       TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-false}"
       ALLOW_PUBLIC_REGISTRATION: "${ALLOW_PUBLIC_REGISTRATION:-false}"
+      # A demo account kept present on every startup, with its credentials
+      # published on the sign-in page. Set SEED_DEMO_USER=false for any
+      # deployment that is reachable by anyone you do not trust.
+      SEED_DEMO_USER: "${SEED_DEMO_USER:-true}"
+      DEMO_USERNAME: ${DEMO_USERNAME:-demo}
+      DEMO_EMAIL: ${DEMO_EMAIL:-demo@example.com}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-demo1234}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CACHE_NAMESPACE: ${CACHE_NAMESPACE:-opennotebooklm}
       CACHE_MAX_ENTRIES: "${CACHE_MAX_ENTRIES:-10000}"

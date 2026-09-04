@@ -531,4 +531,37 @@ describe('API client', () => {
       expect.objectContaining({ headers: expect.any(Headers) }),
     );
   });
+  it('reports the demo account the sign-in page may offer', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      enabled: true,
+      username: 'demo',
+      password: 'demo1234',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getDemoAccount()).resolves.toEqual({
+      username: 'demo',
+      password: 'demo1234',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/demo-account',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+  });
+
+  it('reports no demo account when the deployment disabled it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      enabled: false,
+      username: null,
+      password: null,
+    })));
+
+    await expect(api.getDemoAccount()).resolves.toBeNull();
+  });
+
+  it('reports no demo account rather than failing the sign-in page', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('backend unreachable')));
+
+    await expect(api.getDemoAccount()).resolves.toBeNull();
+  });
 });
