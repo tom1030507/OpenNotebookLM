@@ -77,6 +77,25 @@ def test_thirty_first_query_for_one_account_returns_429(monkeypatch):
     assert responses[-1].headers["Retry-After"] == "60"
 
 
+def test_query_uses_maximum_output_budget_when_caller_omits_limit(monkeypatch):
+    """The default query budget leaves a reasoning model room to finish."""
+    received_max_tokens = None
+
+    class RecordingRAG:
+        def query(self, **kwargs):
+            nonlocal received_max_tokens
+            received_max_tokens = kwargs["max_tokens"]
+            return QUERY_RESULT
+
+    response = query_client(monkeypatch, RecordingRAG()).post(
+        "/api/query",
+        json={"query": "introduce this document"},
+    )
+
+    assert response.status_code == 200
+    assert received_max_tokens == 8192
+
+
 def test_third_concurrent_query_for_one_account_returns_429(monkeypatch):
     """A third active model call cannot consume another worker/budget slot."""
     started = Event()
