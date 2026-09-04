@@ -1,7 +1,7 @@
 """PDF processing adapter."""
 import io
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 import structlog
 
@@ -44,7 +44,7 @@ class PDFAdapter:
         if not HAS_PYMUPDF and not HAS_PDFMINER:
             raise ImportError("No PDF library available. Install PyMuPDF or pdfminer.six")
     
-    def extract_text_from_file(self, file_path: str) -> Dict[str, any]:
+    def extract_text_from_file(self, file_path: str) -> Dict[str, Any]:
         """Extract text from a PDF file.
         
         Args:
@@ -54,11 +54,60 @@ class PDFAdapter:
             Dictionary containing extracted text and metadata
         """
         if self.use_pymupdf:
-            return self._extract_with_pymupdf(file_path)
-        else:
-            return self._extract_with_pdfminer(file_path)
+            return self._extract_file_with_fallback(
+                primary=lambda: self._extract_with_pymupdf(file_path),
+                fallback=(
+                    lambda: self._extract_with_pdfminer(file_path)
+                ) if HAS_PDFMINER else None,
+                primary_parser="pymupdf",
+                fallback_parser="pdfminer",
+            )
+
+        return self._extract_file_with_fallback(
+            primary=lambda: self._extract_with_pdfminer(file_path),
+            fallback=(
+                lambda: self._extract_with_pymupdf(file_path)
+            ) if HAS_PYMUPDF else None,
+            primary_parser="pdfminer",
+            fallback_parser="pymupdf",
+        )
+
+    def _extract_file_with_fallback(
+        self,
+        primary: Callable[[], Dict[str, Any]],
+        fallback: Optional[Callable[[], Dict[str, Any]]],
+        primary_parser: str,
+        fallback_parser: str,
+    ) -> Dict[str, Any]:
+        """Try the alternate parser when the preferred one cannot find text."""
+        try:
+            result = primary()
+        except Exception as error:
+            if fallback is None:
+                raise
+            logger.warning(
+                "Primary PDF parser failed; trying fallback",
+                primary_parser=primary_parser,
+                fallback_parser=fallback_parser,
+                error=str(error),
+            )
+            return fallback()
+
+        if str(result.get("text") or "").strip() or fallback is None:
+            return result
+
+        # Some valid PDFs place every glyph inside a Form XObject. pdfminer can
+        # expose those glyphs without grouping them into the top-level text
+        # boxes this adapter reads, so an empty result is parser-specific rather
+        # than proof that the document needs OCR.
+        logger.warning(
+            "Primary PDF parser found no text; trying fallback",
+            primary_parser=primary_parser,
+            fallback_parser=fallback_parser,
+        )
+        return fallback()
     
-    def extract_text_from_bytes(self, pdf_bytes: bytes) -> Dict[str, any]:
+    def extract_text_from_bytes(self, pdf_bytes: bytes) -> Dict[str, Any]:
         """Extract text from PDF bytes.
         
         Args:
@@ -72,7 +121,7 @@ class PDFAdapter:
         else:
             return self._extract_bytes_with_pdfminer(pdf_bytes)
     
-    def _extract_with_pymupdf(self, file_path: str) -> Dict[str, any]:
+    def _extract_with_pymupdf(self, file_path: str) -> Dict[str, Any]:
         """Extract text using PyMuPDF."""
         try:
             doc = fitz.open(file_path)
@@ -84,12 +133,15 @@ class PDFAdapter:
                 
                 # Clean up text
                 text = self._clean_text(text)
+                bbox = page.rect.irect
                 
                 pages.append({
                     "page_num": page_num,
                     "text": text,
                     "char_count": len(text),
-                    "bbox": page.rect.irect  # Page bounding box
+                    # SQLAlchemy's JSON serializer cannot persist PyMuPDF's
+                    # IRect object, which would fail ingestion after fallback.
+                    "bbox": [bbox.x0, bbox.y0, bbox.x1, bbox.y1],
                 })
                 full_text.append(text)
             
@@ -113,7 +165,7 @@ class PDFAdapter:
             logger.error("Failed to extract text with PyMuPDF", error=str(e))
             raise
     
-    def _extract_bytes_with_pymupdf(self, pdf_bytes: bytes) -> Dict[str, any]:
+    def _extract_bytes_with_pymupdf(self, pdf_bytes: bytes) -> Dict[str, Any]:
         """Extract text from bytes using PyMuPDF."""
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -148,7 +200,7 @@ class PDFAdapter:
             logger.error("Failed to extract text from bytes with PyMuPDF", error=str(e))
             raise
     
-    def _extract_with_pdfminer(self, file_path: str) -> Dict[str, any]:
+    def _extract_with_pdfminer(self, file_path: str) -> Dict[str, Any]:
         """Extract text using pdfminer."""
         try:
             # Build the document text by joining the pages, rather than parsing
@@ -182,7 +234,7 @@ class PDFAdapter:
             logger.error("Failed to extract text with pdfminer", error=str(e))
             raise
     
-    def _extract_bytes_with_pdfminer(self, pdf_bytes: bytes) -> Dict[str, any]:
+    def _extract_bytes_with_pdfminer(self, pdf_bytes: bytes) -> Dict[str, Any]:
         """Extract text from bytes using pdfminer."""
         try:
             # Create a file-like object from bytes
@@ -272,7 +324,7 @@ class PDFAdapter:
 
         return text.strip()
     
-    def extract_with_ocr(self, file_path: str) -> Dict[str, any]:
+    def extract_with_ocr(self, file_path: str) -> Dict[str, Any]:
         """Extract text using OCR (placeholder for future implementation).
         
         Args:
