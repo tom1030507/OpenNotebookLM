@@ -23,31 +23,6 @@ DATASET_PATH = EVAL_DIR / "dataset.json"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
-class CachedResponse:
-    """The subset of `requests.Response` that `URLAdapter` actually touches."""
-
-    def __init__(self, content: bytes):
-        """Store the cached body.
-
-        Args:
-            content: Raw response bytes.
-        """
-        self.content = content
-        self.status_code = 200
-
-    @property
-    def text(self) -> str:
-        """The body as text, decoded as UTF-8.
-
-        Returns:
-            Decoded body.
-        """
-        return self.content.decode("utf-8", errors="replace")
-
-    def raise_for_status(self) -> None:
-        """No-op: a cached page is by definition a page that fetched cleanly."""
-
-
 def load_dataset(path: Path = DATASET_PATH) -> Dict:
     """Read the corpus + question set.
 
@@ -97,11 +72,12 @@ def fetch_into_cache(entries: Iterable[Dict], refresh: bool = False) -> List[str
 
 @contextlib.contextmanager
 def serve_from_cache(entries: Iterable[Dict]):
-    """Make `requests.get` return cached bodies for the corpus URLs.
+    """Replay cached corpus bytes through the real URL extraction pipeline.
 
-    Patches `requests.get` for the duration, which is process-wide. That is
-    acceptable in a one-off script: the eval path makes no other HTTP calls, and
-    it runs with `LLM_MODE=none`.
+    Replaces the adapter's download boundary, including DNS resolution, so
+    replay remains offline even as its HTTP transport changes. HTML parsing,
+    metadata extraction, and content cleanup still use the real adapter. The
+    patch is process-wide and intended only for this one-off eval script.
 
     Args:
         entries: Corpus entries with `id` and `url`.
@@ -109,13 +85,15 @@ def serve_from_cache(entries: Iterable[Dict]):
     Yields:
         None.
     """
+    from app.adapters.url import URLAdapter
+
     by_url = {entry["url"]: entry["id"] for entry in entries}
 
-    def fake_get(url, *args, **kwargs):
+    def cached_download(_adapter, url, _control):
         doc_id = by_url.get(url)
         if doc_id is None:
             raise requests.RequestException(f"{url} is not part of the eval corpus")
-        return CachedResponse(cache_path(doc_id).read_bytes())
+        return url, cache_path(doc_id).read_bytes()
 
-    with mock.patch.object(requests, "get", fake_get):
+    with mock.patch.object(URLAdapter, "_download", cached_download):
         yield
