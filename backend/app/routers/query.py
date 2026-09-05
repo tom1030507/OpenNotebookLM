@@ -76,7 +76,7 @@ class QueryRequest(BaseModel):
     # read it; this is where it now takes effect.
     top_k: int = Field(default_factory=lambda: get_settings().retrieval_top_k, ge=1, le=50)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=512, ge=1, le=8192)
+    max_tokens: int = Field(default=8192, ge=1, le=8192)
     include_sources: bool = True
 
 
