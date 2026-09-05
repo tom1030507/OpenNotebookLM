@@ -41,7 +41,18 @@ test('answers from a ready source and persists messages and citation after reloa
   }
 
   await expect(page.getByText(question, { exact: true })).toBeVisible();
-  await expect(page.getByText(result.answer, { exact: true })).toBeVisible();
+  // The UI renders Markdown and compact citation controls; persisted text
+  // retains the provider's labels and is checked separately below.
+  const renderedAnswer = page.getByRole('main').locator('.prose').last();
+  await expect(renderedAnswer).toContainText('ORBIT-7319');
+  const citation = renderedAnswer.getByRole('button', { name: 'Preview source 1', exact: true });
+  await expect(citation).toHaveText('[1]');
+  await citation.hover();
+  const preview = page.getByRole('tooltip');
+  await expect(preview).toContainText('E2E Observatory Field Notes');
+  await expect(preview).toContainText('ORBIT-7319');
+  await page.keyboard.press('Escape');
+  await expect(preview).toBeHidden();
   const sourcesPanel = page.getByText('Sources:', { exact: true }).last().locator('..');
   await expect(sourcesPanel).toContainText('E2E Observatory Field Notes');
 
@@ -66,7 +77,12 @@ test('answers from a ready source and persists messages and citation after reloa
   expect((await detailReloaded).status()).toBe(200);
 
   await expect(page.getByText(question, { exact: true })).toBeVisible();
-  await expect(page.getByText(result.answer, { exact: true })).toBeVisible();
+  await expect(renderedAnswer).toContainText('ORBIT-7319');
+  await expect(citation).toHaveText('[1]');
+  await citation.hover();
+  await expect(preview).toContainText('ORBIT-7319');
+  await page.keyboard.press('Escape');
+  await expect(preview).toBeHidden();
   await expect(page.getByText('Sources:', { exact: true }).last().locator('..'))
     .toContainText('E2E Observatory Field Notes');
 

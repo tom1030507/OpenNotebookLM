@@ -97,9 +97,9 @@ describe('ChatArea', () => {
         { id: 5, source: 'Results paper', page: 8, text: 'The measured result.' },
       ]);
 
-      expect(screen.getByText('[Source 1]')).toBeTruthy();
-      expect(screen.getByText('[Source 5]')).toBeTruthy();
-      expect(screen.queryByText('[Source 2]')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Preview source 1' }).textContent).toBe('[1]');
+      expect(screen.getByRole('button', { name: 'Preview source 5' }).textContent).toBe('[5]');
+      expect(screen.queryByText('[2]')).toBeNull();
       expect(screen.queryByText('Unused retrieval')).toBeNull();
       expect(screen.getByText('Method paper')).toBeTruthy();
       expect(screen.getByText('Results paper')).toBeTruthy();
@@ -125,8 +125,8 @@ describe('ChatArea', () => {
 
       expect(firstDisclosure?.open).toBe(true);
       expect(secondDisclosure?.open).toBe(false);
-      expect(firstDisclosure?.textContent).toContain('[Source 1]');
-      expect(secondDisclosure?.textContent).toContain('[Source 5]');
+      expect(firstDisclosure?.textContent).toContain('[1]');
+      expect(secondDisclosure?.textContent).toContain('[5]');
       expect(screen.getAllByText('Research paper')).toHaveLength(2);
     });
 
@@ -140,10 +140,10 @@ describe('ChatArea', () => {
 
       expect(screen.getByText('Older source')).toBeTruthy();
       expect(screen.getByText('Legacy document')).toBeTruthy();
-      expect(screen.getByText('[Source 5]')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Preview source 5' })).toBeTruthy();
       expect(screen.queryByText('Unused numbered source')).toBeNull();
-      expect(screen.queryByText('[Source 1]')).toBeNull();
-      expect(screen.queryByText('[Source 2]')).toBeNull();
+      expect(screen.queryByText('[1]')).toBeNull();
+      expect(screen.queryByText('[2]')).toBeNull();
       expect(screen.queryByText('[Source document-id]')).toBeNull();
     });
 
@@ -154,9 +154,38 @@ describe('ChatArea', () => {
       ]);
 
       expect(screen.getByText('Numbered source')).toBeTruthy();
-      expect(screen.getByText('[Source 5]')).toBeTruthy();
+      expect(screen.getByText('[5]')).toBeTruthy();
       expect(screen.getByText('Unnumbered source')).toBeTruthy();
       expect(screen.getByText('Preserved evidence.')).toBeTruthy();
+    });
+
+    it('matches compact references to the source list and opens the corresponding preview', () => {
+      renderAnswer('The result [4].', [
+        { id: 1, source: 'Unused source', text: 'Unused evidence.' },
+        { id: 4, source: 'Results paper', page: 8, text: 'The measured result.' },
+      ]);
+      expect(screen.queryByText('Unused source')).toBeNull();
+      fireEvent.mouseEnter(screen.getByRole('button', { name: 'Preview source 4' }));
+      expect(screen.getByRole('tooltip').textContent).toContain('The measured result.');
+      expect(screen.getByRole('tooltip').textContent).toContain('Page 8');
+    });
+
+    it.each([
+      'Use `values[1]` to select the second element.',
+      'See [1](https://example.com) for the linked example.',
+    ])('preserves legacy sources when numbers occur only in code or links: %s', (content) => {
+      renderAnswer(content, [{ id: 4, source: 'Legacy evidence', text: 'The original supporting excerpt.' }]);
+      expect(screen.getByText('Legacy evidence')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /Preview source/ })).toBeNull();
+    });
+
+    it('ignores even matching source numbers in code when deciding which passages were cited', () => {
+      renderAnswer('Use `values[1]` or `values[4]`.', [
+        { id: 1, source: 'First legacy source' },
+        { id: 5, source: 'Second legacy source' },
+      ]);
+      expect(screen.getByText('First legacy source')).toBeTruthy();
+      expect(screen.getByText('Second legacy source')).toBeTruthy();
     });
   });
 
