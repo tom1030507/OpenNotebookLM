@@ -4,6 +4,9 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, Check } from 'lucide-react';
+import type { Citation } from '@/lib/api';
+import { citationId, rehypeCitations } from '@/lib/citations';
+import InlineCitation from './InlineCitation';
 
 interface HighlightedCodeProps {
   code: string;
@@ -41,10 +44,19 @@ const HighlightedCode = React.lazy(
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  citations?: Citation[];
 }
 
-export default function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
+export default function MarkdownRenderer({ content, className = '', citations }: MarkdownRendererProps) {
   const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
+  const citationsById = React.useMemo(() => {
+    const byId = new Map<number, Citation>();
+    for (const citation of citations ?? []) {
+      const id = citationId(citation);
+      if (id !== null) byId.set(id, citation);
+    }
+    return byId;
+  }, [citations]);
 
   const copyToClipboard = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -56,6 +68,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
     <div className={`prose prose-sm dark:prose-invert max-w-none ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeCitations, { ids: new Set(citationsById.keys()) }]]}
         components={{
         // A language block renders its own fallback/highlighter container.
         // Keep ReactMarkdown's pre for ordinary fenced code, but unwrap this
@@ -105,7 +118,10 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
           );
         },
         // Custom link rendering
-        a({ href, children }) {
+        a({ href, children, node }) {
+          const id = node?.properties['data-citation-id'];
+          const citation = typeof id === 'number' ? citationsById.get(id) : undefined;
+          if (typeof id === 'number' && citation) return <InlineCitation id={id} citation={citation} />;
           return (
             <a
               href={href}

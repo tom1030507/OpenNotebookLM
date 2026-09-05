@@ -17,6 +17,7 @@ import {
 import MarkdownRenderer from '../MarkdownRenderer';
 import { requestAddSources } from '../sourceActions';
 import type { Message } from '@/lib/api';
+import { citationId, referencedCitationIds } from '@/lib/citations';
 import BrandLogo from '../BrandLogo';
 import { useOptionalProjectDialog } from '../ProjectDialogProvider';
 
@@ -34,15 +35,14 @@ interface PendingQuery {
 }
 
 const MessageRow = React.memo(function MessageRow({ message }: { message: Message }) {
-  const referencedIds = new Set(
-    Array.from(message.content.matchAll(/\[Source\s+(\d+)\]/gi), (match) => Number(match[1])),
+  const referencedIds = React.useMemo(
+    () => referencedCitationIds(message.content, message.citations ?? []),
+    [message.content, message.citations],
   );
   const citations = (message.citations ?? []).map((citation, index) => ({
     citation,
     index,
-    id: typeof citation.id === 'number' && Number.isSafeInteger(citation.id) && citation.id > 0
-      ? citation.id
-      : null,
+    id: citationId(citation),
   })).filter(({ id }) => (
     // Older messages lack source numbers; guessing from position could attach
     // evidence to the wrong claim, so retain those entries without a number.
@@ -62,7 +62,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         } rounded-lg px-4 py-3`}
       >
         {message.role === 'assistant' ? (
-          <MarkdownRenderer content={message.content} />
+          <MarkdownRenderer content={message.content} citations={message.citations} />
         ) : (
           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
         )}
@@ -74,7 +74,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
               const key = id === null ? `legacy-${index}` : `source-${id}`;
               const label = (
                 <>
-                  {id !== null && <span className="font-medium mr-2">[Source {id}]</span>}
+                  {id !== null && <span className="font-medium mr-2">[{id}]</span>}
                   <span className="font-medium">{citation.source}</span>
                   {citation.page != null && <span className="opacity-70"> - page {citation.page}</span>}
                 </>
