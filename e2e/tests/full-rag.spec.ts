@@ -130,7 +130,16 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   }
 
   await expect(page.getByText(question, { exact: true })).toBeVisible();
-  await expect(page.getByText(result.answer, { exact: true })).toBeVisible();
+  const renderedAnswer = page.getByRole('main').locator('.prose').last();
+  await expect(renderedAnswer).toContainText(IDENTIFIER);
+  const citation = renderedAnswer.getByRole('button', { name: 'Preview source 1', exact: true });
+  await expect(citation).toHaveText('[1]');
+  await citation.hover();
+  const preview = page.getByRole('tooltip');
+  await expect(preview).toContainText(filename);
+  await expect(preview).toContainText('Page 1');
+  await page.keyboard.press('Escape');
+  await expect(preview).toBeHidden();
   const sourcesPanel = page.getByText('Sources:', { exact: true }).last().locator('..');
   await expect(sourcesPanel).toContainText(filename);
   await expect(sourcesPanel).toContainText('page 1');
@@ -155,7 +164,12 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   expect((await detailReloaded).status()).toBe(200);
 
   await expect(page.getByText(question, { exact: true })).toBeVisible();
-  await expect(page.getByText(result.answer, { exact: true })).toBeVisible();
+  await expect(renderedAnswer).toContainText(IDENTIFIER);
+  await expect(citation).toHaveText('[1]');
+  await citation.hover();
+  await expect(preview).toContainText(filename);
+  await page.keyboard.press('Escape');
+  await expect(preview).toBeHidden();
   const reloadedAssistant = page.getByText('Sources:', { exact: true }).last().locator('..');
   await expect(reloadedAssistant).toContainText(filename);
   await expect(reloadedAssistant).toContainText('page 1');
