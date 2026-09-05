@@ -292,7 +292,7 @@ class MindMapNode(BaseModel):
     id: str
     label: str
     kind: str = Field(..., pattern="^(project|document|topic)$")
-    # Source type for a document node; nothing for the others so far.
+    # Source-grounded explanation of the concept, when one was generated.
     detail: Optional[str] = None
     # Set on a document node and on its topics, so selecting a topic can open
     # the source it came from.
@@ -317,6 +317,10 @@ class MindMapResponse(BaseModel):
     # tell a generated map from an extracted one.
     model_used: str
     node_count: int
+    # Input coverage is explicit when the model's bounded source sample is
+    # smaller than the project. Optional for previously saved map responses.
+    source_count: Optional[int] = Field(default=None, ge=0)
+    total_source_count: Optional[int] = Field(default=None, ge=0)
     root: MindMapNode
 
 

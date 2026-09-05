@@ -110,6 +110,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [pendingQuery, setPendingQuery] = useState<PendingQuery | null>(null);
   const nextRequestIdRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const composerGenerationRef = useRef(0);
   const projectDialog = useOptionalProjectDialog();
   
   const currentProject = useStore((state) => state.currentProject);
@@ -120,6 +122,17 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const createConversation = useStore((state) => state.createConversation);
   const fetchMessages = useStore((state) => state.fetchMessages);
   const followMessageRead = useStore((state) => state.followMessageRead);
+  const pendingMindMapQuestion = useStore((state) => state.pendingMindMapQuestion);
+  const consumeMindMapQuestion = useStore((state) => state.consumeMindMapQuestion);
+
+  useEffect(() => useStore.subscribe((state, previous) => {
+    // Observe each transition so even a batched A → B → A cannot retain a
+    // question from the previous project or signed-in account.
+    if (state.currentProject?.id !== previous.currentProject?.id) {
+      composerGenerationRef.current += 1;
+      setInputValue('');
+    }
+  }), []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -132,6 +145,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const submitQuery = async (query: string) => {
     if (!currentProject) return;
 
+    const composerGeneration = composerGenerationRef.current;
     const requestId = nextRequestIdRef.current + 1;
     nextRequestIdRef.current = requestId;
     setPendingQuery({
@@ -166,7 +180,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             }
           : pending
       ));
-      if (!(error instanceof QueryMessageRefreshError)) {
+      if (!(error instanceof QueryMessageRefreshError)
+        && composerGenerationRef.current === composerGeneration) {
         // A reader can start composing another question while a request fails.
         // Do not overwrite that newer text with the failed question.
         setInputValue((value) => value || query);
@@ -242,6 +257,21 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
     && pendingQuery.projectId === currentProject?.id
     && pendingQuery.conversationId === (currentConversation?.id ?? null);
   const isStreaming = pendingQueryIsActive && !pendingQuery.error;
+
+  useEffect(() => {
+    if (!pendingMindMapQuestion || !currentProject || !canChat || isStreaming) return;
+
+    // Dialog and drawer cleanup restores their trigger first; focusing in the
+    // next frame keeps that cleanup from stealing focus back from the composer.
+    const frame = requestAnimationFrame(() => {
+      const question = consumeMindMapQuestion(currentProject.id);
+      if (question === null) return;
+      setInputValue((value) => value.trim() ? `${value}\n\n${question}` : question);
+      composerRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingMindMapQuestion, currentProject, canChat, isStreaming, consumeMindMapQuestion]);
+
   const hasPendingMessage = pendingQueryIsActive && !messages.some((message) => (
     message.role === 'user'
     && message.content === pendingQuery.content
@@ -413,6 +443,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             
             <div className="min-w-0 flex-1 relative">
               <textarea
+                ref={composerRef}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => {

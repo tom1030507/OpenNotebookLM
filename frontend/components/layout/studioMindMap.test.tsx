@@ -107,14 +107,14 @@ describe('Studio mind map', () => {
     vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMap());
 
     await openMindMap();
-    const branch = await screen.findByRole('button', { name: /Only source/ });
+    const branch = await screen.findByRole('button', { name: 'Collapse Only source' });
     expect(branch.getAttribute('aria-expanded')).toBe('true');
 
     fireEvent.click(branch);
 
     expect(screen.queryByText('Rainfall')).toBeNull();
     expect(
-      screen.getByRole('button', { name: /Only source/ }).getAttribute('aria-expanded'),
+      screen.getByRole('button', { name: 'Expand Only source' }).getAttribute('aria-expanded'),
     ).toBe('false');
   });
 
@@ -127,12 +127,12 @@ describe('Studio mind map', () => {
     expect(screen.queryByText(/fallback/i)).toBeNull();
   });
 
-  it('names the model that produced the topics', async () => {
+  it('shows the size and source coverage of the map', async () => {
     vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMap('claude-opus'));
 
     await openMindMap();
 
-    expect(await screen.findByText(/claude-opus/)).toBeTruthy();
+    expect(await screen.findByText('4 concepts · 1 source')).toBeTruthy();
   });
 
   it('downloads the map as Markdown', async () => {

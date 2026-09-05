@@ -295,6 +295,118 @@ def build(described=None, models_error=None, refuse_first_with=None, **kwargs):
     return provider
 
 
+class FormatRefusal(Exception):
+    """A provider HTTP failure exposes status separately from its error message."""
+
+    def __init__(self, message, status_code=400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class TestJsonOutputMode:
+    """JSON syntax control is opt-in and negotiates only explicit lack of support."""
+
+    def test_json_mode_uses_hidden_reasoning_without_mutating_raw_configuration(self):
+        provider = build(reasoning_format="raw")
+
+        provider.generate("Return JSON.", 0.2, 512, None, json_mode=True)
+        provider.generate("Explain it.", 0.2, 512, None)
+
+        assert provider.completions.requests[0]["extra_body"] == {"reasoning_format": "hidden"}
+        assert provider.completions.requests[1]["extra_body"] == {"reasoning_format": "raw"}
+        assert "response_format" not in provider.completions.requests[1]
+
+    def test_json_mode_preserves_configured_parsed_reasoning(self):
+        provider = build(reasoning_format="parsed")
+
+        provider.generate("Return JSON.", 0.2, 512, None, json_mode=True)
+
+        assert provider.completions.requests[0]["response_format"] == {"type": "json_object"}
+        assert provider.completions.requests[0]["extra_body"] == {"reasoning_format": "parsed"}
+
+    @pytest.mark.parametrize("error", [
+        FormatRefusal("Unsupported parameter: response_format"),
+        FormatRefusal("response_format json_object is not supported by this model", 422),
+    ])
+    def test_explicit_unsupported_format_retries_once_without_it(self, error):
+        provider = build(refuse_first_with=error, reasoning_format="raw")
+
+        result = provider.generate("Return JSON.", 0.2, 512, None, json_mode=True)
+        provider.generate("Ordinary answer.", 0.2, 512, None)
+
+        first, plain, ordinary = provider.completions.requests
+        assert result["text"] == '{"ok": true}'
+        assert first["response_format"] == {"type": "json_object"}
+        assert "response_format" not in plain
+        assert plain["messages"] == first["messages"]
+        assert plain["max_tokens"] == first["max_tokens"]
+        assert plain["extra_body"] == {"reasoning_format": "raw"}
+        assert "response_format" not in ordinary
+
+    @pytest.mark.parametrize("error", [
+        FormatRefusal("response_format unsupported for this account", 401),
+        FormatRefusal("response_format quota exhausted", 429),
+        FormatRefusal("Generated JSON failed validation: response_format json_object", 400),
+        FormatRefusal("JSON must appear in the prompt when using response_format", 400),
+        FormatRefusal("Unsupported temperature", 400),
+    ])
+    def test_other_provider_errors_do_not_trigger_format_negotiation(self, error):
+        provider = build(refuse_first_with=error)
+
+        with pytest.raises(FormatRefusal) as caught:
+            provider.generate("Return JSON.", 0.2, 512, None, json_mode=True)
+
+        assert caught.value is error
+        assert len(provider.completions.requests) == 1
+
+    def test_plain_requests_never_negotiate_format_errors(self):
+        error = FormatRefusal("Unsupported response_format")
+        provider = build(refuse_first_with=error)
+
+        with pytest.raises(FormatRefusal):
+            provider.generate("Ordinary answer.", 0.2, 512, None)
+
+        assert len(provider.completions.requests) == 1
+
+    def test_format_fallback_keeps_existing_token_budget_retry(self):
+        provider = build(max_output_tokens=16384)
+        requests = []
+
+        def create(**request):
+            requests.append(request)
+            if len(requests) == 1:
+                raise FormatRefusal("response_format is not supported")
+            if len(requests) == 2:
+                raise Exception(GROQ_413)
+            return _completion()
+
+        provider._client.chat.completions.create = create
+
+        result = provider.generate("Return JSON. " * 100, 0.2, None, None, json_mode=True)
+
+        assert result["model"] == "stub-model"
+        assert len(requests) == 3
+        assert requests[0]["response_format"] == {"type": "json_object"}
+        assert "response_format" not in requests[1]
+        assert requests[2]["max_tokens"] < requests[1]["max_tokens"]
+        assert "response_format" not in requests[2]
+
+    def test_plain_format_fallback_does_not_loop_on_another_refusal(self):
+        provider = build()
+        requests = []
+
+        def create(**request):
+            requests.append(request)
+            raise FormatRefusal("Unsupported response_format")
+
+        provider._client.chat.completions.create = create
+
+        with pytest.raises(FormatRefusal):
+            provider.generate("Return JSON.", 0.2, 512, None, json_mode=True)
+
+        assert len(requests) == 2
+
+
 class TestModelOutputLimit:
     """The default budget is read from the provider, not tabulated here."""
 

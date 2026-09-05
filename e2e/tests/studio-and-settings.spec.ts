@@ -59,11 +59,61 @@ test('renders a fallback mind map from ready source structure', async ({ api, pa
   const dialog = page.getByRole('dialog', { name: `${project.name} mind map` });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(
-    'Topics taken from document structure rather than from a language model.',
+    'From document structure',
   );
   await expect(dialog).toContainText('Observatory Operations');
+  await dialog.getByRole('button', { name: 'Expand all branches' }).click();
+  const previousZoom = await dialog.getByLabel('Zoom level').innerText();
+  await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await expect(dialog.getByLabel('Zoom level')).not.toHaveText(previousZoom);
+  const zoomIn = dialog.getByRole('button', { name: 'Zoom in', exact: true });
+  while (await zoomIn.isEnabled()) await zoomIn.click();
+  const canvas = dialog.getByRole('region', { name: 'Mind map canvas' });
+  const bounds = (await canvas.boundingBox())!;
+  await page.mouse.move(bounds.x + 200, bounds.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + 40, bounds.y + 10, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => canvas.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, 100);
+  await page.keyboard.up('Control');
+  await expect(dialog.getByLabel('Zoom level')).not.toHaveText('200%');
+  await dialog.getByRole('button', { name: 'Fit to view' }).click();
   await dialog.getByRole('button', { name: 'Close mind map dialog', exact: true }).click();
   await expect(dialog).toBeHidden();
+});
+
+test('explores a mind map and brings a question back to mobile chat', async ({ api, page }, testInfo) => {
+  const queryRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/query')) {
+      queryRequests.push(request.url());
+    }
+  });
+  await setupReadyUrlWorkspace(api, page, testInfo, 'mind-map-chat');
+  const composer = page.getByRole('textbox', { name: 'Ask anything about your sources...' });
+  await composer.fill('My existing question');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Open Studio panel', exact: true }).click();
+  await page.getByRole('complementary', { name: 'Studio' }).getByRole('button', { name: 'Mind map', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: /mind map$/ });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Expand all branches' }).click();
+  await dialog.getByRole('button', { name: 'Enter full screen' }).click();
+  await expect(dialog.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Download mind map' })).toBeFocused();
+  const concept = dialog.getByRole('button', { name: /^Explore / }).last();
+  const label = (await concept.getAttribute('aria-label'))!.slice('Explore '.length);
+  await concept.click();
+  await dialog.getByRole('button', { name: 'Ask in chat' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Studio panel', exact: true })).toBeHidden();
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue(new RegExp(`^My existing question\\n\\nExplain`));
+  expect(await composer.inputValue()).toContain(label);
+  expect(queryRequests).toEqual([]);
 });
 
 test('downloads a Markdown project report', async ({ api, page }, testInfo) => {

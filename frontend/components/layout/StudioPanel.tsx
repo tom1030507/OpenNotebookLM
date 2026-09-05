@@ -432,7 +432,14 @@ export default function StudioPanel({
 
       {currentMindMap && (
         <React.Suspense fallback={<StudioDialogFallback />}>
-          <MindMapDialog map={currentMindMap} onClose={() => setMindMap(null)} />
+          <MindMapDialog
+            map={currentMindMap}
+            onClose={() => setMindMap(null)}
+            onAsk={(question) => {
+              useStore.getState().draftMindMapQuestion(currentMindMap.project_id, question);
+              setMindMap(null);
+            }}
+          />
         </React.Suspense>
       )}
 

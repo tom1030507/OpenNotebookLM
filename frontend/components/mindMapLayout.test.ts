@@ -9,6 +9,8 @@ import {
   layoutMindMap,
   mindMapToMarkdown,
   toggleCollapsed,
+  collapsedBranches,
+  mindMapQuestion,
 } from './mindMapLayout';
 import type { MindMap, MindMapNode } from '@/lib/api';
 
@@ -148,6 +150,20 @@ describe('toggleCollapsed', () => {
 });
 
 describe('mindMapToMarkdown', () => {
+  it('keeps the actual subject, explanations and partial source coverage in the export', () => {
+    const conceptMap = map(tree());
+    conceptMap.project_name = 'Paper notes';
+    conceptMap.root.label = 'Transformer';
+    conceptMap.root.detail = 'An architecture based on attention.';
+    conceptMap.root.children[0].detail = 'Parallel attention heads.';
+    conceptMap.source_count = 24;
+    conceptMap.total_source_count = 30;
+    const markdown = mindMapToMarkdown(conceptMap);
+    expect(markdown).toContain('## Transformer');
+    expect(markdown).toContain('An architecture based on attention.');
+    expect(markdown).toContain('Parallel attention heads.');
+    expect(markdown).toContain('24 of 30 ready sources');
+  });
   it('writes the project as the heading and the branches as nested bullets', () => {
     expect(mindMapToMarkdown(map(tree()))).toContain(
       '- First source\n  - Alpha\n  - Beta\n- Second source\n  - Gamma',
@@ -178,6 +194,9 @@ describe('mindMapToMarkdown', () => {
 });
 
 describe('fitZoom', () => {
+  it('fits a tall map within the available height too', () => {
+    expect(fitZoom(1000, 600, 300, 600)).toBe(0.5);
+  });
   it('leaves a map that already fits at its natural size', () => {
     expect(fitZoom(900, 616)).toBe(1);
   });
@@ -199,5 +218,29 @@ describe('fitZoom', () => {
   it('keeps the natural size when the container has not been measured yet', () => {
     // The first render happens before layout, so the container reports 0.
     expect(fitZoom(0, 616)).toBe(1);
+  });
+});
+
+describe('concept navigation', () => {
+  it('keeps branch colors stable when a neighboring branch is collapsed', () => {
+    const before = layoutMindMap(tree()).nodes.find((n) => n.id === 'doc-2-topic-0');
+    const after = layoutMindMap(tree(), { collapsed: new Set(['doc-1']) }).nodes
+      .find((n) => n.id === 'doc-2-topic-0');
+    expect(before!.branchIndex).toBe(1);
+    expect(after!.branchIndex).toBe(before!.branchIndex);
+  });
+
+  it('starts deeper branches folded without hiding the main topics', () => {
+    const deep = tree();
+    deep.children[0].children[0].children = [node('detail', 'A detail', 'topic')];
+    expect(collapsedBranches(deep, 2)).toEqual(new Set(['doc-1-topic-0']));
+    expect(collapsedBranches(deep, 1)).toEqual(new Set(['doc-1', 'doc-1-topic-0', 'doc-2']));
+  });
+
+  it('includes the concept path in a question so ambiguous leaves keep their context', () => {
+    expect(mindMapQuestion(tree(), 'doc-1-topic-0')).toBe(
+      'Explain “Alpha” in the context of Notebook → First source, using the sources in this notebook.',
+    );
+    expect(mindMapQuestion(tree(), 'missing')).toBeNull();
   });
 });

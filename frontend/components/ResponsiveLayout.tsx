@@ -8,6 +8,7 @@ import {
   type WorkspacePanelId,
 } from './responsiveLayoutContract';
 import { DrawerFocusController } from './drawerFocusController';
+import useStore from '@/store/useStore';
 
 interface ResponsiveLayoutProps {
   children: React.ReactNode;
@@ -75,11 +76,20 @@ export default function ResponsiveLayout({
     dispatch({ type: 'dismiss' });
   }, [drawerFocusController]);
 
+  useEffect(() => useStore.subscribe((state, previous) => {
+    if (state.pendingMindMapQuestion && state.pendingMindMapQuestion !== previous.pendingMindMapQuestion) {
+      // Observe the handoff synchronously before chat consumes it. The composer
+      // takes focus, so restoring the drawer trigger would interrupt that move.
+      drawerFocusController.forgetTrigger();
+      dispatch({ type: 'dismiss' });
+    }
+  }), [drawerFocusController]);
+
   useEffect(() => {
     if (!activePanel) return;
 
     const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
         dismissDrawer();
       }
     };
@@ -182,7 +192,13 @@ export default function ResponsiveLayout({
               role={isDrawer ? 'dialog' : undefined}
               aria-modal={isDrawer ? 'true' : undefined}
               aria-label={isDrawer ? `${activePanelLabel} panel` : undefined}
-              onKeyDown={isDrawer ? (event) => drawerFocusController.trapTab(event) : undefined}
+              onKeyDown={isDrawer ? (event) => {
+                // Portal events bubble through React parents even when their
+                // dialog lives outside this drawer and owns its own focus trap.
+                if (event.currentTarget.contains(event.target as Node)) {
+                  drawerFocusController.trapTab(event);
+                }
+              } : undefined}
               style={
                 isDrawer
                   ? ({ '--workspace-drawer-width': layout.drawerWidth } as React.CSSProperties)

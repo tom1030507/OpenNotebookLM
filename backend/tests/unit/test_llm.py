@@ -241,6 +241,67 @@ def test_reasoning_format_is_absent_unless_configured(
     assert "extra_body" not in fake_openai.requests[-1]
 
 
+def test_json_mode_adds_response_format_only_when_requested(settings, monkeypatch, fake_openai):
+    """Mind maps opt into JSON syntax without changing ordinary text requests."""
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    service = LLMService()
+
+    ordinary = service.generate("Explain attention.")
+    structured = service.generate("Return JSON about attention.", json_mode=True)
+    later = service.generate("Explain attention again.")
+
+    assert ordinary["model"] == structured["model"] == later["model"]
+    assert "response_format" not in fake_openai.requests[0]
+    assert fake_openai.requests[1]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in fake_openai.requests[2]
+
+
+def test_json_mode_does_not_send_openai_options_to_claude(
+    settings, monkeypatch, fake_anthropic,
+):
+    """Claude continues to generate from the same JSON prompt using its native API."""
+    monkeypatch.setattr(settings, "claude_api_key", "sk-ant-test")
+
+    result = LLMService().generate("Return JSON about attention.", json_mode=True)
+
+    assert result["model"] == "claude-opus-5"
+    assert "response_format" not in fake_anthropic.requests[-1]
+    assert "json_mode" not in fake_anthropic.requests[-1]
+    assert fake_anthropic.requests[-1]["messages"][0]["content"] == (
+        "Return JSON about attention."
+    )
+
+
+def test_json_mode_without_a_provider_keeps_extractive_fallback(settings, monkeypatch):
+    """An opt-in output format must not make local offline usage an exception."""
+    monkeypatch.setattr(settings, "llm_mode", "none")
+
+    result = LLMService().generate(RAG_PROMPT, json_mode=True)
+
+    assert result["model"] == FALLBACK_MODEL
+    assert result["usage"]["total_tokens"] == 0
+
+
+def test_json_mode_preserves_strict_injected_provider_compatibility(settings, monkeypatch):
+    """Providers outside the OpenAI adapter still receive their original arguments."""
+    class StrictProvider:
+        name = "stub"
+        model = "stub-model"
+
+        def generate(self, prompt, temperature, max_tokens, system_prompt):
+            return {"text": '{"ok":true}', "model": self.model,
+                    "usage": {"total_tokens": 1}}
+
+    monkeypatch.setattr(settings, "llm_mode", "none")
+    service = LLMService()
+    service.provider = StrictProvider()
+
+    result = service.generate("Return JSON.", json_mode=True)
+
+    assert result["text"] == '{"ok":true}'
+    assert result["model"] == "stub-model"
+
+
 def test_claude_request_omits_temperature_and_lifts_max_tokens(
     settings, monkeypatch, fake_anthropic
 ):

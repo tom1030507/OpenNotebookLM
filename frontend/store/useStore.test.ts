@@ -126,6 +126,59 @@ beforeEach(() => {
 
 
 describe('application store', () => {
+  describe('mind map chat drafts', () => {
+    it('queues a transient question and exposes chat without creating or sending a conversation', () => {
+      useStore.setState({ currentProject: project('project-a'), sidebarOpen: true, studioOpen: true });
+
+      useStore.getState().draftMindMapQuestion('project-a', 'Explain attention.');
+
+      expect(useStore.getState().pendingMindMapQuestion).toEqual({
+        projectId: 'project-a', question: 'Explain attention.',
+      });
+      expect(useStore.getState().sidebarOpen).toBe(false);
+      expect(useStore.getState().studioOpen).toBe(false);
+      expect(testStorage.getItem('app-storage')).not.toContain('Explain attention.');
+      expect(apiMock.createConversation).not.toHaveBeenCalled();
+      expect(apiMock.query).not.toHaveBeenCalled();
+    });
+
+    it('ignores questions from a stale project and empty questions', () => {
+      useStore.setState({ currentProject: project('project-b'), studioOpen: true });
+
+      useStore.getState().draftMindMapQuestion('project-a', 'Private topic');
+      useStore.getState().draftMindMapQuestion('project-b', '  ');
+
+      expect(useStore.getState().pendingMindMapQuestion).toBeNull();
+      expect(useStore.getState().studioOpen).toBe(true);
+    });
+
+    it('retires a queued question when selecting away and back before chat consumes it', () => {
+      useStore.setState({ currentProject: project('project-a') });
+      useStore.getState().draftMindMapQuestion('project-a', 'Private topic');
+
+      useStore.getState().selectProject(project('project-b'));
+      useStore.getState().selectProject(project('project-a'));
+
+      expect(useStore.getState().pendingMindMapQuestion).toBeNull();
+    });
+
+    it.each(['refresh', 'delete', 'account'] as const)('retires queued questions on %s boundaries', async (boundary) => {
+      useStore.setState({ currentProject: project('project-a') });
+      useStore.getState().draftMindMapQuestion('project-a', 'Private topic');
+
+      if (boundary === 'refresh') {
+        apiMock.getProjects.mockResolvedValue([project('project-b')]);
+        await useStore.getState().fetchProjects();
+      } else if (boundary === 'delete') {
+        await useStore.getState().deleteProject('project-a');
+      } else {
+        useStore.getState().clearAccountState();
+      }
+
+      expect(useStore.getState().pendingMindMapQuestion).toBeNull();
+    });
+  });
+
   it('resets test state to an empty project state instead of a fake backend id', () => {
     useStore.getState().resetForTests();
 

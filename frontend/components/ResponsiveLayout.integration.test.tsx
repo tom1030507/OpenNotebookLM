@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import ResponsiveLayout from './ResponsiveLayout';
+import ChatArea from './chat/ChatArea';
+import useStore from '@/store/useStore';
+import useDialogFocus from '@/hooks/useDialogFocus';
 
 afterEach(() => {
   cleanup();
+  useStore.getState().resetForTests();
   vi.unstubAllGlobals();
 });
 
@@ -59,7 +65,91 @@ function renderWorkspace() {
   );
 }
 
+function PortalDialogPanel() {
+  const [isOpen, setIsOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const initialFocusRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus({ isOpen, onClose: () => setIsOpen(false), dialogRef, initialFocusRef });
+
+  return <>
+    <button onClick={() => setIsOpen(true)}>Open mind map</button>
+    {isOpen && createPortal(
+      <div role="dialog" aria-label="Mind map" ref={dialogRef}>
+        <button ref={initialFocusRef}>Full screen</button>
+        <button>Download mind map</button>
+      </div>,
+      document.body,
+    )}
+  </>;
+}
+
 describe('ResponsiveLayout component integration', () => {
+  it('leaves Tab navigation and focus wrapping to a dialog portaled outside the drawer', async () => {
+    const user = userEvent.setup();
+    render(<ResponsiveLayout rightPanel={<PortalDialogPanel />}><button>Chat</button></ResponsiveLayout>);
+    await user.click(screen.getByRole('button', { name: 'Open Studio panel' }));
+    await user.click(screen.getByRole('button', { name: 'Open mind map' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Full screen' }));
+
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Download mind map' }));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Full screen' }));
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Download mind map' }));
+  });
+
+  it('closes only the portaled dialog when it handles Escape and keeps the drawer open', async () => {
+    const user = userEvent.setup();
+    render(<ResponsiveLayout rightPanel={<PortalDialogPanel />}><button>Chat</button></ResponsiveLayout>);
+    await user.click(screen.getByRole('button', { name: 'Open Studio panel' }));
+    const mapTrigger = screen.getByRole('button', { name: 'Open mind map' });
+    await user.click(mapTrigger);
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: 'Mind map' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Studio panel' })).toBeTruthy();
+    expect(document.activeElement).toBe(mapTrigger);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Studio panel' }));
+  });
+
+  it('dismisses the mobile studio drawer and focuses the question drafted into chat', async () => {
+    useStore.setState({
+      currentProject: {
+        id: 'project-1', name: 'Research', description: null, meta_json: {},
+        created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
+        document_count: 1, conversation_count: 0,
+      },
+      documents: [{
+        id: 'source-1', name: 'Research source', type: 'text', meta: {}, status: 'ready',
+        created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z', chunk_count: 1,
+      }],
+    });
+    render(
+      <ResponsiveLayout rightPanel={
+        <button onClick={() => useStore.getState().draftMindMapQuestion('project-1', 'Explain attention.')}>
+          Ask in chat
+        </button>
+      }>
+        <ChatArea onAddSourcesOpenChange={() => undefined} />
+      </ResponsiveLayout>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open Studio panel' }));
+    const drawer = screen.getByRole('dialog', { name: 'Studio panel' });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Ask in chat' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+    await waitFor(() => expect(document.activeElement).toBe(composer));
+    expect(composer.value).toBe('Explain attention.');
+    expect(useStore.getState().pendingMindMapQuestion).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open Studio panel' })).toBeTruthy();
+  });
+
   it('renders compact and desktop structures from stable CSS-controlled markup with an in-flow toolbar', () => {
     const { container } = renderWorkspace();
     const toolbar = screen.getByRole('navigation', { name: 'Workspace panels' });

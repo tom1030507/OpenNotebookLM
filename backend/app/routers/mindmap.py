@@ -58,9 +58,18 @@ def project_mindmap(
 ):
     """Build a mind map of one of the caller's projects.
 
-    The map is a project root, a branch per source, and the topics inside each
-    source. Topics are named by the configured LLM when there is one; otherwise
-    they come from the documents' own structure, and `model_used` says so.
+    The configured LLM organizes ready sources into a subject and nested
+    concepts. Otherwise the map preserves source heading structure, with
+    `model_used` identifying the fallback.
+
+    Args:
+        project_id: Project to resolve through the current user's ownership.
+        db: Database session.
+        current_user: Authenticated caller.
+        service: Mind map generator.
+
+    Returns:
+        The recursive tree and generation metadata.
     """
     project = require_project(db, project_id, current_user)
 

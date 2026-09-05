@@ -154,6 +154,8 @@ class FakeDocument:
         self.source_type = source_type
         self.content = content
         self.chunks = chunks or []
+        self.status = "ready"
+        self.user_id = "test-owner"
 
 
 def _tree(service, documents, project_name="Notebook"):
@@ -239,9 +241,12 @@ class TestGeneratedTopics:
     """What the LLM adds, and what happens when it cannot be used."""
 
     def test_llm_topics_replace_the_structural_ones(self):
-        """The model sees the whole document; headings only see its skeleton."""
+        """Generated concepts replace the source outline rather than flattening it."""
         service = MindMapService(
-            llm_service=StubLLM('{"documents": [{"index": 1, "topics": ["Framing"]}]}'),
+            llm_service=StubLLM(
+                '{"root":{"label":"Study guide","children":'
+                '[{"label":"Framing","document_index":1}]}}'
+            ),
         )
         document = FakeDocument(
             "d1", "Guide", "url", chunks=[FakeChunk(heading_path="Guide/Setup")],
@@ -249,12 +254,15 @@ class TestGeneratedTopics:
 
         tree = _tree(service, [document])
 
-        assert [t["label"] for t in tree["children"][0]["children"]] == ["Framing"]
+        assert [t["label"] for t in tree["children"]] == ["Framing"]
 
     def test_the_model_is_reported_when_it_produced_the_topics(self):
         """Callers must be able to tell a generated map from an extracted one."""
         service = MindMapService(
-            llm_service=StubLLM('{"documents": [{"index": 1, "topics": ["Framing"]}]}'),
+            llm_service=StubLLM(
+                '{"root":{"label":"Study guide","children":'
+                '[{"label":"Framing","document_index":1}]}}'
+            ),
         )
 
         _, model_used = service.build_tree(
@@ -282,6 +290,14 @@ class TestGeneratedTopics:
         service.build_tree("Notebook", [FakeDocument("d1", "One")])
 
         assert stub.calls[0]["max_tokens"] is None
+
+    def test_mindmap_opts_into_json_output_mode(self):
+        """The concept tree requires provider-enforced JSON syntax when available."""
+        stub = StubLLM("unavailable", model="fallback")
+
+        MindMapService(stub).build_tree("Notebook", [FakeDocument("d", "Paper")])
+
+        assert stub.calls[0]["json_mode"] is True
 
     def test_no_llm_call_is_made_for_an_empty_project(self):
         """There is nothing to ask about, and the call is not free."""
@@ -314,6 +330,7 @@ class FakeProject:
         """Store the two fields the mind map reads."""
         self.id = project_id or "project-%s" % name.lower()
         self.name = name
+        self.user_id = "test-owner"
 
 
 class PairedLLM:
@@ -351,7 +368,8 @@ class PairedLLM:
             )
 
         return {
-            "text": '{"documents": [{"index": 1, "topics": ["%s"]}]}' % source,
+            "text": ('{"root":{"label":"Subject","children":'
+                     '[{"label":"%s","document_index":1}]}}') % source,
             "model": self.models_by_source[source],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         }
@@ -382,6 +400,8 @@ class PausingDocument:
         self.source_type = "pdf"
         self.content = ""
         self.chunks = []
+        self.status = "ready"
+        self.user_id = "test-owner"
         self._on_first_read = on_first_read
         self._read = False
 
