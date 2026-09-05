@@ -247,6 +247,14 @@ class TestConversationRetrievalQuery:
         assert "第二點呢？" in searched
         assert "attention work over long sequences" in searched
 
+    def test_a_short_document_overview_does_not_borrow_an_old_detail_question(self, db, service):
+        instance, embeddings, _ = service
+        instance.query_with_conversation(
+            db=db, query="這篇論文在講什麼？", conversation_id=CONVERSATION_ID,
+            project_id=None, use_cache=False,
+        )
+        assert embeddings.queries == ["這篇論文在講什麼？"]
+
     def test_instructions_are_sent_as_a_system_prompt(self, db, service):
         instance, _, llm = service
 

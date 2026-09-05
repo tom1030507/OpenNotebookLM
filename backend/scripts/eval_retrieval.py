@@ -14,7 +14,6 @@ Results land in `output/rag-eval/<tag>-<timestamp>/` as `metrics.json` plus a
 readable `report.md`, so two runs can be diffed directly.
 """
 import argparse
-import asyncio
 from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, is_dataclass
@@ -187,8 +186,8 @@ def build_session(db_path: Path):
 def ingest_corpus(db, entries: List[Dict[str, Any]], project_id: str) -> Dict[str, str]:
     """Ingest every corpus entry through the real pipeline.
 
-    Mirrors `DocumentService.process_url` without its fire-and-forget
-    `create_task`, so indexing has finished by the time this returns.
+    Uses the synchronous ingestion pipeline with the eval session, so indexing
+    has finished by the time this returns without opening an application session.
 
     Args:
         db: Database session.
@@ -221,7 +220,15 @@ def ingest_corpus(db, entries: List[Dict[str, Any]], project_id: str) -> Dict[st
             db.add(ProjectDocument(project_id=project_id, document_id=doc_id))
             db.commit()
 
-            asyncio.run(service._process_url_async(db, doc_id, entry["url"]))
+            service.process_ingestion_job(
+                db,
+                document_id=doc_id,
+                job_type="url",
+                payload={"url": entry["url"]},
+            )
+            # The worker normally commits ready together with its durable job.
+            # Eval owns that transaction because it has no background worker.
+            db.commit()
 
             document = db.query(Document).filter(Document.id == doc_id).first()
             print("  %-16s %-10s chars=%7d error=%s" % (

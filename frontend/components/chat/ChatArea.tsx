@@ -34,6 +34,21 @@ interface PendingQuery {
 }
 
 const MessageRow = React.memo(function MessageRow({ message }: { message: Message }) {
+  const referencedIds = new Set(
+    Array.from(message.content.matchAll(/\[Source\s+(\d+)\]/gi), (match) => Number(match[1])),
+  );
+  const citations = (message.citations ?? []).map((citation, index) => ({
+    citation,
+    index,
+    id: typeof citation.id === 'number' && Number.isSafeInteger(citation.id) && citation.id > 0
+      ? citation.id
+      : null,
+  })).filter(({ id }) => (
+    // Older messages lack source numbers; guessing from position could attach
+    // evidence to the wrong claim, so retain those entries without a number.
+    referencedIds.size === 0 || id === null || referencedIds.has(id)
+  ));
+
   return (
     <div className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       {message.role === 'assistant' && (
@@ -51,15 +66,33 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         ) : (
           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
         )}
-        {message.citations && message.citations.length > 0 && (
+        {citations.length > 0 && (
           <div className="mt-3 pt-3 border-t border-[var(--border)]">
             <p className="text-xs opacity-70 mb-2">Sources: </p>
-            {message.citations.map((citation, index) => (
-              <div key={index} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs">
-                <span className="font-medium">{citation.source}</span>
-                {citation.page && <span className="opacity-70"> - page {citation.page}</span>}
-              </div>
-            ))}
+            {citations.map(({ citation, id, index }) => {
+              const excerpt = citation.text?.replace(/\s+/g, ' ').trim();
+              const key = id === null ? `legacy-${index}` : `source-${id}`;
+              const label = (
+                <>
+                  {id !== null && <span className="font-medium mr-2">[Source {id}]</span>}
+                  <span className="font-medium">{citation.source}</span>
+                  {citation.page != null && <span className="opacity-70"> - page {citation.page}</span>}
+                </>
+              );
+
+              return excerpt ? (
+                <details key={key} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs break-words">
+                  <summary className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-[var(--ring)]">
+                    {label}
+                  </summary>
+                  <p className="mt-2 leading-relaxed text-[var(--muted-foreground)]">{excerpt}</p>
+                </details>
+              ) : (
+                <div key={key} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs break-words">
+                  {label}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
