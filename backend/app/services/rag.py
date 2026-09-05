@@ -1,6 +1,7 @@
 """RAG (Retrieval-Augmented Generation) query service."""
 import json
 import hashlib
+import re
 from time import perf_counter
 from typing import List, Dict, Any, Optional, Tuple
 import structlog
@@ -9,6 +10,11 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import Document, Chunk, Project, ProjectDocument
 from app.services import retrieval
+from app.services.overview import (
+    is_overview_query,
+    overview_chunk_ids,
+    overview_passage_text,
+)
 from app.services.llm import LLMService
 from app.services.retrieval_index import get_retrieval_index
 
@@ -27,6 +33,10 @@ settings = get_settings()
 # query vector, and the embedding model truncates at its sequence limit from the
 # end -- which is exactly where the current question sits.
 FOLLOWUP_CHAR_FLOOR = 16
+SOURCE_LABEL = re.compile(r"\[Source\s+(\d+)(?::[^\]\r\n]*)?\]", re.IGNORECASE)
+SOURCE_GROUP = re.compile(
+    r"\[Source\s+(\d+(?:\s*[,;]\s*(?:Source\s+)?\d+)+)\]", re.IGNORECASE,
+)
 
 
 class RAGService:
@@ -134,7 +144,7 @@ class RAGService:
                 }
             
             # 2. Prepare context
-            context = self._prepare_context(relevant_chunks)
+            context, context_chunks = self._prepare_grounded_context(relevant_chunks)
             
             # 3. Generate answer using LLM
             prompt = self._build_prompt(query, context, include_sources)
@@ -143,21 +153,46 @@ class RAGService:
                 prompt=prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                system_prompt=self._system_prompt(include_sources)
+                system_prompt=self._system_prompt(
+                    include_sources, overview=is_overview_query(retrieval_query or query),
+                )
             )
             
             # 4. Format response
+            # Keep the model's numbering: filtering Source 2 out must not turn
+            # Source 3 into a link to an unrelated passage. Dropped context is
+            # not evidence, even when a model invents a label for it.
+            # Providers may group citations despite the requested format. Expand
+            # those labels before validation so their evidence is not lost.
+            answer_text = SOURCE_GROUP.sub(
+                lambda match: "".join(
+                    f"[Source {number}]" for number in re.findall(r"\d+", match.group(1))
+                ),
+                answer["text"],
+            )
+            answer_text = SOURCE_LABEL.sub(
+                lambda match: (
+                    f"[Source {int(match.group(1))}]"
+                    if include_sources and 1 <= int(match.group(1)) <= len(context_chunks)
+                    else ""
+                ),
+                answer_text,
+            )
+            cited_ids = {int(match.group(1)) for match in SOURCE_LABEL.finditer(answer_text)}
             response = {
-                "answer": answer["text"],
-                "sources": self._format_sources(relevant_chunks) if include_sources else [],
-                "chunks_used": len(relevant_chunks),
+                "answer": answer_text,
+                "sources": [
+                    source for source in self._format_sources(context_chunks)
+                    if source["id"] in cited_ids
+                ] if include_sources else [],
+                "chunks_used": len(context_chunks),
                 "model_used": answer["model"],
                 "usage": answer.get("usage", {})
             }
             
             logger.info(
                 "RAG query completed",
-                chunks_used=len(relevant_chunks),
+                chunks_used=len(context_chunks),
                 model=answer["model"]
             )
             
@@ -224,6 +259,7 @@ class RAGService:
         scope = "any" if allowed_document_ids is None else ",".join(sorted(allowed_document_ids))
 
         key_parts = [
+            "overview-citations-v1",
             query,
             str(retrieval_query),
             scope,
@@ -359,6 +395,30 @@ class RAGService:
             )
             if not document_ids:
                 return [], diagnostics()
+
+        if is_overview_query(query) and document_ids is not None and len(document_ids) == 1:
+            # Only a uniquely scoped document can be read structurally. A
+            # project with several sources must still resolve relevance through
+            # search, and the project/ownership intersection above always wins.
+            rows = db.query(Chunk.id, Chunk.text, Chunk.heading_path).join(
+                Document, Document.id == Chunk.document_id,
+            ).filter(
+                Chunk.document_id == document_ids[0], Document.status == "ready",
+            ).order_by(
+                Chunk.start_offset.is_(None), Chunk.start_offset, Chunk.page_num, Chunk.id,
+            ).limit(settings.max_chunks_per_doc).all()
+            overview_ids = overview_chunk_ids(rows, top_k)
+            if overview_ids:
+                overview_chunks = [
+                    dict(chunk, text=overview_passage_text(chunk["text"]), score=0.0)
+                    for chunk in index.hydrate(db, overview_ids)
+                    if chunk["document_id"] == document_ids[0]
+                ]
+                if overview_chunks:
+                    return overview_chunks, {
+                        **diagnostics(fused_count=len(overview_chunks)),
+                        "retrieval_mode": "document_overview",
+                    }
 
         candidate_k = max(settings.retrieval_candidate_k, top_k)
 
@@ -627,10 +687,29 @@ class RAGService:
         Returns:
             Formatted context string
         """
+        return self._prepare_grounded_context(chunks)[0]
+
+    def _prepare_grounded_context(
+        self, chunks: List[Dict[str, Any]],
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """Build a prompt and retain exactly the passages its labels refer to.
+
+        Args:
+            chunks: Retrieved passage payloads.
+
+        Returns:
+            Context text and the distinct passages admitted by its size budget.
+        """
         context_parts = []
+        context_chunks = []
+        seen = set()
         used = 0
 
-        for i, chunk in enumerate(chunks, 1):
+        for chunk in chunks:
+            if chunk["chunk_id"] in seen:
+                continue
+            seen.add(chunk["chunk_id"])
+            i = len(context_chunks) + 1
             # Include source information
             source_info = f"[Source {i}: {chunk['document_title']}"
             
@@ -666,11 +745,12 @@ class RAGService:
                 break
 
             context_parts.append(entry)
+            context_chunks.append(chunk)
             used += len(entry) + 2
 
-        return "\n\n".join(context_parts)
+        return "\n\n".join(context_parts), context_chunks
     
-    def _system_prompt(self, include_sources: bool) -> str:
+    def _system_prompt(self, include_sources: bool, overview: bool = False) -> str:
         """Instructions for the model, as a system message.
 
         These used to ride inside the user turn. Providers weight a system
@@ -680,6 +760,7 @@ class RAGService:
 
         Args:
             include_sources: Whether to ask for source citations
+            overview: Whether the current question asks for a document overview.
 
         Returns:
             The system prompt
@@ -687,12 +768,28 @@ class RAGService:
         base = (
             "You answer questions using only the context provided in the user "
             "message. If the context does not contain the answer, say so plainly "
-            "instead of guessing. Answer in the language the question is asked in."
+            "instead of guessing. Answer in the language the question is asked in. "
+            "Keep each number, result and comparison attached to its exact dataset, "
+            "experiment or setting; do not combine details from different experiments."
         )
+        if overview:
+            base += (
+                " Give a useful overview: name the document's subject or proposed "
+                "method first, then explain the problem, the main approach, the key "
+                "findings and why they matter, as supported by the passages. Prefer "
+                "the abstract, introduction and conclusion. Use one short opening "
+                "paragraph followed by up to three concise key points. Do not use "
+                "tables or lists of benchmark scores unless requested. Leave out incidental "
+                "training settings and vocabulary sizes unless essential to the main "
+                "contribution. Do not present referenced papers as this paper's work."
+            )
         if include_sources:
             base += (
                 " Cite the passages you used by their bracketed label, for example "
-                "[Source 2]. Do not cite a passage you did not use."
+                "[Source 2]. Put citations at the end of the paragraph or bullet they "
+                "support, rather than collecting them all at the end. Use only "
+                "labels present in the context, with each label in its own brackets. "
+                "Do not cite a passage you did not use."
             )
         return base
 
@@ -805,7 +902,7 @@ Question: {query}
             The question, with the previous one prepended if it is too short to
             search with on its own.
         """
-        if len(query.strip()) >= FOLLOWUP_CHAR_FLOOR:
+        if is_overview_query(query) or len(query.strip()) >= FOLLOWUP_CHAR_FLOOR:
             return query
 
         from app.db.models import Message

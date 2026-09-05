@@ -355,3 +355,106 @@ class TestCacheKeyKnowsTheScope:
             query="what is this?", allowed_document_ids=[ALICE_DOC])
 
         assert unscoped != scoped
+
+
+@pytest.fixture
+def overview_document(db):
+    """Seed split overview sections and misleading bibliography text.
+
+    Args:
+        db: Isolated database with Alice's and Bob's documents.
+
+    Returns:
+        Alice's document id.
+    """
+    db.query(Chunk).filter(Chunk.document_id == ALICE_DOC).delete()
+    for offset, chunk_id, text in [
+        (0, "00-front", "Paper title and author affiliations."),
+        (100, "10-abstract", "Abstract\nWe introduce Aurora, an attention architecture."),
+        (200, "11-abstract-result", "It permits parallel training and improves translation."),
+        (300, "20-intro", "1 Introduction\nRecurrent models train sequentially."),
+        (400, "30-method", "2 Method\nThe architecture compares queries against keys."),
+        (500, "70-conclusion", "7 Conclusion\nAurora reduces training cost."),
+        (600, "71-conclusion-result", "The method improves translation quality."),
+        (700, "80-references", "References\n[1] Other people's research."),
+        (800, "81-reference-title", "Abstract\nA bibliography entry about another method."),
+    ]:
+        db.add(Chunk(
+            id=chunk_id, document_id=ALICE_DOC, text=text,
+            start_offset=offset, end_offset=offset + len(text), meta_json={},
+        ))
+    db.commit()
+    return ALICE_DOC
+
+
+@pytest.mark.parametrize("question", [
+    "What is this paper about?",
+    "Summarize this paper.",
+    "Give me an overview of this document.",
+    "What are the main contributions of this paper?",
+    "這篇論文在講什麼？",
+    "請總結這篇文章",
+])
+def test_document_overviews_select_complete_scoped_sections(
+    db, service, overview_document, question,
+):
+    instance, _ = service
+    chunks = instance._retrieve_chunks(
+        db=db, query=question, project_id=PROJECT,
+        allowed_document_ids=[overview_document], top_k=5,
+    )
+    assert [chunk["chunk_id"] for chunk in chunks] == [
+        "10-abstract", "11-abstract-result", "70-conclusion",
+        "71-conclusion-result", "20-intro",
+    ]
+    assert {chunk["document_id"] for chunk in chunks} == {ALICE_DOC}
+
+
+@pytest.mark.parametrize("question", [
+    "What vocabulary did this paper use?",
+    "Summarize the vocabulary settings.",
+    "這篇論文用了多少訓練資料？",
+])
+def test_specific_questions_keep_the_existing_search_ranking(
+    db, service, overview_document, question,
+):
+    instance, _ = service
+    chunks = instance._retrieve_chunks(
+        db=db, query=question, allowed_document_ids=[overview_document], top_k=2,
+    )
+    assert [chunk["chunk_id"] for chunk in chunks] == ["00-front", "10-abstract"]
+
+
+def test_an_overview_cannot_reach_a_project_document_outside_the_allowed_set(
+    db, service, overview_document,
+):
+    instance, _ = service
+    chunks = instance._retrieve_chunks(
+        db=db, query="What is this paper about?", project_id=PROJECT,
+        allowed_document_ids=[BOB_DOC], top_k=5,
+    )
+    assert {chunk["document_id"] for chunk in chunks} == {BOB_DOC}
+
+
+def test_overview_selection_honors_a_small_top_k(db, service, overview_document):
+    instance, _ = service
+    chunks = instance._retrieve_chunks(
+        db=db, query="What is this paper about?",
+        allowed_document_ids=[overview_document], top_k=1,
+    )
+    assert [chunk["chunk_id"] for chunk in chunks] == ["10-abstract"]
+
+
+def test_overview_passages_start_at_the_section_instead_of_author_metadata(
+    db, service, overview_document,
+):
+    abstract = db.get(Chunk, "10-abstract")
+    abstract.text = "Alice Researcher\nalice@example.com\n" + abstract.text
+    db.commit()
+    instance, _ = service
+    chunks = instance._retrieve_chunks(
+        db=db, query="What is this paper about?",
+        allowed_document_ids=[overview_document], top_k=1,
+    )
+    assert chunks[0]["text"].startswith("Abstract\nWe introduce Aurora")
+    assert "alice@example.com" not in chunks[0]["text"]

@@ -70,6 +70,96 @@ afterEach(() => {
 
 
 describe('ChatArea', () => {
+  describe('source citations', () => {
+    function renderAnswer(content: string, citations: Message['citations']) {
+      useStore.setState({
+        projects: [project],
+        currentProject: project,
+        documents: [readyDocument],
+        currentConversation: conversation('conversation-1', project.id),
+        messages: [{
+          id: 'message-assistant',
+          conversation_id: 'conversation-1',
+          role: 'assistant',
+          content,
+          citations,
+          created_at: '2026-08-23T00:00:00Z',
+        }],
+      });
+
+      return render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+    }
+
+    it('matches sparse source numbers in the answer and hides uncited stored entries', () => {
+      renderAnswer('The method [Source 1] improves the result [Source 5].', [
+        { id: 1, source: 'Method paper', page: 2, text: 'The proposed method.' },
+        { id: 2, source: 'Unused retrieval', page: 1, text: 'Unrelated context.' },
+        { id: 5, source: 'Results paper', page: 8, text: 'The measured result.' },
+      ]);
+
+      expect(screen.getByText('[Source 1]')).toBeTruthy();
+      expect(screen.getByText('[Source 5]')).toBeTruthy();
+      expect(screen.queryByText('[Source 2]')).toBeNull();
+      expect(screen.queryByText('Unused retrieval')).toBeNull();
+      expect(screen.getByText('Method paper')).toBeTruthy();
+      expect(screen.getByText('Results paper')).toBeTruthy();
+    });
+
+    it('lets readers expand distinct excerpts from two chunks on the same page', () => {
+      renderAnswer('Two findings support this conclusion [Source 1] [Source 5].', [
+        { id: 1, chunk_id: 'chunk-a', source: 'Research paper', page: 3, text: 'First finding:  the method\nuses attention.' },
+        { id: 5, chunk_id: 'chunk-b', source: 'Research paper', page: 3, text: 'Second finding:  the results\nimprove accuracy.' },
+      ]);
+
+      const firstExcerpt = screen.getByText('First finding: the method uses attention.');
+      const secondExcerpt = screen.getByText('Second finding: the results improve accuracy.');
+      const firstDisclosure = firstExcerpt.closest('details');
+      const secondDisclosure = secondExcerpt.closest('details');
+      expect(firstDisclosure).not.toBeNull();
+      expect(secondDisclosure).not.toBeNull();
+      expect(firstDisclosure).not.toBe(secondDisclosure);
+      expect(firstDisclosure?.open).toBe(false);
+      expect(secondDisclosure?.open).toBe(false);
+
+      fireEvent.click(firstDisclosure!.querySelector('summary')!);
+
+      expect(firstDisclosure?.open).toBe(true);
+      expect(secondDisclosure?.open).toBe(false);
+      expect(firstDisclosure?.textContent).toContain('[Source 1]');
+      expect(secondDisclosure?.textContent).toContain('[Source 5]');
+      expect(screen.getAllByText('Research paper')).toHaveLength(2);
+    });
+
+    it('keeps unnumbered legacy sources without inventing a citation mapping', () => {
+      renderAnswer('The result is supported by [Source 5].', [
+        { source: 'Older source', text: 'An older excerpt.' },
+        { id: 'document-id', source: 'Legacy document', page: 2 },
+        { id: 1, source: 'Unused numbered source' },
+        { id: 5, source: 'Cited source' },
+      ]);
+
+      expect(screen.getByText('Older source')).toBeTruthy();
+      expect(screen.getByText('Legacy document')).toBeTruthy();
+      expect(screen.getByText('[Source 5]')).toBeTruthy();
+      expect(screen.queryByText('Unused numbered source')).toBeNull();
+      expect(screen.queryByText('[Source 1]')).toBeNull();
+      expect(screen.queryByText('[Source 2]')).toBeNull();
+      expect(screen.queryByText('[Source document-id]')).toBeNull();
+    });
+
+    it('retains sources in older answers without explicit source markers', () => {
+      renderAnswer('This older answer uses an unnumbered citation style.', [
+        { id: 5, source: 'Numbered source', page: 1 },
+        { source: 'Unnumbered source', text: 'Preserved evidence.' },
+      ]);
+
+      expect(screen.getByText('Numbered source')).toBeTruthy();
+      expect(screen.getByText('[Source 5]')).toBeTruthy();
+      expect(screen.getByText('Unnumbered source')).toBeTruthy();
+      expect(screen.getByText('Preserved evidence.')).toBeTruthy();
+    });
+  });
+
   it('uses the shared brand mark decoratively in the empty welcome state', () => {
     useStore.setState({
       projects: [project],
