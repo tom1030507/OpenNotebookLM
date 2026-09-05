@@ -45,7 +45,7 @@ you configure — and you can point that at a model running on the same machine.
 | 🔍 | **Hybrid retrieval** | Persistent sqlite-vec dense candidates and FTS5/BM25 keyword candidates run over the same document scope and are fused by reciprocal rank. The lexical terms include CJK character bigrams, so Chinese text is searchable too. |
 | 💬 | **Answers with citations** | Every answer names the chunks behind it, with the document and the section path they came from. Conversations are multi-turn and persisted per project. |
 | 🔌 | **Any LLM, or none** | Claude, OpenAI, anything speaking the OpenAI chat-completions API (Groq, OpenRouter, DeepSeek, Gemini, xAI, Mistral), or a local Ollama / llama.cpp / vLLM server. |
-| 🎛 | **Studio outputs** | A Markdown report, a spoken audio summary, a mind map of your sources' topics, and a narrated slideshow — all built from the same project summary. |
+| 🎛 | **Studio outputs** | A Markdown report, a spoken audio summary, an interactive concept map, and a narrated slideshow, grounded in your project's sources. |
 | 🔐 | **Per-account isolation** | Register, sign in, and every route checks ownership. Another account's project answers `404` rather than `403`, so ids cannot be enumerated. |
 | 📤 | **Export anything** | One conversation, a whole project, or a project summary, as Markdown, JSON or plain text. |
 
@@ -64,9 +64,9 @@ you configure — and you can point that at a model running on the same machine.
 </p>
 
 <p align="center">
-  <img src=".github/assets/screenshot-mindmap.png" alt="Mind map dialog: the project at the root, one branch per source, topics under each" width="620">
-  <br><em>The mind map: one branch per source, topics under each. The subtitle names the model that
-  named them — or says they came from the documents' own headings, when no LLM is configured.</em>
+  <img src=".github/assets/screenshot-mindmap.png" alt="An interactive concept map with colored topic branches and nested subtopics" width="820">
+  <br><em>Explore concepts and their connections: expand branches, drag and zoom, or select an
+  idea to read its explanation and prepare a question in chat.</em>
 </p>
 
 ## 🚀 Quick start
@@ -900,11 +900,16 @@ the existing index and that failures remain visible on the document.
   configured each source scene is extracted instead — heading structure first,
   then the document's opening sentences, then word frequency — and `model_used`
   says so, in the response and in the player.
-- **A mind map's topics are only as good as its inputs.** With no LLM configured
-  they come from the documents' own heading structure, and for a PDF with no
-  headings from word frequency — useful, but a keyword list rather than a reading
-  of the text. `model_used` on the response says which happened, and the dialog
-  repeats it, so an extracted map is never presented as a generated one.
+- **Mind maps use representative source passages.** The model builds a subject,
+  main concepts and nested subtopics from summary sections and passages across
+  the body. Generation uses at most 24 ready, owned sources and 18,000 excerpt
+  characters per request; the dialog and Markdown export show partial coverage
+  when the notebook is larger. Without a usable model response, the map retains
+  every eligible source and derives its branches from heading structure, or
+  word frequency where headings are unavailable. `model_used` identifies this
+  fallback; `source_count` and `total_source_count` report source coverage.
+  Selecting **Ask in chat** prepares an editable question with the concept's
+  parent context, preserving any existing draft. It does not send automatically.
 - **A small provider tier costs one refused request per feature.** The mind map
   and the video summary ask for as much output as the model will give, because a
   reply cut off mid-JSON parses to nothing. Providers count the prompt and

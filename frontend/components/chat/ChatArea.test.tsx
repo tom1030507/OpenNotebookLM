@@ -70,6 +70,124 @@ afterEach(() => {
 
 
 describe('ChatArea', () => {
+  describe('mind map question handoff', () => {
+    beforeEach(() => {
+      useStore.setState({
+        currentProject: project,
+        documents: [readyDocument],
+        currentConversation: conversation('conversation-1', project.id),
+      });
+    });
+
+    it('prefills once and focuses after dialog cleanup without sending a question', async () => {
+      const query = vi.spyOn(api, 'query');
+      const createConversation = vi.spyOn(api, 'createConversation');
+      const { unmount } = render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      const previousTrigger = document.createElement('button');
+      document.body.append(previousTrigger);
+      const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+      act(() => useStore.getState().draftMindMapQuestion(project.id, 'Explain attention.'));
+      previousTrigger.focus();
+
+      await waitFor(() => expect(composer.value).toBe('Explain attention.'));
+      await waitFor(() => expect(document.activeElement).toBe(composer));
+      expect(useStore.getState().pendingMindMapQuestion).toBeNull();
+      expect(query).not.toHaveBeenCalled();
+      expect(createConversation).not.toHaveBeenCalled();
+
+      unmount();
+      previousTrigger.remove();
+      render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+    });
+
+    it('appends the topic question while preserving text already being composed', async () => {
+      render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(composer, { target: { value: 'Compare the two methods.' } });
+
+      act(() => useStore.getState().draftMindMapQuestion(project.id, 'Explain attention.'));
+
+      await waitFor(() => expect(composer.value).toBe('Compare the two methods.\n\nExplain attention.'));
+    });
+
+    it('ignores a stale project handoff without changing the composer', () => {
+      render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(composer, { target: { value: 'My current question' } });
+
+      act(() => useStore.getState().draftMindMapQuestion('another-project', 'Private topic'));
+
+      expect(composer.value).toBe('My current question');
+    });
+
+    it.each(['project', 'account'] as const)('clears a prefilled question across a batched %s change and return', async (boundary) => {
+      vi.spyOn(api, 'getDocuments').mockResolvedValue([readyDocument]);
+      vi.spyOn(api, 'getConversations').mockResolvedValue([]);
+      render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      act(() => useStore.getState().draftMindMapQuestion(project.id, 'Private topic'));
+      await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Private topic'));
+
+      await act(async () => {
+        if (boundary === 'account') {
+          useStore.getState().clearAccountState();
+        } else {
+          useStore.getState().selectProject({ ...project, id: 'project-2' });
+        }
+        useStore.getState().selectProject(project);
+      });
+
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+      expect(useStore.getState().pendingMindMapQuestion).toBeNull();
+    });
+
+    it('waits for the current send to finish before consuming the topic question', async () => {
+      const request = deferred<Awaited<ReturnType<typeof api.query>>>();
+      const query = vi.spyOn(api, 'query').mockReturnValue(request.promise);
+      vi.spyOn(api, 'getMessages').mockResolvedValue([]);
+      render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(composer, { target: { value: 'First question' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+      act(() => useStore.getState().draftMindMapQuestion(project.id, 'Explain attention.'));
+
+      expect(composer.disabled).toBe(true);
+      expect(query).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        request.resolve({ answer: '', sources: [], chunks_used: 0, model_used: null, usage: {}, conversation_id: 'conversation-1' });
+      });
+
+      await waitFor(() => expect(composer.value).toBe('Explain attention.'));
+      expect(composer.disabled).toBe(false);
+      expect(useStore.getState().pendingMindMapQuestion).toBeNull();
+      expect(query).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not restore a submitted topic after a late failure across project changes', async () => {
+      const request = deferred<Awaited<ReturnType<typeof api.query>>>();
+      vi.spyOn(api, 'query').mockReturnValue(request.promise);
+      vi.spyOn(api, 'getDocuments').mockResolvedValue([readyDocument]);
+      vi.spyOn(api, 'getConversations').mockResolvedValue([]);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+      act(() => useStore.getState().draftMindMapQuestion(project.id, 'Private topic'));
+      await waitFor(() => expect(composer.value).toBe('Private topic'));
+      fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+      await act(async () => {
+        useStore.getState().selectProject({ ...project, id: 'project-2' });
+        useStore.getState().selectProject(project);
+        request.reject(new Error('Late failure'));
+      });
+
+      expect(composer.value).toBe('');
+      expect(screen.queryByText('Private topic')).toBeNull();
+    });
+  });
+
   describe('source citations', () => {
     function renderAnswer(content: string, citations: Message['citations']) {
       useStore.setState({

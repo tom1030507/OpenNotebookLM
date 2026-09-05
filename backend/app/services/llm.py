@@ -144,6 +144,21 @@ def token_ceiling_from_error(error: Exception) -> Optional[int]:
     return ceiling if ceiling > 0 else None
 
 
+def _json_mode_unsupported(error: Exception) -> bool:
+    """Recognize an explicit format capability refusal, never quota or auth."""
+    if getattr(error, "status_code", None) not in (400, 422):
+        return False
+    message = str(error).lower()
+    return bool(re.search(
+        r"\b(?:response_format|json_object)\b.{0,100}"
+        r"(?:not supported|unsupported|extra inputs are not permitted)"
+        r"|\b(?:unsupported|unknown|unrecognized|unexpected)"
+        r"(?:\s+(?:request|parameter|field|argument|keyword|supplied))*"
+        r"\s*[:=]?\s*['\"]?(?:response_format|json_object)\b",
+        message,
+    ))
+
+
 class ClaudeProvider:
     """Anthropic's Messages API."""
 
@@ -367,6 +382,7 @@ class OpenAICompatibleProvider:
         temperature: float,
         max_tokens: Optional[int],
         system_prompt: Optional[str],
+        json_mode: bool = False,
     ) -> Dict[str, Any]:
         """Generate an answer through the chat-completions API.
 
@@ -374,6 +390,17 @@ class OpenAICompatibleProvider:
         instead does *not* mean that — Groq applies its own 2048 default and the
         reply comes back cut off with `finish_reason: length` — so a number is
         always sent.
+
+        Args:
+            prompt: User prompt, including explicit JSON instructions in JSON mode.
+            temperature: Sampling temperature.
+            max_tokens: Output budget, or None for the model's limit.
+            system_prompt: Optional system instructions.
+            json_mode: Request JSON object syntax. An explicit unsupported-format
+                refusal permits one plain request with the same instructions.
+
+        Returns:
+            Generated text, model name and token usage.
         """
         messages: List[Dict[str, Any]] = []
         if system_prompt:
@@ -388,13 +415,35 @@ class OpenAICompatibleProvider:
             # the floor is what keeps the ceiling from cutting off the answer.
             "max_tokens": self._budget(max_tokens, messages),
         }
-        if self.reasoning_format:
+        if json_mode:
+            request["response_format"] = {"type": "json_object"}
+        reasoning_format = self.reasoning_format
+        if json_mode and reasoning_format == "raw":
+            # Groq rejects raw <think> text with JSON mode. Keep this local to
+            # the request so ordinary answers retain the configured format.
+            reasoning_format = "hidden"
+        if reasoning_format:
             # Not part of the OpenAI API. It travels in extra_body, and only
             # when configured, because OpenAI rejects parameters it does not
             # recognise — which would take down the default path.
-            request["extra_body"] = {"reasoning_format": self.reasoning_format}
+            request["extra_body"] = {"reasoning_format": reasoning_format}
 
-        response = self._create(request, max_tokens, messages)
+        try:
+            response = self._create(request, max_tokens, messages)
+        except Exception as error:
+            if not json_mode or not _json_mode_unsupported(error):
+                raise
+            # Older compatible servers may lack response_format. Drop only
+            # that opt-in control, leaving token-budget negotiation intact.
+            request.pop("response_format")
+            if self.reasoning_format == "raw":
+                request["extra_body"] = {"reasoning_format": "raw"}
+            logger.info(
+                "Provider lacks JSON output mode; retrying with prompt instructions",
+                provider=self.name,
+                model=self.model,
+            )
+            response = self._create(request, max_tokens, messages)
         usage = response.usage
         return {
             "text": response.choices[0].message.content,
@@ -583,7 +632,8 @@ class LLMService:
         prompt: str,
         temperature: float = 0.7,
         max_tokens: Optional[int] = 512,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        json_mode: bool = False,
     ) -> Dict[str, Any]:
         """Generate text using LLM.
 
@@ -596,6 +646,8 @@ class LLMService:
                 has to be complete to be usable at all — anything parsing JSON
                 back — should pass None.
             system_prompt: Optional system prompt
+            json_mode: Request JSON object syntax from OpenAI-compatible
+                providers. Claude and injected providers remain prompt-driven.
 
         Returns:
             Generated text and metadata. `model` is "fallback" when no provider
@@ -605,12 +657,15 @@ class LLMService:
             return self._fallback_response(prompt)
 
         try:
-            result = self.provider.generate(
-                prompt=prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                system_prompt=system_prompt,
-            )
+            request = {
+                "prompt": prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "system_prompt": system_prompt,
+            }
+            if json_mode and isinstance(self.provider, OpenAICompatibleProvider):
+                request["json_mode"] = True
+            result = self.provider.generate(**request)
             logger.info(
                 "LLM generation completed",
                 provider=self.provider.name,

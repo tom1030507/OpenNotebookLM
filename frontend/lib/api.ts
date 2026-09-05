@@ -87,6 +87,8 @@ export interface MindMapNode {
 }
 
 export interface MindMap {
+  source_count?: number | null;
+  total_source_count?: number | null;
   project_id: string;
   project_name: string;
   generated_at: string;

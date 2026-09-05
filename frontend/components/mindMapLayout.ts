@@ -1,42 +1,45 @@
 import type { MindMap, MindMapNode } from '@/lib/api';
 
 /** Width of a node box. */
-export const NODE_WIDTH = 168;
+export const NODE_WIDTH = 208;
 /** Height of a node box. */
-export const NODE_HEIGHT = 44;
+export const NODE_HEIGHT = 52;
 /** Distance between the left edges of two adjacent columns. */
-export const COLUMN_WIDTH = 224;
+export const COLUMN_WIDTH = 292;
 /** Distance between the top edges of two adjacent rows. */
-export const ROW_HEIGHT = 60;
+export const ROW_HEIGHT = 68;
 
 /**
- * Smallest zoom the map is drawn at. Below this the 12px labels stop being
- * readable, so a map too wide even for this scrolls instead of shrinking.
+ * Smallest overview scale. Readers can zoom in and pan when a map is too large.
  */
 export const MIN_ZOOM = 0.4;
 /** Largest zoom the map is drawn at. */
-export const MAX_ZOOM = 1.5;
+export const MAX_ZOOM = 2;
 /** How much one press of zoom in or out changes the scale. */
 export const ZOOM_STEP = 0.1;
 
 /**
- * The zoom that fits a drawing into the width available for it.
- *
- * Opening at 1:1 is wrong on a narrow screen: the three-column map is about
- * 616px wide, so a phone shows the root and nothing else, with no hint that the
- * rest is off to the right. Fitting first, and letting the reader zoom in, puts
- * the whole shape on screen.
+ * Fit a drawing into the available width and optional height.
  *
  * @param containerWidth Width available, in CSS pixels. 0 before layout.
  * @param drawingWidth Width the map needs at 1:1.
+ * @param containerHeight Height available, in CSS pixels.
+ * @param drawingHeight Height the map needs at 1:1.
  * @returns A scale in [MIN_ZOOM, 1], to two decimal places.
  */
-export function fitZoom(containerWidth: number, drawingWidth: number): number {
+export function fitZoom(
+  containerWidth: number,
+  drawingWidth: number,
+  containerHeight?: number,
+  drawingHeight?: number,
+): number {
   // Before the first layout the container measures 0. Shrinking to the floor on
   // that reading would make every map open tiny and then never correct itself.
   if (containerWidth <= 0 || drawingWidth <= 0) return 1;
 
-  const scale = Math.min(1, containerWidth / drawingWidth);
+  const heightScale = containerHeight && drawingHeight
+    ? containerHeight / drawingHeight : 1;
+  const scale = Math.min(1, containerWidth / drawingWidth, heightScale);
 
   return Math.max(MIN_ZOOM, Math.round(scale * 100) / 100);
 }
@@ -48,12 +51,15 @@ export interface PositionedNode {
   detail: string | null;
   documentId: string | null;
   depth: number;
+  /** Inherited from the top-level branch, independent of its visible rows. */
+  branchIndex: number;
   /** Left edge of the box, in canvas coordinates. */
   x: number;
   /** Top edge of the box, in canvas coordinates. */
   y: number;
   hasChildren: boolean;
   isCollapsed: boolean;
+  childCount: number;
 }
 
 export interface PositionedEdge {
@@ -63,6 +69,7 @@ export interface PositionedEdge {
   fromY: number;
   toX: number;
   toY: number;
+  branchIndex: number;
 }
 
 export interface MindMapGeometry {
@@ -101,9 +108,11 @@ export function layoutMindMap(
 
   // Returns the node's y, so the parent can centre itself on its children
   // without a second pass over the tree.
-  const place = (node: MindMapNode, depth: number): number => {
+  const place = (node: MindMapNode, depth: number, branchIndex: number): number => {
     const children = collapsed.has(node.id) ? [] : node.children;
-    const childCentres = children.map((child) => place(child, depth + 1));
+    const childCentres = children.map((child, index) => (
+      place(child, depth + 1, depth === 0 ? index : branchIndex)
+    ));
 
     const y = childCentres.length
       ? (childCentres[0] + childCentres[childCentres.length - 1]) / 2
@@ -116,10 +125,12 @@ export function layoutMindMap(
       detail: node.detail,
       documentId: node.document_id,
       depth,
+      branchIndex,
       x: depth * COLUMN_WIDTH,
       y,
       hasChildren: node.children.length > 0,
       isCollapsed: collapsed.has(node.id) && node.children.length > 0,
+      childCount: node.children.length,
     };
     nodes.push(positioned);
 
@@ -131,18 +142,48 @@ export function layoutMindMap(
         fromY: y + NODE_HEIGHT / 2,
         toX: (depth + 1) * COLUMN_WIDTH,
         toY: childCentres[index] + NODE_HEIGHT / 2,
+        branchIndex: depth === 0 ? index : branchIndex,
       });
     });
 
     return y;
   };
 
-  place(root, 0);
+  place(root, 0, -1);
 
   const width = Math.max(...nodes.map((node) => node.x)) + NODE_WIDTH;
   const height = Math.max(...nodes.map((node) => node.y)) + NODE_HEIGHT;
 
   return { nodes, edges, width, height };
+}
+
+/** Collect expandable branches at or below a depth, keeping the root visible. */
+export function collapsedBranches(root: MindMapNode, minimumDepth: number): Set<string> {
+  const ids = new Set<string>();
+  const visit = (node: MindMapNode, depth: number) => {
+    if (node.children.length && depth >= minimumDepth) ids.add(node.id);
+    node.children.forEach((child) => visit(child, depth + 1));
+  };
+  visit(root, 0);
+  return ids;
+}
+
+/** Keep the parent concepts with a question so repeated leaf labels have context. */
+export function mindMapQuestion(root: MindMapNode, nodeId: string): string | null {
+  const find = (node: MindMapNode, path: string[]): string[] | null => {
+    const next = [...path, node.label];
+    if (node.id === nodeId) return next;
+    for (const child of node.children) {
+      const result = find(child, next);
+      if (result) return result;
+    }
+    return null;
+  };
+  const path = find(root, []);
+  if (!path) return null;
+  const label = path.pop();
+  const context = path.length ? ` in the context of ${path.join(' → ')}` : '';
+  return `Explain “${label}”${context}, using the sources in this notebook.`;
 }
 
 /**
@@ -194,8 +235,15 @@ export function mindMapToMarkdown(map: MindMap): string {
     '',
   );
 
+  if (map.source_count != null && map.total_source_count != null && map.source_count < map.total_source_count) {
+    lines.push(`_Covers ${map.source_count} of ${map.total_source_count} ready sources._`, '');
+  }
+  if (map.root.label !== map.project_name) lines.push(`## ${map.root.label}`, '');
+  if (map.root.detail) lines.push(map.root.detail, '');
+
   const write = (node: MindMapNode, depth: number) => {
     lines.push(`${'  '.repeat(depth)}- ${node.label}`);
+    if (node.detail) lines.push(`${'  '.repeat(depth + 1)}${node.detail}`);
     node.children.forEach((child) => write(child, depth + 1));
   };
   map.root.children.forEach((branch) => write(branch, 0));

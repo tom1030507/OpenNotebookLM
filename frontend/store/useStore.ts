@@ -25,6 +25,7 @@ interface AppState {
   // UI State
   sidebarOpen: boolean;
   studioOpen: boolean;
+  pendingMindMapQuestion: { projectId: string; question: string } | null;
 
   // Preferences
   /** Whether finishing a source announces itself. Read by useDocumentStatusWatch. */
@@ -75,6 +76,8 @@ interface AppState {
   // Actions - UI
   toggleSidebar: () => void;
   toggleStudio: () => void;
+  draftMindMapQuestion: (projectId: string, question: string) => void;
+  consumeMindMapQuestion: (projectId: string) => string | null;
 
   // Actions - Preferences
   setNotifyOnProcessingComplete: (enabled: boolean) => void;
@@ -249,6 +252,7 @@ const initialState = {
   loadingMessages: false,
   sidebarOpen: true,
   studioOpen: true,
+  pendingMindMapQuestion: null,
   notifyOnProcessingComplete: true,
 };
 
@@ -284,6 +288,7 @@ const useStore = create<AppState>()(
               currentProject,
               loadingProjects: false,
               ...(!currentProject || projectChanged ? {
+                pendingMindMapQuestion: null,
                 documents: [],
                 conversations: [],
                 currentConversation: null,
@@ -312,6 +317,7 @@ const useStore = create<AppState>()(
           retireProjectScopedReads();
           set({
             currentProject: project,
+            pendingMindMapQuestion: null,
             loadingProjects: false,
             documents: [],
             conversations: [],
@@ -361,6 +367,7 @@ const useStore = create<AppState>()(
                 currentProject: deletedCurrentProject ? null : state.currentProject,
                 loadingProjects: false,
                 ...(deletedCurrentProject ? {
+                  pendingMindMapQuestion: null,
                   documents: [],
                   conversations: [],
                   currentConversation: null,
@@ -837,6 +844,25 @@ const useStore = create<AppState>()(
           set((state) => ({ studioOpen: !state.studioOpen }));
         },
 
+        draftMindMapQuestion: (projectId, question) => {
+          const content = question.trim();
+          if (get().currentProject?.id !== projectId || !content) return;
+          set({
+            pendingMindMapQuestion: { projectId, question: content },
+            sidebarOpen: false,
+            studioOpen: false,
+          });
+        },
+
+        consumeMindMapQuestion: (projectId) => {
+          const { currentProject, pendingMindMapQuestion } = get();
+          if (currentProject?.id !== projectId || pendingMindMapQuestion?.projectId !== projectId) {
+            return null;
+          }
+          set({ pendingMindMapQuestion: null });
+          return pendingMindMapQuestion.question;
+        },
+
         // Preferences
         setNotifyOnProcessingComplete: (enabled) => {
           set({ notifyOnProcessingComplete: enabled });
@@ -849,6 +875,7 @@ const useStore = create<AppState>()(
           set((state) => ({
             projects: [],
             currentProject: null,
+            pendingMindMapQuestion: null,
             loadingProjects: false,
             documents: [],
             loadingDocuments: false,
