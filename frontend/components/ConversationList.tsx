@@ -147,20 +147,24 @@ export default function ConversationList() {
             </button>
             <h3 className="truncate text-sm font-medium">Conversations</h3>
           </div>
-          <button
-            onClick={handleNewConversation}
-            aria-label="New Conversation"
-            title="New Conversation"
-            className="p-1 hover:bg-[var(--muted)] rounded transition-base"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
+          {/* Only while collapsed. Expanded, the labelled button below is the
+              same action, and two controls a few pixels apart read as two. */}
+          {isCollapsed && (
+            <button
+              onClick={handleNewConversation}
+              aria-label="New Conversation"
+              title="New Conversation"
+              className="p-1 hover:bg-[var(--muted)] rounded transition-base"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          )}
         </div>
-        
+
         {!isCollapsed && (
           <button
             onClick={handleNewConversation}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base text-sm"
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base text-sm"
           >
             <Plus className="w-4 h-4" />
             <span>New Conversation</span>
@@ -240,17 +244,27 @@ export default function ConversationList() {
                           >
                             <MessageSquare className="w-4 h-4 mt-0.5 text-[var(--muted-foreground)] flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm truncate">
+                              <p className="text-sm truncate" title={conv.title}>
                                 {conv.title}
                               </p>
                               <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1 mt-0.5">
-                                <Clock className="w-3 h-3" />
-                                {formatDistanceToNow(parseApiTimestamp(conv.created_at), { addSuffix: true })}
+                                <Clock className="w-3 h-3 flex-shrink-0" />
+                                {/* One line: in a 184px panel "2 minutes ago"
+                                    otherwise wraps under the clock icon. */}
+                                <span className="truncate">
+                                  {formatDistanceToNow(parseApiTimestamp(conv.created_at), { addSuffix: true })}
+                                </span>
                               </p>
                             </div>
-                            
-                            {/* Action buttons */}
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+
+                            {/* Overlaid rather than in flow: at opacity-0 these
+                                still reserved their width, and the title lost it
+                                permanently. See the same note in SourcesPanel. */}
+                            <div className={`absolute right-2 top-2 flex items-center gap-1 rounded pl-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${
+                              currentConversation?.id === conv.id
+                                ? 'bg-[var(--accent-bg)]'
+                                : 'bg-[var(--muted)]'
+                            }`}>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();

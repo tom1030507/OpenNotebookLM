@@ -248,7 +248,7 @@ export default function SourcesPanel({
         {currentProject && (
           <button 
             onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base"
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base"
           >
             <Plus className="w-4 h-4" />
             <span className="text-sm">Add Source</span>
@@ -297,7 +297,7 @@ export default function SourcesPanel({
               {filteredDocuments.map((doc) => (
                 <div
                   key={doc.id}
-                  className="p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
+                  className="relative p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
                   onClick={() => setPreviewDocument(doc)}
                 >
                   <div className="flex items-start gap-3">
@@ -305,7 +305,7 @@ export default function SourcesPanel({
                       {getSourceIcon(doc.type)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium truncate">
+                      <h3 className="text-sm font-medium truncate" title={doc.name}>
                         {doc.name}
                       </h3>
                       <p className="text-xs text-[var(--muted-foreground)] mt-1">
@@ -317,30 +317,35 @@ export default function SourcesPanel({
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPreviewDocument(doc);
-                        }}
-                        className="p-1 hover:bg-[var(--muted)] rounded"
-                        aria-label={'Preview document'}
-                        title={'Preview document'}
-                      >
-                        <Eye className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDocument(doc.id);
-                        }}
-                        className="p-1 hover:bg-[var(--muted)] rounded"
-                        aria-label={'Delete document'}
-                        title={'Delete document'}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
+                  </div>
+                  {/* Out of flow on purpose. In the flex row this pair held 44px
+                      of a 190px card even while invisible at opacity-0, which is
+                      what cut a filename down to a handful of characters.
+                      Overlaying it spends that width only while it is on screen,
+                      and focus-within keeps it reachable by keyboard. */}
+                  <div className="absolute right-2 top-2 flex items-center gap-1 rounded bg-[var(--card)] pl-1 opacity-0 transition-all group-hover:opacity-100 group-focus-within:opacity-100">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewDocument(doc);
+                      }}
+                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      aria-label={'Preview document'}
+                      title={'Preview document'}
+                    >
+                      <Eye className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteDocument(doc.id);
+                      }}
+                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      aria-label={'Delete document'}
+                      title={'Delete document'}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               ))}

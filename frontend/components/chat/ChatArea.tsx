@@ -7,6 +7,7 @@ import {
   Upload,
   FolderPlus,
   ChevronRight,
+  MessageSquare,
   Loader2
 } from 'lucide-react';
 import useStore, { QueryMessageRefreshError } from '@/store/useStore';
@@ -55,10 +56,14 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         <BrandLogo className="w-8 h-8 flex-shrink-0" />
       )}
       <div
-        className={`max-w-[70%] ${
+        className={`${
           message.role === 'user'
-            ? 'bg-[var(--primary)] text-white'
-            : 'bg-[var(--card)] border border-[var(--border)]'
+            ? 'max-w-[85%] bg-[var(--primary)] text-[var(--primary-foreground)]'
+            // An answer fills the column rather than 70% of it. The cap left a
+            // gutter as wide as the composer's right third, and on a 1024px
+            // screen with the side panels open it squeezed the prose to about
+            // 250px while 110px next to it stayed empty.
+            : 'min-w-0 flex-1 bg-[var(--card)] border border-[var(--border)]'
         } rounded-lg px-4 py-3`}
       >
         {message.role === 'assistant' ? (
@@ -250,7 +255,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   };
   
   // Check if ready to chat
-  const hasDocuments = documents.length > 0 && documents.some(d => d.status === 'ready');
+  const readyDocumentCount = documents.filter(d => d.status === 'ready').length;
+  const hasDocuments = readyDocumentCount > 0;
   const canChat = currentProject && hasDocuments;
   const canAddSources = Boolean(currentProject);
   const pendingQueryIsActive = pendingQuery !== null
@@ -326,34 +332,45 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 className="leading-tight font-normal mb-4"
                 style={welcomeHeroStyles.title}
               >
-                {currentProject
-                  ? 'Add a source to get started'
-                  : 'Create a project to get started'}
+                {!currentProject
+                  ? 'Create a project to get started'
+                  : hasDocuments
+                    ? 'Ask anything about your sources'
+                    : 'Add a source to get started'}
               </h2>
-              
+
               <p className="max-w-2xl mx-auto text-base text-[var(--muted-foreground)] mb-8">
-                {currentProject
-                  ? 'NotebookLM can be inaccurate. Please verify its responses.'
-                  : 'Projects keep your sources and conversations organized.'}
+                {!currentProject
+                  ? 'Projects keep your sources and conversations organized.'
+                  : hasDocuments
+                    ? 'OpenNotebookLM can be inaccurate. Please verify its responses.'
+                    : 'Answers are grounded in the sources you add, and cite them.'}
               </p>
 
               <button
                 type="button"
-                onClick={currentProject
-                  ? handleRequestAddSources
-                  : projectDialog?.openProjectDialog}
+                onClick={!currentProject
+                  ? projectDialog?.openProjectDialog
+                  : hasDocuments
+                    ? () => composerRef.current?.focus()
+                    : handleRequestAddSources}
                 disabled={!currentProject && !projectDialog}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
               >
-                {currentProject ? (
+                {!currentProject ? (
                   <>
-                    <Upload className="w-5 h-5" />
-                    <span>Upload sources</span>
+                    <FolderPlus className="w-5 h-5" />
+                    <span>New Project</span>
+                  </>
+                ) : hasDocuments ? (
+                  <>
+                    <MessageSquare className="w-5 h-5" />
+                    <span>Start asking</span>
                   </>
                 ) : (
                   <>
-                  <FolderPlus className="w-5 h-5" />
-                  <span>New Project</span>
+                    <Upload className="w-5 h-5" />
+                    <span>Upload sources</span>
                   </>
                 )}
               </button>
@@ -466,7 +483,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               
               {inputValue && hasDocuments && (
                 <span className="absolute right-3 bottom-2 text-xs text-[var(--muted-foreground)]">
-                  {documents.filter(d => d.status === 'ready').length} sources
+                  {readyDocumentCount} {readyDocumentCount === 1 ? 'source' : 'sources'}
                 </span>
               )}
             </div>
