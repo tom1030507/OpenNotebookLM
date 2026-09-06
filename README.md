@@ -27,8 +27,15 @@
   <a href="#-faq">FAQ</a>
 </p>
 
+<!--
+  Recorded 2026-09-06 against a real run: Docker backend on :8000, the
+  OpenAI-compatible path pointed at Groq (qwen/qwen3.8-27b), and the
+  "Attention is all you need" PDF imported through the app itself. The answer
+  and its citations are what that model actually returned. Re-record it when
+  the workspace layout changes.
+-->
 <p align="center">
-  <img src=".github/assets/demo.gif" alt="Typing a question about three imported sources and getting back an answer with citations" width="820">
+  <img src=".github/assets/demo.gif" alt="Typing 'What is this paper about?' against an imported PDF, then an answer whose inline citations preview the passage they came from" width="820">
 </p>
 
 ---
@@ -52,19 +59,20 @@ you configure — and you can point that at a model running on the same machine.
 ## 📸 Screenshots
 
 <!--
-  Captured 2026-08-21 from a real run: Docker backend on :8000, the OpenAI-compatible
-  path pointed at Groq (openai/gpt-oss-120b), and three Wikipedia pages imported
-  through the app itself. Nothing here is mocked. Retake them when the workspace
+  Captured 2026-09-06 from a real run: Docker backend on :8000, the OpenAI-compatible
+  path pointed at Groq (qwen/qwen3.8-27b), and the "Attention is all you need" PDF
+  imported through the app itself. Nothing here is mocked — the answers, the citations
+  and the concept map are what that model returned. Retake them when the workspace
   layout changes — an out-of-date screenshot is worse than none.
 -->
 
 <p align="center">
-  <img src=".github/assets/screenshot-workspace.png" alt="The workspace: imported sources on the left, a generated answer with its citations in the middle, Studio outputs on the right" width="820">
+  <img src=".github/assets/screenshot-workspace.png" alt="The workspace: the imported PDF on the left, a generated answer with numbered citations in the middle, Studio outputs on the right" width="820">
   <br><em>Sources on the left, the answer and the chunks it cited in the middle, Studio on the right.</em>
 </p>
 
 <p align="center">
-  <img src=".github/assets/screenshot-mindmap.png" alt="An interactive concept map with colored topic branches and nested subtopics" width="820">
+  <img src=".github/assets/screenshot-mindmap.png" alt="An interactive concept map of the Transformer paper with colored topic branches and nested subtopics, one concept selected and explained below the canvas" width="820">
   <br><em>Explore concepts and their connections: expand branches, drag and zoom, or select an
   idea to read its explanation and prepare a question in chat.</em>
 </p>
