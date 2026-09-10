@@ -457,7 +457,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             <button
               onClick={handleSave}
               disabled={isSaving}
-              className="px-4 py-2 text-sm bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base disabled:opacity-50 flex items-center gap-2"
+              className="px-4 py-2 text-sm bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base disabled:opacity-50 flex items-center gap-2"
             >
               {isSaving ? (
                 <>

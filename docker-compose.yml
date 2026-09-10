@@ -33,6 +33,11 @@ services:
       OPENAI_REASONING_FORMAT: ${OPENAI_REASONING_FORMAT:-}
       # Floor for a request's output budget; reasoning models spend it first.
       OPENAI_MIN_MAX_TOKENS: ${OPENAI_MIN_MAX_TOKENS:-2048}
+      # Empty means "read the model's own limit from /v1/models".
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-}
+      # Ceiling on prompt + max_tokens for one request. Empty learns it from the
+      # first refusal that names one, at the cost of that refused request.
+      LLM_MAX_REQUEST_TOKENS: ${LLM_MAX_REQUEST_TOKENS:-}
       CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-opus-5}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}

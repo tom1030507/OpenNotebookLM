@@ -9,12 +9,20 @@
   --card-foreground: #202124;
   --primary: #1a73e8;
   --primary-hover: #1557b0;
+  /* Text and icons drawn on --primary. It is a token rather than a literal
+     white because dark mode flips --primary to a light blue: white on that is
+     2.1:1, well under the 4.5:1 AA floor. */
+  --primary-foreground: #ffffff;
   --secondary: #f0f3ff;
   --secondary-foreground: #202124;
   --muted: #f1f3f4;
   --muted-foreground: #5f6368;
   --accent: #9b51e0;
   --accent-foreground: #ffffff;
+  /* Fill for a selected row. Without it `bg-[var(--accent-bg)]` in
+     ConversationList resolved to an invalid colour, the declaration was
+     dropped, and the open conversation looked identical to the closed ones. */
+  --accent-bg: #e8f0fe;
   --border: #dadce0;
   --input: #dadce0;
   --ring: #1a73e8;
@@ -37,12 +45,16 @@
   --card-foreground: #e8eaed;
   --primary: #8ab4f8;
   --primary-hover: #aecbfa;
+  --primary-foreground: #202124;
   --secondary: #292a2d;
   --secondary-foreground: #e8eaed;
   --muted: #3c4043;
   --muted-foreground: #9aa0a6;
   --accent: #bb86fc;
   --accent-foreground: #202124;
+  /* Dark enough that --muted-foreground, which the row's timestamp uses,
+     still clears 4.5:1 on top of it. */
+  --accent-bg: #2b3446;
   --border: #3c4043;
   --input: #3c4043;
   --sidebar-bg: #292a2d;

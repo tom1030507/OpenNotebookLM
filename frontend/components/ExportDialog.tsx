@@ -178,7 +178,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
           <button
             onClick={handleExport}
             disabled={isExporting || exportSuccess}
-            className="flex-1 px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-base disabled:opacity-50 flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {exportSuccess ? (
               <>

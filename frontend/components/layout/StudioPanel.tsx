@@ -419,12 +419,17 @@ export default function StudioPanel({
           <button
             disabled
             aria-label={`More options (${availabilityLabel})`}
-            className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-0.5"
           >
-            {/* The availability note lives in the accessible name only: English
-                is long enough to wrap and crowd the bounded Studio track. */}
-            <span className="truncate">More options</span>
-            <ChevronDown className="w-4 h-4 shrink-0" />
+            <span className="flex items-center gap-2">
+              <span className="truncate">More options</span>
+              <ChevronDown className="w-4 h-4 shrink-0" />
+            </span>
+            {/* The note used to live in the accessible name only, to keep it
+                from wrapping in the bounded Studio track — which left a sighted
+                reader with a greyed control and no reason for it. On its own
+                line it fits without pushing the label into a wrap. */}
+            <span className="truncate text-xs">{availabilityLabel}</span>
           </button>
 
         </div>

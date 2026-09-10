@@ -233,7 +233,7 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
                   {selected.kind === 'document' ? 'Explore the concepts from this source.' : selected.detail || 'Explore this concept with a question grounded in your sources.'}
                 </p>
               </div>
-              {onAsk && <button type="button" className="flex shrink-0 items-center gap-2 rounded-full bg-[var(--primary)] px-4 py-2.5 text-xs font-medium text-white hover:opacity-90"
+              {onAsk && <button type="button" className="flex shrink-0 items-center gap-2 rounded-full bg-[var(--primary)] px-4 py-2.5 text-xs font-medium text-[var(--primary-foreground)] hover:opacity-90"
                 onClick={() => { const question = mindMapQuestion(map.root, selected.id); if (question) onAsk(question); }}>
                 <MessageCircle className="h-4 w-4" /><span>Ask in chat</span><ChevronRight className="hidden h-3 w-3 sm:block" />
               </button>}

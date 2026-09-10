@@ -154,8 +154,10 @@ describe('desktop workspace layout', () => {
     const actions = container.querySelector<HTMLElement>(
       '[data-layout="welcome-actions"]',
     );
+    // The fixture project already holds two ready documents, so the hero asks
+    // for a question rather than for a source.
     const title = screen.getByRole('heading', {
-      name: 'Add a source to get started',
+      name: 'Ask anything about your sources',
     });
 
     expect(workspace?.style.gridTemplateColumns).toBe(
@@ -328,8 +330,16 @@ describe('desktop workspace layout', () => {
     render(createElement(Home));
 
     expect(screen.getByRole('heading', { name: 'Conversations' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Collapse conversations' })).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'New Conversation' })).toHaveLength(2);
+    const toggle = screen.getByRole('button', { name: 'Collapse conversations' });
+
+    // Expanded, the labelled button is the only way in: the header's icon
+    // button was the same action a few pixels away, and read as a second one.
+    expect(screen.getAllByRole('button', { name: 'New Conversation' })).toHaveLength(1);
+
+    // Collapsed, the labelled button is gone, so the icon has to come back —
+    // otherwise the action is unreachable without expanding first.
+    fireEvent.click(toggle);
+    expect(screen.getAllByRole('button', { name: 'New Conversation' })).toHaveLength(1);
   });
 
   test('keeps the controlled conversation content mounted while collapsed', () => {

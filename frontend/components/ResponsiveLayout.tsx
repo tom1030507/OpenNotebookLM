@@ -126,7 +126,7 @@ export default function ResponsiveLayout({
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <nav
         aria-label="Workspace panels"
-        className="flex shrink-0 gap-2 border-b border-[var(--border)] bg-[var(--card)] p-3 lg:hidden"
+        className="flex shrink-0 gap-2 border-b border-[var(--border)] bg-[var(--card)] p-3 xl:hidden"
       >
         {layout.drawerControls.map(({ id, label }) => {
           const isOpen = layout.drawerPanelId === id;
@@ -157,14 +157,14 @@ export default function ResponsiveLayout({
       <div
         data-layout="desktop-workspace"
         style={desktopStyle}
-        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden lg:grid"
+        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden xl:grid"
       >
         {layout.drawerPanelId && (
           <button
             type="button"
             aria-label="Close panel"
             tabIndex={-1}
-            className="absolute inset-0 z-40 bg-black/50 lg:hidden"
+            className="absolute inset-0 z-40 bg-black/50 xl:hidden"
             onClick={dismissDrawer}
           />
         )}
@@ -206,14 +206,14 @@ export default function ResponsiveLayout({
               }
               className={
                 isDrawer
-                  ? `absolute inset-y-0 z-50 flex w-[var(--workspace-drawer-width)] flex-col overflow-hidden bg-[var(--background)] shadow-xl lg:static lg:z-auto lg:block lg:w-auto lg:shrink-0 lg:overflow-visible lg:shadow-none ${
+                  ? `absolute inset-y-0 z-50 flex w-[var(--workspace-drawer-width)] flex-col overflow-hidden bg-[var(--background)] shadow-xl xl:static xl:z-auto xl:block xl:w-auto xl:shrink-0 xl:overflow-visible xl:shadow-none ${
                       item === 'studio' ? 'right-0' : 'left-0'
                     }`
-                  : 'hidden shrink-0 lg:block'
+                  : 'hidden shrink-0 xl:block'
               }
             >
               {isDrawer && (
-                <header className="flex shrink-0 items-center justify-end border-b border-[var(--border)] p-3 lg:hidden">
+                <header className="flex shrink-0 items-center justify-end border-b border-[var(--border)] p-3 xl:hidden">
                   <button
                     type="button"
                     aria-label={`Close ${activePanelLabel} panel`}
