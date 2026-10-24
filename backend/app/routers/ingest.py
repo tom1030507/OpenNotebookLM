@@ -9,7 +9,7 @@ import structlog
 from app.db.database import get_db
 from app.schemas import (
     FileUploadResponse, URLUploadRequest, YouTubeUploadRequest,
-    DocumentResponse, DocumentStatusResponse, TextUploadRequest,
+    DocumentResponse, DocumentContentResponse, DocumentStatusResponse, TextUploadRequest,
     DocumentUpdateRequest,
 )
 from app.db.models import User
@@ -432,6 +432,26 @@ async def get_document(
         updated_at=document.updated_at,
         chunk_count=chunk_count
     )
+
+
+@router.get("/docs/{doc_id}/content", response_model=DocumentContentResponse)
+async def get_document_content(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return extracted text for a preview opened by its owner.
+
+    Args:
+        doc_id: Document whose extracted text is being previewed.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        The extracted document content, or an empty string before extraction.
+    """
+    document = require_document(db, doc_id, current_user)
+    return DocumentContentResponse(content=document.content or "")
 
 
 @router.put("/docs/{doc_id}", response_model=DocumentResponse)

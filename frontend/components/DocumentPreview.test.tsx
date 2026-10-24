@@ -67,6 +67,21 @@ afterEach(() => {
 
 
 describe('DocumentPreview', () => {
+  it('fetches and previews extracted text for an uploaded Office source', async () => {
+    const document = await loadDocument({
+      source_type: 'docx',
+      source_url: 'uploads/document-1_report.docx',
+      title: 'Report',
+    });
+    const fetchContent = vi.spyOn(api, 'fetchDocumentContent')
+      .mockResolvedValue('# Chapter One\n\nReport text');
+
+    render(<DocumentPreview document={document} onClose={() => {}} />);
+
+    expect(await screen.findByText(/# Chapter One/)).toBeTruthy();
+    expect(fetchContent).toHaveBeenCalledWith('document-1');
+  });
+
   it('fetches an uploaded PDF with the session token and previews the bytes', async () => {
     // The file route requires a bearer token and a browser cannot put an
     // Authorization header on an <iframe src>, so pointing the frame straight at

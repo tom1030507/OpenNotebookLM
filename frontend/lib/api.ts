@@ -702,6 +702,14 @@ const api = {
     return requestBlob(`/docs/${encodeURIComponent(documentId)}/file`);
   },
 
+  /** Read extracted source text on demand for an uploaded file preview. */
+  async fetchDocumentContent(documentId: string): Promise<string> {
+    const response = await requestJson<{ content: string }>(
+      `/docs/${encodeURIComponent(documentId)}/content`,
+    );
+    return response.content;
+  },
+
   async getDocuments(projectId: string, signal?: AbortSignal): Promise<Document[]> {
     const documents = await requestJson<BackendDocument[]>(
       `/projects/${projectId}/documents`,

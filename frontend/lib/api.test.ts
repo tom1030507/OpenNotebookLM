@@ -634,6 +634,22 @@ describe('API client', () => {
       expect.objectContaining({ headers: expect.any(Headers) }),
     );
   });
+
+  it('fetches extracted document text with the session token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      content: '# Chapter One',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const content = await api.fetchDocumentContent('document/1');
+
+    expect(content).toBe('# Chapter One');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/docs/document%2F1/content',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+  });
+
   it('reports the demo account the sign-in page may offer', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       enabled: true,

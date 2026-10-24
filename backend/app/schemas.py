@@ -165,6 +165,11 @@ class DocumentResponse(DocumentBase):
         from_attributes = True
 
 
+class DocumentContentResponse(BaseModel):
+    """Extracted source text returned only when a preview requests it."""
+    content: str
+
+
 class DocumentStatusResponse(BaseModel):
     """Schema for document status response."""
     id: str
