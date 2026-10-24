@@ -26,7 +26,7 @@ from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.services.projects import ProjectService
 from app.db.models import Conversation, Message, User
-from app.schemas import ConversationResponse
+from app.schemas import ConversationResponse, MAX_DOCUMENT_SELECTION
 from app.routers.auth import get_current_user
 from app.routers.ownership import (
     owned_document_ids,
@@ -81,7 +81,30 @@ class QueryRequest(BaseModel):
     include_sources: bool = True
     # Omitted means every owned source. An empty list is refused rather than
     # read as "no restriction", which would quietly search everything.
-    document_ids: Optional[List[str]] = Field(default=None, min_length=1)
+    document_ids: Optional[List[str]] = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_DOCUMENT_SELECTION,
+    )
+
+    @field_validator("document_ids")
+    @classmethod
+    def deduplicate_document_ids(
+        cls,
+        document_ids: Optional[List[str]],
+    ) -> Optional[List[str]]:
+        """Keep the first occurrence of each source before ownership lookup.
+
+        Args:
+            document_ids: Validated source ids, or None when no selection was
+                supplied.
+
+        Returns:
+            The selection in request order with duplicates removed.
+        """
+        if document_ids is None:
+            return None
+        return list(dict.fromkeys(document_ids))
 
 
 class QueryResponse(BaseModel):

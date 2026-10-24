@@ -21,6 +21,9 @@ UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
 # email-validator is not installed, so the address is checked with a pattern
 # rather than pydantic's EmailStr.
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+# Source ids fan out into ownership and retrieval queries; a fixed ceiling
+# prevents one request from building an unbounded SQL `IN` clause.
+MAX_DOCUMENT_SELECTION = 500
 
 
 class UserRegister(BaseModel):
@@ -347,7 +350,30 @@ class SourceSelection(BaseModel):
 
     # Omitted means every source. An empty list is refused rather than read as
     # "no restriction", which would quietly use everything.
-    document_ids: Optional[List[str]] = Field(default=None, min_length=1)
+    document_ids: Optional[List[str]] = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_DOCUMENT_SELECTION,
+    )
+
+    @field_validator("document_ids")
+    @classmethod
+    def deduplicate_document_ids(
+        cls,
+        document_ids: Optional[List[str]],
+    ) -> Optional[List[str]]:
+        """Keep the first occurrence of every selected source id.
+
+        Args:
+            document_ids: Validated source ids, or None when no selection was
+                supplied.
+
+        Returns:
+            The selection in request order with duplicates removed.
+        """
+        if document_ids is None:
+            return None
+        return list(dict.fromkeys(document_ids))
 
 
 class MindMapResponse(BaseModel):
