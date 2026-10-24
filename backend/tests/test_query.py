@@ -74,7 +74,8 @@ def test_thirty_first_query_for_one_account_returns_429(monkeypatch):
 
     assert [response.status_code for response in responses[:30]] == [200] * 30
     assert responses[-1].status_code == 429
-    assert responses[-1].headers["Retry-After"] == "60"
+    # The window is counted from the first request, so a slow run reports 58 or 59.
+    assert 55 <= int(responses[-1].headers["Retry-After"]) <= 60
 
 
 def test_query_uses_maximum_output_budget_when_caller_omits_limit(monkeypatch):
