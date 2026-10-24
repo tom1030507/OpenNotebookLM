@@ -295,19 +295,26 @@ class VideoSummaryService:
         """
         self.llm = llm_service if llm_service is not None else LLMService()
 
-    def generate(self, db: Session, project: Project) -> Dict[str, Any]:
+    def generate(
+        self,
+        db: Session,
+        project: Project,
+        document_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Build the video summary script for a project.
 
         Args:
             db: Database session.
             project: The project to summarise. Ownership is the caller's
                 problem — resolve the id through `routers.ownership` first.
+            document_ids: Optional subset of the project's sources to cover;
+                `None` covers all of them.
 
         Returns:
             The scenes plus the metadata the API exposes: which model wrote
             them, when they were built, and how long they take to play.
         """
-        documents = project_documents(db, project)
+        documents = project_documents(db, project, document_ids)
         generated_at = utc_now()
         scenes, model_used = self.build_scenes(
             project.name, documents, generated_at,

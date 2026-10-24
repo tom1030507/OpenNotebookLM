@@ -43,7 +43,7 @@ const apiMock = vi.hoisted(() => ({
 vi.mock('@/lib/api', () => ({ default: apiMock }));
 
 
-import useStore, { QueryMessageRefreshError } from './useStore';
+import useStore, { QueryMessageRefreshError, selectedSourceIds } from './useStore';
 
 
 const project = (id: string): Project => ({
@@ -506,6 +506,68 @@ describe('application store', () => {
     });
     expect(apiMock.getMessages).toHaveBeenCalledWith('conversation-1');
     expect(useStore.getState().messages).toEqual([authoritativeMessage]);
+  });
+
+  describe('source selection', () => {
+    beforeEach(() => {
+      useStore.setState({
+        currentProject: project('project-1'),
+        currentConversation: conversation('conversation-1', 'project-1'),
+        documents: [document('a'), document('b')],
+      });
+      apiMock.query.mockResolvedValue({
+        answer: 'Answer',
+        sources: [],
+        chunks_used: 0,
+        model_used: null,
+        usage: {},
+        conversation_id: 'conversation-1',
+      });
+    });
+
+    it('leaves the scope unset while every source is selected', async () => {
+      expect(selectedSourceIds(useStore.getState())).toBeUndefined();
+
+      await useStore.getState().sendQuery('Question');
+
+      // What goes over the wire: an undefined field is dropped by JSON.stringify.
+      expect(JSON.parse(JSON.stringify(apiMock.query.mock.calls[0][0]))).not.toHaveProperty(
+        'document_ids',
+      );
+    });
+
+    it('scopes a question to the sources still selected', async () => {
+      useStore.getState().toggleSourceSelected('project-1', 'b');
+
+      await useStore.getState().sendQuery('Question');
+
+      expect(apiMock.query).toHaveBeenCalledWith(expect.objectContaining({
+        document_ids: ['a'],
+      }));
+    });
+
+    it('reports an empty selection rather than an unscoped one', () => {
+      useStore.getState().setAllSourcesSelected('project-1', false);
+      expect(selectedSourceIds(useStore.getState())).toEqual([]);
+
+      useStore.getState().setAllSourcesSelected('project-1', true);
+      expect(selectedSourceIds(useStore.getState())).toBeUndefined();
+    });
+
+    it('keeps each project its own selection', () => {
+      useStore.getState().toggleSourceSelected('project-1', 'a');
+      useStore.setState({ currentProject: project('project-2') });
+
+      expect(selectedSourceIds(useStore.getState())).toBeUndefined();
+    });
+
+    it('forgets the selection at the account boundary', () => {
+      useStore.getState().toggleSourceSelected('project-1', 'a');
+
+      useStore.getState().clearAccountState();
+
+      expect(useStore.getState().deselectedSources).toEqual({});
+    });
   });
 
   it('waits for a newer same-conversation message read before completing a query', async () => {

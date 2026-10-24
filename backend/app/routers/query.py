@@ -31,6 +31,7 @@ from app.routers.auth import get_current_user
 from app.routers.ownership import (
     owned_document_ids,
     require_conversation,
+    require_documents,
     require_project,
 )
 from app.routers.rate_limit import (
@@ -78,6 +79,9 @@ class QueryRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=8192, ge=1, le=8192)
     include_sources: bool = True
+    # Omitted means every owned source. An empty list is refused rather than
+    # read as "no restriction", which would quietly search everything.
+    document_ids: Optional[List[str]] = Field(default=None, min_length=1)
 
 
 class QueryResponse(BaseModel):
@@ -145,6 +149,10 @@ def query(
         # independently of the project scope below. Without this a question with
         # no project selected searched every chunk in the database.
         allowed_document_ids = owned_document_ids(db, current_user)
+        if request.document_ids is not None:
+            allowed_document_ids = require_documents(
+                db, request.document_ids, current_user
+            )
 
         # Validate project if specified
         if request.project_id:

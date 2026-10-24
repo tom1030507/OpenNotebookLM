@@ -48,24 +48,32 @@ WORD_PATTERN = re.compile(r"[A-Za-z][A-Za-z'-]{2,}")
 MAX_LABELS = 6
 
 
-def project_documents(db: Session, project: Project) -> List[Document]:
+def project_documents(
+    db: Session,
+    project: Project,
+    document_ids: Optional[List[str]] = None,
+) -> List[Document]:
     """List the documents attached to a project, in a stable order.
 
     Args:
         db: Database session.
         project: The project.
+        document_ids: Optional subset to keep; `None` keeps every document.
 
     Returns:
         The documents. Ordered by title after `added_at`, because `added_at`
         comes from SQLite's second-resolution clock and every document of one
         upload ties.
     """
-    return db.query(Document).join(
+    query = db.query(Document).join(
         ProjectDocument,
         ProjectDocument.document_id == Document.id,
     ).filter(
         ProjectDocument.project_id == project.id,
-    ).order_by(
+    )
+    if document_ids is not None:
+        query = query.filter(Document.id.in_(document_ids))
+    return query.order_by(
         ProjectDocument.added_at,
         Document.title,
     ).all()

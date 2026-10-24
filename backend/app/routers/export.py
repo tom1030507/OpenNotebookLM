@@ -1,5 +1,6 @@
 """Export router for exporting conversations and projects."""
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, FileResponse
@@ -10,10 +11,11 @@ import structlog
 
 from app.db.database import get_db
 from app.db.models import User
+from app.schemas import SourceSelection
 from app.services.export import ExportService, MAX_BATCH_EXPORT_CONVERSATIONS
 from app.utils.time import utc_now
 from app.routers.auth import get_current_user
-from app.routers.ownership import require_conversation, require_project
+from app.routers.ownership import require_conversation, require_documents, require_project
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -143,18 +145,32 @@ async def export_project(
 @router.post("/export/project/{project_id}/summary")
 async def export_project_summary(
     project_id: str,
+    selection: Optional[SourceSelection] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Generate and export a summary report of one of the caller's projects.
-    
+
     Includes statistics, key insights, and document overview.
+
+    Args:
+        project_id: Project to resolve through the current user's ownership.
+        selection: Optional subset of sources to report on; omitted means all.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        The report as a Markdown attachment.
     """
     project = require_project(db, project_id, current_user)
-    
+    # Resolved before the try below, which would turn a 404 into a 500.
+    document_ids = None
+    if selection and selection.document_ids is not None:
+        document_ids = require_documents(db, selection.document_ids, current_user)
+
     try:
         # Generate summary
-        summary = export_service.generate_project_summary(db, project)
+        summary = export_service.generate_project_summary(db, project, document_ids)
         
         # Create markdown report
         report = f"""# Project Summary: {project.name}

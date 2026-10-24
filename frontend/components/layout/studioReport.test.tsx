@@ -74,9 +74,26 @@ describe('Studio report', () => {
 
     fireEvent.click(report);
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1'));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
     await waitFor(() => expect(clicks.length).toBe(1));
     expect(clicks[0]).toMatch(/Research notes/);
+  });
+
+  it('reports on the selected sources only', async () => {
+    const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue(new Blob(['#']));
+    useStore.getState().toggleSourceSelected('project-1', 'doc-2');
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', ['doc-1']));
+  });
+
+  it('keeps the report action unavailable with no source selected', () => {
+    useStore.getState().setAllSourcesSelected('project-1', false);
+    render(<StudioPanel />);
+
+    expect((screen.getByRole('button', { name: 'Report' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('keeps the report action unavailable without a project', () => {

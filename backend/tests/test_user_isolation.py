@@ -491,6 +491,102 @@ class TestNoteIsolation:
         assert env.alice.delete("%s/%s" % (base, note_id)).status_code == 200
 
 
+SELECTION_ROUTES = [
+    "/api/projects/%s/mindmap",
+    "/api/projects/%s/video-summary",
+    "/api/export/project/%s/summary",
+]
+
+
+class TestSourceSelectionIsolation:
+    """A source selection names document ids, so every one is checked."""
+
+    def _own_project_with_two_sources(self, env):
+        project_id = make_project(env.alice)
+        kept = make_document(env.session, env.alice_user, "Kept source")
+        dropped = make_document(env.session, env.alice_user, "Dropped source")
+        for document_id in (kept, dropped):
+            assert env.alice.post(
+                "/api/projects/%s/documents/%s" % (project_id, document_id)
+            ).status_code == 200
+        return project_id, kept
+
+    @pytest.mark.parametrize("route", SELECTION_ROUTES)
+    def test_selecting_someone_elses_source_is_not_found(self, env, route):
+        project_id = make_project(env.bob, BOB_PROJECT)
+        alice_document = make_document(env.session, env.alice_user)
+
+        foreign = env.bob.post(
+            route % project_id, json={"document_ids": [alice_document]})
+        missing = env.bob.post(route % project_id, json={"document_ids": [MISSING_ID]})
+
+        assert foreign.status_code == 404
+        assert foreign.json() == missing.json()
+
+    def test_query_selecting_someone_elses_source_is_not_found(self, env):
+        alice_document = make_document(env.session, env.alice_user)
+
+        foreign = env.bob.post("/api/query", json={
+            "query": "what is in here?", "document_ids": [alice_document]})
+        missing = env.bob.post("/api/query", json={
+            "query": "what is in here?", "document_ids": [MISSING_ID]})
+
+        assert foreign.status_code == 404
+        assert foreign.json() == missing.json()
+
+    @pytest.mark.parametrize("route", SELECTION_ROUTES + ["/api/query"])
+    def test_an_empty_selection_is_refused(self, env, route):
+        project_id = make_project(env.alice)
+
+        response = env.alice.post(
+            route % project_id if "%s" in route else route,
+            json={"query": "anything", "document_ids": []},
+        )
+
+        assert response.status_code == 422
+
+    def test_the_mind_map_covers_only_the_selection(self, env):
+        project_id, kept = self._own_project_with_two_sources(env)
+
+        response = env.alice.post(
+            "/api/projects/%s/mindmap" % project_id, json={"document_ids": [kept]})
+
+        assert response.status_code == 200
+        assert "Dropped source" not in response.text
+        assert "Kept source" in response.text
+
+    def test_the_video_summary_covers_only_the_selection(self, env):
+        project_id, kept = self._own_project_with_two_sources(env)
+
+        response = env.alice.post(
+            "/api/projects/%s/video-summary" % project_id,
+            json={"document_ids": [kept]},
+        )
+
+        sources = [s["document_id"] for s in response.json()["scenes"] if s["kind"] == "source"]
+        assert sources == [kept]
+
+    def test_the_report_covers_only_the_selection(self, env):
+        project_id, kept = self._own_project_with_two_sources(env)
+
+        response = env.alice.post(
+            "/api/export/project/%s/summary" % project_id,
+            json={"document_ids": [kept]},
+        )
+
+        assert response.status_code == 200
+        assert "Kept source" in response.text
+        assert "Dropped source" not in response.text
+
+    def test_omitting_the_selection_keeps_every_source(self, env):
+        project_id, _ = self._own_project_with_two_sources(env)
+
+        response = env.alice.post("/api/export/project/%s/summary" % project_id)
+
+        assert "Kept source" in response.text
+        assert "Dropped source" in response.text
+
+
 class TestCacheIsolation:
     """Cache invalidation reports on activity, so it is scoped too."""
 

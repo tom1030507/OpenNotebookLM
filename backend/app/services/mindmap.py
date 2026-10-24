@@ -211,13 +211,20 @@ class MindMapService:
         """
         self.llm = llm_service if llm_service is not None else LLMService()
 
-    def generate(self, db: Session, project: Project) -> Dict[str, Any]:
+    def generate(
+        self,
+        db: Session,
+        project: Project,
+        document_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Build the mind map for a project.
 
         Args:
             db: Database session.
             project: The project to map. Ownership is the caller's problem —
                 resolve the id through `routers.ownership` first.
+            document_ids: Optional subset of the project's sources to map;
+                `None` maps all of them.
 
         Returns:
             The tree plus the metadata the API exposes: which model named the
@@ -226,7 +233,7 @@ class MindMapService:
         # Project links alone do not prove document ownership. Imported or
         # corrupted cross-account links must never send private text to a model.
         documents = [
-            document for document in project_documents(db, project)
+            document for document in project_documents(db, project, document_ids)
             if document.status == "ready" and document.user_id == project.user_id
         ]
         root, model_used, source_count = self._build_tree_with_source_count(

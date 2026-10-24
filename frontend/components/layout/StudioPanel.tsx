@@ -12,7 +12,7 @@ import {
   Loader2,
   Square,
 } from 'lucide-react';
-import useStore from '@/store/useStore';
+import useStore, { selectedSourceIds } from '@/store/useStore';
 import api from '@/lib/api';
 import type { MindMap, VideoSummary } from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
@@ -64,6 +64,7 @@ export default function StudioPanel({
   const currentProject = useStore((state) => state.currentProject);
   const documents = useStore((state) => state.documents);
   const loadingDocuments = useStore((state) => state.loadingDocuments);
+  const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState('');
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
@@ -128,7 +129,10 @@ export default function StudioPanel({
     setReportError('');
 
     try {
-      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(operation.project.id));
+      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(
+        operation.project.id,
+        selectedSourceIds(useStore.getState()),
+      ));
       if (!isCurrent()) return;
 
       setIsPreparingAudio(false);
@@ -161,7 +165,10 @@ export default function StudioPanel({
     setReportError('');
 
     try {
-      const map = await api.fetchProjectMindMap(operation.project.id);
+      const map = await api.fetchProjectMindMap(
+        operation.project.id,
+        selectedSourceIds(useStore.getState()),
+      );
       if (operation.isCurrent()) {
         setMindMap({ projectId: operation.project.id, value: map });
       }
@@ -182,7 +189,10 @@ export default function StudioPanel({
     setReportError('');
 
     try {
-      const summary = await api.fetchProjectVideoSummary(operation.project.id);
+      const summary = await api.fetchProjectVideoSummary(
+        operation.project.id,
+        selectedSourceIds(useStore.getState()),
+      );
       if (operation.isCurrent()) {
         setVideoSummary({ projectId: operation.project.id, value: summary });
       }
@@ -203,7 +213,10 @@ export default function StudioPanel({
     setReportError('');
 
     try {
-      const blob = await api.exportProjectSummary(operation.project.id);
+      const blob = await api.exportProjectSummary(
+        operation.project.id,
+        selectedSourceIds(useStore.getState()),
+      );
       if (!operation.isCurrent()) return;
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -244,8 +257,13 @@ export default function StudioPanel({
     ? videoSummary.value
     : null;
 
+  // A reading already under way stays stoppable after its sources are cleared.
+  const blockedBySelection = (option: StudioOption) => (
+    noSourcesSelected && !(option.action === 'audio' && isSpeaking)
+  );
+
   const optionDisabled = (option: StudioOption) => {
-    if (!option.available || !currentProject) return true;
+    if (!option.available || !currentProject || blockedBySelection(option)) return true;
     if (option.action === 'audio') return !speechSupported || isPreparingAudio;
     if (option.action === 'mindmap') return isBuildingMindMap || currentMindMap !== null;
     if (option.action === 'video') {
@@ -285,6 +303,7 @@ export default function StudioPanel({
   const optionHint = (option: StudioOption) => {
     if (!option.available) return availabilityLabel;
     if (!currentProject) return 'Select a project first';
+    if (blockedBySelection(option)) return 'Select a source first';
 
     if (option.action === 'audio') {
       if (!speechSupported) return 'Not supported in this browser';

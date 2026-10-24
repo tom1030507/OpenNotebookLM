@@ -81,7 +81,7 @@ describe('Studio audio summary', () => {
 
     fireEvent.click(audio);
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1'));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
     await waitFor(() => expect(spoken).toHaveLength(1));
     expect(spoken[0].text).toContain('Research notes');
     expect(spoken[0].text).toContain('Example Domain');

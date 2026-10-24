@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import zipfile
-from typing import Tuple, Any, Dict, List
+from typing import Tuple, Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 import structlog
 
@@ -274,14 +274,28 @@ class ExportService:
     def generate_project_summary(
         self,
         db: Session,
-        project: Project
+        project: Project,
+        document_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Generate a summary of the project."""
+        """Generate a summary of the project.
+
+        Args:
+            db: Database session.
+            project: The project to summarise.
+            document_ids: Optional subset of the project's sources to report
+                on; `None` reports on all of them.
+
+        Returns:
+            Document and conversation statistics for the report.
+        """
         # Get document statistics
         documents = []
         total_chunks = 0
         
         project_documents = self._get_project_documents(db, project)
+        if document_ids is not None:
+            selected = set(document_ids)
+            project_documents = [doc for doc in project_documents if doc.id in selected]
 
         for doc in project_documents:
             chunk_count = len(doc.chunks) if doc.chunks else 0

@@ -153,7 +153,7 @@ describe('Studio video summary', () => {
 
     await openVideoSummary();
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1'));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
     expect(screen.getByText('Research notes video summary')).toBeTruthy();
   });
 

@@ -97,6 +97,42 @@ def test_query_uses_maximum_output_budget_when_caller_omits_limit(monkeypatch):
     assert received_max_tokens == 8192
 
 
+class ScopeRecordingRAG:
+    """Records the document scope the route hands to retrieval."""
+
+    allowed = None
+
+    def query(self, **kwargs):
+        self.allowed = kwargs["allowed_document_ids"]
+        return QUERY_RESULT
+
+
+def test_a_source_selection_becomes_the_retrieval_scope(monkeypatch):
+    """Selected ids replace the owned set once they resolve as the caller's."""
+    rag = ScopeRecordingRAG()
+    client = query_client(monkeypatch, rag)
+    monkeypatch.setattr(query, "require_documents", lambda db, ids, user: ids)
+
+    response = client.post(
+        "/api/query", json={"query": "hello", "document_ids": ["doc-1"]},
+    )
+
+    assert response.status_code == 200
+    assert rag.allowed == ["doc-1"]
+
+
+def test_omitting_the_selection_keeps_the_owned_scope(monkeypatch):
+    """Without `document_ids` the route scopes exactly as it always has."""
+    rag = ScopeRecordingRAG()
+    client = query_client(monkeypatch, rag)
+    monkeypatch.setattr(query, "owned_document_ids", lambda *args: ["doc-1", "doc-2"])
+
+    response = client.post("/api/query", json={"query": "hello"})
+
+    assert response.status_code == 200
+    assert rag.allowed == ["doc-1", "doc-2"]
+
+
 def test_third_concurrent_query_for_one_account_returns_429(monkeypatch):
     """A third active model call cannot consume another worker/budget slot."""
     started = Event()
