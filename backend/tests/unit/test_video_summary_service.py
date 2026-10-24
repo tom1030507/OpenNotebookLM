@@ -571,7 +571,7 @@ class TestConcurrentGeneration:
         )
         monkeypatch.setattr(
             "app.services.video_summary.project_documents",
-            lambda db, project: documents[project.name],
+            lambda db, project, document_ids=None: documents[project.name],
         )
 
         with ThreadPoolExecutor(max_workers=2) as pool:

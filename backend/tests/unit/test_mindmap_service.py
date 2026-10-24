@@ -457,7 +457,7 @@ class TestConcurrentGeneration:
         )
         monkeypatch.setattr(
             "app.services.mindmap.project_documents",
-            lambda db, project: documents[project.name],
+            lambda db, project, document_ids=None: documents[project.name],
         )
 
         with ThreadPoolExecutor(max_workers=2) as pool:

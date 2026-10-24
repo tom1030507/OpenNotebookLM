@@ -161,6 +161,22 @@ describe('API client', () => {
     }));
   });
 
+  it.each([
+    { output: 'mind map', request: () => api.fetchProjectMindMap('project-1', ['doc-1']) },
+    { output: 'video summary', request: () => api.fetchProjectVideoSummary('project-1', ['doc-1']) },
+    { output: 'report', request: () => api.exportProjectSummary('project-1', ['doc-1']) },
+    { output: 'audio summary', request: () => api.fetchProjectSummaryText('project-1', ['doc-1']) },
+  ])('sends the source selection as JSON for the $output', async ({ request }) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request();
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(JSON.parse(init.body)).toEqual({ document_ids: ['doc-1'] });
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+  });
+
   it('fetches the complete document after a file upload', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

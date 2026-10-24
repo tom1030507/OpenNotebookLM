@@ -338,6 +338,14 @@ class MindMapNode(BaseModel):
     children: List["MindMapNode"] = []
 
 
+class SourceSelection(BaseModel):
+    """Optional body narrowing a Studio output to some of a project's sources."""
+
+    # Omitted means every source. An empty list is refused rather than read as
+    # "no restriction", which would quietly use everything.
+    document_ids: Optional[List[str]] = Field(default=None, min_length=1)
+
+
 class MindMapResponse(BaseModel):
     """Schema for a generated mind map."""
 

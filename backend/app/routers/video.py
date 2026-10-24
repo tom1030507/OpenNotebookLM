@@ -10,6 +10,8 @@ loop that stalls every other request for the whole call, `/healthz` included,
 which the compose healthcheck gives ten seconds. FastAPI runs a sync handler in
 its threadpool, which is where blocking work belongs.
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 import structlog
@@ -17,8 +19,8 @@ import structlog
 from app.db.database import get_db
 from app.db.models import User
 from app.routers.auth import get_current_user
-from app.routers.ownership import require_project
-from app.schemas import VideoSummaryResponse
+from app.routers.ownership import require_documents, require_project
+from app.schemas import SourceSelection, VideoSummaryResponse
 from app.services.video_summary import VideoSummaryService
 
 # Every route below requires a signed-in caller. Declaring that on the
@@ -55,6 +57,7 @@ def get_video_summary_service() -> VideoSummaryService:
 )
 def project_video_summary(
     project_id: str,
+    selection: Optional[SourceSelection] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     service: VideoSummaryService = Depends(get_video_summary_service),
@@ -64,7 +67,20 @@ def project_video_summary(
     The script is a title card, one scene per source, and a closing recap. The
     source scenes are written by the configured LLM when there is one; otherwise
     they are extracted from the documents themselves, and `model_used` says so.
+
+    Args:
+        project_id: Project to resolve through the current user's ownership.
+        selection: Optional subset of sources to cover; omitted covers them all.
+        db: Database session.
+        current_user: Authenticated caller.
+        service: Video summary generator.
+
+    Returns:
+        The scenes and generation metadata.
     """
     project = require_project(db, project_id, current_user)
+    document_ids = None
+    if selection and selection.document_ids is not None:
+        document_ids = require_documents(db, selection.document_ids, current_user)
 
-    return service.generate(db, project)
+    return service.generate(db, project, document_ids)

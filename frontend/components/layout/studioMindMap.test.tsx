@@ -96,7 +96,7 @@ describe('Studio mind map', () => {
 
     await openMindMap();
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1'));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
     expect(screen.getByText('Research notes mind map')).toBeTruthy();
   });
 

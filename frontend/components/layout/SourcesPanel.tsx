@@ -90,6 +90,9 @@ export default function SourcesPanel({
     createDocument,
     deleteDocument,
     renameDocument,
+    deselectedSources,
+    toggleSourceSelected,
+    setAllSourcesSelected,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
 
@@ -210,6 +213,10 @@ export default function SourcesPanel({
     }
   };
 
+  const deselected = (currentProject && deselectedSources[currentProject.id]) || [];
+  const selectedCount = documents.filter((doc) => !deselected.includes(doc.id)).length;
+  const allSelected = selectedCount === documents.length;
+
   // Filter documents based on search query
   const filteredDocuments = documents.filter(doc => 
     doc.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -326,6 +333,19 @@ export default function SourcesPanel({
             </div>
           ) : (
             <div className="space-y-2">
+              <label className="flex items-center gap-2 px-1 text-xs text-[var(--muted-foreground)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = selectedCount > 0 && !allSelected;
+                  }}
+                  onChange={() => setAllSourcesSelected(currentProject.id, !allSelected)}
+                  className="h-4 w-4 accent-[var(--primary)]"
+                />
+                <span className="flex-1">Select all sources</span>
+                <span>{selectedCount} of {documents.length} selected</span>
+              </label>
               {filteredDocuments.map((doc) => (
                 <div
                   key={doc.id}
@@ -333,6 +353,14 @@ export default function SourcesPanel({
                   onClick={() => setPreviewDocument(doc)}
                 >
                   <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={!deselected.includes(doc.id)}
+                      onChange={() => toggleSourceSelected(currentProject.id, doc.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Use ${doc.name} in answers and Studio`}
+                      className="mt-2.5 h-4 w-4 shrink-0 accent-[var(--primary)] cursor-pointer"
+                    />
                     <div className="p-2 bg-[var(--muted)] rounded">
                       {getSourceIcon(doc.type)}
                     </div>

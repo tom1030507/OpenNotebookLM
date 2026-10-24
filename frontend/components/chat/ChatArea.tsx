@@ -13,7 +13,7 @@ import {
   ThumbsUp,
   ThumbsDown,
 } from 'lucide-react';
-import useStore, { QueryMessageRefreshError } from '@/store/useStore';
+import useStore, { QueryMessageRefreshError, selectedSourceIds } from '@/store/useStore';
 import {
   chatWorkspaceStyle,
   welcomeHeroStyles,
@@ -175,6 +175,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const currentConversation = useStore((state) => state.currentConversation);
   const messages = useStore((state) => state.messages);
   const documents = useStore((state) => state.documents);
+  const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
   const sendQuery = useStore((state) => state.sendQuery);
   const createConversation = useStore((state) => state.createConversation);
   const fetchMessages = useStore((state) => state.fetchMessages);
@@ -251,7 +252,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   };
 
   const handleSend = () => {
-    if (!inputValue.trim() || !currentProject) return;
+    if (!inputValue.trim() || !currentProject || noSourcesSelected) return;
 
     const query = inputValue.trim();
     setInputValue('');
@@ -535,9 +536,11 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 placeholder={
                   !currentProject
                     ? 'Create a project to start chatting'
-                    : canChat
-                      ? 'Ask anything about your sources...'
-                      : 'Add sources to start chatting'
+                    : !canChat
+                      ? 'Add sources to start chatting'
+                      : noSourcesSelected
+                        ? 'Select a source to start chatting'
+                        : 'Ask anything about your sources...'
                 }
                 className="w-full px-4 py-3 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
                 rows={1}
@@ -555,7 +558,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               onClick={handleSend}
               aria-label={'Send message'}
               title={'Send message'}
-              disabled={!inputValue.trim() || !canChat || isStreaming}
+              disabled={!inputValue.trim() || !canChat || isStreaming || noSourcesSelected}
               className={`flex-shrink-0 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base ${currentProject ? 'p-3' : 'p-2.5'}`}>
               {isStreaming ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

@@ -15,7 +15,7 @@ membership oracle: an attacker enumerating ids learns exactly which ones exist.
 404 leaks nothing, and it matches the choice already made for authentication,
 where a missing token and an invalid one are also indistinguishable.
 """
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Query, Session
@@ -148,3 +148,32 @@ def owned_document_ids(db: Session, user: User) -> list:
         Document ids.
     """
     return [row[0] for row in db.query(Document.id).filter(Document.user_id == user.id).all()]
+
+
+def require_documents(db: Session, document_ids: List[str], user: User) -> List[str]:
+    """Return the requested document ids if this account owns every one of them.
+
+    One unowned id fails the whole selection, with the same 404 as an unknown
+    one, rather than being dropped: dropping it silently would answer from fewer
+    sources than the caller chose.
+
+    Args:
+        db: Database session.
+        document_ids: Document ids from the request.
+        user: The signed-in account.
+
+    Returns:
+        The ids, de-duplicated, in request order.
+
+    Raises:
+        HTTPException: 404 if any id does not exist or belongs to someone else.
+    """
+    wanted = list(dict.fromkeys(document_ids))
+    owned = {
+        row[0] for row in db.query(Document.id).filter(
+            Document.id.in_(wanted), Document.user_id == user.id,
+        ).all()
+    }
+    if len(owned) != len(wanted):
+        raise _not_found("document")
+    return wanted

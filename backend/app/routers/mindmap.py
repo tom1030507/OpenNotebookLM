@@ -10,6 +10,8 @@ event loop that stalls every other request for the whole call, `/healthz`
 included, which the compose healthcheck gives ten seconds. FastAPI runs a sync
 handler in its threadpool, which is where blocking work belongs.
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 import structlog
@@ -17,8 +19,8 @@ import structlog
 from app.db.database import get_db
 from app.db.models import User
 from app.routers.auth import get_current_user
-from app.routers.ownership import require_project
-from app.schemas import MindMapResponse
+from app.routers.ownership import require_documents, require_project
+from app.schemas import MindMapResponse, SourceSelection
 from app.services.mindmap import MindMapService
 
 # Every route below requires a signed-in caller. Declaring that on the
@@ -52,6 +54,7 @@ def get_mindmap_service() -> MindMapService:
 @router.post("/projects/{project_id}/mindmap", response_model=MindMapResponse)
 def project_mindmap(
     project_id: str,
+    selection: Optional[SourceSelection] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     service: MindMapService = Depends(get_mindmap_service),
@@ -64,6 +67,7 @@ def project_mindmap(
 
     Args:
         project_id: Project to resolve through the current user's ownership.
+        selection: Optional subset of sources to map; omitted maps them all.
         db: Database session.
         current_user: Authenticated caller.
         service: Mind map generator.
@@ -72,5 +76,8 @@ def project_mindmap(
         The recursive tree and generation metadata.
     """
     project = require_project(db, project_id, current_user)
+    document_ids = None
+    if selection and selection.document_ids is not None:
+        document_ids = require_documents(db, selection.document_ids, current_user)
 
-    return service.generate(db, project)
+    return service.generate(db, project, document_ids)

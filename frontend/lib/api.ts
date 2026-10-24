@@ -86,6 +86,8 @@ export interface QueryRequest {
   project_id: string;
   query: string;
   conversation_id?: string;
+  /** Omitted to use every source in the project. */
+  document_ids?: string[];
 }
 
 export interface QueryResponse {
@@ -413,6 +415,22 @@ const guard = async (
   throw await extractError(response);
 };
 
+
+/**
+ * A Studio generation request, scoped to `documentIds` when given. Without
+ * them no body is sent, so the request is the one every source always made.
+ * The content type is explicit because the blob and text helpers do not set
+ * one, and a bare string body would otherwise go out as text/plain.
+ */
+const studioRequest = (documentIds?: string[]): RequestInit => (
+  documentIds
+    ? {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ document_ids: documentIds }),
+    }
+    : { method: 'POST' }
+);
 
 const requestJson = async <T>(
   path: string,
@@ -820,22 +838,25 @@ const api = {
     );
   },
 
-  fetchProjectMindMap(projectId: string): Promise<MindMap> {
-    return requestJson<MindMap>(`/projects/${projectId}/mindmap`, {
-      method: 'POST',
-    });
+  fetchProjectMindMap(projectId: string, documentIds?: string[]): Promise<MindMap> {
+    return requestJson<MindMap>(
+      `/projects/${projectId}/mindmap`,
+      studioRequest(documentIds),
+    );
   },
 
-  fetchProjectVideoSummary(projectId: string): Promise<VideoSummary> {
-    return requestJson<VideoSummary>(`/projects/${projectId}/video-summary`, {
-      method: 'POST',
-    });
+  fetchProjectVideoSummary(projectId: string, documentIds?: string[]): Promise<VideoSummary> {
+    return requestJson<VideoSummary>(
+      `/projects/${projectId}/video-summary`,
+      studioRequest(documentIds),
+    );
   },
 
-  exportProjectSummary(projectId: string): Promise<Blob> {
-    return requestDetachedExportBlob(`/export/project/${projectId}/summary`, {
-      method: 'POST',
-    });
+  exportProjectSummary(projectId: string, documentIds?: string[]): Promise<Blob> {
+    return requestDetachedExportBlob(
+      `/export/project/${projectId}/summary`,
+      studioRequest(documentIds),
+    );
   },
 
   listNotes(projectId: string): Promise<Note[]> {
@@ -869,10 +890,11 @@ const api = {
   },
 
   /** The same summary as text, for reading aloud rather than downloading. */
-  fetchProjectSummaryText(projectId: string): Promise<string> {
-    return requestText(`/export/project/${projectId}/summary`, {
-      method: 'POST',
-    });
+  fetchProjectSummaryText(projectId: string, documentIds?: string[]): Promise<string> {
+    return requestText(
+      `/export/project/${projectId}/summary`,
+      studioRequest(documentIds),
+    );
   },
 
 };

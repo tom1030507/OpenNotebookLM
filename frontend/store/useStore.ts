@@ -14,6 +14,12 @@ interface AppState {
   documents: Document[];
   loadingDocuments: boolean;
   uploadProgress: { [key: string]: number };
+  /**
+   * Sources left out of questions and Studio outputs, per project id. The
+   * deselected ids are kept rather than the selected ones so a source added
+   * later is included by default.
+   */
+  deselectedSources: Record<string, string[]>;
   
   // Conversations
   conversations: Conversation[];
@@ -59,6 +65,9 @@ interface AppState {
     rating: MessageRating,
   ) => Promise<void>;
 
+  toggleSourceSelected: (projectId: string, documentId: string) => void;
+  setAllSourcesSelected: (projectId: string, selected: boolean) => void;
+  
   // Actions - Conversations
   fetchConversations: (projectId: string) => Promise<void>;
   selectConversation: (conversation: Conversation) => Promise<void>;
@@ -251,6 +260,7 @@ const initialState = {
   documents: [],
   loadingDocuments: false,
   uploadProgress: {},
+  deselectedSources: {},
   conversations: [],
   currentConversation: null,
   messages: [],
@@ -260,6 +270,23 @@ const initialState = {
   studioOpen: true,
   pendingMindMapQuestion: null,
   notifyOnProcessingComplete: true,
+};
+
+/**
+ * The source ids to scope a question or Studio output to.
+ *
+ * `undefined` while every source is selected, so the request goes out exactly
+ * as it did before sources could be deselected; `[]` when none is, which
+ * callers treat as "cannot send" rather than as "search everything".
+ */
+export const selectedSourceIds = (
+  state: Pick<AppState, 'currentProject' | 'documents' | 'deselectedSources'>,
+): string[] | undefined => {
+  const deselected = state.deselectedSources[state.currentProject?.id ?? ''] ?? [];
+  const selected = state.documents
+    .filter((doc) => !deselected.includes(doc.id))
+    .map((doc) => doc.id);
+  return selected.length === state.documents.length ? undefined : selected;
 };
 
 const useStore = create<AppState>()(
@@ -590,6 +617,30 @@ const useStore = create<AppState>()(
           }));
         },
 
+        
+        toggleSourceSelected: (projectId, documentId) => {
+          set((state) => {
+            const deselected = state.deselectedSources[projectId] ?? [];
+            return {
+              deselectedSources: {
+                ...state.deselectedSources,
+                [projectId]: deselected.includes(documentId)
+                  ? deselected.filter((id) => id !== documentId)
+                  : [...deselected, documentId],
+              },
+            };
+          });
+        },
+
+        setAllSourcesSelected: (projectId, selected) => {
+          set((state) => ({
+            deselectedSources: {
+              ...state.deselectedSources,
+              [projectId]: selected ? [] : state.documents.map((doc) => doc.id),
+            },
+          }));
+        },
+        
         // Conversations
         fetchConversations: async (projectId) => {
           const epoch = accountEpoch;
@@ -863,6 +914,7 @@ const useStore = create<AppState>()(
               project_id: projectId,
               query,
               conversation_id: conversationId,
+              document_ids: selectedSourceIds(get()),
             });
             if (!isCurrentAccount()) return;
             const refreshed = await get().fetchMessages(conversationId);
@@ -924,6 +976,7 @@ const useStore = create<AppState>()(
             documents: [],
             loadingDocuments: false,
             uploadProgress: {},
+            deselectedSources: {},
             conversations: [],
             currentConversation: null,
             messages: [],
