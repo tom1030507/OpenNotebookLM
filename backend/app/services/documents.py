@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Chunk,
+    Conversation,
     Document,
     IngestionJob,
+    Message,
     Project,
     ProjectDocument,
 )
@@ -111,6 +113,48 @@ def _commit_ingestion_enqueue(
             "Ingestion enqueue commit left inconsistent state for job %s"
             % job_id
         ) from commit_error
+
+
+def rename_document(db: Session, document: Document, title: str) -> Document:
+    """Rename a source, including the title its existing citations show.
+
+    Args:
+        db: Database session.
+        document: Document the caller is allowed to change.
+        title: New title.
+
+    Returns:
+        The renamed document.
+    """
+    document.title = title
+    # Answers keep a copy of each cited source's title. Left alone, every
+    # earlier answer and its exports would go on citing the old name.
+    messages = (
+        db.query(Message)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .join(
+            ProjectDocument,
+            ProjectDocument.project_id == Conversation.project_id,
+        )
+        .filter(
+            ProjectDocument.document_id == document.id,
+            Message.role == "assistant",
+        )
+        .all()
+    )
+    for message in messages:
+        citations = message.citations_json or []
+        if any(c.get("document_id") == document.id for c in citations):
+            # Reassigned rather than mutated: SQLAlchemy cannot see an
+            # in-place change to a JSON column and would not save it.
+            message.citations_json = [
+                {**c, "document_title": title}
+                if c.get("document_id") == document.id else c
+                for c in citations
+            ]
+    db.commit()
+    db.refresh(document)
+    return document
 
 
 def _operation_lease(lease: Optional[OperationLease]) -> OperationLease:
@@ -1017,6 +1061,102 @@ class DocumentService:
         finally:
             lease.release()
 
+    async def process_text(
+        self,
+        db: Session,
+        project_id: str,
+        user_id: str,
+        title: str,
+        text: str,
+        operation_lease: Optional[OperationLease] = None,
+    ) -> Document:
+        """Store pasted text as a source and queue it for indexing.
+
+        Args:
+            db: Database session
+            project_id: Project ID
+            user_id: Account that will own the document
+            title: Document title
+            text: Pasted body
+            operation_lease: Explicit quota ownership transferred to this
+                service until background indexing really finishes.
+
+        Returns:
+            Created document
+        """
+        lease = _operation_lease(operation_lease)
+        job_id = None
+        retained = False
+        owns_retained_lease = False
+        try:
+            size = len(text.encode("utf-8"))
+            if size > self.settings.max_file_size_bytes:
+                raise UploadTooLargeError(
+                    "Text size exceeds maximum of %sMB"
+                    % self.settings.max_file_size_mb
+                )
+
+            doc_id = str(uuid.uuid4())
+            # The text is the source, so it is stored now; the job only has to
+            # chunk and embed it, exactly as it does for extracted content.
+            document = Document(
+                id=doc_id,
+                user_id=user_id,
+                title=title,
+                source_type="text",
+                content=text,
+                status="queued",
+                meta_json={
+                    "text_size": size,
+                    "upload_time": utc_now_iso(),
+                },
+            )
+            db.add(document)
+            db.add(ProjectDocument(project_id=project_id, document_id=doc_id))
+            payload = {"document_id": doc_id}
+            enqueue_result = enqueue_ingestion_job_with_result(
+                db,
+                document_id=doc_id,
+                job_type="text",
+                payload=payload,
+            )
+            job_id = enqueue_result.job.id
+            owns_retained_lease = retain_enqueued_operation_lease(
+                enqueue_result,
+                operation_lease,
+            )
+            _commit_ingestion_enqueue(
+                db,
+                document_id=doc_id,
+                project_id=project_id,
+                job_id=job_id,
+                job_type="text",
+                payload=payload,
+            )
+            retained = True
+            try:
+                notify_ingestion_worker()
+            except Exception as error:
+                logger.warning(
+                    "Could not wake ingestion worker after text enqueue",
+                    job_id=job_id,
+                    error=str(error),
+                )
+
+            logger.info("Text source added", doc_id=doc_id, project_id=project_id)
+            return document
+
+        except Exception as e:
+            db.rollback()
+            if isinstance(e, EnqueueCommitUncertainError):
+                retained = True
+            if owns_retained_lease and not retained:
+                release_operation_lease(job_id)
+            elif job_id is None:
+                lease.release()
+            logger.error("Failed to add text source", error=str(e))
+            raise
+
     def process_ingestion_job(
         self,
         db: Session,
@@ -1054,6 +1194,7 @@ class DocumentService:
             "pdf": "file_path",
             "url": "url",
             "youtube": "youtube_url",
+            "text": "document_id",
         }.get(job_type)
         if source_key is None:
             raise ValueError("Unsupported ingestion job type: %s" % job_type)
@@ -1065,6 +1206,9 @@ class DocumentService:
             actual_source = Path(source_reference).resolve()
             if actual_source != expected_source:
                 raise ValueError("PDF job source does not match its document")
+        elif job_type == "text":
+            if source_reference != document.id:
+                raise ValueError("Text job does not match its document")
         elif source_reference != document.source_url:
             raise ValueError("Ingestion job source does not match its document")
 
@@ -1081,6 +1225,9 @@ class DocumentService:
                 "metadata": result.get("metadata", {}),
                 "processed_at": utc_now_iso(),
             }
+        elif job_type == "text":
+            # Pasted text was stored with the document; there is nothing to extract.
+            pass
         elif job_type == "url":
             result = self.url_adapter.extract_content(source_reference)
             document.content = result["text"]

@@ -8,7 +8,8 @@ import structlog
 from app.db.database import get_db
 from app.schemas import (
     FileUploadResponse, URLUploadRequest, YouTubeUploadRequest,
-    DocumentResponse, DocumentStatusResponse
+    DocumentResponse, DocumentStatusResponse, TextUploadRequest,
+    DocumentUpdateRequest,
 )
 from app.db.models import User
 from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
@@ -292,6 +293,62 @@ async def upload_youtube(
         raise HTTPException(status_code=500, detail="YouTube processing failed")
 
 
+@router.post("/projects/{project_id}/upload-text", response_model=FileUploadResponse)
+async def upload_text(
+    project_id: str,
+    request: TextUploadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    document_service: Any = Depends(get_document_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
+):
+    """Add pasted text as a source in one caller-owned project.
+
+    Args:
+        project_id: Project receiving the document.
+        request: Title and pasted body.
+        db: Database session.
+        current_user: Authenticated caller.
+        document_service: Document ingestion service.
+        request_limiter: Per-account ingestion request limiter.
+        concurrency_limiter: Per-account active-ingestion limiter.
+
+    Returns:
+        Created document identifier and queued status.
+    """
+    require_project(db, project_id, current_user)
+
+    lease = _begin_ingestion(
+        current_user.id,
+        request_limiter,
+        concurrency_limiter,
+    )
+    from app.services.documents import UploadTooLargeError
+
+    try:
+        document = await document_service.process_text(
+            db=db,
+            project_id=project_id,
+            user_id=current_user.id,
+            title=request.title,
+            text=request.text,
+            operation_lease=lease,
+        )
+
+        return FileUploadResponse(
+            doc_id=document.id,
+            status=document.status,
+            message="Text added successfully. Processing started."
+        )
+
+    except UploadTooLargeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+    except Exception as e:
+        logger.error("Text source failed", project_id=project_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Adding text failed")
+
+
 @router.get("/docs/{doc_id}/status", response_model=DocumentStatusResponse)
 async def get_document_status(
     doc_id: str,
@@ -344,6 +401,41 @@ async def get_document(
         created_at=document.created_at,
         updated_at=document.updated_at,
         chunk_count=chunk_count
+    )
+
+
+@router.put("/docs/{doc_id}", response_model=DocumentResponse)
+async def rename_document(
+    doc_id: str,
+    request: DocumentUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Rename one of the caller's documents.
+
+    Args:
+        doc_id: Document to rename.
+        request: The new title.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        The renamed document.
+    """
+    from app.services.documents import rename_document as rename
+
+    document = rename(db, require_document(db, doc_id, current_user), request.title)
+    return DocumentResponse(
+        id=document.id,
+        title=document.title,
+        source_type=document.source_type,
+        source_url=document.source_url,
+        meta_json=document.meta_json,
+        status=document.status,
+        error_message=document.error_message,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+        chunk_count=len(document.chunks) if document.chunks else 0,
     )
 
 

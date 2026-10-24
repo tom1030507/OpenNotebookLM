@@ -187,6 +187,32 @@ class YouTubeUploadRequest(BaseModel):
     title: Optional[str] = None
 
 
+def _not_blank(value: str) -> str:
+    """Strip a required string and refuse one that is only whitespace.
+
+    Args:
+        value: Submitted string.
+
+    Returns:
+        The stripped string.
+    """
+    value = value.strip()
+    if not value:
+        raise ValueError("must not be blank")
+    return value
+
+
+class TextUploadRequest(BaseModel):
+    """Schema for adding pasted text as a source."""
+    title: Annotated[str, AfterValidator(_not_blank)] = Field(..., max_length=200)
+    text: Annotated[str, AfterValidator(_not_blank)]
+
+
+class DocumentUpdateRequest(BaseModel):
+    """Schema for renaming a source."""
+    title: Annotated[str, AfterValidator(_not_blank)] = Field(..., max_length=200)
+
+
 # Conversation schemas
 class ConversationCreate(BaseModel):
     """Schema for creating a conversation."""

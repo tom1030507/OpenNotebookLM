@@ -65,6 +65,7 @@ export interface Message {
   content: string;
   created_at: string;
   citations?: Citation[];
+  rating?: MessageRating;
 }
 
 export interface Note {
@@ -78,6 +79,8 @@ export interface Note {
   created_at: string;
   updated_at: string;
 }
+
+export type MessageRating = 'up' | 'down' | null;
 
 export interface QueryRequest {
   project_id: string;
@@ -215,6 +218,7 @@ interface BackendMessage {
   text: string;
   created_at: string;
   citations?: BackendCitation[] | null;
+  rating?: MessageRating;
 }
 
 interface CreateDocumentInput {
@@ -558,6 +562,7 @@ const normalizeMessage = (
   ...(message.citations?.length
     ? { citations: message.citations.map(normalizeCitation) }
     : {}),
+  ...(message.rating ? { rating: message.rating } : {}),
 });
 
 
@@ -679,6 +684,16 @@ const api = {
   },
 
   createDocument(projectId: string, data: CreateDocumentInput): Promise<Document> {
+    if (data.type === 'text') {
+      return completeDocumentCreation(requestJson<FileUploadResponse>(
+        `/projects/${projectId}/upload-text`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ title: data.name, text: data.content ?? '' }),
+        },
+      ));
+    }
+
     if (!data.url) {
       return Promise.reject(new Error('A URL is required for this source type'));
     }
@@ -703,7 +718,15 @@ const api = {
       ));
     }
 
-    return Promise.reject(new Error('Text sources are not supported by the API'));
+    return Promise.reject(new Error('Unsupported source type'));
+  },
+
+  async renameDocument(documentId: string, title: string): Promise<Document> {
+    const document = await requestJson<BackendDocument>(`/docs/${documentId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title }),
+    });
+    return normalizeDocument(document);
   },
 
   async deleteDocument(projectId: string, documentId: string): Promise<void> {
@@ -758,6 +781,17 @@ const api = {
     );
     return (conversation.messages || []).map(
       (message) => normalizeMessage(conversationId, message),
+    );
+  },
+
+  async rateMessage(
+    conversationId: string,
+    messageId: string,
+    rating: MessageRating,
+  ): Promise<void> {
+    await requestJson(
+      `/conversations/${conversationId}/messages/${messageId}/rating`,
+      { method: 'PUT', body: JSON.stringify({ rating }) },
     );
   },
 

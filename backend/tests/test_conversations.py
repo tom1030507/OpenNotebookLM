@@ -181,6 +181,7 @@ def test_conversation_details_include_message_text_and_citations(client):
                 "page_num": 4,
                 "text_preview": "Evidence",
             }],
+            "rating": None,
         }
     ]
 

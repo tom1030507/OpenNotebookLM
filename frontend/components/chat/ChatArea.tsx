@@ -9,7 +9,9 @@ import {
   ChevronRight,
   MessageSquare,
   Loader2,
-  SlidersHorizontal
+  SlidersHorizontal,
+  ThumbsUp,
+  ThumbsDown,
 } from 'lucide-react';
 import useStore, { QueryMessageRefreshError } from '@/store/useStore';
 import {
@@ -36,6 +38,46 @@ interface PendingQuery {
   conversationId: string | null;
   error: string | null;
   retryMode: 'query' | 'refresh';
+}
+
+function AnswerRating({ message }: { message: Message }) {
+  const rateMessage = useStore((state) => state.rateMessage);
+  const rate = (rating: 'up' | 'down') => {
+    // Choosing the rating already given clears it.
+    rateMessage(
+      message.conversation_id,
+      message.id,
+      message.rating === rating ? null : rating,
+    ).catch((error) => console.error('Failed to rate answer:', error));
+  };
+  const buttonClass = (active: boolean) => `p-1 rounded hover:bg-[var(--muted)] transition-base ${
+    active ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]'
+  }`;
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => rate('up')}
+        aria-label="Good answer"
+        title="Good answer"
+        aria-pressed={message.rating === 'up'}
+        className={buttonClass(message.rating === 'up')}
+      >
+        <ThumbsUp className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => rate('down')}
+        aria-label="Bad answer"
+        title="Bad answer"
+        aria-pressed={message.rating === 'down'}
+        className={buttonClass(message.rating === 'down')}
+      >
+        <ThumbsDown className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
 }
 
 const MessageRow = React.memo(function MessageRow({ message }: { message: Message }) {
@@ -106,6 +148,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         {message.role === 'assistant' && (
           <div className="mt-2 flex items-center gap-1">
             <SaveToNoteButton message={message} />
+            <AnswerRating message={message} />
           </div>
         )}
       </div>

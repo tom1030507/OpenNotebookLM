@@ -10,6 +10,7 @@ interface FileUploadProps {
   multiple?: boolean;
   maxSize?: number; // in MB
   onUploadingChange?: (isUploading: boolean) => void;
+  onAddText?: (title: string, text: string) => Promise<void>;
 }
 
 export default function FileUpload({ 
@@ -18,11 +19,14 @@ export default function FileUpload({
   multiple = false,
   maxSize = 10,
   onUploadingChange,
+  onAddText,
 }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [urlInput, setUrlInput] = useState('');
-  const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube'>('file');
+  const [textTitle, setTextTitle] = useState('');
+  const [textInput, setTextInput] = useState('');
+  const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube' | 'text'>('file');
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const uploadInFlightRef = useRef(false);
@@ -126,6 +130,28 @@ export default function FileUpload({
     }
   };
 
+  const handleTextSubmit = async () => {
+    if (!onAddText || !textTitle.trim() || !textInput.trim()) return;
+
+    if (new Blob([textInput]).size > maxSize * 1024 * 1024) {
+      setErrors([`Text exceeds ${maxSize}MB limit`]);
+      return;
+    }
+
+    if (!startUpload()) return;
+
+    try {
+      await onAddText(textTitle.trim(), textInput);
+      setTextTitle('');
+      setTextInput('');
+      setErrors([]);
+    } catch {
+      setErrors(['Adding text failed. Please try again.']);
+    } finally {
+      finishUpload();
+    }
+  };
+
   const handleUploadFiles = async () => {
     if (isUploading || uploadInFlightRef.current) return;
 
@@ -195,7 +221,50 @@ export default function FileUpload({
           <Youtube className="inline w-4 h-4 mr-2" />
           YouTube
         </button>
+        {onAddText && (
+          <button
+            onClick={() => setUploadType('text')}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              uploadType === 'text'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <FileText className="inline w-4 h-4 mr-2" />
+            Text
+          </button>
+        )}
       </div>
+
+      {/* Pasted Text Area */}
+      {uploadType === 'text' && (
+        <div className="border border-gray-300 rounded-lg p-4 space-y-2">
+          <input
+            type="text"
+            aria-label="Source title"
+            value={textTitle}
+            onChange={(e) => setTextTitle(e.target.value)}
+            placeholder="Title"
+            maxLength={200}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+          />
+          <textarea
+            aria-label="Source text"
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            placeholder="Paste text here..."
+            rows={8}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+          />
+          <button
+            onClick={() => void handleTextSubmit()}
+            disabled={!textTitle.trim() || !textInput.trim() || isUploading}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            Add text
+          </button>
+        </div>
+      )}
 
       {/* File Upload Area */}
       {uploadType === 'file' && (

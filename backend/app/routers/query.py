@@ -15,7 +15,7 @@ to relitigate the question. Anything that does start awaiting has to become
 an async one that blocks the loop is not.
 """
 from functools import lru_cache
-from typing import Any, Optional, List
+from typing import Any, Literal, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, field_validator
@@ -25,7 +25,7 @@ import uuid
 from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.services.projects import ProjectService
-from app.db.models import Conversation, User
+from app.db.models import Conversation, Message, User
 from app.schemas import ConversationResponse
 from app.routers.auth import get_current_user
 from app.routers.ownership import (
@@ -109,6 +109,12 @@ class ConversationUpdateRequest(BaseModel):
         if not normalized_title:
             raise ValueError("Title must not be blank")
         return normalized_title
+
+
+class MessageRatingRequest(BaseModel):
+    """Request model for rating an answer; null clears the rating."""
+
+    rating: Optional[Literal["up", "down"]] = None
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -295,7 +301,8 @@ def get_conversation(
             "role": msg.role,
             "text": msg.text,
             "created_at": msg.created_at,
-            "citations": msg.citations_json
+            "citations": msg.citations_json,
+            "rating": msg.rating,
         })
     
     return {
@@ -333,6 +340,40 @@ def update_conversation(
         updated_at=conversation.updated_at,
         message_count=len(conversation.messages),
     )
+
+
+@router.put("/conversations/{conversation_id}/messages/{message_id}/rating")
+def rate_message(
+    conversation_id: str,
+    message_id: str,
+    request: MessageRatingRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set, change or clear the rating on one of the caller's answers.
+
+    Args:
+        conversation_id: Conversation holding the message.
+        message_id: Assistant message to rate.
+        request: "up", "down", or null to clear.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        The message id and its rating.
+    """
+    require_conversation(db, conversation_id, current_user)
+    message = db.query(Message).filter(
+        Message.id == message_id,
+        Message.conversation_id == conversation_id,
+        Message.role == "assistant",
+    ).first()
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    message.rating = request.rating
+    db.commit()
+    return {"id": message.id, "rating": message.rating}
 
 
 @router.get(

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import api from '@/lib/api';
-import type { Conversation, Document, Message, Project } from '@/lib/api';
+import type { Conversation, Document, Message, MessageRating, Project } from '@/lib/api';
 import { registerAccountStateRetirer } from '@/lib/sessionBoundary';
 
 interface AppState {
@@ -52,7 +52,13 @@ interface AppState {
     url?: string;
   }) => Promise<void>;
   deleteDocument: (projectId: string, documentId: string) => Promise<void>;
-  
+  renameDocument: (documentId: string, title: string) => Promise<void>;
+  rateMessage: (
+    conversationId: string,
+    messageId: string,
+    rating: MessageRating,
+  ) => Promise<void>;
+
   // Actions - Conversations
   fetchConversations: (projectId: string) => Promise<void>;
   selectConversation: (conversation: Conversation) => Promise<void>;
@@ -545,7 +551,45 @@ const useStore = create<AppState>()(
             throw error;
           }
         },
-        
+
+        renameDocument: async (documentId, title) => {
+          const epoch = accountEpoch;
+          const document = await api.renameDocument(documentId, title);
+          if (accountEpoch !== epoch) return;
+          advanceReadGeneration('documents');
+          // The backend rewrites stored citations too; patch the loaded answers
+          // so they show the new title without a reload.
+          set((state) => ({
+            documents: state.documents.map((item) => (
+              item.id === documentId ? document : item
+            )),
+            loadingDocuments: false,
+            messages: state.messages.map((message) => (
+              message.citations?.some((citation) => citation.document_id === documentId)
+                ? {
+                  ...message,
+                  citations: message.citations.map((citation) => (
+                    citation.document_id === documentId
+                      ? { ...citation, source: document.name, document_title: document.name }
+                      : citation
+                  )),
+                }
+                : message
+            )),
+          }));
+        },
+
+        rateMessage: async (conversationId, messageId, rating) => {
+          const epoch = accountEpoch;
+          await api.rateMessage(conversationId, messageId, rating);
+          if (accountEpoch !== epoch) return;
+          set((state) => ({
+            messages: state.messages.map((message) => (
+              message.id === messageId ? { ...message, rating } : message
+            )),
+          }));
+        },
+
         // Conversations
         fetchConversations: async (projectId) => {
           const epoch = accountEpoch;
