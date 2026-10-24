@@ -140,6 +140,89 @@ def test_route_allows_declared_multipart_envelope_above_exact_file_cap(monkeypat
     )
 
     assert response.status_code == 200
+
+
+def test_upload_route_queues_supported_text_files_as_file_jobs(monkeypatch):
+    """Configured non-PDF types use the durable file ingestion path."""
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(
+        ingest.settings,
+        "allowed_file_types",
+        "pdf,txt,md,docx,pptx,xlsx,epub",
+    )
+    calls = []
+
+    class AcceptingService:
+        async def process_file_upload(self, **kwargs):
+            calls.append(kwargs)
+            kwargs["operation_lease"].release()
+            return SimpleNamespace(id="document", status="queued")
+
+    app.dependency_overrides[ingest.get_document_service] = AcceptingService
+    response = TestClient(app).post(
+        "/api/projects/project/upload",
+        files={"file": ("notes.txt", b"local notes", "text/plain")},
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["filename"] == "notes.txt"
+    assert calls[0]["file_extension"] == ".txt"
+
+
+def test_upload_route_refuses_extensions_outside_the_configured_allowlist(monkeypatch):
+    """An unsupported extension is refused before a service or lease is used."""
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest.settings, "allowed_file_types", "pdf,txt,md")
+
+    class MustNotRun:
+        async def process_pdf_upload(self, **kwargs):
+            raise AssertionError("unsupported extension reached document service")
+
+        async def process_file_upload(self, **kwargs):
+            raise AssertionError("unsupported extension reached document service")
+
+    app.dependency_overrides[ingest.get_document_service] = MustNotRun
+    response = TestClient(app).post(
+        "/api/projects/project/upload",
+        files={"file": ("payload.exe", b"MZ", "application/octet-stream")},
+    )
+
+    assert response.status_code == 400
+    assert "not supported" in response.json()["detail"]
+
+
+def test_invalid_office_content_has_a_stable_400_response(monkeypatch):
+    """A content validator refusal is returned as a client error."""
+    from app.services.documents import InvalidUploadFileError
+
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+
+    class RefusingService:
+        async def process_file_upload(self, **kwargs):
+            raise InvalidUploadFileError("The DOCX file is not a valid Office document")
+
+    app.dependency_overrides[ingest.get_document_service] = RefusingService
+    response = TestClient(app).post(
+        "/api/projects/project/upload",
+        files={"file": ("renamed.docx", b"MZ", "application/octet-stream")},
+    )
+
+    assert response.status_code == 400
+    assert "valid Office document" in response.json()["detail"]
+
+
 def test_asgi_cap_rejects_actual_upload_before_auth_and_form_route(monkeypatch):
     """Actual multipart bytes are capped before auth, form parsing, and service."""
     auth_calls = []

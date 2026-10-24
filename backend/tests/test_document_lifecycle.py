@@ -4,6 +4,7 @@ from io import BytesIO
 from pathlib import Path
 import threading
 from types import SimpleNamespace
+import zipfile
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -254,6 +255,163 @@ def test_reindex_repeats_when_title_changes_during_embedding(lifecycle_db):
 
     assert embeddings.titles == ["Initial title", "Latest title"]
     assert payload["_indexed_title"] == "Latest title"
+
+
+def test_file_job_extracts_using_the_persisted_extension_and_indexes_text(lifecycle_db):
+    """A non-PDF file job dispatches by stored extension and reaches ready."""
+    document = Document(
+        id="file-job-document",
+        title="Report",
+        source_type="docx",
+        source_url="uploads/file-job-document_report.docx",
+        status="processing",
+        meta_json={"file_extension": ".docx", "filename": "report.docx"},
+    )
+    lifecycle_db.add(document)
+    lifecycle_db.commit()
+
+    class OfficeExtractor:
+        def __init__(self):
+            self.calls = []
+
+        def extract_text_from_file(self, file_path, file_extension):
+            self.calls.append((file_path, file_extension))
+            return {
+                "text": "## Section\n\nSearchable report content.",
+                "pages": [],
+                "num_pages": 0,
+                "metadata": {"format": "docx"},
+            }
+
+    class Chunker:
+        def chunk_document(self, db, document_id, max_chunks=None):
+            return [object()]
+
+    class Embedder:
+        def embed_chunks(self, db, document_id):
+            return [object()]
+
+    office = OfficeExtractor()
+    service = DocumentService(
+        chunking_service=Chunker(),
+        embedding_service=Embedder(),
+        office_adapter=office,
+    )
+    service._publish_document_index = lambda db, document_id: None
+
+    status = service.process_ingestion_job(
+        lifecycle_db,
+        document_id=document.id,
+        job_type="file",
+        payload={"file_path": document.source_url},
+    )
+
+    assert office.calls == [(document.source_url, ".docx")]
+    assert status == document.status == "ready"
+    assert document.content == "## Section\n\nSearchable report content."
+    assert document.meta_json["metadata"] == {"format": "docx"}
+
+
+def test_non_pdf_upload_persists_its_extension_and_a_file_job(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """The generalized upload path stores recoverable file-job state."""
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(document_module, "notify_ingestion_worker", lambda: None)
+    service = DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+    )
+
+    document = asyncio.run(service.process_file_upload(
+        db=lifecycle_db,
+        project_id="project-1",
+        user_id="user-1",
+        file=BytesIO(b"# Research notes"),
+        filename="notes.md",
+        file_extension=".md",
+    ))
+
+    job = lifecycle_db.query(IngestionJob).filter_by(
+        document_id=document.id,
+    ).one()
+    assert document.source_type == "md"
+    assert document.meta_json["file_extension"] == ".md"
+    assert document.source_url.endswith("_notes.md")
+    assert job.job_type == "file"
+    assert job.payload_json == {"file_path": document.source_url}
+
+
+def test_non_pdf_upload_refuses_invalid_office_bytes_without_a_queued_row(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """A mismatched Office package leaves no file, document, or job behind."""
+    from app.services.documents import InvalidUploadFileError
+
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    service = DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+    )
+
+    with pytest.raises(InvalidUploadFileError, match="valid Office document"):
+        asyncio.run(service.process_file_upload(
+            db=lifecycle_db,
+            project_id="project-1",
+            user_id="user-1",
+            file=BytesIO(b"MZ executable content"),
+            filename="renamed.docx",
+            file_extension=".docx",
+        ))
+
+    assert list(tmp_path.iterdir()) == []
+    assert lifecycle_db.query(Document).count() == 0
+    assert lifecycle_db.query(IngestionJob).count() == 0
+
+
+def test_non_pdf_upload_refuses_epub_without_package_document(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """A superficially valid EPUB is rejected before file or job persistence."""
+    from app.services.documents import InvalidUploadFileError
+
+    package = BytesIO()
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"/>',
+        )
+
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    service = DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+    )
+
+    with pytest.raises(InvalidUploadFileError, match="package rootfile"):
+        asyncio.run(service.process_file_upload(
+            db=lifecycle_db,
+            project_id="project-1",
+            user_id="user-1",
+            file=BytesIO(package.getvalue()),
+            filename="book.epub",
+            file_extension=".epub",
+        ))
+
+    assert list(tmp_path.iterdir()) == []
+    assert lifecycle_db.query(Document).count() == 0
+    assert lifecycle_db.query(IngestionJob).count() == 0
 
 
 class StaticURLAdapter:

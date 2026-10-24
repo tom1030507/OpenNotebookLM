@@ -1,11 +1,14 @@
 'use client';
 
-import React, { useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { 
   X, 
   Download, 
   ExternalLink, 
   FileText, 
+  FileSpreadsheet,
+  Presentation,
+  BookOpen,
   Globe, 
   Youtube,
   Maximize2,
@@ -13,7 +16,7 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import { Document } from '@/lib/api';
+import api, { Document } from '@/lib/api';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import usePreviewSource from '@/hooks/usePreviewSource';
 
@@ -22,15 +25,93 @@ interface DocumentPreviewProps {
   onClose: () => void;
 }
 
+type ContentRequest =
+  | { documentId: string; status: 'loading' }
+  | { documentId: string; status: 'loaded'; content: string }
+  | { documentId: string; status: 'error'; message: string };
+
+const EXTRACTED_TEXT_TYPES: Document['type'][] = [
+  'docx', 'pptx', 'xlsx', 'epub', 'txt', 'md',
+];
+
 export default function DocumentPreview({ document, onClose }: DocumentPreviewProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [contentRequest, setContentRequest] = useState<ContentRequest | null>(null);
+  const [contentRefreshCount, setContentRefreshCount] = useState(0);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   // An uploaded file is behind the API's protected route, so its bytes arrive
   // as an object URL rather than as an address the browser can load directly.
   const preview = usePreviewSource(document);
+  const shouldFetchContent =
+    EXTRACTED_TEXT_TYPES.includes(document.type) && document.content === undefined;
+  const shouldRequestContent = shouldFetchContent && (
+    document.status === 'ready' || contentRefreshCount > 0
+  );
+  const currentContentRequest = contentRequest?.documentId === document.id
+    ? contentRequest
+    : null;
+  const fetchedContent = currentContentRequest?.status === 'loaded'
+    ? currentContentRequest.content
+    : undefined;
+  const content = document.content ?? (
+    fetchedContent !== undefined && (document.status === 'ready' || fetchedContent.length > 0)
+      ? fetchedContent
+      : undefined
+  );
+  const contentLoading = shouldRequestContent && (
+    currentContentRequest === null || currentContentRequest.status === 'loading'
+  );
+  const contentError = currentContentRequest?.status === 'error'
+    ? currentContentRequest.message
+    : shouldFetchContent && document.status === 'error'
+      ? document.error_message || 'Source processing failed.'
+      : undefined;
+  const contentWaiting = shouldFetchContent
+    && document.status !== 'ready'
+    && document.status !== 'error'
+    && !contentLoading
+    && !contentError;
+
+  useEffect(() => {
+    if (!shouldRequestContent) {
+      return;
+    }
+
+    let cancelled = false;
+    setContentRequest({ documentId: document.id, status: 'loading' });
+    api.fetchDocumentContent(document.id)
+      .then((extractedContent) => {
+        if (!cancelled) {
+          setContentRequest({
+            documentId: document.id,
+            status: 'loaded',
+            content: extractedContent,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setContentRequest({
+            documentId: document.id,
+            status: 'error',
+            message: error instanceof Error ? error.message : 'Could not load extracted text.',
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    contentRefreshCount,
+    document.content,
+    document.id,
+    document.status,
+    shouldRequestContent,
+  ]);
 
   useDialogFocus({
     isOpen: true,
@@ -40,8 +121,8 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   });
 
   const handleCopy = async () => {
-    if (document.content) {
-      await navigator.clipboard.writeText(document.content);
+    if (content !== undefined) {
+      await navigator.clipboard.writeText(content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -49,7 +130,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
 
   const handleDownload = () => {
     // Create a download link for the document content
-    const blob = new Blob([document.content || ''], { type: 'text/plain' });
+    const blob = new Blob([content || ''], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = window.document.createElement('a');
     a.href = url;
@@ -74,7 +155,16 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     switch (document.type) {
       case 'pdf':
       case 'text':
+      case 'txt':
+      case 'md':
+      case 'docx':
         return <FileText className="w-5 h-5" />;
+      case 'pptx':
+        return <Presentation className="w-5 h-5" />;
+      case 'xlsx':
+        return <FileSpreadsheet className="w-5 h-5" />;
+      case 'epub':
+        return <BookOpen className="w-5 h-5" />;
       case 'url':
         return <Globe className="w-5 h-5" />;
       case 'youtube':
@@ -111,11 +201,11 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             <p className="text-[var(--muted-foreground)]">
               {preview.error || 'PDF preview not available'}
             </p>
-            {document.content && (
+            {content !== undefined && (
               <div className="mt-4 text-left max-w-3xl mx-auto">
                 <h4 className="font-medium mb-2">Extracted Text:</h4>
                 <pre className="whitespace-pre-wrap text-sm bg-[var(--muted)] p-4 rounded-lg">
-                  {document.content}
+                  {content}
                 </pre>
               </div>
             )}
@@ -193,13 +283,53 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         break;
 
       case 'text':
+      case 'docx':
+      case 'pptx':
+      case 'xlsx':
+      case 'epub':
+      case 'txt':
+      case 'md':
       default:
-        if (document.content) {
+        if (content !== undefined) {
           return (
             <div className="p-6 overflow-y-auto h-full">
               <pre className="whitespace-pre-wrap text-sm font-mono">
-                {document.content}
+                {content}
               </pre>
+            </div>
+          );
+        }
+        if (contentLoading) {
+          return (
+            <div className="p-8 text-center" role="status">
+              <p className="text-[var(--muted-foreground)]">
+                Loading extracted text...
+              </p>
+            </div>
+          );
+        }
+        if (contentWaiting) {
+          return (
+            <div className="p-8 text-center">
+              <p className="text-[var(--muted-foreground)]" role="status">
+                Source is still processing.
+              </p>
+              <button
+                type="button"
+                className="mt-3 text-sm text-[var(--primary)] hover:underline"
+                onClick={() => setContentRefreshCount((count) => count + 1)}
+              >
+                Check for extracted text
+              </button>
+            </div>
+          );
+        }
+        if (contentError) {
+          return (
+            <div className="p-8 text-center">
+              <p className="text-[var(--muted-foreground)]" role="alert">
+                {contentError}
+              </p>
             </div>
           );
         }
@@ -246,7 +376,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
           </div>
           
           <div className="flex items-center gap-2">
-            {document.content && (
+            {content !== undefined && (
               <button
                 onClick={handleCopy}
                 aria-label={'Copy content'}
@@ -272,7 +402,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               </button>
             )}
             
-            {document.content && (
+            {content !== undefined && (
               <button
                 onClick={handleDownload}
                 aria-label={'Download document'}

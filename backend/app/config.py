@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     
     # File Upload
     max_file_size_mb: int = 50
-    allowed_file_types: str = "pdf,txt,md"
+    allowed_file_types: str = "pdf,txt,md,docx,pptx,xlsx,epub"
     max_url_download_mb: int = 10
     max_url_redirects: int = 5
     url_connect_timeout_seconds: int = 5

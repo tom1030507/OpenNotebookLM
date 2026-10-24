@@ -1,10 +1,27 @@
+export const SUPPORTED_UPLOAD_FILE_EXTENSIONS = [
+  '.pdf',
+  '.txt',
+  '.md',
+  '.docx',
+  '.pptx',
+  '.xlsx',
+  '.epub',
+] as const;
+
+export const isSupportedUploadFileName = (fileName: string): boolean => {
+  const extension = fileName.toLowerCase().slice(fileName.lastIndexOf('.'));
+  return SUPPORTED_UPLOAD_FILE_EXTENSIONS.includes(
+    extension as (typeof SUPPORTED_UPLOAD_FILE_EXTENSIONS)[number],
+  );
+};
+
 export const getUploadFileError = (
   file: File,
   maxSizeMb: number,
   existingNames: string[],
 ): string | null => {
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    return `${file.name} is not a supported PDF file`;
+  if (!isSupportedUploadFileName(file.name)) {
+    return `${file.name} is not a supported file type`;
   }
 
   if (file.size > maxSizeMb * 1024 * 1024) {

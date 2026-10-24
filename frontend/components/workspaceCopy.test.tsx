@@ -72,7 +72,7 @@ describe('workspace copy is English', () => {
     expect(screen.getByRole('button', { name: 'New Project' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Add Source' })).toBeTruthy();
     expect(screen.getByText('No sources yet')).toBeTruthy();
-    expect(screen.getByText(/to upload PDFs, URLs, or YouTube videos/)).toBeTruthy();
+    expect(screen.getByText(/to upload files, URLs, or YouTube videos/)).toBeTruthy();
   });
 
   it('does not repeat the no-project prompt in the simplified Sources panel', () => {

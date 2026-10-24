@@ -142,7 +142,7 @@ class ProjectListResponse(BaseModel):
 class DocumentBase(BaseModel):
     """Base document schema."""
     title: str
-    source_type: str  # pdf, url, youtube
+    source_type: str  # pdf, file extension, url, youtube, or pasted text
     source_url: Optional[str] = None
     meta_json: Optional[Dict[str, Any]] = {}
 
@@ -163,6 +163,11 @@ class DocumentResponse(DocumentBase):
     
     class Config:
         from_attributes = True
+
+
+class DocumentContentResponse(BaseModel):
+    """Extracted source text returned only when a preview requests it."""
+    content: str
 
 
 class DocumentStatusResponse(BaseModel):

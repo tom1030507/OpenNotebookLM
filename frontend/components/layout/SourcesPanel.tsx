@@ -5,7 +5,10 @@ import {
   Plus, 
   Search,
   FileText,
+  FileSpreadsheet,
   Globe,
+  BookOpen,
+  Presentation,
   Youtube,
   File as FileIcon,
   X,
@@ -203,7 +206,16 @@ export default function SourcesPanel({
     switch (type) {
       case 'pdf':
       case 'text':
+      case 'txt':
+      case 'md':
+      case 'docx':
         return <FileText className="w-4 h-4" />;
+      case 'epub':
+        return <BookOpen className="w-4 h-4" />;
+      case 'pptx':
+        return <Presentation className="w-4 h-4" />;
+      case 'xlsx':
+        return <FileSpreadsheet className="w-4 h-4" />;
       case 'url':
         return <Globe className="w-4 h-4" />;
       case 'youtube':
@@ -327,7 +339,7 @@ export default function SourcesPanel({
               </p>
               {!searchQuery && (
                 <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                  Click &ldquo;Add Source&rdquo; to upload PDFs, URLs, or YouTube videos
+                  Click &ldquo;Add Source&rdquo; to upload files, URLs, or YouTube videos
                 </p>
               )}
             </div>

@@ -136,7 +136,7 @@ def make_project(client, name=ALICE_PROJECT):
     return response.json()["id"]
 
 
-def make_document(session, user, title="An upload"):
+def make_document(session, user, title="An upload", source_type="pdf", content=None):
     """Insert a document owned by the given account.
 
     Inserted directly rather than uploaded, so the test needs neither the network
@@ -154,8 +154,9 @@ def make_document(session, user, title="An upload"):
         id=str(uuid.uuid4()),
         user_id=user.id,
         title=title,
-        source_type="pdf",
+        source_type=source_type,
         source_url="uploads/%s.pdf" % uuid.uuid4(),
+        content=content,
         status="ready",
         meta_json={"filename": title},
     )
@@ -259,6 +260,23 @@ class TestRefusalLeaksNothing:
         assert theirs.status_code == missing.status_code == 404
         assert theirs.json() == missing.json()
 
+    def test_document_content_answers_identically_and_returns_owners_text(self, env):
+        document_id = make_document(
+            env.session,
+            env.alice_user,
+            source_type="docx",
+            content="# Chapter One\n\nPrivate text",
+        )
+
+        theirs = env.bob.get("/api/docs/%s/content" % document_id)
+        missing = env.bob.get("/api/docs/%s/content" % MISSING_ID)
+        own = env.alice.get("/api/docs/%s/content" % document_id)
+
+        assert theirs.status_code == missing.status_code == 404
+        assert theirs.json() == missing.json()
+        assert own.status_code == 200
+        assert own.json() == {"content": "# Chapter One\n\nPrivate text"}
+
 
 class TestDocumentIsolation:
     """Documents carry their own owner, including the ones in no project."""
@@ -270,6 +288,26 @@ class TestDocumentIsolation:
     def test_status_of_someone_elses_document_is_not_found(self, env):
         document_id = make_document(env.session, env.alice_user)
         assert env.bob.get("/api/docs/%s/status" % document_id).status_code == 404
+
+    def test_project_document_list_does_not_include_extracted_content(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session,
+            env.alice_user,
+            source_type="docx",
+            content="Large extracted content stays on demand.",
+        )
+
+        attached = env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        )
+        listed = env.alice.get(
+            "/api/projects/%s/documents" % project_id
+        )
+
+        assert attached.status_code == 200
+        assert listed.status_code == 200
+        assert "content" not in listed.json()[0]
 
     def test_downloading_someone_elses_file_is_not_found(self, env):
         # This is the route that returns raw bytes, so it is the one that would

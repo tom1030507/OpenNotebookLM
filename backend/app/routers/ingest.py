@@ -1,5 +1,6 @@
 """Document ingestion router."""
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -8,12 +9,13 @@ import structlog
 from app.db.database import get_db
 from app.schemas import (
     FileUploadResponse, URLUploadRequest, YouTubeUploadRequest,
-    DocumentResponse, DocumentStatusResponse, TextUploadRequest,
+    DocumentResponse, DocumentContentResponse, DocumentStatusResponse, TextUploadRequest,
     DocumentUpdateRequest,
 )
 from app.db.models import User
 from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
 from app.config import get_settings
+from app.adapters.office import SUPPORTED_UPLOAD_EXTENSIONS
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_document, require_project
 from app.routers.rate_limit import (
@@ -91,12 +93,12 @@ async def upload_file(
     request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
 ):
-    """Stream a PDF into one of the caller's projects.
+    """Stream a supported source file into one of the caller's projects.
 
     Args:
         project_id: Project receiving the document.
         request: Incoming request, used for early Content-Length rejection.
-        file: Multipart PDF upload.
+        file: Multipart source file.
         title: Optional document title.
         db: Database session.
         current_user: Authenticated caller.
@@ -124,11 +126,22 @@ async def upload_file(
                 detail=f"File size exceeds maximum of {settings.max_file_size_mb}MB",
             )
     
-    # Validate file type
-    if not file.filename.lower().endswith('.pdf'):
+    filename = file.filename or ""
+    file_extension = Path(filename.replace("\\", "/")).suffix.lower()
+    configured_extensions = {
+        "." + extension.strip().lower().lstrip(".")
+        for extension in settings.allowed_file_types_list
+        if extension.strip()
+    }
+    if (
+        not filename
+        or file_extension not in SUPPORTED_UPLOAD_EXTENSIONS
+        or file_extension not in configured_extensions
+    ):
         raise HTTPException(
             status_code=400, 
-            detail="Only PDF files are supported in this version"
+            detail="File type is not supported. Allowed types: %s"
+            % ", ".join(sorted(extension.lstrip(".") for extension in configured_extensions))
         )
     
     # Starlette has already counted the multipart part while spooling it. Use
@@ -146,19 +159,34 @@ async def upload_file(
     )
     # Import after dependency resolution so importing the router never crosses
     # the optional ML boundary through the document service module.
-    from app.services.documents import UploadTooLargeError
+    from app.services.documents import (
+        InvalidUploadFileError,
+        UploadTooLargeError,
+    )
 
     try:
-        # Process the upload
-        document = await document_service.process_pdf_upload(
-            db=db,
-            project_id=project_id,
-            user_id=current_user.id,
-            file=file.file,
-            filename=file.filename,
-            title=title,
-            operation_lease=lease,
-        )
+        if file_extension == ".pdf":
+            # Keep legacy PDF jobs and the existing upload contract intact.
+            document = await document_service.process_pdf_upload(
+                db=db,
+                project_id=project_id,
+                user_id=current_user.id,
+                file=file.file,
+                filename=filename,
+                title=title,
+                operation_lease=lease,
+            )
+        else:
+            document = await document_service.process_file_upload(
+                db=db,
+                project_id=project_id,
+                user_id=current_user.id,
+                file=file.file,
+                filename=filename,
+                file_extension=file_extension,
+                title=title,
+                operation_lease=lease,
+            )
         
         return FileUploadResponse(
             doc_id=document.id,
@@ -168,10 +196,12 @@ async def upload_file(
         
     except UploadTooLargeError as e:
         raise HTTPException(status_code=413, detail=str(e))
+    except InvalidUploadFileError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("File upload failed", 
                     project_id=project_id,
-                    filename=file.filename,
+                    filename=filename,
                     error=str(e))
         raise HTTPException(status_code=500, detail="File upload failed")
 
@@ -402,6 +432,26 @@ async def get_document(
         updated_at=document.updated_at,
         chunk_count=chunk_count
     )
+
+
+@router.get("/docs/{doc_id}/content", response_model=DocumentContentResponse)
+async def get_document_content(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return extracted text for a preview opened by its owner.
+
+    Args:
+        doc_id: Document whose extracted text is being previewed.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        The extracted document content, or an empty string before extraction.
+    """
+    document = require_document(db, doc_id, current_user)
+    return DocumentContentResponse(content=document.content or "")
 
 
 @router.put("/docs/{doc_id}", response_model=DocumentResponse)

@@ -20,7 +20,12 @@ from app.db.models import (
 )
 from app.db.database import get_db_context
 from app.schemas import DocumentCreate
-from app.adapters import PDFAdapter, URLAdapter, YouTubeAdapter
+from app.adapters import OfficeAdapter, PDFAdapter, URLAdapter, YouTubeAdapter
+from app.adapters.office import (
+    InvalidOfficeFileError,
+    SUPPORTED_FILE_EXTENSIONS,
+    SUPPORTED_UPLOAD_EXTENSIONS,
+)
 from app.config import get_settings
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
@@ -41,6 +46,10 @@ CHUNK_LIMIT_CLEANUP_ATTEMPTS = 2
 
 class UploadTooLargeError(ValueError):
     """Raised when an upload crosses the configured byte limit."""
+
+
+class InvalidUploadFileError(ValueError):
+    """Raised when an upload's extension or file contents are unsupported."""
 
 
 class ChunkLimitPersistenceError(RuntimeError):
@@ -183,6 +192,7 @@ class DocumentService:
         chunking_service: Any | None = None,
         embedding_service: Any | None = None,
         pdf_adapter: Any | None = None,
+        office_adapter: Any | None = None,
         url_adapter: Any | None = None,
         youtube_adapter: Any | None = None,
         session_context: Callable[[], ContextManager[Session]] = get_db_context,
@@ -194,6 +204,7 @@ class DocumentService:
             chunking_service: Optional chunking implementation.
             embedding_service: Optional embedding implementation.
             pdf_adapter: Optional PDF extraction implementation.
+            office_adapter: Optional local file extraction implementation.
             url_adapter: Optional URL extraction implementation.
             youtube_adapter: Optional YouTube transcript implementation.
             session_context: Factory that owns each detached worker session.
@@ -213,6 +224,9 @@ class DocumentService:
             pdf_adapter
             if pdf_adapter is not None
             else PDFAdapter(use_pymupdf=False)
+        )
+        self.office_adapter = (
+            office_adapter if office_adapter is not None else OfficeAdapter()
         )
         self.url_adapter = (
             url_adapter
@@ -491,22 +505,77 @@ class DocumentService:
         title: Optional[str] = None,
         operation_lease: Optional[OperationLease] = None,
     ) -> Document:
-        """Process PDF file upload.
-        
+        """Keep the existing PDF upload entry point and durable job type.
+
         Args:
-            db: Database session
-            project_id: Project ID
-            user_id: Account that will own the document
-            file: File object
-            filename: Original filename
-            title: Optional document title
-            operation_lease: Explicit quota ownership transferred to this
-                service until background extraction/indexing really finishes.
-            
+            db: Database session.
+            project_id: Project receiving the PDF.
+            user_id: Account that will own the document.
+            file: Uploaded PDF stream.
+            filename: Original filename.
+            title: Optional document title.
+            operation_lease: Quota ownership transferred until background work
+                finishes.
+
         Returns:
-            Created document
+            The queued PDF document.
+        """
+        return await self.process_file_upload(
+            db=db,
+            project_id=project_id,
+            user_id=user_id,
+            file=file,
+            filename=filename,
+            file_extension=".pdf",
+            title=title,
+            operation_lease=operation_lease,
+        )
+
+    async def process_file_upload(
+        self,
+        db: Session,
+        project_id: str,
+        user_id: str,
+        file: BinaryIO,
+        filename: str,
+        file_extension: str,
+        title: Optional[str] = None,
+        operation_lease: Optional[OperationLease] = None,
+    ) -> Document:
+        """Store and queue one supported source file.
+
+        Args:
+            db: Database session.
+            project_id: Project receiving the file.
+            user_id: Account that will own the document.
+            file: Uploaded file stream.
+            filename: Original filename.
+            file_extension: Original extension including its leading dot.
+            title: Optional document title.
+            operation_lease: Quota ownership transferred until background work
+                finishes.
+
+        Returns:
+            The queued document.
         """
         lease = _operation_lease(operation_lease)
+        file_extension = str(file_extension or "").strip().lower()
+        if file_extension not in SUPPORTED_UPLOAD_EXTENSIONS:
+            lease.release()
+            raise InvalidUploadFileError(
+                "Files with the %s extension are not supported" % file_extension
+            )
+        safe_filename = (
+            Path(filename.replace("\\", "/")).name
+            if isinstance(filename, str)
+            else ""
+        )
+        if not safe_filename or Path(safe_filename).suffix.lower() != file_extension:
+            lease.release()
+            raise InvalidUploadFileError(
+                "The filename extension does not match the uploaded file type"
+            )
+
         file_path = None
         retained = False
         owns_retained_lease = False
@@ -518,7 +587,7 @@ class DocumentService:
             
             # Save file to disk. Reading without a size would duplicate the
             # entire multipart spool in RAM before the limit could be checked.
-            file_path = UPLOAD_DIR / f"{doc_id}_{filename}"
+            file_path = UPLOAD_DIR / f"{doc_id}_{safe_filename}"
             with open(file_path, "wb") as f:
                 file_size = 0
                 while True:
@@ -532,17 +601,28 @@ class DocumentService:
                         )
                     f.write(block)
                     file_size += len(block)
+
+            if file_extension in SUPPORTED_FILE_EXTENSIONS:
+                try:
+                    self.office_adapter.validate_file(str(file_path), file_extension)
+                except InvalidOfficeFileError as error:
+                    raise InvalidUploadFileError(str(error)) from error
+
+            job_type = "pdf" if file_extension == ".pdf" else "file"
+            source_type = "pdf" if file_extension == ".pdf" else file_extension[1:]
+            payload = {"file_path": str(file_path)}
             
             # Create document record with queued status
             document = Document(
                 id=doc_id,
                 user_id=user_id,
                 title=title or filename,
-                source_type="pdf",
+                source_type=source_type,
                 source_url=str(file_path),
                 status="queued",
                 meta_json={
                     "filename": filename,
+                    "file_extension": file_extension,
                     "file_size": file_size,
                     "upload_time": utc_now_iso(),
                 }
@@ -560,8 +640,8 @@ class DocumentService:
             enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
-                job_type="pdf",
-                payload={"file_path": str(file_path)},
+                job_type=job_type,
+                payload=payload,
             )
             job = enqueue_result.job
             job_id = job.id
@@ -574,8 +654,8 @@ class DocumentService:
                 document_id=doc_id,
                 project_id=project_id,
                 job_id=job_id,
-                job_type="pdf",
-                payload={"file_path": str(file_path)},
+                job_type=job_type,
+                payload=payload,
             )
             retained = True
             try:
@@ -583,17 +663,20 @@ class DocumentService:
             except Exception as error:
                 # Polling is the durable notification path. A process-local
                 # wakeup failure must not undo a committed document/job pair or
-                # delete the PDF file that recovery now owns.
+                # delete the source file that recovery now owns.
                 logger.warning(
-                    "Could not wake ingestion worker after PDF enqueue",
+                    "Could not wake ingestion worker after file enqueue",
                     job_id=job_id,
                     error=str(error),
                 )
             
-            logger.info("PDF upload initiated", 
-                       doc_id=doc_id, 
-                       filename=filename,
-                       project_id=project_id)
+            logger.info(
+                "File upload initiated",
+                doc_id=doc_id,
+                filename=filename,
+                project_id=project_id,
+                file_extension=file_extension,
+            )
             
             return document
             
@@ -608,9 +691,7 @@ class DocumentService:
                 lease.release()
             if file_path is not None and not retained:
                 file_path.unlink(missing_ok=True)
-            logger.error("Failed to process PDF upload", 
-                        filename=filename, 
-                        error=str(e))
+            logger.error("Failed to process file upload", filename=filename, error=str(e))
             raise
     
     async def _process_pdf_async(
@@ -1237,7 +1318,16 @@ class DocumentService:
             payload["_indexed_title"] = indexed_title
             return "ready"
 
-        if document.source_type != job_type:
+        if job_type == "file":
+            file_source_types = {
+                extension[1:] for extension in SUPPORTED_FILE_EXTENSIONS
+            }
+            if document.source_type not in file_source_types:
+                raise ValueError(
+                    "File job does not match document source type %s"
+                    % document.source_type
+                )
+        elif document.source_type != job_type:
             raise ValueError(
                 "Ingestion job type %s does not match document source type %s"
                 % (job_type, document.source_type)
@@ -1245,6 +1335,7 @@ class DocumentService:
 
         source_key = {
             "pdf": "file_path",
+            "file": "file_path",
             "url": "url",
             "youtube": "youtube_url",
             "text": "document_id",
@@ -1254,11 +1345,18 @@ class DocumentService:
         source_reference = payload.get(source_key)
         if not isinstance(source_reference, str) or not source_reference:
             raise ValueError("Ingestion job is missing %s" % source_key)
-        if job_type == "pdf":
+        if job_type in {"pdf", "file"}:
             expected_source = Path(document.source_url or "").resolve()
             actual_source = Path(source_reference).resolve()
             if actual_source != expected_source:
-                raise ValueError("PDF job source does not match its document")
+                raise ValueError("File job source does not match its document")
+            if job_type == "file":
+                file_extension = (document.meta_json or {}).get("file_extension")
+                if (
+                    file_extension not in SUPPORTED_FILE_EXTENSIONS
+                    or file_extension[1:] != document.source_type
+                ):
+                    raise ValueError("File job has no valid persisted file extension")
         elif job_type == "text":
             if source_reference != document.id:
                 raise ValueError("Text job does not match its document")
@@ -1270,6 +1368,20 @@ class DocumentService:
 
         if job_type == "pdf":
             result = self.pdf_adapter.extract_text_from_file(source_reference)
+            document.content = result["text"]
+            document.meta_json = {
+                **(document.meta_json or {}),
+                "num_pages": result["num_pages"],
+                "pages": result.get("pages", []),
+                "metadata": result.get("metadata", {}),
+                "processed_at": utc_now_iso(),
+            }
+        elif job_type == "file":
+            file_extension = document.meta_json["file_extension"]
+            result = self.office_adapter.extract_text_from_file(
+                source_reference,
+                file_extension,
+            )
             document.content = result["text"]
             document.meta_json = {
                 **(document.meta_json or {}),
@@ -1367,7 +1479,13 @@ class DocumentService:
 
         file_path = (
             Path(doc.source_url)
-            if doc.source_type == "pdf" and doc.source_url
+            if (
+                doc.source_url
+                and (
+                    doc.source_type == "pdf"
+                    or ".%s" % doc.source_type in SUPPORTED_FILE_EXTENSIONS
+                )
+            )
             else None
         )
 
@@ -1385,7 +1503,7 @@ class DocumentService:
             .execution_options(synchronize_session="fetch")
         ).scalars())
 
-        # Commit the durable state first. Removing the only recoverable PDF
+        # Commit the durable state first. Removing the only recoverable source
         # before a failed database delete would leave a queued job that can
         # never succeed after restart.
         get_retrieval_index().delete_document(db, doc_id)

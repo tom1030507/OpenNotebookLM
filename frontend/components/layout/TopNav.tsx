@@ -356,7 +356,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
         <TopNavInfoDialog title="Help" onClose={() => setShowHelp(false)}>
           <ol className="space-y-2 text-sm list-decimal list-inside">
             <li>Create a project to hold related material.</li>
-            <li>Add sources: upload a PDF, or paste a web page or YouTube link.</li>
+            <li>Add sources: upload a supported file, or paste a web page or YouTube link.</li>
             <li>Wait for a source to report Ready, then ask a question in the composer.</li>
             <li>Export a conversation or a whole project from the toolbar.</li>
           </ol>

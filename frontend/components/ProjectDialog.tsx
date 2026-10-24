@@ -133,7 +133,7 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
 
           <div className="text-xs text-[var(--muted-foreground)]">
             <p>{'Projects help you organise your documents and conversations.'}</p>
-            <p className="mt-1">{'You can add PDFs, URLs, YouTube videos and more to a project.'}</p>
+            <p className="mt-1">{'You can add files, URLs, YouTube videos and more to a project.'}</p>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">

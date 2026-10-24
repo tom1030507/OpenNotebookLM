@@ -23,7 +23,7 @@ logger = structlog.get_logger()
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
 TERMINAL_JOB_STATUSES = ("completed", "failed")
-SUPPORTED_JOB_TYPES = ("pdf", "url", "youtube", "text", "reindex")
+SUPPORTED_JOB_TYPES = ("pdf", "file", "url", "youtube", "text", "reindex")
 
 JobProcessor = Callable[[Session, IngestionJob], Optional[str]]
 

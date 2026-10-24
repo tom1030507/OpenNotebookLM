@@ -1,7 +1,18 @@
 'use client';
 
 import React, { useState, useCallback, useRef } from 'react';
-import { Upload, X, File, Link, Youtube, FileText, Loader2 } from 'lucide-react';
+import {
+  Upload,
+  X,
+  File,
+  FileSpreadsheet,
+  Link,
+  Presentation,
+  Youtube,
+  BookOpen,
+  FileText,
+  Loader2,
+} from 'lucide-react';
 import { getUploadFileError } from '@/lib/uploadValidation';
 
 interface FileUploadProps {
@@ -15,7 +26,7 @@ interface FileUploadProps {
 
 export default function FileUpload({ 
   onUpload, 
-  accept = '.pdf',
+  accept = '.pdf,.txt,.md,.docx,.pptx,.xlsx,.epub',
   multiple = false,
   maxSize = 10,
   onUploadingChange,
@@ -180,7 +191,12 @@ export default function FileUpload({
 
   const getFileIcon = (fileName: string) => {
     const ext = fileName.split('.').pop()?.toLowerCase();
-    if (ext === 'pdf') return <FileText className="w-4 h-4" />;
+    if (ext === 'pptx') return <Presentation className="w-4 h-4" />;
+    if (ext === 'xlsx') return <FileSpreadsheet className="w-4 h-4" />;
+    if (ext === 'epub') return <BookOpen className="w-4 h-4" />;
+    if (['pdf', 'txt', 'md', 'docx'].includes(ext || '')) {
+      return <FileText className="w-4 h-4" />;
+    }
     return <File className="w-4 h-4" />;
   };
 
@@ -293,7 +309,7 @@ export default function FileUpload({
             </label>
           </p>
           <p className="text-sm text-gray-500">
-            Maximum file size: {maxSize}MB
+            PDF, TXT, Markdown, Word, PowerPoint, Excel, or EPUB · Maximum file size: {maxSize}MB
           </p>
         </div>
       )}

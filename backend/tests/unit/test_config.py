@@ -56,6 +56,15 @@ def test_a_set_optional_number_is_still_read(tmp_path):
     assert Settings(_env_file=env_file).llm_max_request_tokens == 8000
 
 
+def test_allowed_upload_types_match_the_documented_example():
+    """The route allowlist and the tracked environment example stay aligned."""
+    expected = ["pdf", "txt", "md", "docx", "pptx", "xlsx", "epub"]
+    example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert Settings(_env_file=None).allowed_file_types_list == expected
+    assert "ALLOWED_FILE_TYPES=" + ",".join(expected) in example
+
+
 @pytest.mark.parametrize("chunk_size", [0, -1])
 def test_non_positive_chunk_size_is_rejected_during_config_parse(chunk_size):
     """Invalid chunk geometry cannot survive until a worker starts ingesting."""
