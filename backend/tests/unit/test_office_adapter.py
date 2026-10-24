@@ -232,4 +232,3 @@ def test_xlsx_sparse_cells_exceeding_grid_cap_are_rejected(tmp_path, monkeypatch
 
     with pytest.raises(InvalidOfficeFileError, match="cell limit"):
         OfficeAdapter().validate_file(str(path), ".xlsx")
-
