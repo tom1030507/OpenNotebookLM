@@ -156,7 +156,7 @@ describe('workspace accessibility contract', () => {
     renderWorkspace(
       <>
         <TopNav />
-        <ChatArea />
+        <ChatArea onAddSourcesOpenChange={() => {}} />
       </>,
     );
 
@@ -558,7 +558,7 @@ describe('workspace accessibility contract', () => {
     renderWorkspace(
       <>
         <TopNav />
-        <ChatArea />
+        <ChatArea onAddSourcesOpenChange={() => {}} />
         <SourcesPanelHarness />
         <DocumentPreview document={previewDocument} onClose={() => {}} />
         <FileUpload onUpload={async () => {}} />

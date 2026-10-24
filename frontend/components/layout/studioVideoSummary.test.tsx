@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import StudioPanel from './StudioPanel';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
@@ -119,6 +119,13 @@ const finishSpeaking = async (utterance: Utterance) => {
     utterance.onend?.();
   });
 };
+
+// StudioPanel lazy-loads the dialog. Load it once up front so the first
+// test does not spend findByRole's one-second budget on a cold module
+// import, which a busy machine can exceed.
+beforeAll(async () => {
+  await import('@/components/VideoSummaryDialog');
+});
 
 beforeEach(() => {
   useStore.setState({
