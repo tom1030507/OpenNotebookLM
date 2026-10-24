@@ -34,6 +34,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run lint
+      - run: npm run typecheck
       - run: npm run build
         env:
           BACKEND_INTERNAL_URL: http://backend:8000

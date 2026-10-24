@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { ReactNode } from 'react';
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -11,7 +12,7 @@ vi.mock('react-syntax-highlighter', async () => {
       children,
       PreTag = 'pre',
     }: {
-      children: unknown;
+      children: ReactNode;
       PreTag?: 'pre' | 'div';
     }) => createElement(PreTag, null, createElement('code', null, children)),
   };

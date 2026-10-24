@@ -92,11 +92,16 @@ function configureWorkspaceStore() {
     createConversation: vi.fn(async () => conversation),
     updateConversation: vi.fn(async () => undefined),
     deleteConversation: vi.fn(async () => undefined),
-    fetchMessages: vi.fn(async () => undefined),
+    fetchMessages: vi.fn(async () => ({
+      status: 'applied' as const,
+      epoch: 0,
+      generation: 0,
+      projectId: project.id,
+      conversationId: conversation.id,
+    })),
     sendQuery: vi.fn(async () => undefined),
     toggleSidebar: vi.fn(),
     toggleStudio: vi.fn(),
-    reset: vi.fn(),
   }, true);
 }
 

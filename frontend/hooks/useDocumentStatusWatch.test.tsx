@@ -109,7 +109,7 @@ describe('useDocumentStatusWatch', () => {
   });
 
   it('re-checks a source that is still being indexed', async () => {
-    const refreshDocuments = vi.fn(async () => undefined);
+    const refreshDocuments = vi.fn(async (_projectId: string) => undefined);
     useStore.setState({ documents: [documentWith('processing')], refreshDocuments });
     render(<Watcher />);
 
