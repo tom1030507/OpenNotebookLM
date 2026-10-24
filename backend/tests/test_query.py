@@ -169,6 +169,28 @@ def test_query_deduplicates_source_ids_before_ownership_lookup(monkeypatch):
     assert rag.allowed == ["doc-1", "doc-2"]
 
 
+def test_query_counts_unique_ids_toward_the_selection_limit(monkeypatch):
+    """More than 500 raw entries are allowed when they name one source."""
+    rag = ScopeRecordingRAG()
+    client = query_client(monkeypatch, rag)
+    looked_up = []
+
+    def record_lookup(_db, document_ids, _user):
+        looked_up.append(document_ids)
+        return document_ids
+
+    monkeypatch.setattr(query, "require_documents", record_lookup)
+
+    response = client.post(
+        "/api/query",
+        json={"query": "hello", "document_ids": ["doc-1"] * 501},
+    )
+
+    assert response.status_code == 200
+    assert looked_up == [["doc-1"]]
+    assert rag.allowed == ["doc-1"]
+
+
 def test_studio_selection_rejects_more_than_500_source_ids():
     """Studio's shared selection body has the same request-size ceiling."""
     with pytest.raises(ValidationError):
@@ -184,6 +206,13 @@ def test_studio_selection_deduplicates_source_ids_in_order():
     )
 
     assert selection.document_ids == ["doc-1", "doc-2"]
+
+
+def test_studio_selection_caps_unique_ids_after_deduplication():
+    """Studio selection accepts repeated copies of a single source id."""
+    selection = SourceSelection(document_ids=["doc-1"] * 501)
+
+    assert selection.document_ids == ["doc-1"]
 
 
 def test_omitting_the_selection_keeps_the_owned_scope(monkeypatch):

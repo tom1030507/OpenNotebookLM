@@ -87,12 +87,12 @@ class QueryRequest(BaseModel):
         max_length=MAX_DOCUMENT_SELECTION,
     )
 
-    @field_validator("document_ids")
+    @field_validator("document_ids", mode="before")
     @classmethod
     def deduplicate_document_ids(
         cls,
-        document_ids: Optional[List[str]],
-    ) -> Optional[List[str]]:
+        document_ids: Any,
+    ) -> Any:
         """Keep the first occurrence of each source before ownership lookup.
 
         Args:
@@ -102,9 +102,17 @@ class QueryRequest(BaseModel):
         Returns:
             The selection in request order with duplicates removed.
         """
-        if document_ids is None:
-            return None
-        return list(dict.fromkeys(document_ids))
+        if not isinstance(document_ids, (list, tuple)):
+            return document_ids
+        unique_ids = []
+        seen_ids = set()
+        for document_id in document_ids:
+            if not isinstance(document_id, str):
+                unique_ids.append(document_id)
+            elif document_id not in seen_ids:
+                seen_ids.add(document_id)
+                unique_ids.append(document_id)
+        return unique_ids
 
 
 class QueryResponse(BaseModel):

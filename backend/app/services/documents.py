@@ -126,6 +126,7 @@ def rename_document(db: Session, document: Document, title: str) -> Document:
     Returns:
         The renamed document.
     """
+    title_changed = document.title != title
     document.title = title
     # Answers keep a copy of each cited source's title. Left alone, every
     # earlier answer and its exports would go on citing the old name.
@@ -152,8 +153,20 @@ def rename_document(db: Session, document: Document, title: str) -> Document:
                 if c.get("document_id") == document.id else c
                 for c in citations
             ]
+    enqueue_reindex = title_changed and document.status == "ready"
+    if enqueue_reindex:
+        enqueue_ingestion_job_with_result(
+            db,
+            document_id=document.id,
+            job_type="reindex",
+            payload={"requested_title": title},
+        )
+    # Title, stored citations, and the refresh request must share a transaction;
+    # a crash between separate commits would leave title-conditioned vectors stale.
     db.commit()
     db.refresh(document)
+    if enqueue_reindex:
+        notify_ingestion_worker()
     return document
 
 
@@ -1184,6 +1197,46 @@ class DocumentService:
         document = db.get(Document, document_id)
         if document is None:
             raise ValueError("Document %s not found" % document_id)
+        if job_type == "reindex":
+            if document.status != "ready":
+                raise ValueError("Only ready documents can be re-indexed")
+            chunks = (
+                db.query(Chunk)
+                .filter(Chunk.document_id == document_id)
+                .all()
+            )
+            if not chunks:
+                raise RuntimeError(
+                    "No saved chunks are available for re-indexing"
+                )
+            while True:
+                db.refresh(document)
+                indexed_title = document.title
+                embeddings = self.embedding_service.embed_chunks(
+                    db,
+                    document_id,
+                    force_regenerate=True,
+                )
+                if not embeddings:
+                    raise RuntimeError(
+                        "No searchable text could be embedded for this source."
+                    )
+                db.refresh(document)
+                if document.title != indexed_title:
+                    continue
+                document.status = "ready"
+                document.error_message = None
+                self._publish_document_index(db, document_id)
+                db.flush()
+                db.refresh(document)
+                if document.title == indexed_title:
+                    break
+
+            # The worker compares this snapshot against the latest rename while
+            # it holds the queue's writer reservation before completing the job.
+            payload["_indexed_title"] = indexed_title
+            return "ready"
+
         if document.source_type != job_type:
             raise ValueError(
                 "Ingestion job type %s does not match document source type %s"

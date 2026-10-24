@@ -240,6 +240,92 @@ def test_duplicate_enqueue_reuses_one_durable_job(job_database):
         assert second.status == "queued"
 
 
+def test_completed_reindex_can_be_enqueued_again_without_changing_ready_status(
+    job_database,
+):
+    """Each completed rename refresh can be followed by a fresh refresh.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-reindex-again")
+        document.status = "ready"
+        first = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="reindex",
+            payload={},
+        )
+        assert document.status == "ready"
+        db.commit()
+
+        first.status = "completed"
+        first.completed_at = utc_now()
+        db.commit()
+        second = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="reindex",
+            payload={},
+        )
+        assert second.id != first.id
+        assert second.status == "queued"
+        assert document.status == "ready"
+        db.commit()
+        assert db.query(models.IngestionJob).count() == 2
+
+
+def test_active_reindex_records_a_newer_rename_title(job_database):
+    """A rename during a running refresh records the latest target title.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-active-reindex-title")
+        document.title = "First title"
+        document.status = "ready"
+        active = models.IngestionJob(
+            id="active-reindex-title-job",
+            document_id=document.id,
+            job_type="reindex",
+            payload_json={"requested_title": "First title"},
+            status="running",
+        )
+        db.add(active)
+        db.commit()
+
+    with session_factory() as db:
+        document = db.get(models.Document, "document-active-reindex-title")
+        document.title = "Second title"
+        result = ingestion_jobs.enqueue_ingestion_job_with_result(
+            db,
+            document_id=document.id,
+            job_type="reindex",
+            payload={"requested_title": "Second title"},
+        )
+        assert result.job.id == "active-reindex-title-job"
+        assert result.job.payload_json["requested_title"] == "Second title"
+        db.commit()
+
+    with session_factory() as db:
+        assert db.get(
+            models.Document,
+            "document-active-reindex-title",
+        ).title == "Second title"
+        active = db.get(models.IngestionJob, "active-reindex-title-job")
+        assert active.payload_json["requested_title"] == "Second title"
+
+
 def test_enqueue_preserves_failed_history_and_creates_one_retry(job_database):
     """Retry keeps terminal history while creating one new active row.
 
@@ -680,6 +766,288 @@ def test_worker_claims_atomically_and_records_attempt_metadata(job_database):
         assert claimed.attempts == 1
         assert claimed.started_at is not None
         assert claimed.document.status == "processing"
+
+
+def test_reindex_claim_keeps_ready_status(job_database):
+    """Claiming refresh work leaves the source queryable.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-reindex-claim")
+        document.status = "ready"
+        job = models.IngestionJob(
+            id="reindex-claim-job",
+            document_id=document.id,
+            job_type="reindex",
+            payload_json={},
+        )
+        db.add(job)
+        db.commit()
+
+    assert ingestion_jobs.claim_next_job(session_factory) == "reindex-claim-job"
+
+    with session_factory() as db:
+        assert db.get(models.IngestionJob, "reindex-claim-job").status == "running"
+        assert db.get(models.Document, "document-reindex-claim").status == "ready"
+
+
+def test_reindex_failure_preserves_ready_document_and_existing_index(
+    job_database,
+    monkeypatch,
+):
+    """A failed vector refresh keeps the last searchable rows intact.
+
+    Args:
+        job_database: Isolated file database fixture.
+        monkeypatch: Pytest patcher for the retrieval-index adapter.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-reindex-failure")
+        document.status = "ready"
+        db.add(models.Chunk(
+            id="reindex-failure-chunk",
+            document_id=document.id,
+            text="Existing searchable text",
+        ))
+        db.flush()
+        db.add(models.Embedding(
+            id="reindex-failure-embedding",
+            chunk_id="reindex-failure-chunk",
+            vector=b"old-vector",
+            vector_json=[0.25],
+            model_name="test-model",
+        ))
+        job = models.IngestionJob(
+            id="reindex-failure-job",
+            document_id=document.id,
+            job_type="reindex",
+            payload_json={},
+            status="running",
+        )
+        db.add(job)
+        db.commit()
+
+    class RetrievalIndex:
+        def __init__(self):
+            self.deleted_documents = []
+
+        def delete_document(self, db, document_id):
+            self.deleted_documents.append(document_id)
+
+    retrieval_index = RetrievalIndex()
+    monkeypatch.setattr(
+        ingestion_jobs,
+        "get_retrieval_index",
+        lambda: retrieval_index,
+    )
+
+    def fail_refresh(db, claimed_job):
+        raise RuntimeError("encoder unavailable")
+
+    worker = ingestion_jobs.IngestionJobWorker(
+        session_factory=session_factory,
+        processor=fail_refresh,
+        poll_interval=0.001,
+    )
+    worker._process_claimed_job("reindex-failure-job")
+
+    with session_factory() as db:
+        assert db.get(models.IngestionJob, "reindex-failure-job").status == "failed"
+        assert db.get(models.Document, "document-reindex-failure").status == "ready"
+        assert db.get(models.Chunk, "reindex-failure-chunk") is not None
+        embedding = db.get(models.Embedding, "reindex-failure-embedding")
+        assert embedding.vector == b"old-vector"
+    assert retrieval_index.deleted_documents == []
+
+
+def test_running_reindex_repeats_when_title_changes_during_embedding(
+    job_database,
+    monkeypatch,
+):
+    """A rename arriving mid-refresh is included before the job completes.
+
+    Args:
+        job_database: Isolated file database fixture.
+        monkeypatch: Pytest patcher for the retrieval-index adapter.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-reindex-title-race")
+        document.title = "First title"
+        document.status = "ready"
+        job = models.IngestionJob(
+            id="reindex-title-race-job",
+            document_id=document.id,
+            job_type="reindex",
+            payload_json={"requested_title": "First title"},
+            status="running",
+        )
+        db.add(job)
+        db.commit()
+
+    class RetrievalIndex:
+        def delete_document(self, db, document_id):
+            raise AssertionError("reindex removed its current index")
+
+    monkeypatch.setattr(
+        ingestion_jobs,
+        "get_retrieval_index",
+        lambda: RetrievalIndex(),
+    )
+    processed_titles = []
+
+    def refresh(db, claimed_job):
+        indexed_title = db.get(
+            models.Document,
+            claimed_job.document_id,
+        ).title
+        processed_titles.append(indexed_title)
+        if len(processed_titles) == 1:
+            with session_factory() as rename_db:
+                renamed = rename_db.get(
+                    models.Document,
+                    claimed_job.document_id,
+                )
+                renamed.title = "Second title"
+                active = rename_db.get(
+                    models.IngestionJob,
+                    claimed_job.id,
+                )
+                active.payload_json = {"requested_title": "Second title"}
+                rename_db.commit()
+        return indexed_title
+
+    worker = ingestion_jobs.IngestionJobWorker(
+        session_factory=session_factory,
+        processor=refresh,
+        poll_interval=0.001,
+    )
+    worker._process_claimed_job("reindex-title-race-job")
+
+    with session_factory() as db:
+        assert processed_titles == ["First title", "Second title"]
+        job = db.get(models.IngestionJob, "reindex-title-race-job")
+        document = db.get(models.Document, "document-reindex-title-race")
+        assert job.status == "completed"
+        assert document.status == "ready"
+
+
+def test_reindex_recovery_preserves_ready_document_and_saved_chunks(job_database):
+    """Crash recovery requeues refresh work without disturbing its source.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-reindex-recovery")
+        document.status = "ready"
+        db.add(models.Chunk(
+            id="reindex-recovery-chunk",
+            document_id=document.id,
+            text="Existing searchable text",
+        ))
+        job = models.IngestionJob(
+            id="reindex-recovery-job",
+            document_id=document.id,
+            job_type="reindex",
+            payload_json={},
+            status="running",
+            attempts=1,
+            started_at=utc_now(),
+        )
+        db.add(job)
+        db.commit()
+
+    assert ingestion_jobs.recover_abandoned_jobs(session_factory) == 1
+
+    with session_factory() as db:
+        assert db.get(models.IngestionJob, "reindex-recovery-job").status == "queued"
+        assert db.get(models.Document, "document-reindex-recovery").status == "ready"
+        assert db.get(models.Chunk, "reindex-recovery-chunk") is not None
+
+
+def test_reindex_terminal_compensation_preserves_current_index(
+    job_database,
+    monkeypatch,
+):
+    """An uncertain completion requeues only the refresh job.
+
+    Args:
+        job_database: Isolated file database fixture.
+        monkeypatch: Pytest patcher for the retrieval-index adapter.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-reindex-compensation")
+        document.status = "ready"
+        db.add(models.Chunk(
+            id="reindex-compensation-chunk",
+            document_id=document.id,
+            text="Existing searchable text",
+        ))
+        job = models.IngestionJob(
+            id="reindex-compensation-job",
+            document_id=document.id,
+            job_type="reindex",
+            payload_json={},
+            status="running",
+        )
+        db.add(job)
+        db.commit()
+
+    class RetrievalIndex:
+        def __init__(self):
+            self.deleted_documents = []
+
+        def delete_document(self, db, document_id):
+            self.deleted_documents.append(document_id)
+
+    retrieval_index = RetrievalIndex()
+    monkeypatch.setattr(
+        ingestion_jobs,
+        "get_retrieval_index",
+        lambda: retrieval_index,
+    )
+    worker = ingestion_jobs.IngestionJobWorker(
+        session_factory=session_factory,
+        processor=lambda db, job: None,
+        poll_interval=0.001,
+    )
+
+    with session_factory() as db:
+        assert not worker._compensate_terminal_commit_failure(
+            db,
+            "reindex-compensation-job",
+            RuntimeError("terminal commit failed"),
+        )
+
+    with session_factory() as db:
+        requeued = db.get(models.IngestionJob, "reindex-compensation-job")
+        source = db.get(models.Document, "document-reindex-compensation")
+        assert requeued.status == "queued"
+        assert source.status == "ready"
+        assert db.get(models.Chunk, "reindex-compensation-chunk") is not None
+    assert retrieval_index.deleted_documents == []
 
 
 def test_claim_accepts_a_matching_commit_acknowledgement_failure(job_database):
