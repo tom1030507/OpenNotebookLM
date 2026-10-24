@@ -48,7 +48,7 @@ httpx==0.27.2
 requests==2.34.2
 urllib3==2.7.0
 aiofiles==23.2.1
-PyJWT[crypto]==2.13.0
+PyJWT[crypto]==2.15.1
 passlib[bcrypt]==1.7.4
 # Password hashing calls bcrypt directly: passlib 1.7.4 cannot drive bcrypt 5.x,
 # because its backend probe hashes an over-long password and raises ValueError.
