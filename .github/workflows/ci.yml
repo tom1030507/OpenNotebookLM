@@ -55,6 +55,20 @@ jobs:
           # OSV audits the local `+cpu` torch build; PyPI's service skips local
           # version identifiers even though they share the upstream source.
           vulnerability-service: osv
+          # filelock's fixes (4.2.1) require Python 3.11 and the image runs
+          # 3.10. Every advisory below is in SoftFileLock or ReadWriteLock, or
+          # Windows-only, and needs a second local user to plant files. Nothing
+          # in the dependency tree uses ReadWriteLock; huggingface_hub falls
+          # back to SoftFileLock only on filesystems without flock; torch,
+          # transformers and whisper use FileLock. The container runs one
+          # user. Drop these once the image moves to Python 3.11.
+          ignore-vulns: |
+            CVE-2026-112906
+            CVE-2026-112907
+            CVE-2026-112913
+            CVE-2026-112914
+            CVE-2026-112937
+            CVE-2026-112940
       - run: docker build --tag opennotebook-backend-ci ./backend
       - uses: actions/cache@v4
         with:
