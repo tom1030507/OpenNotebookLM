@@ -40,6 +40,8 @@ sys.modules["app.services.rag"] = rag_module
 from app.main import app as production_app  # noqa: E402
 from app.routers.mindmap import get_mindmap_service  # noqa: E402
 from app.routers.video import get_video_summary_service  # noqa: E402
+from app.routers.project_overview import get_project_overview_service  # noqa: E402
+from app.services.project_overview import ProjectOverviewService  # noqa: E402
 from app.services.mindmap import MindMapService  # noqa: E402
 from app.services.video_summary import VideoSummaryService  # noqa: E402
 from conftest import OfflineLLM, authenticated_client  # noqa: E402
@@ -98,6 +100,9 @@ def env():
     # The video summary asks the same configured LLM to write its narration.
     production_app.dependency_overrides[get_video_summary_service] = (
         lambda: VideoSummaryService(llm_service=OfflineLLM())
+    )
+    production_app.dependency_overrides[get_project_overview_service] = (
+        lambda: ProjectOverviewService(llm_service=OfflineLLM())
     )
 
     alice = authenticated_client(production_app, session, "alice")
@@ -585,6 +590,28 @@ class TestSourceSelectionIsolation:
 
         assert "Kept source" in response.text
         assert "Dropped source" in response.text
+
+
+class TestProjectOverviewIsolation:
+    """The overview reads a project's sources and follow-ups read its answers."""
+
+    def test_reading_someone_elses_overview_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        assert env.bob.get("/api/projects/%s/overview" % project_id).status_code == 404
+
+    def test_follow_ups_for_someone_elses_conversation_are_not_found(self, env):
+        conversation_id = make_conversation(env.alice, make_project(env.alice))
+        assert env.bob.post(
+            "/api/conversations/%s/follow-ups" % conversation_id).status_code == 404
+
+    def test_your_own_overview_and_follow_ups_are_reachable(self, env):
+        """Pins that the routes exist: an unmounted route also answers 404."""
+        project_id = make_project(env.alice)
+        conversation_id = make_conversation(env.alice, project_id)
+
+        assert env.alice.get("/api/projects/%s/overview" % project_id).status_code == 200
+        assert env.alice.post(
+            "/api/conversations/%s/follow-ups" % conversation_id).status_code == 200
 
 
 class TestCacheIsolation:
