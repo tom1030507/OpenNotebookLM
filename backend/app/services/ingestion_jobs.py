@@ -99,7 +99,10 @@ def enqueue_ingestion_job_with_result(
     if job_type != "reindex":
         latest = (
             db.query(IngestionJob)
-            .filter(IngestionJob.document_id == document_id)
+            .filter(
+                IngestionJob.document_id == document_id,
+                IngestionJob.job_type == job_type,
+            )
             .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
             .first()
         )
@@ -129,7 +132,10 @@ def enqueue_ingestion_job_with_result(
     if job_type != "reindex":
         latest = (
             db.query(IngestionJob)
-            .filter(IngestionJob.document_id == document_id)
+            .filter(
+                IngestionJob.document_id == document_id,
+                IngestionJob.job_type == job_type,
+            )
             .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
             .first()
         )

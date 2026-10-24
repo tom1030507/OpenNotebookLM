@@ -326,6 +326,51 @@ def test_active_reindex_records_a_newer_rename_title(job_database):
         assert active.payload_json["requested_title"] == "Second title"
 
 
+def test_completed_reindex_does_not_break_upload_deduplication(job_database):
+    """A completed refresh does not make an old import look like a new one.
+
+    Args:
+        job_database: Isolated file database fixture.
+
+    Returns:
+        None.
+    """
+    _, session_factory = job_database
+    with session_factory() as db:
+        document = add_document(db, "document-upload-after-reindex")
+        uploaded = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/source"},
+        )
+        uploaded.status = "completed"
+        uploaded.completed_at = utc_now()
+        document.status = "ready"
+        db.commit()
+        uploaded_id = uploaded.id
+
+        refreshed = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="reindex",
+            payload={"requested_title": document.title},
+        )
+        refreshed.status = "completed"
+        refreshed.completed_at = utc_now()
+        db.commit()
+
+        duplicate_upload = ingestion_jobs.enqueue_ingestion_job(
+            db,
+            document_id=document.id,
+            job_type="url",
+            payload={"url": "https://example.com/source"},
+        )
+
+        assert duplicate_upload.id == uploaded_id
+        assert db.query(models.IngestionJob).count() == 2
+
+
 def test_enqueue_preserves_failed_history_and_creates_one_retry(job_database):
     """Retry keeps terminal history while creating one new active row.
 
