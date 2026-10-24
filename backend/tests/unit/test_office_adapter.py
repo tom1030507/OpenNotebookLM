@@ -64,6 +64,74 @@ def write_epub(path: Path) -> None:
         )
 
 
+def write_pptx(path: Path) -> None:
+    """Create a minimal two-slide package without third-party image libraries.
+
+    Args:
+        path: Destination path for the generated presentation.
+
+    Returns:
+        None.
+    """
+    presentation_namespace = (
+        'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    )
+    drawing_namespace = (
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+    )
+
+    def slide_xml(title: str) -> str:
+        """Return one slide containing a title and body placeholder."""
+        return (
+            '<p:sld %s><p:cSld><p:spTree>'
+            '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/>'
+            '<p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>%s</a:t></a:r></a:p></p:txBody>'
+            '</p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="Body"/><p:cNvSpPr/>'
+            '<p:nvPr><p:ph type="body"/></p:nvPr></p:nvSpPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Slide body text</a:t></a:r></a:p></p:txBody>'
+            '</p:sp></p:spTree></p:cSld></p:sld>'
+            % (presentation_namespace + " " + drawing_namespace, title)
+        )
+
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+            '<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+            '<Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+            '</Types>',
+        )
+        archive.writestr(
+            "_rels/.rels",
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>'
+            '</Relationships>',
+        )
+        archive.writestr(
+            "ppt/presentation.xml",
+            '<p:presentation %s><p:sldIdLst><p:sldId id="256" r:id="rId1"/>'
+            '<p:sldId id="257" r:id="rId2"/></p:sldIdLst></p:presentation>'
+            % presentation_namespace,
+        )
+        archive.writestr(
+            "ppt/_rels/presentation.xml.rels",
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>'
+            '</Relationships>',
+        )
+        for index, title in enumerate(("Findings", "Opening"), start=1):
+            archive.writestr(
+                "ppt/slides/slide%s.xml" % index,
+                slide_xml(title),
+            )
+
+
 def rewrite_zip_members(
     path: Path,
     replacements: dict[str, bytes],
@@ -127,22 +195,57 @@ def test_docx_heading_style_becomes_markdown_heading(tmp_path):
 
 def test_pptx_has_one_markdown_heading_per_slide(tmp_path):
     """Each slide title is a heading that can become a citation section."""
-    from pptx import Presentation
-
     path = tmp_path / "deck.pptx"
-    presentation = Presentation()
-    for title in ("Opening", "Findings"):
-        slide = presentation.slides.add_slide(presentation.slide_layouts[0])
-        slide.shapes.title.text = title
-        slide.placeholders[1].text = "Slide body text"
-    presentation.save(path)
+    write_pptx(path)
 
     text = result_for(path)["text"]
 
     assert "## Slide 1: Opening" in text
     assert "## Slide 2: Findings" in text
+    assert text.index("## Slide 1: Opening") < text.index("## Slide 2: Findings")
+    assert text.count("Slide body text") == 2
     assert text.count("## Slide 1:") == 1
     assert text.count("## Slide 2:") == 1
+
+
+def test_pptx_with_unresolved_slide_relationship_is_rejected(tmp_path):
+    """Presentation slide references must resolve before enqueue."""
+    path = tmp_path / "missing-slide-relationship.pptx"
+    write_pptx(path)
+    with zipfile.ZipFile(path) as archive:
+        presentation = archive.read("ppt/presentation.xml")
+    rewrite_zip_members(
+        path,
+        {
+            "ppt/presentation.xml": presentation.replace(
+                b'r:id="rId1"',
+                b'r:id="rId9"',
+                1,
+            ),
+        },
+    )
+
+    with pytest.raises(InvalidOfficeFileError, match="slide relationship"):
+        OfficeAdapter().validate_file(str(path), ".pptx")
+
+
+def test_pptx_with_wrong_slide_root_is_rejected(tmp_path):
+    """A relationship target must contain a presentation slide part."""
+    path = tmp_path / "wrong-slide-root.pptx"
+    write_pptx(path)
+    with zipfile.ZipFile(path) as archive:
+        slide = archive.read("ppt/slides/slide1.xml")
+    rewrite_zip_members(
+        path,
+        {
+            "ppt/slides/slide1.xml": slide
+            .replace(b"<p:sld ", b"<p:other ", 1)
+            .replace(b"</p:sld>", b"</p:other>", 1),
+        },
+    )
+
+    with pytest.raises(InvalidOfficeFileError, match="slide part"):
+        OfficeAdapter().validate_file(str(path), ".pptx")
 
 
 def test_xlsx_has_sheet_headings_and_markdown_tables(tmp_path):

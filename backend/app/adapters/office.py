@@ -29,7 +29,12 @@ MAX_OFFICE_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 
 _OFFICE_PACKAGE_PARTS = {
     ".docx": {"[Content_Types].xml", "_rels/.rels", "word/document.xml"},
-    ".pptx": {"[Content_Types].xml", "_rels/.rels", "ppt/presentation.xml"},
+    ".pptx": {
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "ppt/presentation.xml",
+        "ppt/_rels/presentation.xml.rels",
+    },
     ".xlsx": {
         "[Content_Types].xml",
         "_rels/.rels",
@@ -48,6 +53,7 @@ _EXPECTED_XML_ROOTS = {
         "[Content_Types].xml": "{http://schemas.openxmlformats.org/package/2006/content-types}Types",
         "_rels/.rels": "{http://schemas.openxmlformats.org/package/2006/relationships}Relationships",
         "ppt/presentation.xml": "{http://schemas.openxmlformats.org/presentationml/2006/main}presentation",
+        "ppt/_rels/presentation.xml.rels": "{http://schemas.openxmlformats.org/package/2006/relationships}Relationships",
     },
     ".xlsx": {
         "[Content_Types].xml": "{http://schemas.openxmlformats.org/package/2006/content-types}Types",
@@ -78,8 +84,11 @@ _OPF_PACKAGE_ROOT = "{http://www.idpf.org/2007/opf}package"
 _SPREADSHEET_WORKSHEET_ROOT = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}worksheet"
 MAX_SPREADSHEET_ROWS = 1_048_576
 MAX_SPREADSHEET_COLUMNS = 16_384
-_SLIDE_MARKER = re.compile(r"<!--\s*Slide number:\s*(\d+)\s*-->")
 _CELL_REFERENCE = re.compile(r"^([A-Za-z]{1,3})([1-9][0-9]*)$")
+_PRESENTATION_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+_PRESENTATION_SLIDE_ROOT = "{%s}sld" % _PRESENTATION_NS
+_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_OFFICE_RELATIONSHIPS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 
 class InvalidOfficeFileError(ValueError):
@@ -181,6 +190,8 @@ class OfficeAdapter:
 
         if extension in {".txt", ".md"}:
             text = Path(file_path).read_text(encoding="utf-8", errors="replace")
+        elif extension == ".pptx":
+            text = self._extract_pptx_text(file_path)
         else:
             # convert_local never treats the filename as a URL. Mammoth also
             # disables external file access by default, so linked images cannot
@@ -189,9 +200,7 @@ class OfficeAdapter:
 
             converted = MarkItDown(enable_plugins=False).convert_local(file_path)
             text = converted.markdown
-            if extension == ".pptx":
-                text = self._format_slides(text)
-            elif extension == ".xlsx":
+            if extension == ".xlsx":
                 text = self._format_sheets(text)
 
         text = text.strip()
@@ -233,11 +242,12 @@ class OfficeAdapter:
             if name.lower().endswith((".xml", ".rels", ".opf", ".xhtml"))
         )
         root_tags: Dict[str, str] = {}
-        package_relationships: Dict[str, list[tuple[str, str, str]]] = {}
+        package_relationships: Dict[str, list[tuple[str, str, str, str]]] = {}
         content_type_overrides: Dict[str, str] = {}
         epub_rootfiles = []
         epub_manifests: Dict[str, Dict[str, str]] = {}
         epub_spines: Dict[str, list[str]] = {}
+        presentation_slide_ids = []
         cell_count = 0
         total_grid_cells = 0
         worksheet_count = 0
@@ -265,6 +275,7 @@ class OfficeAdapter:
 
                     if name.endswith(".rels") and local_name == "Relationship":
                         relationships.append((
+                            element.attrib.get("Id", ""),
                             element.attrib.get("Type", ""),
                             element.attrib.get("Target", ""),
                             element.attrib.get("TargetMode", ""),
@@ -275,6 +286,13 @@ class OfficeAdapter:
                             content_type_overrides[part_name] = element.attrib.get(
                                 "ContentType", ""
                             )
+                    elif name == "ppt/presentation.xml" and local_name == "sldId":
+                        presentation_slide_ids.append(
+                            element.attrib.get(
+                                "{%s}id" % _OFFICE_RELATIONSHIPS_NS,
+                                "",
+                            )
+                        )
                     elif name == "META-INF/container.xml" and local_name == "rootfile":
                         epub_rootfiles.append(element.attrib.get("full-path", ""))
                     elif name.lower().endswith(".opf") and local_name == "item":
@@ -380,12 +398,12 @@ class OfficeAdapter:
                     % extension[1:].upper()
                 )
 
-        resolved_relationships: Dict[str, list[tuple[str, str]]] = {}
+        resolved_relationships: Dict[str, list[tuple[str, str, str]]] = {}
         for part_name, relationships in package_relationships.items():
             source_directory = cls._relationship_source_directory(part_name)
             resolved = []
-            for relationship_type, target, target_mode in relationships:
-                if not relationship_type or not target:
+            for relationship_id, relationship_type, target, target_mode in relationships:
+                if not relationship_id or not relationship_type or not target:
                     raise InvalidOfficeFileError(
                         "The %s file contains invalid package relationships"
                         % extension[1:].upper()
@@ -401,7 +419,7 @@ class OfficeAdapter:
                         "The %s file contains a missing relationship target"
                         % extension[1:].upper()
                     )
-                resolved.append((relationship_type, resolved_target))
+                resolved.append((relationship_id, relationship_type, resolved_target))
             resolved_relationships[part_name] = resolved
 
         if extension in _MAIN_OFFICE_PARTS:
@@ -415,7 +433,7 @@ class OfficeAdapter:
             if not any(
                 relationship_type.endswith("/officeDocument")
                 and target == main_part
-                for relationship_type, target in root_relationships
+                for _, relationship_type, target in root_relationships
             ):
                 raise InvalidOfficeFileError(
                     "The %s file has no valid main-part relationship"
@@ -425,7 +443,7 @@ class OfficeAdapter:
         if extension == ".xlsx":
             worksheet_relationships = [
                 target
-                for relationship_type, target in resolved_relationships.get(
+                for _, relationship_type, target in resolved_relationships.get(
                     "xl/_rels/workbook.xml.rels",
                     [],
                 )
@@ -442,6 +460,26 @@ class OfficeAdapter:
                 )
             if worksheet_count == 0:
                 raise InvalidOfficeFileError("The XLSX file contains no worksheets")
+
+        if extension == ".pptx":
+            slide_relationships = {
+                relationship_id: target
+                for relationship_id, relationship_type, target in resolved_relationships.get(
+                    "ppt/_rels/presentation.xml.rels",
+                    [],
+                )
+                if relationship_type.endswith("/slide")
+            }
+            if not presentation_slide_ids or any(
+                relationship_id not in slide_relationships
+                for relationship_id in presentation_slide_ids
+            ) or any(
+                root_tags.get(target) != _PRESENTATION_SLIDE_ROOT
+                for target in slide_relationships.values()
+            ):
+                raise InvalidOfficeFileError(
+                    "The PPTX file contains an invalid slide relationship or slide part"
+                )
 
         if extension == ".epub":
             if not epub_rootfiles:
@@ -554,6 +592,163 @@ class OfficeAdapter:
             return ""
         return normalized
 
+    @classmethod
+    def _extract_pptx_text(cls, file_path: str) -> str:
+        """Read slide text from OOXML without loading embedded images.
+
+        Args:
+            file_path: Local path to a previously validated PPTX package.
+
+        Returns:
+            Markdown with one heading per slide and its visible text.
+
+        Raises:
+            InvalidOfficeFileError: If slide relationships or text parts are invalid.
+        """
+        presentation_tag = "{%s}presentation" % _PRESENTATION_NS
+        slide_tag = "{%s}sld" % _PRESENTATION_NS
+        slide_id_tag = "{%s}sldId" % _PRESENTATION_NS
+        relationship_id_attribute = "{%s}id" % _OFFICE_RELATIONSHIPS_NS
+        relationship_tag = "{%s}Relationship" % "http://schemas.openxmlformats.org/package/2006/relationships"
+        paragraph_tag = "{%s}p" % _DRAWING_NS
+        text_tag = "{%s}t" % _DRAWING_NS
+        placeholder_tag = "{%s}ph" % _PRESENTATION_NS
+        shape_tree_tag = "{%s}spTree" % _PRESENTATION_NS
+
+        with zipfile.ZipFile(file_path) as archive:
+            names = set(archive.namelist())
+            presentation_root = None
+            slide_ids = []
+            with archive.open("ppt/presentation.xml") as presentation_file:
+                for _, element in ElementTree.iterparse(
+                    presentation_file,
+                    events=("start",),
+                ):
+                    if presentation_root is None:
+                        presentation_root = element.tag
+                    if element.tag == slide_id_tag:
+                        slide_ids.append(
+                            element.attrib.get(relationship_id_attribute, "")
+                        )
+                    element.clear()
+            if presentation_root != presentation_tag:
+                raise InvalidOfficeFileError("The PPTX file has an invalid presentation part")
+
+            relationship_by_id = {}
+            with archive.open("ppt/_rels/presentation.xml.rels") as relationship_file:
+                for _, element in ElementTree.iterparse(
+                    relationship_file,
+                    events=("start",),
+                ):
+                    if element.tag == relationship_tag:
+                        relationship_by_id[element.attrib.get("Id", "")] = dict(
+                            element.attrib
+                        )
+                    element.clear()
+
+            sections = []
+            for slide_number, relationship_id in enumerate(slide_ids, start=1):
+                relationship = relationship_by_id.get(relationship_id)
+                if (
+                    relationship is None
+                    or not relationship.get("Type", "").endswith("/slide")
+                ):
+                    raise InvalidOfficeFileError(
+                        "The PPTX file contains an invalid slide relationship"
+                    )
+                slide_path = cls._resolve_internal_target(
+                    "ppt",
+                    relationship.get("Target", ""),
+                )
+                if slide_path not in names:
+                    raise InvalidOfficeFileError(
+                        "The PPTX file is missing a slide part"
+                    )
+
+                slide_root = None
+                shape_tree_found = False
+                shape_tree_depth = None
+                shape_depth = None
+                shape_tag = None
+                shape_is_title = False
+                shape_paragraphs = []
+                paragraph_text = None
+                title = ""
+                body = []
+                stack = []
+                with archive.open(slide_path) as slide_file:
+                    for event, element in ElementTree.iterparse(
+                        slide_file,
+                        events=("start", "end"),
+                    ):
+                        if event == "start":
+                            if slide_root is None:
+                                slide_root = element.tag
+                            if element.tag == shape_tree_tag:
+                                shape_tree_found = True
+                                shape_tree_depth = len(stack)
+                            elif (
+                                shape_tree_depth is not None
+                                and shape_depth is None
+                                and len(stack) == shape_tree_depth + 1
+                            ):
+                                shape_depth = len(stack)
+                                shape_tag = element.tag
+                                shape_is_title = False
+                                shape_paragraphs = []
+
+                            if shape_depth is not None:
+                                if element.tag == placeholder_tag:
+                                    shape_is_title = shape_is_title or element.attrib.get(
+                                        "type"
+                                    ) in {"title", "ctrTitle"}
+                                elif element.tag == paragraph_tag:
+                                    paragraph_text = []
+                            stack.append(element)
+                            continue
+
+                        if element.tag == text_tag and paragraph_text is not None:
+                            paragraph_text.append(element.text or "")
+                        elif element.tag == paragraph_tag and paragraph_text is not None:
+                            text_line = "".join(paragraph_text).strip()
+                            if text_line:
+                                shape_paragraphs.append(text_line)
+                            paragraph_text = None
+
+                        if (
+                            shape_depth is not None
+                            and len(stack) - 1 == shape_depth
+                            and element.tag == shape_tag
+                        ):
+                            if shape_paragraphs:
+                                if shape_is_title and not title:
+                                    title = " ".join(shape_paragraphs)
+                                else:
+                                    body.extend(shape_paragraphs)
+                            shape_depth = None
+                            shape_tag = None
+                            shape_is_title = False
+                            shape_paragraphs = []
+                        if element.tag == shape_tree_tag:
+                            shape_tree_depth = None
+                        element.clear()
+                        stack.pop()
+
+                if slide_root != slide_tag or not shape_tree_found:
+                    raise InvalidOfficeFileError(
+                        "The PPTX file contains an invalid slide part"
+                    )
+
+                heading = title or "Untitled"
+                section = "## Slide %s: %s" % (slide_number, heading)
+                if body:
+                    section += "\n\n" + "\n".join(body)
+                sections.append(section)
+
+        if not sections:
+            raise InvalidOfficeFileError("The PPTX file contains no slides")
+        return "\n\n".join(sections)
+
     @staticmethod
     def _cell_reference_dimensions(cell_reference: str) -> tuple[int, int]:
         """Return one XLSX cell's column and row after validating its address.
@@ -578,37 +773,6 @@ class OfficeAdapter:
         if column > 16_384 or row > 1_048_576:
             raise InvalidOfficeFileError("The XLSX file contains an invalid cell reference")
         return column, row
-
-    @staticmethod
-    def _format_slides(markdown: str) -> str:
-        """Turn MarkItDown's slide markers and titles into section headings.
-
-        Args:
-            markdown: MarkItDown output for a PowerPoint file.
-
-        Returns:
-            Markdown with one level-two heading for each slide.
-        """
-        markers = list(_SLIDE_MARKER.finditer(markdown))
-        if not markers:
-            return markdown
-
-        sections = []
-        for index, marker in enumerate(markers):
-            end = markers[index + 1].start() if index + 1 < len(markers) else len(markdown)
-            body = markdown[marker.end():end].strip()
-            number = int(marker.group(1))
-            title_match = re.search(r"(?m)^#\s+(.+?)\s*$", body)
-            if title_match:
-                title = title_match.group(1).strip()
-                body = body[:title_match.start()] + body[title_match.end():]
-                heading = "## Slide %s: %s" % (number, title)
-            else:
-                heading = "## Slide %s: Untitled" % number
-
-            sections.append("\n\n".join(part for part in (heading, body.strip()) if part))
-
-        return "\n\n".join(sections)
 
     @staticmethod
     def _format_sheets(markdown: str) -> str:
