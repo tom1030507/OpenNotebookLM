@@ -1,10 +1,8 @@
 name: End-to-end tests
 
+# Browser suites run nightly and on demand rather than on every push or pull
+# request, to keep PR checks to a couple of minutes.
 on:
-  push:
-    branches:
-      - '**'
-  pull_request:
   schedule:
     - cron: '0 18 * * *'
   workflow_dispatch:
@@ -14,7 +12,6 @@ permissions:
 
 jobs:
   fast-e2e:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
