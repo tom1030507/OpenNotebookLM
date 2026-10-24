@@ -326,6 +326,36 @@ describe('ChatArea', () => {
     expect(logo?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('rates an answer and clears the rating when chosen again', async () => {
+    const rateMessage = vi.spyOn(api, 'rateMessage').mockResolvedValue();
+    useStore.setState({
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation: conversation('conversation-1', project.id),
+      messages: [{
+        id: 'message-assistant',
+        conversation_id: 'conversation-1',
+        role: 'assistant',
+        content: 'A concise answer.',
+        created_at: '2026-08-23T00:00:00Z',
+      }],
+    });
+
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }));
+
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'Good answer' }).getAttribute('aria-pressed'),
+    ).toBe('true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }));
+
+    await waitFor(() => expect(useStore.getState().messages[0].rating).toBeNull());
+    expect(rateMessage.mock.calls).toEqual([
+      ['conversation-1', 'message-assistant', 'up'],
+      ['conversation-1', 'message-assistant', null],
+    ]);
+  });
+
   it('uses the shared brand mark decoratively for assistant messages', () => {
     useStore.setState({
       projects: [project],

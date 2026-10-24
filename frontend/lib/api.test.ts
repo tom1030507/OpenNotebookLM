@@ -257,6 +257,63 @@ describe('API client', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual(payload);
   });
 
+  it('sends pasted text to the upload-text route', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ doc_id: 'document-1', status: 'queued', message: 'ok' }))
+      .mockResolvedValueOnce(jsonResponse({
+        id: 'document-1',
+        title: 'Notes',
+        source_type: 'text',
+        meta_json: {},
+        status: 'queued',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        chunk_count: 0,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const document = await api.createDocument('project-1', {
+      name: 'Notes',
+      type: 'text',
+      content: 'Pasted body',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/upload-text');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+      title: 'Notes',
+      text: 'Pasted body',
+    });
+    expect(document.type).toBe('text');
+  });
+
+  it('renames a document and rates a message', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        id: 'document-1',
+        title: 'New name',
+        source_type: 'pdf',
+        meta_json: {},
+        status: 'ready',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        chunk_count: 1,
+      }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'message-1', rating: null }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.renameDocument('document-1', 'New name')).resolves.toEqual(
+      expect.objectContaining({ id: 'document-1', name: 'New name' }),
+    );
+    await api.rateMessage('conversation-1', 'message-1', null);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/docs/document-1');
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'PUT' }));
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/api/conversations/conversation-1/messages/message-1/rating',
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({ rating: null });
+  });
+
   it('normalizes conversation messages and citations', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       id: 'conversation-1',

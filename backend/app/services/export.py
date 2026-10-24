@@ -65,7 +65,9 @@ class ExportService:
             
             # Add message text
             content += f"{message.text}\n\n"
-            
+            if message.rating:
+                content += f"**Rating**: {message.rating}\n\n"
+
             # Add citations if requested
             if include_citations and message.citations_json:
                 citations = message.citations_json
@@ -103,7 +105,8 @@ class ExportService:
                 "id": message.id,
                 "role": message.role,
                 "text": message.text,
-                "created_at": message.created_at.isoformat()
+                "created_at": message.created_at.isoformat(),
+                "rating": message.rating,
             }
             
             if include_citations and message.citations_json:
@@ -127,6 +130,8 @@ class ExportService:
         for message in conversation.messages:
             role = "USER" if message.role == "user" else "ASSISTANT"
             content += f"[{role}]:\n{message.text}\n\n"
+            if message.rating:
+                content += f"Rating: {message.rating}\n\n"
             
             if include_citations and message.citations_json:
                 citations = message.citations_json

@@ -14,6 +14,7 @@ import {
   Eye,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
@@ -88,6 +89,7 @@ export default function SourcesPanel({
     uploadDocument,
     createDocument,
     deleteDocument,
+    renameDocument,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
 
@@ -140,6 +142,36 @@ export default function SourcesPanel({
         onAddSourcesOpenChange(false);
       }
     });
+  };
+
+  const handleAddText = async (title: string, content: string) => {
+    if (!currentProject) return;
+
+    const projectId = currentProject.id;
+    const uploadSession = modalSession;
+    await closeAddSourcesAfterSuccessfulUpload(
+      () => createDocument(projectId, { name: title, type: 'text', content }),
+      () => {
+        if (
+          modalSessionRef.current === uploadSession
+          && isAddSourcesOpenRef.current
+        ) {
+          onAddSourcesOpenChange(false);
+        }
+      },
+    );
+  };
+
+  const handleRenameDocument = async (doc: Document) => {
+    const title = prompt('Rename source', doc.name)?.trim();
+    if (!title || title === doc.name) return;
+
+    try {
+      await renameDocument(doc.id, title);
+    } catch (error) {
+      console.error('Failed to rename document:', error);
+      alert('Failed to rename document');
+    }
   };
 
   const handleUploadingChange = (uploadSession: number) => (uploading: boolean) => {
@@ -338,6 +370,17 @@ export default function SourcesPanel({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        void handleRenameDocument(doc);
+                      }}
+                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      aria-label={'Rename document'}
+                      title={'Rename document'}
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         handleDeleteDocument(doc.id);
                       }}
                       className="p-1 hover:bg-[var(--muted)] rounded"
@@ -384,6 +427,7 @@ export default function SourcesPanel({
             <FileUpload
               onUpload={handleUpload}
               onUploadingChange={handleUploadingChange(modalSession)}
+              onAddText={handleAddText}
             />
           </div>
         </div>

@@ -23,7 +23,7 @@ logger = structlog.get_logger()
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
 TERMINAL_JOB_STATUSES = ("completed", "failed")
-SUPPORTED_JOB_TYPES = ("pdf", "url", "youtube")
+SUPPORTED_JOB_TYPES = ("pdf", "url", "youtube", "text")
 
 JobProcessor = Callable[[Session, IngestionJob], None]
 
@@ -55,7 +55,7 @@ def enqueue_ingestion_job(
     Args:
         db: Session whose surrounding transaction owns the document creation.
         document_id: Document to extract and index.
-        job_type: One of pdf, url, or youtube.
+        job_type: One of pdf, url, youtube, or text.
         payload: Recoverable source references needed by the worker.
 
     Returns:
@@ -80,7 +80,7 @@ def enqueue_ingestion_job_with_result(
     Args:
         db: Session whose surrounding transaction owns the document creation.
         document_id: Document to extract and index.
-        job_type: One of pdf, url, or youtube.
+        job_type: One of pdf, url, youtube, or text.
         payload: Recoverable source references needed by the worker.
 
     Returns:

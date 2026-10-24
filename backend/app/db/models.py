@@ -82,7 +82,7 @@ class Document(Base):
     # no answer to "whose is this?".
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
     title = Column(String, nullable=False)
-    source_type = Column(String, nullable=False)  # pdf, url, youtube
+    source_type = Column(String, nullable=False)  # pdf, url, youtube, text
     source_url = Column(Text)
     content = Column(Text)  # Full content for reference
     meta_json = Column(JSON, default={})
@@ -297,6 +297,7 @@ class Message(Base):
     processing_time = Column(Float)
     is_bookmarked = Column(Boolean, default=False)
     tags = Column(JSON, default=[])
+    rating = Column(String)  # up, down, or NULL when unrated
     # Python-side and strictly ordered: SQLite's CURRENT_TIMESTAMP has second
     # resolution, while Windows can repeat individual Python clock reads for
     # roughly 15.6 ms. Tied values make `order_by(created_at)` arbitrary,

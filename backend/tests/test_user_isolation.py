@@ -538,3 +538,46 @@ class TestOwnerlessRowsBelongToNobody:
         env.session.commit()
 
         assert env.alice.get("/api/docs/%s" % document.id).status_code == 404
+
+
+class TestTextRenameAndRatingIsolation:
+    """Pasting text, renaming a source and rating an answer check ownership."""
+
+    def test_pasting_text_into_someone_elses_project_is_not_found(self, env):
+        project_id = make_project(env.alice)
+
+        response = env.bob.post(
+            "/api/projects/%s/upload-text" % project_id,
+            json={"title": "Mine now", "text": "Some text"})
+
+        assert response.status_code == 404
+
+    def test_renaming_someone_elses_document_is_not_found(self, env):
+        document_id = make_document(env.session, env.alice_user, "Alice upload")
+
+        response = env.bob.put(
+            "/api/docs/%s" % document_id, json={"title": "taken"})
+
+        assert response.status_code == 404
+        assert env.alice.get(
+            "/api/docs/%s" % document_id).json()["title"] == "Alice upload"
+
+    def test_rating_an_answer_in_someone_elses_conversation_is_not_found(self, env):
+        from app.db.models import Message
+
+        conversation_id = make_conversation(env.alice, make_project(env.alice))
+        message = Message(
+            id=str(uuid.uuid4()),
+            conversation_id=conversation_id,
+            role="assistant",
+            text="An answer",
+        )
+        env.session.add(message)
+        env.session.commit()
+        url = "/api/conversations/%s/messages/%s/rating" % (
+            conversation_id, message.id)
+
+        assert env.bob.put(url, json={"rating": "down"}).status_code == 404
+        assert env.alice.put(url, json={"rating": "up"}).status_code == 200
+        env.session.refresh(message)
+        assert message.rating == "up"
