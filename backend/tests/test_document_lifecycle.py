@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import zipfile
 
 import pytest
+from PIL import Image
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -342,6 +343,141 @@ def test_non_pdf_upload_persists_its_extension_and_a_file_job(
     assert document.source_url.endswith("_notes.md")
     assert job.job_type == "file"
     assert job.payload_json == {"file_path": document.source_url}
+
+
+def test_image_upload_runs_ocr_and_indexes_searchable_text(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """A validated image is persisted, OCRed by its file job, and chunked."""
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(document_module, "notify_ingestion_worker", lambda: None)
+    image_bytes = BytesIO()
+    Image.new("RGB", (120, 80), "white").save(image_bytes, format="PNG")
+    recognized_text = (
+        "This scanned report contains important searchable OCR text. " * 3
+    )
+
+    class ImageOCR:
+        max_image_pixels = 40_000_000
+
+        def __init__(self):
+            self.paths = []
+
+        def validate_image_file(self, file_path):
+            with Image.open(file_path) as image:
+                image.verify()
+
+        def extract_text_from_image(self, file_path, filename):
+            self.paths.append((file_path, filename))
+            return {
+                "text": "# %s\n\n%s" % (filename, recognized_text),
+                "pages": [{"page_num": 1, "text": recognized_text}],
+                "num_pages": 1,
+                "metadata": {"ocr_engine": "RapidOCR", "ocr_pages": 1},
+            }
+
+    class Embedder:
+        def embed_chunks(self, db, document_id):
+            return [object()]
+
+    ocr = ImageOCR()
+    service = DocumentService(
+        chunking_service=ChunkingService(chunk_size=300, chunk_overlap=0),
+        embedding_service=Embedder(),
+        ocr_adapter=ocr,
+    )
+    assert service.pdf_adapter.ocr_adapter is ocr
+    assert service.pdf_adapter.ocr_enabled is True
+    service._publish_document_index = lambda db, document_id: None
+
+    document = asyncio.run(service.process_file_upload(
+        db=lifecycle_db,
+        project_id="project-1",
+        user_id="user-1",
+        file=BytesIO(image_bytes.getvalue()),
+        filename="scan.png",
+        file_extension=".png",
+    ))
+    job = lifecycle_db.query(IngestionJob).filter_by(
+        document_id=document.id,
+    ).one()
+
+    status = service.process_ingestion_job(
+        lifecycle_db,
+        document_id=document.id,
+        job_type=job.job_type,
+        payload=job.payload_json,
+    )
+
+    chunks = lifecycle_db.query(Chunk).filter_by(document_id=document.id).all()
+    assert status == document.status == "ready"
+    assert document.source_type == "png"
+    assert document.content.startswith("# scan.png")
+    assert recognized_text in document.content
+    assert any(recognized_text[:70] in chunk.text for chunk in chunks)
+    assert ocr.paths == [(document.source_url, "scan.png")]
+    assert document.meta_json["metadata"]["ocr_engine"] == "RapidOCR"
+
+
+def test_malformed_image_upload_leaves_no_file_document_or_job(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """Malformed images fail before a durable ingestion job is created."""
+    from app.adapters.ocr import OCRAdapter
+    from app.services.documents import InvalidUploadFileError
+
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    service = DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+        ocr_adapter=OCRAdapter(str(tmp_path / "models")),
+    )
+
+    with pytest.raises(InvalidUploadFileError, match="valid image"):
+        asyncio.run(service.process_file_upload(
+            db=lifecycle_db,
+            project_id="project-1",
+            user_id="user-1",
+            file=BytesIO(b"not a PNG image"),
+            filename="broken.png",
+            file_extension=".png",
+        ))
+
+    assert list(tmp_path.iterdir()) == []
+    assert lifecycle_db.query(Document).count() == 0
+    assert lifecycle_db.query(IngestionJob).count() == 0
+
+
+def test_image_upload_is_refused_when_ocr_is_disabled(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """Disabling OCR also disables image sources at the upload boundary."""
+    from app.services.documents import InvalidUploadFileError
+
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(document_module.get_settings(), "ocr_enabled", False)
+    service = DocumentService(chunking_service=object(), embedding_service=object())
+    assert service.pdf_adapter.ocr_enabled is False
+
+    with pytest.raises(InvalidUploadFileError, match="OCR is disabled"):
+        asyncio.run(service.process_file_upload(
+            db=lifecycle_db,
+            project_id="project-1",
+            user_id="user-1",
+            file=BytesIO(b"ignored"),
+            filename="scan.png",
+            file_extension=".png",
+        ))
+
+    assert list(tmp_path.iterdir()) == []
+    assert lifecycle_db.query(Document).count() == 0
+    assert lifecycle_db.query(IngestionJob).count() == 0
 
 
 def test_non_pdf_upload_refuses_invalid_office_bytes_without_a_queued_row(
@@ -978,6 +1114,40 @@ def test_deleting_queued_document_releases_its_operation_lease(lifecycle_db):
     finally:
         release_all_operation_leases()
         service.executor.shutdown(wait=True)
+
+
+def test_deleting_image_document_removes_its_source_file(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """Deleting an OCR source removes its uploaded image after commit."""
+    source_path = tmp_path / "scan.webp"
+    source_path.write_bytes(b"image data")
+    lifecycle_db.add(Document(
+        id="document-delete-image",
+        title="Scan",
+        source_type="webp",
+        source_url=str(source_path),
+        status="ready",
+    ))
+    lifecycle_db.commit()
+
+    class RetrievalIndex:
+        def delete_document(self, db, document_id):
+            return None
+
+    monkeypatch.setattr(
+        document_module,
+        "get_retrieval_index",
+        lambda: RetrievalIndex(),
+    )
+
+    assert DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+    ).delete_document(lifecycle_db, "document-delete-image")
+    assert not source_path.exists()
 
 
 def test_failed_document_delete_keeps_pdf_and_lease(

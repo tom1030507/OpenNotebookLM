@@ -6,6 +6,10 @@ export const SUPPORTED_UPLOAD_FILE_EXTENSIONS = [
   '.pptx',
   '.xlsx',
   '.epub',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
 ] as const;
 
 export const isSupportedUploadFileName = (fileName: string): boolean => {

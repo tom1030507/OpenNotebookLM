@@ -26,7 +26,7 @@ interface FileUploadProps {
 
 export default function FileUpload({ 
   onUpload, 
-  accept = '.pdf,.txt,.md,.docx,.pptx,.xlsx,.epub',
+  accept = '.pdf,.txt,.md,.docx,.pptx,.xlsx,.epub,.png,.jpg,.jpeg,.webp',
   multiple = false,
   maxSize = 10,
   onUploadingChange,
@@ -309,7 +309,7 @@ export default function FileUpload({
             </label>
           </p>
           <p className="text-sm text-gray-500">
-            PDF, TXT, Markdown, Word, PowerPoint, Excel, or EPUB · Maximum file size: {maxSize}MB
+            PDF, TXT, Markdown, Word, PowerPoint, Excel, EPUB, or images · Maximum file size: {maxSize}MB
           </p>
         </div>
       )}

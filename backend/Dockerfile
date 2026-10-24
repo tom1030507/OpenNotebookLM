@@ -1,5 +1,5 @@
 # Backend Dockerfile for OpenNotebookLM
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
@@ -18,7 +18,9 @@ COPY requirements.txt .
 RUN python -m pip install --no-cache-dir --upgrade \
         pip==26.2.1 \
         setuptools==84.0.0 \
-    && python -m pip install --no-cache-dir -r requirements.txt
+    && python -m pip install --no-cache-dir -r requirements.txt \
+    && find /usr/local/lib/python3.11/site-packages/rapidocr/models \
+        -type f -name '*.onnx' -delete
 
 # Copy application code
 COPY . .

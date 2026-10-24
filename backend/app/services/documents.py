@@ -23,9 +23,11 @@ from app.schemas import DocumentCreate
 from app.adapters import OfficeAdapter, PDFAdapter, URLAdapter, YouTubeAdapter
 from app.adapters.office import (
     InvalidOfficeFileError,
+    SUPPORTED_IMAGE_EXTENSIONS,
     SUPPORTED_FILE_EXTENSIONS,
     SUPPORTED_UPLOAD_EXTENSIONS,
 )
+from app.adapters.ocr import InvalidImageError, OCRAdapter
 from app.config import get_settings
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
 from app.services.document_files import UPLOAD_DIR
@@ -197,6 +199,7 @@ class DocumentService:
         youtube_adapter: Any | None = None,
         session_context: Callable[[], ContextManager[Session]] = get_db_context,
         max_chunks_per_doc: Optional[int] = None,
+        ocr_adapter: Any | None = None,
     ):
         """Initialize document processing dependencies.
 
@@ -205,6 +208,7 @@ class DocumentService:
             embedding_service: Optional embedding implementation.
             pdf_adapter: Optional PDF extraction implementation.
             office_adapter: Optional local file extraction implementation.
+            ocr_adapter: Optional local OCR implementation for images and scans.
             url_adapter: Optional URL extraction implementation.
             youtube_adapter: Optional YouTube transcript implementation.
             session_context: Factory that owns each detached worker session.
@@ -220,10 +224,19 @@ class DocumentService:
             embedding_service = EmbeddingService()
 
         self.settings = get_settings()
+        self.ocr_adapter = (
+            ocr_adapter
+            if ocr_adapter is not None
+            else OCRAdapter(self.settings.ocr_model_cache_dir)
+        )
         self.pdf_adapter = (
             pdf_adapter
             if pdf_adapter is not None
-            else PDFAdapter(use_pymupdf=False)
+            else PDFAdapter(
+                use_pymupdf=False,
+                ocr_adapter=self.ocr_adapter,
+                ocr_enabled=self.settings.ocr_enabled,
+            )
         )
         self.office_adapter = (
             office_adapter if office_adapter is not None else OfficeAdapter()
@@ -565,6 +578,9 @@ class DocumentService:
             raise InvalidUploadFileError(
                 "Files with the %s extension are not supported" % file_extension
             )
+        if file_extension in SUPPORTED_IMAGE_EXTENSIONS and not self.settings.ocr_enabled:
+            lease.release()
+            raise InvalidUploadFileError("Image uploads are unavailable while OCR is disabled")
         safe_filename = (
             Path(filename.replace("\\", "/")).name
             if isinstance(filename, str)
@@ -602,7 +618,12 @@ class DocumentService:
                     f.write(block)
                     file_size += len(block)
 
-            if file_extension in SUPPORTED_FILE_EXTENSIONS:
+            if file_extension in SUPPORTED_IMAGE_EXTENSIONS:
+                try:
+                    self.ocr_adapter.validate_image_file(str(file_path))
+                except InvalidImageError as error:
+                    raise InvalidUploadFileError(str(error)) from error
+            elif file_extension in SUPPORTED_FILE_EXTENSIONS:
                 try:
                     self.office_adapter.validate_file(str(file_path), file_extension)
                 except InvalidOfficeFileError as error:
@@ -1320,7 +1341,8 @@ class DocumentService:
 
         if job_type == "file":
             file_source_types = {
-                extension[1:] for extension in SUPPORTED_FILE_EXTENSIONS
+                extension[1:]
+                for extension in SUPPORTED_FILE_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS
             }
             if document.source_type not in file_source_types:
                 raise ValueError(
@@ -1353,7 +1375,9 @@ class DocumentService:
             if job_type == "file":
                 file_extension = (document.meta_json or {}).get("file_extension")
                 if (
-                    file_extension not in SUPPORTED_FILE_EXTENSIONS
+                    file_extension not in (
+                        SUPPORTED_FILE_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS
+                    )
                     or file_extension[1:] != document.source_type
                 ):
                     raise ValueError("File job has no valid persisted file extension")
@@ -1378,10 +1402,19 @@ class DocumentService:
             }
         elif job_type == "file":
             file_extension = document.meta_json["file_extension"]
-            result = self.office_adapter.extract_text_from_file(
-                source_reference,
-                file_extension,
-            )
+            if file_extension in SUPPORTED_IMAGE_EXTENSIONS:
+                filename = (document.meta_json or {}).get("filename") or Path(
+                    source_reference
+                ).name
+                result = self.ocr_adapter.extract_text_from_image(
+                    source_reference,
+                    filename,
+                )
+            else:
+                result = self.office_adapter.extract_text_from_file(
+                    source_reference,
+                    file_extension,
+                )
             document.content = result["text"]
             document.meta_json = {
                 **(document.meta_json or {}),
@@ -1483,7 +1516,8 @@ class DocumentService:
                 doc.source_url
                 and (
                     doc.source_type == "pdf"
-                    or ".%s" % doc.source_type in SUPPORTED_FILE_EXTENSIONS
+                    or ".%s" % doc.source_type
+                    in (SUPPORTED_FILE_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS)
                 )
             )
             else None

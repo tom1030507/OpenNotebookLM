@@ -1,9 +1,11 @@
 """PDF processing adapter."""
 import io
+import math
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 import structlog
+import numpy as np
 
 try:
     import fitz  # PyMuPDF
@@ -19,6 +21,11 @@ except ImportError:
     HAS_PDFMINER = False
 
 from app.utils.text import PAGE_SEPARATOR
+from app.adapters.ocr import (
+    InvalidImageError,
+    MAX_OCR_IMAGE_PIXELS,
+    OCRAdapter,
+)
 
 logger = structlog.get_logger()
 
@@ -28,18 +35,41 @@ PAGE_LABEL_RE = re.compile(r"^page\s+\d+(\s+of\s+\d+)?$", re.IGNORECASE)
 # Digits and the punctuation a page number is usually dressed in. A line left
 # empty by removing these was nothing but a page number.
 PAGE_DECORATION_RE = re.compile(r"[\d\s\-–—.·|/()\[\]]+")
+OCR_RENDER_DPI = 200
+MAX_OCR_PAGES_PER_DOCUMENT = 20
+OCR_MIN_PAGE_IMAGE_COVERAGE = 0.5
+OCR_IMAGE_COVERAGE_GRID_SIZE = 64
+
+
+class OCRPageLimitError(ValueError):
+    """Raised when a PDF has more scanned pages than this worker can OCR."""
 
 
 class PDFAdapter:
     """Adapter for processing PDF files."""
     
-    def __init__(self, use_pymupdf: bool = True):
+    def __init__(
+        self,
+        use_pymupdf: bool = True,
+        ocr_adapter: Optional[OCRAdapter] = None,
+        ocr_enabled: bool = True,
+        max_ocr_pages: int = MAX_OCR_PAGES_PER_DOCUMENT,
+    ):
         """Initialize PDF adapter.
         
         Args:
             use_pymupdf: Whether to use PyMuPDF (True) or pdfminer (False)
+            ocr_adapter: Optional local OCR implementation for scanned pages.
+            ocr_enabled: Whether scanned pages may be rendered and OCRed.
+            max_ocr_pages: Maximum textless pages to OCR in one document.
+
+        Returns:
+            None.
         """
         self.use_pymupdf = use_pymupdf and HAS_PYMUPDF
+        self.ocr_adapter = ocr_adapter or OCRAdapter("./models/rapidocr")
+        self.ocr_enabled = ocr_enabled
+        self.max_ocr_pages = max_ocr_pages
         
         if not HAS_PYMUPDF and not HAS_PDFMINER:
             raise ImportError("No PDF library available. Install PyMuPDF or pdfminer.six")
@@ -53,8 +83,19 @@ class PDFAdapter:
         Returns:
             Dictionary containing extracted text and metadata
         """
+        return self.extract_with_ocr(file_path)
+
+    def extract_with_ocr(self, file_path: str) -> Dict[str, Any]:
+        """Extract normal PDF text and OCR scanned pages with no text layer.
+
+        Args:
+            file_path: Path to the PDF file.
+
+        Returns:
+            Normal PDF extraction metadata with OCR text on scanned pages.
+        """
         if self.use_pymupdf:
-            return self._extract_file_with_fallback(
+            result = self._extract_file_with_fallback(
                 primary=lambda: self._extract_with_pymupdf(file_path),
                 fallback=(
                     lambda: self._extract_with_pdfminer(file_path)
@@ -62,15 +103,165 @@ class PDFAdapter:
                 primary_parser="pymupdf",
                 fallback_parser="pdfminer",
             )
+        else:
+            result = self._extract_file_with_fallback(
+                primary=lambda: self._extract_with_pdfminer(file_path),
+                fallback=(
+                    lambda: self._extract_with_pymupdf(file_path)
+                ) if HAS_PYMUPDF else None,
+                primary_parser="pdfminer",
+                fallback_parser="pymupdf",
+            )
 
-        return self._extract_file_with_fallback(
-            primary=lambda: self._extract_with_pdfminer(file_path),
-            fallback=(
-                lambda: self._extract_with_pymupdf(file_path)
-            ) if HAS_PYMUPDF else None,
-            primary_parser="pdfminer",
-            fallback_parser="pymupdf",
+        return self._ocr_scanned_pages(file_path, result)
+
+    def _ocr_scanned_pages(
+        self,
+        file_path: str,
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """OCR only pages with no extracted text and substantial raster content."""
+        if not self.ocr_enabled or not HAS_PYMUPDF:
+            return result
+
+        pages = result.get("pages", [])
+        textless_pages = [
+            index
+            for index, page in enumerate(pages)
+            if not str(page.get("text") or "").strip()
+        ]
+        if not textless_pages:
+            return result
+
+        max_image_pixels = getattr(
+            self.ocr_adapter,
+            "max_image_pixels",
+            MAX_OCR_IMAGE_PIXELS,
         )
+        scale = OCR_RENDER_DPI / 72.0
+        document = fitz.open(file_path)
+        try:
+            # Photo-heavy slides can still have a searchable title, so only
+            # textless pages reach this raster-coverage check.
+            candidates = [
+                index
+                for index in textless_pages
+                if self._has_scan_sized_image(
+                    document.load_page(index),
+                )
+            ]
+            if not candidates:
+                return result
+            if len(candidates) > self.max_ocr_pages:
+                raise OCRPageLimitError(
+                    "This PDF has %d scan pages with no searchable text; OCR can "
+                    "process at most %d pages per document."
+                    % (len(candidates), self.max_ocr_pages)
+                )
+
+            for page_index in candidates:
+                page_info = pages[page_index]
+                page_number = int(page_info.get("page_num") or page_index + 1)
+                pdf_page = document.load_page(page_number - 1)
+                width_pixels = math.ceil(pdf_page.rect.width * scale)
+                height_pixels = math.ceil(pdf_page.rect.height * scale)
+                if width_pixels * height_pixels > max_image_pixels:
+                    raise InvalidImageError(
+                        "PDF page %d exceeds the image safety limit of %s pixels"
+                        % (page_number, format(max_image_pixels, ","))
+                    )
+
+                pixmap = pdf_page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale),
+                    colorspace=fitz.csRGB,
+                    alpha=False,
+                )
+                rendered = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+                    pixmap.height,
+                    pixmap.width,
+                    pixmap.n,
+                )
+                if pixmap.n == 4:
+                    rendered = rendered[:, :, :3]
+                recognized_text = self.ocr_adapter.recognize_image(rendered)
+                existing_text = str(page_info.get("text") or "").strip()
+                combined_text = "\n".join(
+                    text for text in (existing_text, recognized_text.strip()) if text
+                )
+                page_info["text"] = combined_text
+                page_info["char_count"] = len(combined_text)
+        finally:
+            document.close()
+
+        metadata = dict(result.get("metadata") or {})
+        metadata.update({
+            "ocr_engine": "RapidOCR",
+            "ocr_pages": len(candidates),
+            "ocr_page_limit": self.max_ocr_pages,
+        })
+        result["metadata"] = metadata
+        result["text"] = PAGE_SEPARATOR.join(
+            str(page.get("text") or "") for page in pages
+        )
+        return result
+
+    @staticmethod
+    def _has_scan_sized_image(page: Any) -> bool:
+        """Check for a raster image that covers a substantial part of a page.
+
+        Args:
+            page: An open PyMuPDF page.
+
+        Returns:
+            Whether visible images cover at least half of the page area.
+        """
+        page_rect = page.rect
+        page_area = page_rect.width * page_rect.height
+        if page_area <= 0:
+            return False
+
+        # Sampling the union keeps tiled scans recognizable without counting
+        # overlapping image objects more than once or doing pairwise geometry.
+        grid_size = OCR_IMAGE_COVERAGE_GRID_SIZE
+        coverage_grid = np.zeros((grid_size, grid_size), dtype=bool)
+        covered_cells = 0
+        scale_x = grid_size / page_rect.width
+        scale_y = grid_size / page_rect.height
+        for image_info in page.get_images(full=True):
+            image_xref = int(image_info[0])
+            if image_xref <= 0:
+                continue
+            for image_rect in page.get_image_rects(image_xref):
+                visible_rect = image_rect & page_rect
+                if visible_rect.width <= 0 or visible_rect.height <= 0:
+                    continue
+
+                # Only cells whose centers lie inside an image count as covered.
+                column_start = max(
+                    0,
+                    math.ceil((visible_rect.x0 - page_rect.x0) * scale_x - 0.5),
+                )
+                column_end = min(
+                    grid_size,
+                    math.ceil((visible_rect.x1 - page_rect.x0) * scale_x - 0.5),
+                )
+                row_start = max(
+                    0,
+                    math.ceil((visible_rect.y0 - page_rect.y0) * scale_y - 0.5),
+                )
+                row_end = min(
+                    grid_size,
+                    math.ceil((visible_rect.y1 - page_rect.y0) * scale_y - 0.5),
+                )
+                if column_start >= column_end or row_start >= row_end:
+                    continue
+
+                covered = coverage_grid[row_start:row_end, column_start:column_end]
+                covered_cells += covered.size - int(np.count_nonzero(covered))
+                covered[:] = True
+                if covered_cells / coverage_grid.size >= OCR_MIN_PAGE_IMAGE_COVERAGE:
+                    return True
+        return False
 
     def _extract_file_with_fallback(
         self,
@@ -323,15 +514,3 @@ class PDFAdapter:
         text = re.sub(r'\n{3,}', '\n\n', text)
 
         return text.strip()
-    
-    def extract_with_ocr(self, file_path: str) -> Dict[str, Any]:
-        """Extract text using OCR (placeholder for future implementation).
-        
-        Args:
-            file_path: Path to the PDF file
-            
-        Returns:
-            Dictionary containing extracted text and metadata
-        """
-        # This would use libraries like pytesseract or cloud OCR services
-        raise NotImplementedError("OCR extraction not yet implemented")
