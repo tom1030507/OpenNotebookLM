@@ -1,0 +1,187 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import api from '@/lib/api';
+import type { Note } from '@/lib/api';
+import useNotes from '@/store/useNotes';
+import MarkdownRenderer from '../MarkdownRenderer';
+
+interface Draft {
+  /** `null` while writing a new note. */
+  noteId: string | null;
+  title: string;
+  content: string;
+}
+
+const inputClass = 'w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]';
+const actionClass = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--muted)] transition-base disabled:opacity-50';
+
+export default function NotesSection({ projectId }: { projectId: string | null }) {
+  const notes = useNotes((state) => state.notes);
+  const loading = useNotes((state) => state.loading);
+  const loadError = useNotes((state) => state.error);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    void useNotes.getState().load(projectId);
+    setOpenId(null);
+    setDraft(null);
+    setError('');
+  }, [projectId]);
+
+  if (!projectId) return null;
+
+  const saveDraft = async () => {
+    if (!draft || !draft.title.trim()) return;
+    setSaving(true);
+    setError('');
+    try {
+      const fields = { title: draft.title.trim(), content: draft.content };
+      const note = draft.noteId
+        ? await api.updateNote(projectId, draft.noteId, fields)
+        : await api.createNote(projectId, fields);
+      useNotes.getState().upsert(note);
+      setDraft(null);
+      setOpenId(note.id);
+    } catch {
+      setError('The note could not be saved. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteNote = async (note: Note) => {
+    if (!confirm(`Delete the note "${note.title}"?`)) return;
+    setError('');
+    try {
+      await api.deleteNote(projectId, note.id);
+      useNotes.getState().remove(projectId, note.id);
+    } catch {
+      setError('The note could not be deleted. Please try again.');
+    }
+  };
+
+  const editor = draft && (
+    <div className="space-y-2 p-3 border border-[var(--border)] rounded-lg">
+      <input
+        aria-label="Note title"
+        placeholder="Title"
+        value={draft.title}
+        onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+        maxLength={200}
+        className={inputClass}
+      />
+      <textarea
+        aria-label="Note content"
+        placeholder="Write in Markdown…"
+        value={draft.content}
+        onChange={(e) => setDraft({ ...draft, content: e.target.value })}
+        rows={8}
+        className={`${inputClass} resize-y`}
+      />
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={() => setDraft(null)} className={actionClass}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={saveDraft}
+          disabled={saving || !draft.title.trim()}
+          className={`${actionClass} bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)]`}
+        >
+          {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+          Save note
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <section aria-label="Notes" className="mt-6">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium">Notes</h3>
+        <button
+          type="button"
+          onClick={() => setDraft({ noteId: null, title: '', content: '' })}
+          disabled={draft?.noteId === null}
+          className={actionClass}
+        >
+          <Plus className="w-3.5 h-3.5" />
+          New note
+        </button>
+      </div>
+
+      {error && (
+        <p role="alert" className="mb-2 text-xs text-[var(--error)]">{error}</p>
+      )}
+      {/* Not an alert: the list loads on its own, and announcing that over the
+          Studio action the reader just started would interrupt it. */}
+      {loadError && (
+        <p className="mb-2 text-xs text-[var(--error)]">{loadError}</p>
+      )}
+
+      {draft?.noteId === null && editor}
+
+      {loading ? (
+        <p className="text-xs text-[var(--muted-foreground)]">Loading notes…</p>
+      ) : notes.length === 0 && !draft ? (
+        <p className="text-xs text-[var(--muted-foreground)]">
+          No notes yet. Save an answer from the chat or write your own.
+        </p>
+      ) : (
+        <ul className="space-y-2 mt-2">
+          {notes.map((note) => (
+            <li key={note.id}>
+              {draft?.noteId === note.id ? editor : (
+                <div className="bg-[var(--secondary)] rounded-lg">
+                  <button
+                    type="button"
+                    aria-expanded={openId === note.id}
+                    onClick={() => setOpenId(openId === note.id ? null : note.id)}
+                    className="w-full p-3 text-left text-sm font-medium break-words"
+                  >
+                    {note.title}
+                    {note.origin === 'answer' && (
+                      <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                        Saved answer
+                      </span>
+                    )}
+                  </button>
+                  {openId === note.id && (
+                    <div className="px-3 pb-3">
+                      <MarkdownRenderer content={note.content} className="text-sm" />
+                      <div className="flex justify-end gap-2 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setDraft({
+                            noteId: note.id, title: note.title, content: note.content,
+                          })}
+                          className={actionClass}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteNote(note)}
+                          className={`${actionClass} text-[var(--error)]`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}

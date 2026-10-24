@@ -23,6 +23,7 @@ import { citationId, referencedCitationIds } from '@/lib/citations';
 import BrandLogo from '../BrandLogo';
 import { useOptionalProjectDialog } from '../ProjectDialogProvider';
 import ChatSettingsDialog from './ChatSettingsDialog';
+import SaveToNoteButton from './SaveToNoteButton';
 
 interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
@@ -100,6 +101,11 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
                 </div>
               );
             })}
+          </div>
+        )}
+        {message.role === 'assistant' && (
+          <div className="mt-2 flex items-center gap-1">
+            <SaveToNoteButton message={message} />
           </div>
         )}
       </div>

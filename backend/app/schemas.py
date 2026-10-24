@@ -384,3 +384,40 @@ class VideoSummaryResponse(BaseModel):
     # `WORDS_PER_SECOND` here and in `videoSummaryTiming.ts` the same.
     estimated_seconds: int
     scenes: List[VideoScene]
+
+
+# Note schemas
+# A bound on what one request can store; long enough for any answer or essay.
+NOTE_CONTENT_MAX_LENGTH = 100_000
+
+
+class NoteCreate(BaseModel):
+    """Schema for creating a note.
+
+    With `source_message_id` the note is a saved answer: the server writes its
+    content from the stored message and citations, and `content` is ignored.
+    """
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(default="", max_length=NOTE_CONTENT_MAX_LENGTH)
+    source_message_id: Optional[str] = None
+
+
+class NoteUpdate(BaseModel):
+    """Schema for editing a note."""
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    content: Optional[str] = Field(None, max_length=NOTE_CONTENT_MAX_LENGTH)
+
+
+class NoteResponse(BaseModel):
+    """Schema for note response."""
+    id: str
+    project_id: str
+    title: str
+    content: str
+    origin: str
+    source_message_id: Optional[str] = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+    class Config:
+        from_attributes = True

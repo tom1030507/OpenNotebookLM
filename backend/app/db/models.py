@@ -41,6 +41,7 @@ class Project(Base):
     owner = relationship("User", back_populates="projects")
     documents = relationship("ProjectDocument", back_populates="project", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
+    notes = relationship("Note", back_populates="project", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_projects_user_id", "user_id"),
@@ -309,6 +310,30 @@ class Message(Base):
         Index("idx_messages_conversation_id", "conversation_id"),
         Index("idx_messages_role", "role"),
         Index("idx_messages_is_bookmarked", "is_bookmarked"),
+    )
+
+
+class Note(Base):
+    """A Markdown note kept beside a project's sources."""
+    __tablename__ = "notes"
+
+    id = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False, default="")
+    origin = Column(String, nullable=False, default="manual")  # manual, answer
+    # Deliberately not a foreign key: the note holds its own copy of the answer,
+    # so deleting the conversation must neither take the note with it nor be
+    # refused because a note still points at one of its messages.
+    source_message_id = Column(String)
+    # Python-side so notes saved in quick succession still list in order.
+    created_at = Column(UTCDateTime, default=ordered_utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    project = relationship("Project", back_populates="notes")
+
+    __table_args__ = (
+        Index("idx_notes_project_id", "project_id"),
     )
 
 

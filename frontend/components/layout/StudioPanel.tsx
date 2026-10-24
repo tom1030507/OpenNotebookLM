@@ -16,6 +16,7 @@ import useStore from '@/store/useStore';
 import api from '@/lib/api';
 import type { MindMap, VideoSummary } from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
+import NotesSection from './NotesSection';
 
 const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
 const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
@@ -431,6 +432,8 @@ export default function StudioPanel({
                 line it fits without pushing the label into a wrap. */}
             <span className="truncate text-xs">{availabilityLabel}</span>
           </button>
+
+          <NotesSection projectId={currentProject?.id ?? null} />
 
         </div>
       </div>

@@ -444,6 +444,53 @@ class TestVideoSummaryIsolation:
         assert response.json()["scenes"][0]["headline"] == ALICE_PROJECT
 
 
+class TestNoteIsolation:
+    """Notes follow the project that holds them."""
+
+    def test_listing_someone_elses_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        assert env.bob.get("/api/projects/%s/notes" % project_id).status_code == 404
+
+    def test_creating_one_in_someone_elses_project_is_not_found(self, env):
+        project_id = make_project(env.alice)
+
+        response = env.bob.post(
+            "/api/projects/%s/notes" % project_id, json={"title": "mine now"})
+
+        assert response.status_code == 404
+
+    def test_editing_someone_elses_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        note_id = env.alice.post(
+            "/api/projects/%s/notes" % project_id, json={"title": "Alice"}).json()["id"]
+
+        response = env.bob.put(
+            "/api/projects/%s/notes/%s" % (project_id, note_id), json={"title": "taken"})
+
+        assert response.status_code == 404
+
+    def test_deleting_someone_elses_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        note_id = env.alice.post(
+            "/api/projects/%s/notes" % project_id, json={"title": "Alice"}).json()["id"]
+
+        assert env.bob.delete(
+            "/api/projects/%s/notes/%s" % (project_id, note_id)).status_code == 404
+        assert [n["title"] for n in env.alice.get(
+            "/api/projects/%s/notes" % project_id).json()] == ["Alice"]
+
+    def test_your_own_are_reachable(self, env):
+        """Pins that the routes exist: an unmounted route also answers 404."""
+        project_id = make_project(env.alice)
+        base = "/api/projects/%s/notes" % project_id
+        note_id = env.alice.post(base, json={"title": "Alice"}).json()["id"]
+
+        assert env.alice.get(base).status_code == 200
+        assert env.alice.put(
+            "%s/%s" % (base, note_id), json={"content": "edited"}).status_code == 200
+        assert env.alice.delete("%s/%s" % (base, note_id)).status_code == 200
+
+
 class TestCacheIsolation:
     """Cache invalidation reports on activity, so it is scoped too."""
 
