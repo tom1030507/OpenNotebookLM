@@ -275,7 +275,8 @@ def test_eleventh_login_from_one_client_ip_returns_429_with_retry_after():
 
     assert [response.status_code for response in responses[:10]] == [401] * 10
     assert responses[-1].status_code == 429
-    assert responses[-1].headers["Retry-After"] == "60"
+    # The window is counted from the first request, so a slow run reports 58 or 59.
+    assert 55 <= int(responses[-1].headers["Retry-After"]) <= 60
 
 
 def test_production_registration_is_closed_by_default():
