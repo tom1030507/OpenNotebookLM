@@ -10,6 +10,10 @@ from app.schemas import ChatSettings, ProjectCreate, ProjectUpdate
 
 logger = structlog.get_logger()
 
+# Given to a project created without a name. Such a project takes the title its
+# generated overview suggests; see services.project_overview.
+UNTITLED_PROJECT_NAME = "Untitled notebook"
+
 
 class ProjectService:
     """Service for project operations."""
@@ -31,16 +35,17 @@ class ProjectService:
         project = Project(
             id=project_id,
             user_id=user_id,
-            name=project_data.name,
+            name=project_data.name or UNTITLED_PROJECT_NAME,
             description=project_data.description,
-            meta_json=project_data.meta_json or {}
+            meta_json=project_data.meta_json or {},
+            auto_title=project_data.name is None,
         )
         
         db.add(project)
         db.commit()
         db.refresh(project)
         
-        logger.info("Project created", project_id=project_id, name=project_data.name)
+        logger.info("Project created", project_id=project_id, name=project.name)
         return project
     
     @staticmethod
@@ -121,8 +126,9 @@ class ProjectService:
             return None
         
         # Update fields if provided
-        if project_update.name is not None:
+        if project_update.name is not None and project_update.name != project.name:
             project.name = project_update.name
+            project.auto_title = False
         if project_update.description is not None:
             project.description = project_update.description
         if project_update.meta_json is not None:

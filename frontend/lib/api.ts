@@ -99,6 +99,13 @@ export interface QueryResponse {
   conversation_id: string | null;
 }
 
+/** Generated once a project's sources are ready; empty without a model. */
+export interface ProjectOverview {
+  project_name: string;
+  overview: string | null;
+  questions: string[];
+}
+
 export type ConversationExportFormat = 'markdown' | 'json' | 'txt';
 export type ProjectExportFormat = 'markdown' | 'json';
 
@@ -648,7 +655,7 @@ const api = {
     return response.projects;
   },
 
-  createProject(data: { name: string; description?: string }): Promise<Project> {
+  createProject(data: { name?: string; description?: string }): Promise<Project> {
     return requestJson<Project>('/projects', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -883,6 +890,18 @@ const api = {
       method: 'PUT',
       body: JSON.stringify(changes),
     });
+  },
+
+  fetchProjectOverview(projectId: string): Promise<ProjectOverview> {
+    return requestJson<ProjectOverview>(`/projects/${projectId}/overview`);
+  },
+
+  async fetchFollowUpQuestions(conversationId: string): Promise<string[]> {
+    const response = await requestJson<{ questions: string[] }>(
+      `/conversations/${conversationId}/follow-ups`,
+      { method: 'POST' },
+    );
+    return response.questions;
   },
 
   async deleteNote(projectId: string, noteId: string): Promise<void> {

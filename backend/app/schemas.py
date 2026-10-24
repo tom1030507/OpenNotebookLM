@@ -88,8 +88,12 @@ class ProjectBase(BaseModel):
 
 
 class ProjectCreate(ProjectBase):
-    """Schema for creating a project."""
-    pass
+    """Schema for creating a project.
+
+    The name may be left out; the project then gets a placeholder that the
+    generated overview replaces with a title.
+    """
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
 
 
 class ProjectUpdate(BaseModel):
@@ -455,3 +459,16 @@ class NoteResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Project overview schemas
+class ProjectOverviewResponse(BaseModel):
+    """Schema for a project's generated overview and suggested questions."""
+    project_name: str
+    overview: Optional[str] = None
+    questions: List[str] = []
+
+
+class FollowUpResponse(BaseModel):
+    """Schema for questions suggested after an answer."""
+    questions: List[str] = []

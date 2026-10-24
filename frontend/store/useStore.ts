@@ -40,7 +40,7 @@ interface AppState {
   // Actions - Projects
   fetchProjects: () => Promise<void>;
   selectProject: (project: Project) => void;
-  createProject: (name: string, description?: string) => Promise<Project | null>;
+  createProject: (name?: string, description?: string) => Promise<Project | null>;
   deleteProject: (id: string) => Promise<void>;
   
   // Actions - Documents

@@ -36,6 +36,12 @@ class Project(Base):
     chat_role = Column(String)
     chat_instructions = Column(Text)
     answer_length = Column(String)
+    # Generated overview and suggested questions, plus the source ids they were
+    # generated from so a changed source set is noticed. See services.project_overview.
+    overview_json = Column(JSON)
+    # True while `name` is a placeholder or a generated title. Renaming clears it,
+    # so a generated title can never overwrite a name the user chose.
+    auto_title = Column(Boolean, default=False)
     
     # Relationships
     owner = relationship("User", back_populates="projects")

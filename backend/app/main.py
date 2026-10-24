@@ -7,6 +7,7 @@ from app.lifecycle import lifespan
 from app.routers import (
     auth, projects, ingest, query, export, health, files, mindmap, video, notes
 )
+from app.routers import project_overview
 from app.api import cache
 from app.utils.logging import setup_logging
 from app.middleware.upload_body_limit import UploadBodyLimitMiddleware
@@ -52,6 +53,7 @@ app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(mindmap.router, prefix="/api", tags=["mindmap"])
 app.include_router(video.router, prefix="/api", tags=["video summary"])
 app.include_router(notes.router, prefix="/api", tags=["notes"])
+app.include_router(project_overview.router, prefix="/api", tags=["project overview"])
 app.include_router(cache.router)  # Cache management endpoints
 
 

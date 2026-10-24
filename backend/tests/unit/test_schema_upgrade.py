@@ -83,8 +83,10 @@ class TestUpgrade:
         assert sorted(added) == [
             "documents.user_id",
             "projects.answer_length",
+            "projects.auto_title",
             "projects.chat_instructions",
             "projects.chat_role",
+            "projects.overview_json",
             "projects.user_id",
         ]
         inspector = inspect(old_database)
