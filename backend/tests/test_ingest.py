@@ -335,3 +335,36 @@ def test_disabled_controls_ignore_an_occupied_ingestion_slot(monkeypatch):
         occupied.release()
 
     assert response.status_code == 200
+
+
+def test_asgi_cap_rejects_oversized_pasted_text_before_the_route():
+    """A pasted-text JSON body is capped before it is parsed into memory."""
+    auth_calls = []
+    app = FastAPI()
+    app.add_middleware(
+        UploadBodyLimitMiddleware,
+        max_file_size_bytes=8,
+        multipart_overhead_bytes=64,
+        configured_limit_mb=50,
+    )
+    app.include_router(ingest.router, prefix="/api")
+
+    def authenticate():
+        auth_calls.append(True)
+        return SimpleNamespace(id="user")
+
+    app.dependency_overrides[get_current_user] = authenticate
+    app.dependency_overrides[get_db] = lambda: object()
+
+    class MustNotRun:
+        async def process_text(self, **kwargs):
+            raise AssertionError("ASGI-capped text reached document service")
+
+    app.dependency_overrides[ingest.get_document_service] = MustNotRun
+    response = TestClient(app).post(
+        "/api/projects/project/upload-text",
+        json={"title": "Too long", "text": "x" * 1024},
+    )
+
+    assert response.status_code == 413
+    assert auth_calls == []

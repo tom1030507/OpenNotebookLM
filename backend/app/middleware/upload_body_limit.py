@@ -1,4 +1,4 @@
-"""Pre-parser ASGI cap for multipart PDF upload request bodies."""
+"""Pre-parser ASGI cap for PDF upload and pasted-text request bodies."""
 import json
 from typing import Awaitable, Callable, Dict
 
@@ -79,7 +79,12 @@ class UploadBodyLimitMiddleware:
         """Return whether this is the multipart PDF upload endpoint."""
         if scope.get("type") != "http" or scope.get("method") != "POST":
             return False
-        if not scope.get("path", "").rstrip("/").endswith("/upload"):
+        path = scope.get("path", "").rstrip("/")
+        # Pasted text arrives as JSON, which FastAPI reads whole before the
+        # route can check its size, so it needs the same pre-parse cap.
+        if path.endswith("/upload-text"):
+            return True
+        if not path.endswith("/upload"):
             return False
         content_type = self._header(scope, b"content-type") or b""
         return content_type.lower().startswith(b"multipart/form-data")
