@@ -12,7 +12,7 @@ describe('FileUpload', () => {
     const { container } = render(<FileUpload onUpload={async () => undefined} />);
     const input = container.querySelector('input[type="file"]');
 
-    expect(input?.getAttribute('accept')).toBe('.pdf,.txt,.md,.docx,.pptx,.xlsx,.epub');
-    expect(screen.getByText(/PDF, TXT, Markdown, Word, PowerPoint, Excel, or EPUB/)).toBeTruthy();
+    expect(input?.getAttribute('accept')).toBe('.pdf,.txt,.md,.docx,.pptx,.xlsx,.epub,.png,.jpg,.jpeg,.webp');
+    expect(screen.getByText(/PDF, TXT, Markdown, Word, PowerPoint, Excel, EPUB, or images/)).toBeTruthy();
   });
 });

@@ -77,6 +77,10 @@ def test_upload_route_returns_413_before_calling_the_document_service(monkeypatc
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
+    app.dependency_overrides[get_rate_limiter] = lambda: SlidingWindowRateLimiter(
+        enabled=False
+    )
+    app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
     monkeypatch.setattr(ingest, "require_project", lambda *args: object())
     monkeypatch.setattr(ingest.settings, "max_file_size_mb", 0)
 
@@ -100,6 +104,10 @@ def test_upload_route_rejects_oversized_content_length_before_service(monkeypatc
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
+    app.dependency_overrides[get_rate_limiter] = lambda: SlidingWindowRateLimiter(
+        enabled=False
+    )
+    app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
     monkeypatch.setattr(ingest, "require_project", lambda *args: object())
     monkeypatch.setattr(ingest.settings, "max_file_size_mb", 1)
 
@@ -173,6 +181,70 @@ def test_upload_route_queues_supported_text_files_as_file_jobs(monkeypatch):
     assert calls[0]["file_extension"] == ".txt"
 
 
+def test_upload_route_queues_supported_image_files_as_file_jobs(monkeypatch):
+    """Configured raster images use the same durable file ingestion path."""
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    app.dependency_overrides[get_rate_limiter] = lambda: SlidingWindowRateLimiter(
+        enabled=False
+    )
+    app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
+    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(
+        ingest.settings,
+        "allowed_file_types",
+        "pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp",
+    )
+    calls = []
+
+    class AcceptingService:
+        async def process_file_upload(self, **kwargs):
+            calls.append(kwargs)
+            kwargs["operation_lease"].release()
+            return SimpleNamespace(id="document", status="queued")
+
+    app.dependency_overrides[ingest.get_document_service] = AcceptingService
+    response = TestClient(app).post(
+        "/api/projects/project/upload",
+        files={"file": ("scan.png", b"image bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["filename"] == "scan.png"
+    assert calls[0]["file_extension"] == ".png"
+
+
+def test_invalid_image_content_has_a_stable_400_response(monkeypatch):
+    """An image decoder refusal is returned as a client error."""
+    from app.services.documents import InvalidUploadFileError
+
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    app.dependency_overrides[get_rate_limiter] = lambda: SlidingWindowRateLimiter(
+        enabled=False
+    )
+    app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
+    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+
+    class RefusingService:
+        async def process_file_upload(self, **kwargs):
+            kwargs["operation_lease"].release()
+            raise InvalidUploadFileError("The uploaded file is not a valid image")
+
+    app.dependency_overrides[ingest.get_document_service] = RefusingService
+    response = TestClient(app).post(
+        "/api/projects/project/upload",
+        files={"file": ("renamed.png", b"not an image", "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert "valid image" in response.json()["detail"]
+
+
 def test_upload_route_refuses_extensions_outside_the_configured_allowlist(monkeypatch):
     """An unsupported extension is refused before a service or lease is used."""
     app = FastAPI()
@@ -207,10 +279,15 @@ def test_invalid_office_content_has_a_stable_400_response(monkeypatch):
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
+    app.dependency_overrides[get_rate_limiter] = lambda: SlidingWindowRateLimiter(
+        enabled=False
+    )
+    app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
     monkeypatch.setattr(ingest, "require_project", lambda *args: object())
 
     class RefusingService:
         async def process_file_upload(self, **kwargs):
+            kwargs["operation_lease"].release()
             raise InvalidUploadFileError("The DOCX file is not a valid Office document")
 
     app.dependency_overrides[ingest.get_document_service] = RefusingService
@@ -263,6 +340,10 @@ def test_url_upload_route_returns_400_for_a_fetch_boundary_refusal(monkeypatch):
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
+    app.dependency_overrides[get_rate_limiter] = lambda: SlidingWindowRateLimiter(
+        enabled=False
+    )
+    app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
     monkeypatch.setattr(ingest, "require_project", lambda *args: object())
 
     class RefusingService:

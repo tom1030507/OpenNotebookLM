@@ -4,7 +4,10 @@ import { getUploadFileError } from './uploadValidation';
 
 
 describe('file upload validation', () => {
-  it.each(['pdf', 'txt', 'md', 'docx', 'pptx', 'xlsx', 'epub'])(
+  it.each([
+    'pdf', 'txt', 'md', 'docx', 'pptx', 'xlsx', 'epub',
+    'png', 'jpg', 'jpeg', 'webp',
+  ])(
     'accepts .%s files dropped onto the upload area',
     (extension) => {
       const file = new File(['source'], `notes.${extension}`);

@@ -1,5 +1,8 @@
 # Core
 fastapi==0.141.1
+# Starlette 1.10 changes FileResponse Range and cancellation behavior used by
+# the exact-archive cleanup contract; keep the tested 1.7 series.
+starlette==1.7.0
 uvicorn[standard]==0.24.0
 python-multipart==0.0.32
 python-dotenv==1.2.3
@@ -31,8 +34,8 @@ transformers==5.10.1
 huggingface-hub==1.27.0
 # Pin the official CPU wheels and their hashes per production architecture.
 # The generic PyPI wheel pulls several gigabytes of unused CUDA 13 libraries.
-torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp310-cp310-manylinux_2_28_aarch64.whl#sha256=f028e428bddee95cdb86e2470254e95c9af629362488550c200ed4793125a817 ; sys_platform == "linux" and platform_machine == "aarch64"
-torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl#sha256=f5cbb61180a9793d9e12fe115a2310d2600bd449dfb9a01ec5640e21359fa5ea ; sys_platform == "linux" and platform_machine == "x86_64"
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl#sha256=84453b69508ec79902f899c5ed9495acb9e2bbe9fda5f1d5d6f19e3c3842e1a7 ; sys_platform == "linux" and platform_machine == "aarch64"
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl#sha256=6746dbcbeb526eb61330b76b41ff1b4eb848951103a892eeb080dfa2b264667b ; sys_platform == "linux" and platform_machine == "x86_64"
 torch==2.13.0 ; sys_platform != "linux"
 faiss-cpu==1.7.4
 openai==1.3.8
@@ -42,6 +45,12 @@ anthropic==0.122.0
 tiktoken==0.5.1
 
 # Utils
+# Keep OpenCV headless for containers and compatible with the pinned NumPy 1.x
+# stack used by sentence-transformers and faiss-cpu.
+opencv-python-headless==4.11.0.86
+Pillow==13.0.0
+rapidocr==3.10.0
+onnxruntime==1.31.0
 # OpenAI 1.3 still passes the `proxies` keyword removed by httpx 0.28.
 httpx==0.27.2
 # URL pinning depends on Requests' TLS-context hook and the reviewed urllib3

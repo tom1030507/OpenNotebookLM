@@ -17,7 +17,12 @@ SUPPORTED_FILE_EXTENSIONS = frozenset({
     ".xlsx",
     ".epub",
 })
-SUPPORTED_UPLOAD_EXTENSIONS = frozenset({".pdf", *SUPPORTED_FILE_EXTENSIONS})
+SUPPORTED_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+SUPPORTED_UPLOAD_EXTENSIONS = frozenset({
+    ".pdf",
+    *SUPPORTED_FILE_EXTENSIONS,
+    *SUPPORTED_IMAGE_EXTENSIONS,
+})
 
 # Pandas materializes a worksheet during MarkItDown conversion, so bound the
 # number of cells before that allocation can be driven by an uploaded workbook.
@@ -112,7 +117,7 @@ class OfficeAdapter:
             InvalidOfficeFileError: If the file is unsupported or malformed.
         """
         extension = self._normalize_extension(file_extension)
-        if extension not in SUPPORTED_UPLOAD_EXTENSIONS:
+        if extension not in SUPPORTED_FILE_EXTENSIONS and extension != ".pdf":
             raise InvalidOfficeFileError(
                 "Files with the %s extension are not supported" % extension
             )

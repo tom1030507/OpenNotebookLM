@@ -58,11 +58,44 @@ def test_a_set_optional_number_is_still_read(tmp_path):
 
 def test_allowed_upload_types_match_the_documented_example():
     """The route allowlist and the tracked environment example stay aligned."""
-    expected = ["pdf", "txt", "md", "docx", "pptx", "xlsx", "epub"]
+    expected = [
+        "pdf", "txt", "md", "docx", "pptx", "xlsx", "epub",
+        "png", "jpg", "jpeg", "webp",
+    ]
     example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
 
     assert Settings(_env_file=None).allowed_file_types_list == expected
     assert "ALLOWED_FILE_TYPES=" + ",".join(expected) in example
+
+
+def test_ocr_is_enabled_and_models_cache_under_the_volume(monkeypatch):
+    """OCR defaults on and its model cache uses the persistent models volume."""
+    monkeypatch.delenv("OCR_ENABLED", raising=False)
+    monkeypatch.delenv("OCR_MODEL_CACHE_DIR", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ocr_enabled is True
+    assert settings.ocr_model_cache_dir == "./models/rapidocr"
+
+    monkeypatch.setenv("OCR_ENABLED", "false")
+    monkeypatch.setenv("OCR_MODEL_CACHE_DIR", "/cache/ocr")
+    overrides = Settings(_env_file=None)
+
+    assert overrides.ocr_enabled is False
+    assert overrides.ocr_model_cache_dir == "/cache/ocr"
+
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    backend_environment = compose["services"]["backend"]["environment"]
+    assert backend_environment["OCR_ENABLED"] == "${OCR_ENABLED:-true}"
+    assert backend_environment["OCR_MODEL_CACHE_DIR"] == (
+        "${OCR_MODEL_CACHE_DIR:-/app/models/rapidocr}"
+    )
+    assert backend_environment["ALLOWED_FILE_TYPES"] == (
+        "${ALLOWED_FILE_TYPES:-pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp}"
+    )
 
 
 @pytest.mark.parametrize("chunk_size", [0, -1])
