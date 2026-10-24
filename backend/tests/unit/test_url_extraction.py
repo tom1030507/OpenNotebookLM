@@ -9,10 +9,10 @@ import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 
 import pytest
 import requests
+import urllib3.connection
 from bs4 import BeautifulSoup
 
 from app.adapters import url as url_module
@@ -239,12 +239,23 @@ class TestPublicURLPolicy:
 
         def wrap_tls(sock, **kwargs):
             tls_hostnames.append(kwargs["server_hostname"])
-            return SimpleNamespace(socket=sock, is_verified=True)
+            # Return urllib3's own result type: 2.7 reads its attributes, 2.8
+            # unpacks it as a tuple, and a stand-in that supports only one of
+            # those breaks the TLS connect under the other release.
+            return urllib3.connection._WrappedAndVerifiedSocket(
+                socket=sock,
+                is_verified=True,
+            )
 
         def serve_one_response():
             request_bytes = bytearray()
             while b"\r\n\r\n" not in request_bytes:
-                request_bytes.extend(server_socket.recv(4096))
+                chunk = server_socket.recv(4096)
+                if not chunk:
+                    # The client closed without sending a request. Without this
+                    # the loop spins forever and the process cannot exit.
+                    return
+                request_bytes.extend(chunk)
             server_socket.sendall(
                 b"HTTP/1.1 200 OK\r\n"
                 b"Content-Type: text/plain\r\n"
@@ -260,7 +271,9 @@ class TestPublicURLPolicy:
             wrap_tls,
         )
         monkeypatch.setattr(adapter, "get_connection_with_tls_context", hook)
-        server = threading.Thread(target=serve_one_response)
+        # Daemon, so a failure before the request is sent leaves a reportable
+        # test failure instead of a pytest process that never exits.
+        server = threading.Thread(target=serve_one_response, daemon=True)
         server.start()
         session = requests.Session()
         session.trust_env = False
@@ -270,6 +283,7 @@ class TestPublicURLPolicy:
             assert response.text == "OK"
         finally:
             session.close()
+            client_socket.close()
             server.join(timeout=2)
 
         assert server.is_alive() is False

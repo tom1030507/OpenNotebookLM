@@ -60,7 +60,7 @@ def _require_supported_requests_transport() -> None:
     if not callable(getattr(HTTPAdapter, "get_connection_with_tls_context", None)):
         raise RuntimeError(
             "Requests transport hook get_connection_with_tls_context is unavailable; "
-            "install requests==2.34.2 with urllib3==2.7.0"
+            "install requests==2.34.2 with urllib3==2.8.0"
         )
 
 

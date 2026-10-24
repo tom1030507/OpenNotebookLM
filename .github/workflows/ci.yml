@@ -2,10 +2,21 @@ name: CI
 
 on:
   push:
+    branches:
+      - master
   pull_request:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # The backend suite in the image, and building and booting the Compose
+  # stack, take most of a run's wall clock. They run nightly and on demand;
+  # pushes and pull requests get the fast checks and the dependency audits.
+  RUN_SLOW: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
 jobs:
   frontend:
@@ -55,16 +66,34 @@ jobs:
           # OSV audits the local `+cpu` torch build; PyPI's service skips local
           # version identifiers even though they share the upstream source.
           vulnerability-service: osv
+          # filelock's fixes (4.2.1) require Python 3.11 and the image runs
+          # 3.10. Every advisory below is in SoftFileLock or ReadWriteLock, or
+          # Windows-only, and needs a second local user to plant files. Nothing
+          # in the dependency tree uses ReadWriteLock; huggingface_hub falls
+          # back to SoftFileLock only on filesystems without flock; torch,
+          # transformers and whisper use FileLock. The container runs one
+          # user. Drop these once the image moves to Python 3.11.
+          ignore-vulns: |
+            CVE-2026-112906
+            CVE-2026-112907
+            CVE-2026-112913
+            CVE-2026-112914
+            CVE-2026-112937
+            CVE-2026-112940
       - run: docker build --tag opennotebook-backend-ci ./backend
+        if: env.RUN_SLOW == 'true'
       - uses: actions/cache@v4
+        if: env.RUN_SLOW == 'true'
         with:
           path: .ci-model-cache
           key: backend-test-model-paraphrase-minilm-l3-v2
       - name: Prepare the model cache for the image user
+        if: env.RUN_SLOW == 'true'
         run: |
           mkdir -p .ci-model-cache
           sudo chown -R 1000:1000 .ci-model-cache
       - name: Run backend tests in the supported image
+        if: env.RUN_SLOW == 'true'
         run: >-
           docker run --rm
           --volume "$PWD:/source:ro"
@@ -113,12 +142,14 @@ jobs:
           docker compose config
           docker compose -f deploy/docker-compose.yml config
       - name: Build both production Compose entry points
+        if: env.RUN_SLOW == 'true'
         env:
           JWT_SECRET_KEY: ci-only-not-a-production-secret
         run: |
           docker compose build
           docker compose -f deploy/docker-compose.yml build
       - name: Smoke the root production entry point
+        if: env.RUN_SLOW == 'true'
         env:
           JWT_SECRET_KEY: ci-only-not-a-production-secret
           LLM_MODE: none
@@ -138,11 +169,12 @@ jobs:
           curl --fail http://127.0.0.1:8000/readyz
           curl --fail http://127.0.0.1:3000/login
       - name: Clean the root production smoke
-        if: always()
+        if: always() && env.RUN_SLOW == 'true'
         env:
           JWT_SECRET_KEY: ci-only-not-a-production-secret
         run: docker compose down --volumes --remove-orphans
       - name: Smoke the deploy compatibility entry point
+        if: env.RUN_SLOW == 'true'
         env:
           JWT_SECRET_KEY: ci-only-not-a-production-secret
           LLM_MODE: none
@@ -162,7 +194,7 @@ jobs:
           curl --fail http://127.0.0.1:8000/readyz
           curl --fail http://127.0.0.1:3000/login
       - name: Clean the deploy production smoke
-        if: always()
+        if: always() && env.RUN_SLOW == 'true'
         env:
           JWT_SECRET_KEY: ci-only-not-a-production-secret
         run: docker compose -f deploy/docker-compose.yml down --volumes --remove-orphans
