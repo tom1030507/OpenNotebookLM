@@ -144,6 +144,118 @@ def queued_service():
     )
 
 
+def test_reindex_uses_saved_chunks_and_the_current_title(lifecycle_db):
+    """A re-index job refreshes vectors without extraction or rechunking.
+
+    Args:
+        lifecycle_db: Isolated database session.
+
+    Returns:
+        None.
+    """
+    class ReindexEmbeddings:
+        def __init__(self):
+            self.titles = []
+            self.published = []
+
+        def embed_chunks(self, db, document_id, force_regenerate=False):
+            self.titles.append(db.get(Document, document_id).title)
+            assert force_regenerate
+            return [object()]
+
+        def publish_document_index(self, db, document_id):
+            self.published.append(document_id)
+
+    document = Document(
+        id="reindex-document",
+        title="Renamed source",
+        source_type="url",
+        status="ready",
+        content="Previously extracted content",
+    )
+    lifecycle_db.add(document)
+    lifecycle_db.add(Chunk(
+        id="reindex-chunk",
+        document_id=document.id,
+        text="Previously chunked content",
+    ))
+    lifecycle_db.commit()
+    embeddings = ReindexEmbeddings()
+    service = DocumentService(
+        chunking_service=MustNotChunk(),
+        embedding_service=embeddings,
+    )
+
+    status = service.process_ingestion_job(
+        lifecycle_db,
+        document_id=document.id,
+        job_type="reindex",
+        payload={},
+    )
+
+    assert status == "ready"
+    assert document.status == "ready"
+    assert embeddings.titles == ["Renamed source"]
+    assert embeddings.published == [document.id]
+
+
+def test_reindex_repeats_when_title_changes_during_embedding(lifecycle_db):
+    """The vectors are regenerated if a rename lands during model inference.
+
+    Args:
+        lifecycle_db: Isolated database session.
+
+    Returns:
+        None.
+    """
+    class RenameDuringEmbedding:
+        def __init__(self):
+            self.titles = []
+
+        def embed_chunks(self, db, document_id, force_regenerate=False):
+            document = db.get(Document, document_id)
+            self.titles.append(document.title)
+            assert force_regenerate
+            if len(self.titles) == 1:
+                document.title = "Latest title"
+                db.commit()
+            return [object()]
+
+        def publish_document_index(self, db, document_id):
+            pass
+
+    document = Document(
+        id="reindex-race-document",
+        title="Initial title",
+        source_type="url",
+        status="ready",
+        content="Previously extracted content",
+    )
+    lifecycle_db.add(document)
+    lifecycle_db.add(Chunk(
+        id="reindex-race-chunk",
+        document_id=document.id,
+        text="Previously chunked content",
+    ))
+    lifecycle_db.commit()
+    embeddings = RenameDuringEmbedding()
+    payload = {}
+    service = DocumentService(
+        chunking_service=MustNotChunk(),
+        embedding_service=embeddings,
+    )
+
+    service.process_ingestion_job(
+        lifecycle_db,
+        document_id=document.id,
+        job_type="reindex",
+        payload=payload,
+    )
+
+    assert embeddings.titles == ["Initial title", "Latest title"]
+    assert payload["_indexed_title"] == "Latest title"
+
+
 class StaticURLAdapter:
     """Return stable content without a network dependency."""
 

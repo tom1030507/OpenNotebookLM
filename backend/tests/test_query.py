@@ -5,12 +5,15 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+import pytest
 
 from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.routers import query
 from app.routers.auth import get_current_user
 from app.routers.rate_limit import get_concurrency_limiter, get_rate_limiter
+from app.schemas import SourceSelection
 from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
 
 
@@ -119,6 +122,97 @@ def test_a_source_selection_becomes_the_retrieval_scope(monkeypatch):
 
     assert response.status_code == 200
     assert rag.allowed == ["doc-1"]
+
+
+def test_query_rejects_more_than_500_selected_sources_with_422(monkeypatch):
+    """Bound query lookup work before it reaches ownership resolution."""
+    class FastRAG:
+        def query(self, **kwargs):
+            return QUERY_RESULT
+
+    client = query_client(monkeypatch, FastRAG())
+    monkeypatch.setattr(query, "require_documents", lambda *args: args[1])
+
+    response = client.post(
+        "/api/query",
+        json={
+            "query": "hello",
+            "document_ids": ["doc-%03d" % index for index in range(501)],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_query_deduplicates_source_ids_before_ownership_lookup(monkeypatch):
+    """Repeated ids resolve once and retain the caller's selection order."""
+    rag = ScopeRecordingRAG()
+    client = query_client(monkeypatch, rag)
+    looked_up = []
+
+    def record_lookup(_db, document_ids, _user):
+        looked_up.append(document_ids)
+        return document_ids
+
+    monkeypatch.setattr(query, "require_documents", record_lookup)
+
+    response = client.post(
+        "/api/query",
+        json={
+            "query": "hello",
+            "document_ids": ["doc-1", "doc-1", "doc-2", "doc-1"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert looked_up == [["doc-1", "doc-2"]]
+    assert rag.allowed == ["doc-1", "doc-2"]
+
+
+def test_query_counts_unique_ids_toward_the_selection_limit(monkeypatch):
+    """More than 500 raw entries are allowed when they name one source."""
+    rag = ScopeRecordingRAG()
+    client = query_client(monkeypatch, rag)
+    looked_up = []
+
+    def record_lookup(_db, document_ids, _user):
+        looked_up.append(document_ids)
+        return document_ids
+
+    monkeypatch.setattr(query, "require_documents", record_lookup)
+
+    response = client.post(
+        "/api/query",
+        json={"query": "hello", "document_ids": ["doc-1"] * 501},
+    )
+
+    assert response.status_code == 200
+    assert looked_up == [["doc-1"]]
+    assert rag.allowed == ["doc-1"]
+
+
+def test_studio_selection_rejects_more_than_500_source_ids():
+    """Studio's shared selection body has the same request-size ceiling."""
+    with pytest.raises(ValidationError):
+        SourceSelection(
+            document_ids=["doc-%03d" % index for index in range(501)]
+        )
+
+
+def test_studio_selection_deduplicates_source_ids_in_order():
+    """Every Studio route sees a stable, unique selection from its schema."""
+    selection = SourceSelection(
+        document_ids=["doc-1", "doc-1", "doc-2", "doc-1"]
+    )
+
+    assert selection.document_ids == ["doc-1", "doc-2"]
+
+
+def test_studio_selection_caps_unique_ids_after_deduplication():
+    """Studio selection accepts repeated copies of a single source id."""
+    selection = SourceSelection(document_ids=["doc-1"] * 501)
+
+    assert selection.document_ids == ["doc-1"]
 
 
 def test_omitting_the_selection_keeps_the_owned_scope(monkeypatch):

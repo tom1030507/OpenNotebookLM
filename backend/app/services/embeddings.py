@@ -264,12 +264,17 @@ class EmbeddingService:
             
             logger.info(f"Generating embeddings for {len(chunks)} chunks")
             
-            # Check existing embeddings
+            # Keep current records available until the replacement vectors are
+            # ready. Deleting first commits a search outage if model inference
+            # fails partway through a rename-triggered refresh.
+            existing_embeddings = db.query(Embedding).filter(
+                Embedding.chunk_id.in_([chunk.id for chunk in chunks])
+            ).all()
+            existing_by_chunk = {
+                record.chunk_id: record for record in existing_embeddings
+            }
+
             if not force_regenerate:
-                existing_embeddings = db.query(Embedding).filter(
-                    Embedding.chunk_id.in_([c.id for c in chunks])
-                ).all()
-                
                 if len(existing_embeddings) == len(chunks):
                     self._upsert_retrieval_index(
                         db,
@@ -283,13 +288,6 @@ class EmbeddingService:
                 elif existing_embeddings:
                     logger.info(f"Found {len(existing_embeddings)} existing embeddings, "
                                f"generating {len(chunks) - len(existing_embeddings)} new ones")
-            else:
-                # Delete existing embeddings
-                get_retrieval_index().delete_document(db, document_id)
-                db.query(Embedding).filter(
-                    Embedding.chunk_id.in_([c.id for c in chunks])
-                ).delete()
-                db.commit()
             
             # Prepare texts for batch processing
             texts_to_embed = []
@@ -297,12 +295,8 @@ class EmbeddingService:
             
             for chunk in chunks:
                 # Skip if embedding already exists (unless force_regenerate)
-                if not force_regenerate:
-                    existing = db.query(Embedding).filter(
-                        Embedding.chunk_id == chunk.id
-                    ).first()
-                    if existing:
-                        continue
+                if not force_regenerate and chunk.id in existing_by_chunk:
+                    continue
                 
                 # Prepare text with context
                 chunk_text = chunk.text
@@ -334,22 +328,24 @@ class EmbeddingService:
             
             # Save to database
             embedding_records = []
-            for i, (chunk, embedding) in enumerate(zip(chunks_to_embed, embeddings)):
+            model_name = get_settings().emb_model_name
+            for chunk, embedding in zip(chunks_to_embed, embeddings):
                 # Convert to bytes for storage
                 embedding_bytes = pickle.dumps(embedding.astype(np.float32))
                 
                 # Also store as JSON for compatibility
                 embedding_json = embedding.tolist()
-                
-                embedding_record = Embedding(
-                    id=str(uuid.uuid4()),
-                    chunk_id=chunk.id,
-                    vector=embedding_bytes,
-                    vector_json=embedding_json,
-                    model_name=get_settings().emb_model_name
-                )
-                
-                db.add(embedding_record)
+
+                embedding_record = existing_by_chunk.get(chunk.id)
+                if embedding_record is None:
+                    embedding_record = Embedding(
+                        id=str(uuid.uuid4()),
+                        chunk_id=chunk.id,
+                    )
+                    db.add(embedding_record)
+                embedding_record.vector = embedding_bytes
+                embedding_record.vector_json = embedding_json
+                embedding_record.model_name = model_name
                 embedding_records.append(embedding_record)
                 
             # Canonical embeddings and both retrieval indexes become visible in

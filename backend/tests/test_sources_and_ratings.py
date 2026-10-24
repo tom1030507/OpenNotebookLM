@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -23,6 +23,7 @@ from app.db.models import (
 from app.routers import export, ingest, query
 from app.routers.rate_limit import get_concurrency_limiter, get_rate_limiter
 from app.services.chunking import ChunkingService
+from app.services import documents as document_service_module
 from app.services.documents import DocumentService
 from app.services.ingestion_jobs import release_all_operation_leases
 from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
@@ -179,7 +180,11 @@ class TestPastedText:
 class TestRename:
     """A rename reaches the source and the answers that cite it."""
 
-    def test_rename_updates_the_title_and_stored_citations(self, env):
+    def test_rename_updates_the_title_and_stored_citations(
+        self,
+        env,
+        monkeypatch,
+    ):
         client, session, _ = env
         session.add(Document(
             id="doc-1", user_id=owner_id(session), title="Old name",
@@ -191,11 +196,45 @@ class TestRename:
             {"document_id": "doc-1", "document_title": "Old name"},
             {"document_id": "doc-2", "document_title": "Untouched"},
         ])
+        notified = []
+        atomic_commits = []
+
+        def verify_title_and_job_commit_together(db):
+            assert db.get(Document, "doc-1").title == "New name"
+            job = db.query(IngestionJob).filter_by(
+                document_id="doc-1",
+                job_type="reindex",
+            ).one()
+            atomic_commits.append(job.id)
+
+        event.listen(session, "before_commit", verify_title_and_job_commit_together)
+
+        def check_committed_reindex():
+            assert session.get(Document, "doc-1").title == "New name"
+            job = session.query(IngestionJob).filter_by(
+                document_id="doc-1",
+                job_type="reindex",
+            ).one()
+            assert job.status == "queued"
+            notified.append(job.id)
+
+        monkeypatch.setattr(
+            document_service_module,
+            "notify_ingestion_worker",
+            check_committed_reindex,
+        )
 
         response = client.put("/api/docs/doc-1", json={"title": "  New name "})
 
         assert response.status_code == 200, response.text
         assert response.json()["title"] == "New name"
+        job = session.query(IngestionJob).one()
+        assert (job.document_id, job.job_type, job.payload_json) == (
+            "doc-1", "reindex", {"requested_title": "New name"},
+        )
+        assert session.get(Document, "doc-1").status == "ready"
+        assert notified == [job.id]
+        assert atomic_commits and set(atomic_commits) == {job.id}
         citations = client.get(
             "/api/conversations/%s" % conversation_id).json()["messages"][0]["citations"]
         assert [c["document_title"] for c in citations] == ["New name", "Untouched"]
@@ -210,6 +249,22 @@ class TestRename:
 
         assert client.put("/api/docs/doc-1", json={"title": " "}).status_code == 422
         assert session.get(Document, "doc-1").title == "Keep"
+
+    def test_renaming_to_the_current_title_does_not_queue_refresh(self, env):
+        client, session, _ = env
+        session.add(Document(
+            id="doc-1", user_id=owner_id(session), title="Already named",
+            source_type="text", status="ready",
+        ))
+        session.commit()
+
+        response = client.put(
+            "/api/docs/doc-1",
+            json={"title": "Already named"},
+        )
+
+        assert response.status_code == 200
+        assert session.query(IngestionJob).count() == 0
 
 
 class TestRating:

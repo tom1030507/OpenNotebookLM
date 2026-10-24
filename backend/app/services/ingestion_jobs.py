@@ -23,9 +23,9 @@ logger = structlog.get_logger()
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
 TERMINAL_JOB_STATUSES = ("completed", "failed")
-SUPPORTED_JOB_TYPES = ("pdf", "url", "youtube", "text")
+SUPPORTED_JOB_TYPES = ("pdf", "url", "youtube", "text", "reindex")
 
-JobProcessor = Callable[[Session, IngestionJob], None]
+JobProcessor = Callable[[Session, IngestionJob], Optional[str]]
 
 _active_worker: Optional["IngestionJobWorker"] = None
 _lease_lock = Lock()
@@ -46,16 +46,17 @@ def enqueue_ingestion_job(
     job_type: str,
     payload: dict,
 ) -> IngestionJob:
-    """Create one queued job, reusing existing active or completed work.
+    """Create queued work, reusing active work and completed imports.
 
     A failed row remains as attempt history and enqueue creates a new retry.
     The database partial unique index arbitrates racing callers, so at most one
-    queued/running row can exist for a document.
+    queued/running row can exist for a document. Completed re-index jobs are
+    not reused because a later rename changes the text used for each vector.
 
     Args:
         db: Session whose surrounding transaction owns the document creation.
         document_id: Document to extract and index.
-        job_type: One of pdf, url, youtube, or text.
+        job_type: Source extraction type or ``reindex``.
         payload: Recoverable source references needed by the worker.
 
     Returns:
@@ -80,7 +81,7 @@ def enqueue_ingestion_job_with_result(
     Args:
         db: Session whose surrounding transaction owns the document creation.
         document_id: Document to extract and index.
-        job_type: One of pdf, url, youtube, or text.
+        job_type: Source extraction type or ``reindex``.
         payload: Recoverable source references needed by the worker.
 
     Returns:
@@ -90,17 +91,27 @@ def enqueue_ingestion_job_with_result(
         raise ValueError("Unsupported ingestion job type: %s" % job_type)
 
     active = _active_job(db, document_id)
-    if active is not None:
+    if active is not None and job_type != "reindex":
         return IngestionEnqueueResult(active, created_new_active=False)
 
-    latest = (
-        db.query(IngestionJob)
-        .filter(IngestionJob.document_id == document_id)
-        .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
-        .first()
-    )
-    if latest is not None and latest.status == "completed":
-        return IngestionEnqueueResult(latest, created_new_active=False)
+    # Re-index input includes the title, so each rename needs a new job even
+    # when an earlier title refresh completed successfully.
+    if job_type != "reindex":
+        latest = (
+            db.query(IngestionJob)
+            .filter(
+                IngestionJob.document_id == document_id,
+                IngestionJob.job_type == job_type,
+            )
+            .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
+            .first()
+        )
+        if (
+            latest is not None
+            and latest.status == "completed"
+            and latest.job_type == job_type
+        ):
+            return IngestionEnqueueResult(latest, created_new_active=False)
 
     _reserve_sqlite_enqueue_transaction(db)
     # BEGIN IMMEDIATE may have waited behind a winner. Re-read inside the
@@ -108,15 +119,32 @@ def enqueue_ingestion_job_with_result(
     # obsolete WAL snapshot or report a second caller as the creator.
     active = _active_job(db, document_id)
     if active is not None:
+        if (
+            job_type == "reindex"
+            and active.job_type == "reindex"
+            and "requested_title" in payload
+        ):
+            active.payload_json = {
+                **(active.payload_json or {}),
+                "requested_title": payload["requested_title"],
+            }
         return IngestionEnqueueResult(active, created_new_active=False)
-    latest = (
-        db.query(IngestionJob)
-        .filter(IngestionJob.document_id == document_id)
-        .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
-        .first()
-    )
-    if latest is not None and latest.status == "completed":
-        return IngestionEnqueueResult(latest, created_new_active=False)
+    if job_type != "reindex":
+        latest = (
+            db.query(IngestionJob)
+            .filter(
+                IngestionJob.document_id == document_id,
+                IngestionJob.job_type == job_type,
+            )
+            .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
+            .first()
+        )
+        if (
+            latest is not None
+            and latest.status == "completed"
+            and latest.job_type == job_type
+        ):
+            return IngestionEnqueueResult(latest, created_new_active=False)
 
     candidate = IngestionJob(
         id=str(uuid.uuid4()),
@@ -140,7 +168,7 @@ def enqueue_ingestion_job_with_result(
         return IngestionEnqueueResult(active, created_new_active=False)
 
     document = db.get(Document, document_id)
-    if document is not None:
+    if document is not None and job_type != "reindex":
         document.status = "queued"
         document.error_message = None
         if "indexing_failure" in (document.meta_json or {}):
@@ -244,18 +272,20 @@ def claim_next_job(session_factory: sessionmaker) -> Optional[str]:
                 IngestionJob.id,
                 IngestionJob.document_id,
                 IngestionJob.attempts,
+                IngestionJob.job_type,
             )
         ).first()
         if claimed is None:
             db.rollback()
             return None
 
-        job_id, document_id, attempts = claimed
-        db.execute(
-            update(Document)
-            .where(Document.id == document_id)
-            .values(status="processing", error_message=None)
-        )
+        job_id, document_id, attempts, job_type = claimed
+        if job_type != "reindex":
+            db.execute(
+                update(Document)
+                .where(Document.id == document_id)
+                .values(status="processing", error_message=None)
+            )
         try:
             db.commit()
         except Exception:
@@ -268,6 +298,7 @@ def claim_next_job(session_factory: sessionmaker) -> Optional[str]:
                 job_id=job_id,
                 attempts=attempts,
                 started_at=claim_started_at,
+                job_type=job_type,
             ):
                 raise
         return job_id
@@ -306,6 +337,7 @@ def _claim_was_persisted(
     job_id: str,
     attempts: int,
     started_at,
+    job_type: str,
 ) -> bool:
     """Confirm that an ambiguous claim ACK belongs to this exact attempt."""
     with Session(bind=db.get_bind()) as verification_db:
@@ -315,6 +347,7 @@ def _claim_was_persisted(
                 IngestionJob.attempts,
                 IngestionJob.started_at,
                 IngestionJob.document_id,
+                IngestionJob.job_type,
             ).where(IngestionJob.id == job_id)
         ).one_or_none()
         if row is None:
@@ -325,12 +358,16 @@ def _claim_was_persisted(
             row.status != "running"
             or row.attempts != attempts
             or row.started_at != started_at
+            or row.job_type != job_type
         ):
             return False
         document_status = verification_db.execute(
             select(Document.status).where(Document.id == row.document_id)
         ).scalar_one_or_none()
-        return document_status in (None, "processing")
+        expected_document_status = (
+            "ready" if job_type == "reindex" else "processing"
+        )
+        return document_status in (None, expected_document_status)
 
 
 def retain_operation_lease(
@@ -638,31 +675,67 @@ class IngestionJobWorker:
                     )
                     return
                 try:
-                    self._delete_document_index(db, job.document_id)
-                    self.processor(db, job)
-                    db.flush()
-                    document = db.get(Document, job.document_id)
-                    if document is None:
-                        raise ValueError(
-                            "Document %s not found" % job.document_id
-                        )
-                    if document.status != "ready":
-                        raise RuntimeError(
-                            "Ingestion processor ended with document status %s"
-                            % document.status
-                        )
+                    if job.job_type != "reindex":
+                        self._delete_document_index(db, job.document_id)
+                    while True:
+                        indexed_title = self.processor(db, job)
+                        db.flush()
+                        document = db.get(Document, job.document_id)
+                        if document is None:
+                            raise ValueError(
+                                "Document %s not found" % job.document_id
+                            )
+                        if document.status != "ready":
+                            raise RuntimeError(
+                                "Ingestion processor ended with document status %s"
+                                % document.status
+                            )
+                        if job.job_type != "reindex":
+                            break
+
+                        # The reservation serializes this final freshness check
+                        # with a concurrent rename. A rename that wins first
+                        # updates the request title; one that follows this
+                        # transaction sees a completed job and creates another.
+                        _reserve_sqlite_enqueue_transaction(db)
+                        db.refresh(job)
+                        db.refresh(document)
+                        requested_title = (
+                            job.payload_json or {}
+                        ).get("requested_title")
+                        if indexed_title is None:
+                            indexed_title = document.title
+                        if (
+                            indexed_title == document.title
+                            and requested_title in (None, document.title)
+                        ):
+                            break
+
+                        db.rollback()
+                        job = db.get(IngestionJob, job_id)
+                        if job is None or job.status != "running":
+                            raise RuntimeError(
+                                "Re-index job changed state before completion"
+                            )
                 except Exception as error:
                     db.rollback()
                     failed_job = db.get(IngestionJob, job_id)
                     if failed_job is not None:
-                        self._delete_document_index(db, failed_job.document_id)
+                        if failed_job.job_type != "reindex":
+                            self._delete_document_index(
+                                db,
+                                failed_job.document_id,
+                            )
                         failed_job.status = "failed"
                         failed_job.last_error = {
                             "type": type(error).__name__,
                             "message": str(error),
                         }
                         failed_job.completed_at = utc_now()
-                        if failed_job.document is not None:
+                        if (
+                            failed_job.job_type != "reindex"
+                            and failed_job.document is not None
+                        ):
                             failed_job.document.status = "error"
                             failed_job.document.error_message = str(error)
                             if isinstance(error, ChunkLimitExceededError):
@@ -798,16 +871,17 @@ class IngestionJobWorker:
                 db.rollback()
                 return self._job_is_terminal_or_missing(db, job_id)
 
-            # The conditional state transition obtains the writer boundary
-            # before index deletion. A concurrent terminal transition therefore
-            # wins without having its confirmed searchable index erased.
-            self._delete_document_index(db, document_id)
-            db.execute(
-                update(Document)
-                .where(Document.id == document_id)
-                .values(status="queued", error_message=None)
-                .execution_options(synchronize_session=False)
-            )
+            if persisted_job.job_type != "reindex":
+                # The conditional state transition obtains the writer boundary
+                # before index deletion. A concurrent terminal transition therefore
+                # wins without having its confirmed searchable index erased.
+                self._delete_document_index(db, document_id)
+                db.execute(
+                    update(Document)
+                    .where(Document.id == document_id)
+                    .values(status="queued", error_message=None)
+                    .execution_options(synchronize_session=False)
+                )
             db.commit()
             if self._job_is_terminal_or_missing(db, job_id):
                 return True
@@ -863,18 +937,23 @@ class IngestionJobWorker:
         return status is None or status in TERMINAL_JOB_STATUSES
 
     @staticmethod
-    def _process_with_document_service(db: Session, job: IngestionJob) -> None:
-        """Run the production document pipeline for one claimed job."""
+    def _process_with_document_service(
+        db: Session,
+        job: IngestionJob,
+    ) -> Optional[str]:
+        """Run the production pipeline and return its re-index title snapshot."""
         # Imported lazily so schema/database unit tests do not load the
         # embedding model merely by importing the queue module.
         from app.services.documents import DocumentService
 
+        payload = dict(job.payload_json or {})
         DocumentService().process_ingestion_job(
             db,
             document_id=job.document_id,
             job_type=job.job_type,
-            payload=dict(job.payload_json or {}),
+            payload=payload,
         )
+        return payload.get("_indexed_title")
 
     @staticmethod
     def _log_task_failure(task: asyncio.Task) -> None:
