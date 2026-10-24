@@ -289,6 +289,26 @@ class TestDocumentIsolation:
         document_id = make_document(env.session, env.alice_user)
         assert env.bob.get("/api/docs/%s/status" % document_id).status_code == 404
 
+    def test_project_document_list_does_not_include_extracted_content(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session,
+            env.alice_user,
+            source_type="docx",
+            content="Large extracted content stays on demand.",
+        )
+
+        attached = env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        )
+        listed = env.alice.get(
+            "/api/projects/%s/documents" % project_id
+        )
+
+        assert attached.status_code == 200
+        assert listed.status_code == 200
+        assert "content" not in listed.json()[0]
+
     def test_downloading_someone_elses_file_is_not_found(self, env):
         # This is the route that returns raw bytes, so it is the one that would
         # have handed over an entire upload.

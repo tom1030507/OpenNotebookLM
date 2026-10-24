@@ -64,6 +64,34 @@ def write_epub(path: Path) -> None:
         )
 
 
+def rewrite_zip_members(
+    path: Path,
+    replacements: dict[str, bytes],
+    added: dict[str, bytes] | None = None,
+) -> None:
+    """Replace selected ZIP members without changing the others.
+
+    Args:
+        path: ZIP archive to rewrite in place.
+        replacements: Existing member names and replacement bytes.
+        added: Optional new member names and bytes.
+
+    Returns:
+        None.
+    """
+    with zipfile.ZipFile(path) as source:
+        members = [
+            (part, replacements.get(part.filename, source.read(part.filename)))
+            for part in source.infolist()
+        ]
+
+    with zipfile.ZipFile(path, "w") as target:
+        for part, data in members:
+            target.writestr(part, data)
+        for name, data in (added or {}).items():
+            target.writestr(name, data)
+
+
 def result_for(path: Path) -> dict:
     """Extract a generated fixture through the production adapter."""
     return OfficeAdapter().extract_text_from_file(str(path))
@@ -167,6 +195,79 @@ def test_docx_with_malformed_required_xml_is_rejected(tmp_path):
         OfficeAdapter().validate_file(str(path), ".docx")
 
 
+def test_docx_with_well_formed_wrong_root_is_rejected(tmp_path):
+    """A valid XML document in the main part is not necessarily a DOCX part."""
+    path = tmp_path / "wrong-root.docx"
+    write_docx(
+        path,
+        document_xml=(
+            '<w:notDocument xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+        ),
+    )
+
+    with pytest.raises(InvalidOfficeFileError, match="valid Office document"):
+        OfficeAdapter().validate_file(str(path), ".docx")
+
+
+def test_docx_with_missing_relationship_target_is_rejected(tmp_path):
+    """Internal relationship targets must exist in the package."""
+    path = tmp_path / "missing-target.docx"
+    write_docx(path)
+    with zipfile.ZipFile(path) as archive:
+        relationships = archive.read("_rels/.rels")
+    rewrite_zip_members(
+        path,
+        {
+            "_rels/.rels": relationships.replace(
+                b"word/document.xml",
+                b"word/missing.xml",
+            ),
+        },
+    )
+
+    with pytest.raises(InvalidOfficeFileError, match="missing relationship target"):
+        OfficeAdapter().validate_file(str(path), ".docx")
+
+
+def test_docx_with_wrong_main_relationship_target_is_rejected(tmp_path):
+    """The package root must identify the actual Word document part."""
+    path = tmp_path / "wrong-main-target.docx"
+    write_docx(path)
+    with zipfile.ZipFile(path) as archive:
+        relationships = archive.read("_rels/.rels")
+    rewrite_zip_members(
+        path,
+        {
+            "_rels/.rels": relationships.replace(
+                b"word/document.xml",
+                b"word/other.xml",
+            ),
+        },
+        added={"word/other.xml": b"<other/>"},
+    )
+
+    with pytest.raises(InvalidOfficeFileError, match="main-part relationship"):
+        OfficeAdapter().validate_file(str(path), ".docx")
+
+
+def test_epub_without_rootfile_is_rejected(tmp_path):
+    """An EPUB container must declare a package document for conversion."""
+    path = tmp_path / "no-rootfile.epub"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"/>',
+        )
+
+    with pytest.raises(InvalidOfficeFileError, match="rootfile"):
+        OfficeAdapter().validate_file(str(path), ".epub")
+
+
 def test_docx_with_corrupted_package_part_is_rejected(tmp_path):
     """A bad CRC in a non-XML member is caught before MarkItDown reads it."""
     path = tmp_path / "corrupted.docx"
@@ -231,4 +332,127 @@ def test_xlsx_sparse_cells_exceeding_grid_cap_are_rejected(tmp_path, monkeypatch
     monkeypatch.setattr(office, "MAX_SPREADSHEET_CELLS", 10)
 
     with pytest.raises(InvalidOfficeFileError, match="cell limit"):
+        OfficeAdapter().validate_file(str(path), ".xlsx")
+
+
+def test_xlsx_relocated_worksheet_is_included_in_cell_cap(tmp_path, monkeypatch):
+    """Workbook relationship targets are checked even outside the usual folder."""
+    from openpyxl import Workbook
+    import app.adapters.office as office
+
+    path = tmp_path / "relocated.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "Empty"
+    populated = workbook.create_sheet("Sparse")
+    populated["A1"] = "first"
+    populated["Z100"] = "last"
+    workbook.save(path)
+
+    with zipfile.ZipFile(path) as archive:
+        relationships = archive.read("xl/_rels/workbook.xml.rels")
+        content_types = archive.read("[Content_Types].xml")
+        populated_sheet = archive.read("xl/worksheets/sheet2.xml")
+    empty_sheet = (
+        b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        b"<sheetData/></worksheet>"
+    )
+    rewrite_zip_members(
+        path,
+        {
+            "xl/_rels/workbook.xml.rels": relationships.replace(
+                b"/xl/worksheets/sheet2.xml",
+                b"/xl/custom.xml",
+            ),
+            "[Content_Types].xml": content_types.replace(
+                b"/xl/worksheets/sheet2.xml",
+                b"/xl/custom.xml",
+            ),
+            "xl/worksheets/sheet2.xml": empty_sheet,
+        },
+        added={"xl/custom.xml": populated_sheet},
+    )
+    monkeypatch.setattr(office, "MAX_SPREADSHEET_CELLS", 10)
+
+    with pytest.raises(InvalidOfficeFileError, match="cell limit"):
+        OfficeAdapter().validate_file(str(path), ".xlsx")
+
+
+def test_xlsx_row_index_cannot_hide_a_large_row_span(tmp_path, monkeypatch):
+    """The row parser's index matters even when cells claim a nearby row."""
+    from openpyxl import Workbook
+    import app.adapters.office as office
+
+    path = tmp_path / "large-row-index.xlsx"
+    workbook = Workbook()
+    workbook.active["A1"] = "value"
+    workbook.save(path)
+    with zipfile.ZipFile(path) as archive:
+        worksheet = archive.read("xl/worksheets/sheet1.xml")
+    assert b'<row r="1"' in worksheet
+    rewrite_zip_members(
+        path,
+        {
+            "xl/worksheets/sheet1.xml": worksheet.replace(
+                b'<row r="1"',
+                b'<row r="1048576"',
+                1,
+            ),
+        },
+    )
+    monkeypatch.setattr(office, "MAX_SPREADSHEET_CELLS", 10)
+
+    with pytest.raises(InvalidOfficeFileError, match="cell limit|row reference"):
+        OfficeAdapter().validate_file(str(path), ".xlsx")
+
+
+def test_xlsx_missing_row_index_uses_the_sequential_row(tmp_path, monkeypatch):
+    """Optional row indices can be inferred without losing the row bound."""
+    from openpyxl import Workbook
+    import app.adapters.office as office
+
+    path = tmp_path / "implicit-row-index.xlsx"
+    workbook = Workbook()
+    workbook.active["A1"] = "first"
+    workbook.active["A2"] = "second"
+    workbook.save(path)
+    with zipfile.ZipFile(path) as archive:
+        worksheet = archive.read("xl/worksheets/sheet1.xml")
+    assert b'<row r="2"' in worksheet
+    rewrite_zip_members(
+        path,
+        {
+            "xl/worksheets/sheet1.xml": worksheet.replace(
+                b'<row r="2"',
+                b"<row",
+                1,
+            ),
+        },
+    )
+    monkeypatch.setattr(office, "MAX_SPREADSHEET_CELLS", 2)
+
+    OfficeAdapter().validate_file(str(path), ".xlsx")
+
+
+def test_xlsx_out_of_range_row_index_is_rejected(tmp_path):
+    """Rows beyond Excel's maximum cannot bypass the conversion bound."""
+    from openpyxl import Workbook
+
+    path = tmp_path / "out-of-range-row-index.xlsx"
+    workbook = Workbook()
+    workbook.active["A1"] = "value"
+    workbook.save(path)
+    with zipfile.ZipFile(path) as archive:
+        worksheet = archive.read("xl/worksheets/sheet1.xml")
+    rewrite_zip_members(
+        path,
+        {
+            "xl/worksheets/sheet1.xml": worksheet.replace(
+                b'<row r="1"',
+                b'<row r="1048577"',
+                1,
+            ),
+        },
+    )
+
+    with pytest.raises(InvalidOfficeFileError, match="invalid row references"):
         OfficeAdapter().validate_file(str(path), ".xlsx")

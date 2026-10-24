@@ -1,10 +1,12 @@
 """Local text and Office document conversion for searchable sources."""
 from pathlib import Path
+import posixpath
 import re
 import zipfile
 import zlib
 from xml.etree import ElementTree
 from typing import Any, Dict, Optional
+from urllib.parse import unquote, urlsplit
 
 
 SUPPORTED_FILE_EXTENSIONS = frozenset({
@@ -26,11 +28,56 @@ MAX_SPREADSHEET_CELLS = 1_000_000
 MAX_OFFICE_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 
 _OFFICE_PACKAGE_PARTS = {
-    ".docx": {"[Content_Types].xml", "word/document.xml"},
-    ".pptx": {"[Content_Types].xml", "ppt/presentation.xml"},
-    ".xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
+    ".docx": {"[Content_Types].xml", "_rels/.rels", "word/document.xml"},
+    ".pptx": {"[Content_Types].xml", "_rels/.rels", "ppt/presentation.xml"},
+    ".xlsx": {
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+    },
     ".epub": {"META-INF/container.xml", "mimetype"},
 }
+_EXPECTED_XML_ROOTS = {
+    ".docx": {
+        "[Content_Types].xml": "{http://schemas.openxmlformats.org/package/2006/content-types}Types",
+        "_rels/.rels": "{http://schemas.openxmlformats.org/package/2006/relationships}Relationships",
+        "word/document.xml": "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document",
+    },
+    ".pptx": {
+        "[Content_Types].xml": "{http://schemas.openxmlformats.org/package/2006/content-types}Types",
+        "_rels/.rels": "{http://schemas.openxmlformats.org/package/2006/relationships}Relationships",
+        "ppt/presentation.xml": "{http://schemas.openxmlformats.org/presentationml/2006/main}presentation",
+    },
+    ".xlsx": {
+        "[Content_Types].xml": "{http://schemas.openxmlformats.org/package/2006/content-types}Types",
+        "_rels/.rels": "{http://schemas.openxmlformats.org/package/2006/relationships}Relationships",
+        "xl/workbook.xml": "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}workbook",
+        "xl/_rels/workbook.xml.rels": "{http://schemas.openxmlformats.org/package/2006/relationships}Relationships",
+    },
+    ".epub": {
+        "META-INF/container.xml": "{urn:oasis:names:tc:opendocument:xmlns:container}container",
+    },
+}
+_MAIN_OFFICE_PARTS = {
+    ".docx": (
+        "word/document.xml",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+    ),
+    ".pptx": (
+        "ppt/presentation.xml",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+    ),
+    ".xlsx": (
+        "xl/workbook.xml",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+    ),
+}
+_RELATIONSHIPS_ROOT = "{http://schemas.openxmlformats.org/package/2006/relationships}Relationships"
+_OPF_PACKAGE_ROOT = "{http://www.idpf.org/2007/opf}package"
+_SPREADSHEET_WORKSHEET_ROOT = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}worksheet"
+MAX_SPREADSHEET_ROWS = 1_048_576
+MAX_SPREADSHEET_COLUMNS = 16_384
 _SLIDE_MARKER = re.compile(r"<!--\s*Slide number:\s*(\d+)\s*-->")
 _CELL_REFERENCE = re.compile(r"^([A-Za-z]{1,3})([1-9][0-9]*)$")
 
@@ -92,7 +139,11 @@ class OfficeAdapter:
                 self._validate_package_xml(archive, names, extension)
 
                 if extension == ".epub":
-                    if archive.read("mimetype") != b"application/epub+zip":
+                    if (
+                        parts[0].filename != "mimetype"
+                        or parts[0].compress_type != zipfile.ZIP_STORED
+                        or archive.read("mimetype") != b"application/epub+zip"
+                    ):
                         raise InvalidOfficeFileError("The EPUB file has an invalid mimetype")
         except InvalidOfficeFileError:
             raise
@@ -181,48 +232,327 @@ class OfficeAdapter:
             name for name in names
             if name.lower().endswith((".xml", ".rels", ".opf", ".xhtml"))
         )
-        worksheet_names = {
-            name for name in xml_names
-            if name.startswith("xl/worksheets/") and name.endswith(".xml")
-        }
-        if extension == ".xlsx" and not worksheet_names:
-            raise InvalidOfficeFileError("The XLSX file contains no worksheets")
-
+        root_tags: Dict[str, str] = {}
+        package_relationships: Dict[str, list[tuple[str, str, str]]] = {}
+        content_type_overrides: Dict[str, str] = {}
+        epub_rootfiles = []
+        epub_manifests: Dict[str, Dict[str, str]] = {}
+        epub_spines: Dict[str, list[str]] = {}
         cell_count = 0
         total_grid_cells = 0
+        worksheet_count = 0
         for name in xml_names:
-            is_worksheet = name in worksheet_names
+            root_tag = None
+            is_worksheet = False
+            relationships = []
+            manifest: Dict[str, str] = {}
+            spine = []
+            current_row = 0
+            current_column = 0
             max_row = 0
             max_column = 0
             with archive.open(name) as xml_file:
                 for _, element in ElementTree.iterparse(xml_file, events=("start",)):
+                    local_name = element.tag.rsplit("}", 1)[-1]
+                    if root_tag is None:
+                        root_tag = element.tag
+                        is_worksheet = (
+                            extension == ".xlsx"
+                            and root_tag == _SPREADSHEET_WORKSHEET_ROOT
+                        )
+                        if is_worksheet:
+                            worksheet_count += 1
+
+                    if name.endswith(".rels") and local_name == "Relationship":
+                        relationships.append((
+                            element.attrib.get("Type", ""),
+                            element.attrib.get("Target", ""),
+                            element.attrib.get("TargetMode", ""),
+                        ))
+                    elif name == "[Content_Types].xml" and local_name == "Override":
+                        part_name = element.attrib.get("PartName", "").lstrip("/")
+                        if part_name:
+                            content_type_overrides[part_name] = element.attrib.get(
+                                "ContentType", ""
+                            )
+                    elif name == "META-INF/container.xml" and local_name == "rootfile":
+                        epub_rootfiles.append(element.attrib.get("full-path", ""))
+                    elif name.lower().endswith(".opf") and local_name == "item":
+                        item_id = element.attrib.get("id", "")
+                        href = element.attrib.get("href", "")
+                        if item_id and href:
+                            manifest[item_id] = href
+                    elif name.lower().endswith(".opf") and local_name == "itemref":
+                        item_id = element.attrib.get("idref", "")
+                        if item_id:
+                            spine.append(item_id)
+
                     if (
                         extension == ".xlsx"
                         and is_worksheet
-                        and element.tag.rsplit("}", 1)[-1] == "c"
                     ):
-                        cell_count += 1
-                        if cell_count > MAX_SPREADSHEET_CELLS:
-                            raise InvalidOfficeFileError(
-                                "The XLSX file exceeds the %s cell limit"
-                                % MAX_SPREADSHEET_CELLS
-                            )
-                        cell_reference = element.attrib.get("r", "")
-                        dimensions = cls._cell_reference_dimensions(cell_reference)
-                        max_column = max(max_column, dimensions[0])
-                        max_row = max(max_row, dimensions[1])
+                        if local_name == "row":
+                            row_reference = element.attrib.get("r")
+                            if row_reference is None:
+                                current_row += 1
+                            elif re.fullmatch(r"[1-9][0-9]*", row_reference):
+                                parsed_row = int(row_reference)
+                                if parsed_row <= current_row:
+                                    raise InvalidOfficeFileError(
+                                        "The XLSX file contains invalid row references"
+                                    )
+                                current_row = parsed_row
+                            else:
+                                raise InvalidOfficeFileError(
+                                    "The XLSX file contains invalid row references"
+                                )
+
+                            if current_row > MAX_SPREADSHEET_ROWS:
+                                raise InvalidOfficeFileError(
+                                    "The XLSX file contains invalid row references"
+                                )
+                            current_column = 0
+                            max_row = max(max_row, current_row)
+                        elif local_name == "c":
+                            if current_row == 0:
+                                raise InvalidOfficeFileError(
+                                    "The XLSX file contains a cell outside a worksheet row"
+                                )
+                            cell_reference = element.attrib.get("r")
+                            if cell_reference:
+                                column, row = cls._cell_reference_dimensions(cell_reference)
+                                if row != current_row:
+                                    raise InvalidOfficeFileError(
+                                        "The XLSX cell reference does not match its row reference"
+                                    )
+                                current_column = column
+                            else:
+                                current_column += 1
+                                column = current_column
+                                row = current_row
+
+                            cell_count += 1
+                            if cell_count > MAX_SPREADSHEET_CELLS:
+                                raise InvalidOfficeFileError(
+                                    "The XLSX file exceeds the %s cell limit"
+                                    % MAX_SPREADSHEET_CELLS
+                                )
+                            max_column = max(max_column, column)
+                            max_row = max(max_row, row)
                     element.clear()
+
+            if root_tag is None:
+                raise InvalidOfficeFileError(
+                    "The %s file contains an empty XML package part"
+                    % extension[1:].upper()
+                )
+            root_tags[name] = root_tag
+            if name.endswith(".rels"):
+                package_relationships[name] = relationships
+            if name.lower().endswith(".opf"):
+                epub_manifests[name] = manifest
+                epub_spines[name] = spine
 
             if extension == ".xlsx" and is_worksheet:
                 # pandas creates a rectangular DataFrame through the furthest
                 # row and column; sparse references can otherwise allocate a
-                # huge grid despite containing very few stored cells.
-                total_grid_cells += max_row * max_column
+                # huge grid despite containing very few stored cells. Blank
+                # rows count as one column so their generated row tuples are
+                # bounded too.
+                total_grid_cells += max_row * max(max_column, 1)
                 if total_grid_cells > MAX_SPREADSHEET_CELLS:
                     raise InvalidOfficeFileError(
                         "The XLSX file exceeds the %s cell limit"
                         % MAX_SPREADSHEET_CELLS
                     )
+
+        for part_name, expected_root in _EXPECTED_XML_ROOTS.get(extension, {}).items():
+            if root_tags.get(part_name) != expected_root:
+                raise InvalidOfficeFileError(
+                    "The %s file is not a valid Office document"
+                    % extension[1:].upper()
+                )
+
+        for part_name, relationships in package_relationships.items():
+            if root_tags.get(part_name) != _RELATIONSHIPS_ROOT:
+                raise InvalidOfficeFileError(
+                    "The %s file contains invalid package relationships"
+                    % extension[1:].upper()
+                )
+
+        resolved_relationships: Dict[str, list[tuple[str, str]]] = {}
+        for part_name, relationships in package_relationships.items():
+            source_directory = cls._relationship_source_directory(part_name)
+            resolved = []
+            for relationship_type, target, target_mode in relationships:
+                if not relationship_type or not target:
+                    raise InvalidOfficeFileError(
+                        "The %s file contains invalid package relationships"
+                        % extension[1:].upper()
+                    )
+                if target_mode.lower() == "external":
+                    continue
+                resolved_target = cls._resolve_internal_target(
+                    source_directory,
+                    target,
+                )
+                if resolved_target not in names:
+                    raise InvalidOfficeFileError(
+                        "The %s file contains a missing relationship target"
+                        % extension[1:].upper()
+                    )
+                resolved.append((relationship_type, resolved_target))
+            resolved_relationships[part_name] = resolved
+
+        if extension in _MAIN_OFFICE_PARTS:
+            main_part, main_content_type = _MAIN_OFFICE_PARTS[extension]
+            if content_type_overrides.get(main_part) != main_content_type:
+                raise InvalidOfficeFileError(
+                    "The %s file has invalid main-part content types"
+                    % extension[1:].upper()
+                )
+            root_relationships = resolved_relationships.get("_rels/.rels", [])
+            if not any(
+                relationship_type.endswith("/officeDocument")
+                and target == main_part
+                for relationship_type, target in root_relationships
+            ):
+                raise InvalidOfficeFileError(
+                    "The %s file has no valid main-part relationship"
+                    % extension[1:].upper()
+                )
+
+        if extension == ".xlsx":
+            worksheet_relationships = [
+                target
+                for relationship_type, target in resolved_relationships.get(
+                    "xl/_rels/workbook.xml.rels",
+                    [],
+                )
+                if relationship_type.endswith("/worksheet")
+            ]
+            if not worksheet_relationships:
+                raise InvalidOfficeFileError("The XLSX file contains no worksheets")
+            if any(
+                root_tags.get(target) != _SPREADSHEET_WORKSHEET_ROOT
+                for target in worksheet_relationships
+            ):
+                raise InvalidOfficeFileError(
+                    "The XLSX file contains an invalid worksheet part"
+                )
+            if worksheet_count == 0:
+                raise InvalidOfficeFileError("The XLSX file contains no worksheets")
+
+        if extension == ".epub":
+            if not epub_rootfiles:
+                raise InvalidOfficeFileError(
+                    "The EPUB file does not declare a package rootfile"
+                )
+            package_path = cls._resolve_archive_path(epub_rootfiles[0])
+            if (
+                package_path not in names
+                or root_tags.get(package_path) != _OPF_PACKAGE_ROOT
+            ):
+                raise InvalidOfficeFileError(
+                    "The EPUB file has an invalid package rootfile"
+                )
+            manifest = epub_manifests.get(package_path, {})
+            spine = epub_spines.get(package_path, [])
+            if not manifest or not spine:
+                raise InvalidOfficeFileError(
+                    "The EPUB file has no readable package spine"
+                )
+            package_directory = posixpath.dirname(package_path)
+            for item_id in spine:
+                href = manifest.get(item_id)
+                if href is None:
+                    raise InvalidOfficeFileError(
+                        "The EPUB file has an invalid spine reference"
+                    )
+                target_path = urlsplit(href)
+                if target_path.scheme or target_path.netloc or target_path.query or target_path.fragment:
+                    raise InvalidOfficeFileError(
+                        "The EPUB file has an invalid spine resource"
+                    )
+                resolved_target = cls._resolve_internal_target(
+                    package_directory,
+                    target_path.path,
+                )
+                if resolved_target not in names:
+                    raise InvalidOfficeFileError(
+                        "The EPUB file has a missing spine resource"
+                    )
+
+    @staticmethod
+    def _relationship_source_directory(relationship_part: str) -> str:
+        """Return the directory of the part a relationship file describes.
+
+        Args:
+            relationship_part: Package path ending in ``.rels``.
+
+        Returns:
+            The source part's containing directory.
+
+        Raises:
+            InvalidOfficeFileError: If the relationship path is not an OPC path.
+        """
+        if relationship_part == "_rels/.rels":
+            return ""
+        marker = "/_rels/"
+        if marker not in relationship_part or not relationship_part.endswith(".rels"):
+            raise InvalidOfficeFileError("The Office package has an invalid relationship path")
+        directory, relationship_name = relationship_part.rsplit(marker, 1)
+        source_name = relationship_name.removesuffix(".rels")
+        if not source_name:
+            raise InvalidOfficeFileError("The Office package has an invalid relationship path")
+        return posixpath.dirname(posixpath.join(directory, source_name))
+
+    @staticmethod
+    def _resolve_internal_target(base_directory: str, target: str) -> str:
+        """Normalize a package-internal target without allowing path escape.
+
+        Args:
+            base_directory: Package directory containing the referring part.
+            target: URI reference from a relationship or EPUB manifest.
+
+        Returns:
+            Normalized package path.
+
+        Raises:
+            InvalidOfficeFileError: If the target is external or escapes the package.
+        """
+        parsed_target = urlsplit(target)
+        if parsed_target.scheme or parsed_target.netloc:
+            raise InvalidOfficeFileError("The Office package has an invalid internal target")
+        target_path = unquote(parsed_target.path)
+        if not target_path:
+            raise InvalidOfficeFileError("The Office package has an empty internal target")
+        if target_path.startswith("/"):
+            resolved_target = posixpath.normpath(target_path.lstrip("/"))
+        else:
+            resolved_target = posixpath.normpath(
+                posixpath.join(base_directory, target_path)
+            )
+        if resolved_target == ".." or resolved_target.startswith("../"):
+            raise InvalidOfficeFileError("The Office package target escapes the package")
+        return resolved_target
+
+    @staticmethod
+    def _resolve_archive_path(package_path: str) -> str:
+        """Normalize a root-relative EPUB package path.
+
+        Args:
+            package_path: The path from an EPUB container rootfile element.
+
+        Returns:
+            Normalized ZIP member name, or an empty string for an invalid path.
+        """
+        if not package_path or package_path.startswith("/"):
+            return ""
+        normalized = posixpath.normpath(package_path)
+        if normalized == ".." or normalized.startswith("../"):
+            return ""
+        return normalized
 
     @staticmethod
     def _cell_reference_dimensions(cell_reference: str) -> tuple[int, int]:

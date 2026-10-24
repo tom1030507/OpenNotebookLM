@@ -38,6 +38,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [contentRequest, setContentRequest] = useState<ContentRequest | null>(null);
+  const [contentRefreshCount, setContentRefreshCount] = useState(0);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -46,22 +47,36 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const preview = usePreviewSource(document);
   const shouldFetchContent =
     EXTRACTED_TEXT_TYPES.includes(document.type) && document.content === undefined;
+  const shouldRequestContent = shouldFetchContent && (
+    document.status === 'ready' || contentRefreshCount > 0
+  );
   const currentContentRequest = contentRequest?.documentId === document.id
     ? contentRequest
     : null;
   const fetchedContent = currentContentRequest?.status === 'loaded'
     ? currentContentRequest.content
     : undefined;
-  const content = document.content ?? fetchedContent;
-  const contentLoading = shouldFetchContent && (
+  const content = document.content ?? (
+    fetchedContent !== undefined && (document.status === 'ready' || fetchedContent.length > 0)
+      ? fetchedContent
+      : undefined
+  );
+  const contentLoading = shouldRequestContent && (
     currentContentRequest === null || currentContentRequest.status === 'loading'
   );
   const contentError = currentContentRequest?.status === 'error'
     ? currentContentRequest.message
-    : undefined;
+    : shouldFetchContent && document.status === 'error'
+      ? document.error_message || 'Source processing failed.'
+      : undefined;
+  const contentWaiting = shouldFetchContent
+    && document.status !== 'ready'
+    && document.status !== 'error'
+    && !contentLoading
+    && !contentError;
 
   useEffect(() => {
-    if (!shouldFetchContent) {
+    if (!shouldRequestContent) {
       return;
     }
 
@@ -90,7 +105,13 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     return () => {
       cancelled = true;
     };
-  }, [document.content, document.id, shouldFetchContent]);
+  }, [
+    contentRefreshCount,
+    document.content,
+    document.id,
+    document.status,
+    shouldRequestContent,
+  ]);
 
   useDialogFocus({
     isOpen: true,
@@ -284,6 +305,22 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               <p className="text-[var(--muted-foreground)]">
                 Loading extracted text...
               </p>
+            </div>
+          );
+        }
+        if (contentWaiting) {
+          return (
+            <div className="p-8 text-center">
+              <p className="text-[var(--muted-foreground)]" role="status">
+                Source is still processing.
+              </p>
+              <button
+                type="button"
+                className="mt-3 text-sm text-[var(--primary)] hover:underline"
+                onClick={() => setContentRefreshCount((count) => count + 1)}
+              >
+                Check for extracted text
+              </button>
             </div>
           );
         }

@@ -67,6 +67,31 @@ afterEach(() => {
 
 
 describe('DocumentPreview', () => {
+  it('shows processing state and retries a preview until extraction completes', async () => {
+    const document = await loadDocument({
+      source_type: 'docx',
+      source_url: 'uploads/document-1_report.docx',
+      title: 'Report',
+    });
+    document.status = 'queued';
+    const fetchContent = vi.spyOn(api, 'fetchDocumentContent')
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('# Chapter One');
+    render(<DocumentPreview document={document} onClose={() => {}} />);
+
+    expect(await screen.findByText(/Source is still processing/)).toBeTruthy();
+    expect(fetchContent).not.toHaveBeenCalled();
+
+    screen.getByRole('button', { name: 'Check for extracted text' }).click();
+    await waitFor(() => expect(fetchContent).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Source is still processing/)).toBeTruthy();
+
+    screen.getByRole('button', { name: 'Check for extracted text' }).click();
+    expect(await screen.findByText(/# Chapter One/)).toBeTruthy();
+    expect(fetchContent).toHaveBeenNthCalledWith(1, 'document-1');
+    expect(fetchContent).toHaveBeenNthCalledWith(2, 'document-1');
+  });
+
   it('fetches and previews extracted text for an uploaded Office source', async () => {
     const document = await loadDocument({
       source_type: 'docx',

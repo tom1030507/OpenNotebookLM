@@ -4,6 +4,7 @@ from io import BytesIO
 from pathlib import Path
 import threading
 from types import SimpleNamespace
+import zipfile
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -365,6 +366,47 @@ def test_non_pdf_upload_refuses_invalid_office_bytes_without_a_queued_row(
             file=BytesIO(b"MZ executable content"),
             filename="renamed.docx",
             file_extension=".docx",
+        ))
+
+    assert list(tmp_path.iterdir()) == []
+    assert lifecycle_db.query(Document).count() == 0
+    assert lifecycle_db.query(IngestionJob).count() == 0
+
+
+def test_non_pdf_upload_refuses_epub_without_package_document(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """A superficially valid EPUB is rejected before file or job persistence."""
+    from app.services.documents import InvalidUploadFileError
+
+    package = BytesIO()
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"/>',
+        )
+
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    service = DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+    )
+
+    with pytest.raises(InvalidUploadFileError, match="package rootfile"):
+        asyncio.run(service.process_file_upload(
+            db=lifecycle_db,
+            project_id="project-1",
+            user_id="user-1",
+            file=BytesIO(package.getvalue()),
+            filename="book.epub",
+            file_extension=".epub",
         ))
 
     assert list(tmp_path.iterdir()) == []
