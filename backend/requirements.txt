@@ -15,6 +15,7 @@ sqlite-vec==0.1.9
 PyMuPDF==1.23.8
 pdfminer.six==20260107
 beautifulsoup4==4.12.2
+markitdown[docx,pptx,xlsx]==0.1.9
 lxml==6.1.2
 readability-lxml==0.8.1
 youtube-transcript-api==0.6.1

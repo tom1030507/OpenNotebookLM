@@ -6,6 +6,9 @@ import {
   Download, 
   ExternalLink, 
   FileText, 
+  FileSpreadsheet,
+  Presentation,
+  BookOpen,
   Globe, 
   Youtube,
   Maximize2,
@@ -74,7 +77,16 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     switch (document.type) {
       case 'pdf':
       case 'text':
+      case 'txt':
+      case 'md':
+      case 'docx':
         return <FileText className="w-5 h-5" />;
+      case 'pptx':
+        return <Presentation className="w-5 h-5" />;
+      case 'xlsx':
+        return <FileSpreadsheet className="w-5 h-5" />;
+      case 'epub':
+        return <BookOpen className="w-5 h-5" />;
       case 'url':
         return <Globe className="w-5 h-5" />;
       case 'youtube':

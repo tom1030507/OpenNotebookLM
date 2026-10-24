@@ -4,6 +4,7 @@ import {
   type SessionCredentialSnapshot,
 } from './session';
 import { retireCurrentSession } from './sessionBoundary';
+import { isSupportedUploadFileName } from './uploadValidation';
 
 
 export interface Project {
@@ -27,7 +28,17 @@ export interface ChatSettings {
 }
 
 export type DocumentStatus = 'queued' | 'processing' | 'ready' | 'error';
-export type DocumentType = 'pdf' | 'url' | 'youtube' | 'text';
+export type DocumentType =
+  | 'pdf'
+  | 'docx'
+  | 'pptx'
+  | 'xlsx'
+  | 'epub'
+  | 'txt'
+  | 'md'
+  | 'url'
+  | 'youtube'
+  | 'text';
 
 export interface Document {
   id: string;
@@ -519,9 +530,13 @@ const resolveDocumentUrl = (document: BackendDocument): string | undefined => {
     return undefined;
   }
 
-  return /^https?:\/\//i.test(document.source_url)
-    ? document.source_url
-    : documentFileUrl(document.id);
+  if (/^https?:\/\//i.test(document.source_url)) {
+    return document.source_url;
+  }
+
+  return document.source_type === 'pdf'
+    ? documentFileUrl(document.id)
+    : undefined;
 };
 
 
@@ -696,8 +711,8 @@ const api = {
   },
 
   uploadDocument(projectId: string, file: File): Promise<Document> {
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      return Promise.reject(new Error('Only PDF files are supported'));
+    if (!isSupportedUploadFileName(file.name)) {
+      return Promise.reject(new Error(`${file.name} is not a supported file type`));
     }
 
     const formData = new FormData();

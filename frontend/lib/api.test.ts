@@ -218,15 +218,45 @@ describe('API client', () => {
     );
   });
 
-  it('rejects non-PDF files before sending an unsupported upload', async () => {
+  it('rejects unsupported file types before sending an upload', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
+    const file = new File(['binary'], 'program.exe');
 
     await expect(api.uploadDocument('project-1', file)).rejects.toThrow(
-      'Only PDF files are supported',
+      'not a supported file type',
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('uploads supported office files through the existing upload route', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        doc_id: 'document-1',
+        status: 'queued',
+        message: 'uploaded',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        id: 'document-1',
+        title: 'Report',
+        source_type: 'docx',
+        source_url: 'uploads/document-1_report.docx',
+        meta_json: { file_extension: '.docx' },
+        status: 'queued',
+        error_message: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        chunk_count: 0,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.uploadDocument(
+      'project-1',
+      new File(['word'], 'report.docx'),
+    );
+
+    expect(result.type).toBe('docx');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/upload');
   });
 
   it.each([

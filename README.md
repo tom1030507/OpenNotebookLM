@@ -48,7 +48,7 @@ you configure — and you can point that at a model running on the same machine.
 
 | | Feature | What it does |
 |---|---|---|
-| 📚 | **Bring your own sources** | PDFs, `.txt` and `.md` files, web pages and YouTube transcripts, extracted into Markdown, chunked along the document's own headings, and embedded locally. |
+| 📚 | **Bring your own sources** | PDF, Word, PowerPoint, Excel, EPUB, `.txt` and `.md` files, web pages and YouTube transcripts, extracted into Markdown, chunked along the document's own headings, and embedded locally. |
 | 🔍 | **Hybrid retrieval** | Persistent sqlite-vec dense candidates and FTS5/BM25 keyword candidates run over the same document scope and are fused by reciprocal rank. The lexical terms include CJK character bigrams, so Chinese text is searchable too. |
 | 💬 | **Answers with citations** | Every answer names the chunks behind it, with the document and the section path they came from. Conversations are multi-turn and persisted per project. |
 | 🔌 | **Any LLM, or none** | Claude, OpenAI, anything speaking the OpenAI chat-completions API (Groq, OpenRouter, DeepSeek, Gemini, xAI, Mistral), or a local Ollama / llama.cpp / vLLM server. |
@@ -96,7 +96,7 @@ docker compose ps
 | Liveness | <http://localhost:8000/healthz> |
 | Readiness | <http://localhost:8000/readyz> |
 
-Register on `/login`, create a project, drop in a PDF, and ask it something. The
+Register on `/login`, create a project, add a source file or link, and ask it something. The
 first request downloads the embedding model, so expect a slow cold start.
 
 > [!IMPORTANT]
@@ -267,7 +267,7 @@ server up alongside the app; point `OLLAMA_BASE_URL` at `http://ollama:11434/v1`
 ```mermaid
 flowchart LR
     subgraph sources[Sources]
-        S1[PDF / txt / md]
+        S1[PDF / DOCX / PPTX / XLSX / EPUB / TXT / MD]
         S2[Web page]
         S3[YouTube transcript]
     end
@@ -704,7 +704,7 @@ improve on their own.
 | `DEMO_PASSWORD` | Demo account password (min 8 characters) | `demo1234` |
 | **Uploads** | | |
 | `MAX_FILE_SIZE_MB` | Upload limit | `50` |
-| `ALLOWED_FILE_TYPES` | Accepted extensions | `pdf,txt,md` |
+| `ALLOWED_FILE_TYPES` | Accepted extensions | `pdf,txt,md,docx,pptx,xlsx,epub` |
 | `MAX_URL_DOWNLOAD_MB` | Decompressed URL response limit | `10` |
 | `MAX_URL_REDIRECTS` | Redirects revalidated per URL import | `5` |
 | `URL_CONNECT_TIMEOUT_SECONDS` | URL socket connection timeout | `5` |
@@ -747,7 +747,7 @@ endpoints requires
 | `GET`/`POST` | `/api/projects` | List and create projects |
 | `GET`/`PUT`/`DELETE` | `/api/projects/{id}` | Read, rename, delete a project |
 | `GET` | `/api/projects/{id}/documents` | Documents in a project |
-| `POST` | `/api/projects/{id}/upload` | Upload a file (PDF, txt, md) |
+| `POST` | `/api/projects/{id}/upload` | Upload a file (PDF, DOCX, PPTX, XLSX, EPUB, txt, md) |
 | `POST` | `/api/projects/{id}/upload-url` | Import a web page |
 | `POST` | `/api/projects/{id}/upload-youtube` | Import a YouTube transcript |
 | `GET` | `/api/docs/{id}`, `/api/docs/{id}/status` | Document detail and ingest status |

@@ -455,7 +455,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   >
                     <h3 className="font-medium text-base mb-1.5">Quick start</h3>
                     <p className="text-sm text-[var(--muted-foreground)]">
-                      Upload PDFs, web pages, or YouTube videos
+                      Upload files, web pages, or YouTube videos
                     </p>
                   </div>
                   <div

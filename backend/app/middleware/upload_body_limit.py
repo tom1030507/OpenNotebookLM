@@ -1,4 +1,4 @@
-"""Pre-parser ASGI cap for PDF upload and pasted-text request bodies."""
+"""Pre-parser ASGI cap for file uploads and pasted-text request bodies."""
 import json
 from typing import Awaitable, Callable, Dict
 
@@ -11,7 +11,7 @@ class _UploadBodyTooLarge(Exception):
 
 
 class UploadBodyLimitMiddleware:
-    """Reject oversized PDF multipart bodies before FastAPI parses the form."""
+    """Reject oversized multipart file bodies before FastAPI parses the form."""
 
     def __init__(
         self,
@@ -37,7 +37,7 @@ class UploadBodyLimitMiddleware:
         self.configured_limit_mb = configured_limit_mb
 
     async def __call__(self, scope: Dict, receive: Callable, send: Callable) -> None:
-        """Apply the cap to the PDF upload route and delegate other requests.
+        """Apply the cap to the source upload route and delegate other requests.
 
         Args:
             scope: ASGI connection scope.
@@ -76,7 +76,7 @@ class UploadBodyLimitMiddleware:
             await self._send_too_large(send)
 
     def _is_limited_upload(self, scope: Dict) -> bool:
-        """Return whether this is the multipart PDF upload endpoint."""
+        """Return whether this is the multipart source upload endpoint."""
         if scope.get("type") != "http" or scope.get("method") != "POST":
             return False
         path = scope.get("path", "").rstrip("/")

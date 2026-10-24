@@ -88,7 +88,7 @@ class Document(Base):
     # no answer to "whose is this?".
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
     title = Column(String, nullable=False)
-    source_type = Column(String, nullable=False)  # pdf, url, youtube, text
+    source_type = Column(String, nullable=False)  # pdf, office extension, url, youtube, text
     source_url = Column(Text)
     content = Column(Text)  # Full content for reference
     meta_json = Column(JSON, default={})
