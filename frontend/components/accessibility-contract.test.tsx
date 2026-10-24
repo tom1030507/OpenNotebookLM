@@ -174,7 +174,7 @@ describe('workspace accessibility contract', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Create New Project' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Project Name *' }));
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Project Name' }));
     expect(screen.getByRole('button', { name: closeProjectDialog })).toBeTruthy();
 
     fireEvent.keyDown(dialog, { key: 'Escape' });
@@ -252,14 +252,15 @@ describe('workspace accessibility contract', () => {
 
     fireEvent.click(screen.getByRole('button', { name: openProjectDialog }));
     const closeButton = screen.getByRole('button', { name: closeProjectDialog });
-    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    // The name is optional, so Create is enabled and is the last control.
+    const createButton = screen.getByRole('button', { name: 'Create Project' });
 
     closeButton.focus();
     fireEvent.keyDown(closeButton, { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(cancelButton);
+    expect(document.activeElement).toBe(createButton);
 
-    cancelButton.focus();
-    fireEvent.keyDown(cancelButton, { key: 'Tab' });
+    createButton.focus();
+    fireEvent.keyDown(createButton, { key: 'Tab' });
     expect(document.activeElement).toBe(closeButton);
   });
 
@@ -281,7 +282,7 @@ describe('workspace accessibility contract', () => {
     const trigger = screen.getByRole('button', { name: openProjectDialog });
     trigger.focus();
     fireEvent.click(trigger);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Project Name *' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Project Name' }), {
       target: { value: 'Busy project' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
@@ -390,7 +391,7 @@ describe('workspace accessibility contract', () => {
         trigger: openProjectDialog,
         dialog: 'Create New Project',
         initialRole: 'textbox',
-        initialFocus: 'Project Name *',
+        initialFocus: 'Project Name',
       },
       {
         Harness: DocumentPreviewHarness,

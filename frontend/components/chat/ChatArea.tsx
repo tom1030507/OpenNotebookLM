@@ -26,6 +26,7 @@ import BrandLogo from '../BrandLogo';
 import { useOptionalProjectDialog } from '../ProjectDialogProvider';
 import ChatSettingsDialog from './ChatSettingsDialog';
 import SaveToNoteButton from './SaveToNoteButton';
+import { FollowUpQuestions, ProjectOverview } from './SuggestedQuestions';
 
 interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
@@ -165,6 +166,9 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
   const [pendingQuery, setPendingQuery] = useState<PendingQuery | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(false);
+  // Follow-ups cost a model call, so they are offered for answers given in this
+  // session rather than regenerated every time an old conversation is opened.
+  const [followUpConversationId, setFollowUpConversationId] = useState<string | null>(null);
   const nextRequestIdRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -223,6 +227,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
             : pending
         ));
       });
+      setFollowUpConversationId(useStore.getState().currentConversation?.id ?? null);
     } catch (error) {
       console.error('Failed to send query:', error);
       const message = error instanceof Error ? error.message : 'Unable to send the question.';
@@ -308,7 +313,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   };
   
   // Check if ready to chat
-  const readyDocumentCount = documents.filter(d => d.status === 'ready').length;
+  const readyDocumentIds = documents.filter(d => d.status === 'ready').map(d => d.id);
+  const readyDocumentCount = readyDocumentIds.length;
   const hasDocuments = readyDocumentCount > 0;
   const canChat = currentProject && hasDocuments;
   const canAddSources = Boolean(currentProject);
@@ -349,6 +355,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
           created_at: '',
         },
       ];
+  const lastMessage = visibleMessages[visibleMessages.length - 1];
 
   const handleRequestAddSources = () => {
     requestAddSources(canAddSources, onAddSourcesOpenChange);
@@ -399,6 +406,14 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     ? 'OpenNotebookLM can be inaccurate. Please verify its responses.'
                     : 'Answers are grounded in the sources you add, and cite them.'}
               </p>
+
+              {currentProject && hasDocuments && (
+                <ProjectOverview
+                  projectId={currentProject.id}
+                  readySourceKey={readyDocumentIds.sort().join(',')}
+                  onAsk={(question) => void submitQuery(question)}
+                />
+              )}
 
               <button
                 type="button"
@@ -462,7 +477,18 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               {visibleMessages.map((message) => (
                 <MessageRow key={message.id} message={message} />
               ))}
-              
+
+              {/* While a question is pending the last message is the user's, so
+                  a follow-up cannot be clicked mid-request. */}
+              {lastMessage?.role === 'assistant' && currentConversation
+                && currentConversation.id === followUpConversationId && (
+                <FollowUpQuestions
+                  conversationId={currentConversation.id}
+                  messageId={lastMessage.id}
+                  onAsk={(question) => void submitQuery(question)}
+                />
+              )}
+
               {isStreaming && (
                 <div className="flex gap-3">
                   <BrandLogo className="w-8 h-8 flex-shrink-0" />

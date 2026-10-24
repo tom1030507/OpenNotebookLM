@@ -38,16 +38,15 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!name.trim()) {
-      setError('Please enter a project name');
-      return;
-    }
-
     setIsCreating(true);
     setError('');
 
     try {
-      const project = await createProject(name.trim(), description.trim() || undefined);
+      const project = await createProject(
+        // Left blank, the project is titled from its sources once they are read.
+        name.trim() || undefined,
+        description.trim() || undefined,
+      );
       if (!project) return;
       selectProject(project);
       setName('');
@@ -103,14 +102,14 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
 
           <div>
             <label htmlFor="name" className="block text-sm font-medium mb-2">
-              {'Project Name'} <span className="text-red-500">*</span>
+              {'Project Name'}
             </label>
             <input
               id="name"
               type="text"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder={'e.g. Research Papers, Meeting Notes'}
+              placeholder={'Leave blank to name it from your sources'}
               className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
               ref={nameInputRef}
               disabled={isCreating}
@@ -148,7 +147,7 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
             </button>
             <button
               type="submit"
-              disabled={isCreating || !name.trim()}
+              disabled={isCreating}
               className="px-4 py-2 text-sm bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {isCreating ? (
