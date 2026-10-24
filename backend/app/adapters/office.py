@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 import zipfile
+import zlib
 from xml.etree import ElementTree
 from typing import Any, Dict, Optional
 
@@ -31,6 +32,7 @@ _OFFICE_PACKAGE_PARTS = {
     ".epub": {"META-INF/container.xml", "mimetype"},
 }
 _SLIDE_MARKER = re.compile(r"<!--\s*Slide number:\s*(\d+)\s*-->")
+_CELL_REFERENCE = re.compile(r"^([A-Za-z]{1,3})([1-9][0-9]*)$")
 
 
 class InvalidOfficeFileError(ValueError):
@@ -80,14 +82,30 @@ class OfficeAdapter:
                         % extension[1:].upper()
                     )
 
+                corrupt_part = archive.testzip()
+                if corrupt_part is not None:
+                    raise InvalidOfficeFileError(
+                        "The %s file contains a corrupted package part"
+                        % extension[1:].upper()
+                    )
+
+                self._validate_package_xml(archive, names, extension)
+
                 if extension == ".epub":
                     if archive.read("mimetype") != b"application/epub+zip":
                         raise InvalidOfficeFileError("The EPUB file has an invalid mimetype")
-                elif extension == ".xlsx":
-                    self._validate_spreadsheet_cells(archive, names)
         except InvalidOfficeFileError:
             raise
-        except (OSError, zipfile.BadZipFile, ElementTree.ParseError, KeyError) as error:
+        except (
+            OSError,
+            EOFError,
+            zipfile.BadZipFile,
+            ElementTree.ParseError,
+            KeyError,
+            RuntimeError,
+            NotImplementedError,
+            zlib.error,
+        ) as error:
             raise InvalidOfficeFileError(
                 "The %s file is not a valid Office document" % extension[1:].upper()
             ) from error
@@ -139,42 +157,97 @@ class OfficeAdapter:
         normalized = extension.strip().lower()
         return normalized if normalized.startswith(".") else "." + normalized
 
-    @staticmethod
-    def _validate_spreadsheet_cells(
+    @classmethod
+    def _validate_package_xml(
+        cls,
         archive: zipfile.ZipFile,
         names: set[str],
+        extension: str,
     ) -> None:
-        """Count actual worksheet cells before pandas materializes the file.
+        """Stream-parse package XML and bound XLSX conversion grid size.
 
         Args:
-            archive: Open XLSX package.
+            archive: Open Office or EPUB package.
             names: Package member names.
+            extension: Normalized package extension.
 
         Returns:
             None.
 
         Raises:
-            InvalidOfficeFileError: If the workbook is malformed or too large.
+            InvalidOfficeFileError: If package XML is invalid or XLSX is too large.
         """
-        worksheet_names = sorted(
+        xml_names = sorted(
             name for name in names
-            if name.startswith("xl/worksheets/") and name.endswith(".xml")
+            if name.lower().endswith((".xml", ".rels", ".opf", ".xhtml"))
         )
-        if not worksheet_names:
+        worksheet_names = {
+            name for name in xml_names
+            if name.startswith("xl/worksheets/") and name.endswith(".xml")
+        }
+        if extension == ".xlsx" and not worksheet_names:
             raise InvalidOfficeFileError("The XLSX file contains no worksheets")
 
         cell_count = 0
-        for name in worksheet_names:
-            with archive.open(name) as worksheet:
-                for _, element in ElementTree.iterparse(worksheet, events=("start",)):
-                    if element.tag.rsplit("}", 1)[-1] == "c":
+        total_grid_cells = 0
+        for name in xml_names:
+            is_worksheet = name in worksheet_names
+            max_row = 0
+            max_column = 0
+            with archive.open(name) as xml_file:
+                for _, element in ElementTree.iterparse(xml_file, events=("start",)):
+                    if (
+                        extension == ".xlsx"
+                        and is_worksheet
+                        and element.tag.rsplit("}", 1)[-1] == "c"
+                    ):
                         cell_count += 1
                         if cell_count > MAX_SPREADSHEET_CELLS:
                             raise InvalidOfficeFileError(
                                 "The XLSX file exceeds the %s cell limit"
                                 % MAX_SPREADSHEET_CELLS
                             )
+                        cell_reference = element.attrib.get("r", "")
+                        dimensions = cls._cell_reference_dimensions(cell_reference)
+                        max_column = max(max_column, dimensions[0])
+                        max_row = max(max_row, dimensions[1])
                     element.clear()
+
+            if extension == ".xlsx" and is_worksheet:
+                # pandas creates a rectangular DataFrame through the furthest
+                # row and column; sparse references can otherwise allocate a
+                # huge grid despite containing very few stored cells.
+                total_grid_cells += max_row * max_column
+                if total_grid_cells > MAX_SPREADSHEET_CELLS:
+                    raise InvalidOfficeFileError(
+                        "The XLSX file exceeds the %s cell limit"
+                        % MAX_SPREADSHEET_CELLS
+                    )
+
+    @staticmethod
+    def _cell_reference_dimensions(cell_reference: str) -> tuple[int, int]:
+        """Return one XLSX cell's column and row after validating its address.
+
+        Args:
+            cell_reference: A cell address such as ``BC42``.
+
+        Returns:
+            One-based column and row numbers.
+
+        Raises:
+            InvalidOfficeFileError: If the address is malformed or outside XLSX bounds.
+        """
+        match = _CELL_REFERENCE.fullmatch(cell_reference)
+        if match is None:
+            raise InvalidOfficeFileError("The XLSX file contains an invalid cell reference")
+
+        column = 0
+        for letter in match.group(1).upper():
+            column = column * 26 + ord(letter) - ord("A") + 1
+        row = int(match.group(2))
+        if column > 16_384 or row > 1_048_576:
+            raise InvalidOfficeFileError("The XLSX file contains an invalid cell reference")
+        return column, row
 
     @staticmethod
     def _format_slides(markdown: str) -> str:

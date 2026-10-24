@@ -10,7 +10,7 @@ from app.adapters.office import (
 )
 
 
-def write_docx(path: Path) -> None:
+def write_docx(path: Path, document_xml: str | None = None) -> None:
     """Create a small OpenXML Word document without storing a binary fixture."""
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
@@ -28,11 +28,13 @@ def write_docx(path: Path) -> None:
         )
         archive.writestr(
             "word/document.xml",
-            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-            '<w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-            '<w:r><w:t>Chapter One</w:t></w:r></w:p>'
-            '<w:p><w:r><w:t>Useful paragraph content.</w:t></w:r></w:p>'
-            '<w:sectPr/></w:body></w:document>',
+            document_xml or (
+                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                '<w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+                '<w:r><w:t>Chapter One</w:t></w:r></w:p>'
+                '<w:p><w:r><w:t>Useful paragraph content.</w:t></w:r></w:p>'
+                '<w:sectPr/></w:body></w:document>'
+            ),
         )
 
 
@@ -156,6 +158,37 @@ def test_non_archive_renamed_as_docx_is_rejected(tmp_path):
         OfficeAdapter().validate_file(str(path), ".docx")
 
 
+def test_docx_with_malformed_required_xml_is_rejected(tmp_path):
+    """A package with the right names but broken XML cannot enter the queue."""
+    path = tmp_path / "malformed.docx"
+    write_docx(path, document_xml="<w:document><w:body>")
+
+    with pytest.raises(InvalidOfficeFileError, match="valid Office document"):
+        OfficeAdapter().validate_file(str(path), ".docx")
+
+
+def test_docx_with_corrupted_package_part_is_rejected(tmp_path):
+    """A bad CRC in a non-XML member is caught before MarkItDown reads it."""
+    path = tmp_path / "corrupted.docx"
+    write_docx(path)
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.writestr("word/media/image1.png", b"image bytes")
+    with zipfile.ZipFile(path) as archive:
+        part = archive.getinfo("word/media/image1.png")
+    data_offset = (
+        part.header_offset
+        + 30
+        + len(part.filename.encode("utf-8"))
+        + len(part.extra)
+    )
+    with path.open("r+b") as package:
+        package.seek(data_offset)
+        package.write(bytes([package.read(1)[0] ^ 1]))
+
+    with pytest.raises(InvalidOfficeFileError, match="corrupted package part"):
+        OfficeAdapter().validate_file(str(path), ".docx")
+
+
 def test_xlsx_above_cell_cap_is_rejected(tmp_path, monkeypatch):
     """The configured worksheet cell ceiling is checked before pandas loads it."""
     from openpyxl import Workbook
@@ -182,4 +215,21 @@ def test_xlsx_within_the_cell_cap_is_accepted(tmp_path):
     workbook.save(path)
 
     OfficeAdapter().validate_file(str(path), ".xlsx")
+
+
+def test_xlsx_sparse_cells_exceeding_grid_cap_are_rejected(tmp_path, monkeypatch):
+    """Far-apart populated cells cannot expand into an oversized DataFrame."""
+    from openpyxl import Workbook
+    import app.adapters.office as office
+
+    path = tmp_path / "sparse.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "first"
+    sheet["Z100"] = "last"
+    workbook.save(path)
+    monkeypatch.setattr(office, "MAX_SPREADSHEET_CELLS", 10)
+
+    with pytest.raises(InvalidOfficeFileError, match="cell limit"):
+        OfficeAdapter().validate_file(str(path), ".xlsx")
 
