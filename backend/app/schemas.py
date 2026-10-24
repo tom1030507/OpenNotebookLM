@@ -1,6 +1,6 @@
 """Pydantic schemas for API models."""
 from datetime import datetime
-from typing import Annotated, Optional, List, Dict, Any
+from typing import Annotated, Optional, List, Dict, Any, Literal
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from app.utils.time import as_utc
@@ -109,6 +109,18 @@ class ProjectResponse(ProjectBase):
     
     class Config:
         from_attributes = True
+
+
+# Custom instructions ride along with every question, so an unbounded block would
+# eat into the prompt budget the retrieved passages need.
+CHAT_INSTRUCTIONS_MAX_LENGTH = 2000
+
+
+class ChatSettings(BaseModel):
+    """How a project's chat answers: the role it plays and how long it runs."""
+    role: Literal["default", "learning_guide", "custom"] = "default"
+    instructions: str = Field("", max_length=CHAT_INSTRUCTIONS_MAX_LENGTH)
+    answer_length: Literal["default", "longer", "shorter"] = "default"
 
 
 class ProjectListResponse(BaseModel):

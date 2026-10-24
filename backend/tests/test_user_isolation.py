@@ -219,6 +219,14 @@ class TestProjectIsolation:
         project_id = make_project(env.alice)
         assert env.bob.get("/api/projects/%s/documents" % project_id).status_code == 404
 
+    def test_someone_elses_chat_settings_are_not_found(self, env):
+        project_id = make_project(env.alice)
+        url = "/api/projects/%s/chat-settings" % project_id
+
+        assert env.bob.get(url).status_code == 404
+        assert env.bob.put(url, json={"role": "learning_guide"}).status_code == 404
+        assert env.alice.get(url).json()["role"] == "default"
+
     def test_your_own_project_is_reachable(self, env):
         project_id = make_project(env.alice)
         assert env.alice.get("/api/projects/%s" % project_id).status_code == 200

@@ -31,6 +31,11 @@ class Project(Base):
     meta_json = Column(JSON, default={})
     created_at = Column(UTCDateTime, default=func.now())
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
+    # Chat settings applied to every answer in the project. Null on rows that
+    # predate them, which reads as "default" (see ProjectService.get_chat_settings).
+    chat_role = Column(String)
+    chat_instructions = Column(Text)
+    answer_length = Column(String)
     
     # Relationships
     owner = relationship("User", back_populates="projects")

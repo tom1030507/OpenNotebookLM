@@ -80,7 +80,13 @@ class TestUpgrade:
     def test_columns_are_added(self, old_database):
         added = ensure_added_columns(old_database)
 
-        assert sorted(added) == ["documents.user_id", "projects.user_id"]
+        assert sorted(added) == [
+            "documents.user_id",
+            "projects.answer_length",
+            "projects.chat_instructions",
+            "projects.chat_role",
+            "projects.user_id",
+        ]
         inspector = inspect(old_database)
         for table, column, _, _ in ADDED_COLUMNS:
             if table not in inspector.get_table_names():

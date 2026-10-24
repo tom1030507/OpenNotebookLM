@@ -6,7 +6,7 @@ from sqlalchemy import func
 import structlog
 
 from app.db.models import Project, ProjectDocument, Document, Conversation
-from app.schemas import ProjectCreate, ProjectUpdate
+from app.schemas import ChatSettings, ProjectCreate, ProjectUpdate
 
 logger = structlog.get_logger()
 
@@ -134,6 +134,45 @@ class ProjectService:
         logger.info("Project updated", project_id=project_id)
         return project
     
+    @staticmethod
+    def get_chat_settings(project: Project) -> ChatSettings:
+        """Read a project's chat settings.
+
+        Args:
+            project: The project row.
+
+        Returns:
+            Its settings, with "default" for any never set.
+        """
+        return ChatSettings(
+            role=project.chat_role or "default",
+            instructions=project.chat_instructions or "",
+            answer_length=project.answer_length or "default",
+        )
+
+    @staticmethod
+    def update_chat_settings(
+        db: Session, project: Project, chat_settings: ChatSettings
+    ) -> ChatSettings:
+        """Replace a project's chat settings.
+
+        Args:
+            db: Database session
+            project: The project row, already checked for ownership
+            chat_settings: The new settings
+
+        Returns:
+            The settings as stored.
+        """
+        project.chat_role = chat_settings.role
+        project.chat_instructions = chat_settings.instructions
+        project.answer_length = chat_settings.answer_length
+        db.commit()
+        db.refresh(project)
+
+        logger.info("Project chat settings updated", project_id=project.id)
+        return ProjectService.get_chat_settings(project)
+
     @staticmethod
     def delete_project(db: Session, project_id: str) -> bool:
         """Delete a project."""
