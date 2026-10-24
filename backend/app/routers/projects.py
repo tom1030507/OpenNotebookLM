@@ -6,7 +6,7 @@ import structlog
 
 from app.db.database import get_db
 from app.schemas import (
-    ProjectCreate, ProjectUpdate, ProjectResponse, 
+    ChatSettings, ProjectCreate, ProjectUpdate, ProjectResponse, 
     ProjectListResponse, DocumentResponse
 )
 from app.db.models import User
@@ -141,6 +141,29 @@ async def delete_project(
     ProjectService.delete_project(db, project_id)
     
     return {"status": "success", "message": "Project deleted successfully"}
+
+
+@router.get("/projects/{project_id}/chat-settings", response_model=ChatSettings)
+async def get_chat_settings(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get the chat settings of one of the caller's projects."""
+    project = require_project(db, project_id, current_user)
+    return ProjectService.get_chat_settings(project)
+
+
+@router.put("/projects/{project_id}/chat-settings", response_model=ChatSettings)
+async def update_chat_settings(
+    project_id: str,
+    chat_settings: ChatSettings,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Replace the chat settings of one of the caller's projects."""
+    project = require_project(db, project_id, current_user)
+    return ProjectService.update_chat_settings(db, project, chat_settings)
 
 
 @router.get("/projects/{project_id}/documents", response_model=list[DocumentResponse])

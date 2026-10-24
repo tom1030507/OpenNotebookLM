@@ -8,7 +8,8 @@ import {
   FolderPlus,
   ChevronRight,
   MessageSquare,
-  Loader2
+  Loader2,
+  SlidersHorizontal
 } from 'lucide-react';
 import useStore, { QueryMessageRefreshError } from '@/store/useStore';
 import {
@@ -21,6 +22,7 @@ import type { Message } from '@/lib/api';
 import { citationId, referencedCitationIds } from '@/lib/citations';
 import BrandLogo from '../BrandLogo';
 import { useOptionalProjectDialog } from '../ProjectDialogProvider';
+import ChatSettingsDialog from './ChatSettingsDialog';
 
 interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
@@ -113,6 +115,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
 export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
   const [pendingQuery, setPendingQuery] = useState<PendingQuery | null>(null);
+  const [showChatSettings, setShowChatSettings] = useState(false);
   const nextRequestIdRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -457,6 +460,17 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 <Paperclip className="w-5 h-5" />
               </button>
             )}
+            {currentProject && (
+              <button
+                type="button"
+                onClick={() => setShowChatSettings(true)}
+                aria-label={'Chat settings'}
+                title={'Chat settings'}
+                className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base"
+              >
+                <SlidersHorizontal className="w-5 h-5" />
+              </button>
+            )}
             
             <div className="min-w-0 flex-1 relative">
               <textarea
@@ -513,6 +527,13 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
           )}
         </div>
       </div>
+
+      {showChatSettings && currentProject && (
+        <ChatSettingsDialog
+          projectId={currentProject.id}
+          onClose={() => setShowChatSettings(false)}
+        />
+      )}
     </div>
   );
 }

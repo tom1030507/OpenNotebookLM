@@ -17,6 +17,15 @@ export interface Project {
   conversation_count: number;
 }
 
+export type ChatRole = 'default' | 'learning_guide' | 'custom';
+export type AnswerLength = 'default' | 'longer' | 'shorter';
+
+export interface ChatSettings {
+  role: ChatRole;
+  instructions: string;
+  answer_length: AnswerLength;
+}
+
 export type DocumentStatus = 'queued' | 'processing' | 'ready' | 'error';
 export type DocumentType = 'pdf' | 'url' | 'youtube' | 'text';
 
@@ -613,6 +622,17 @@ const api = {
 
   async deleteProject(projectId: string): Promise<void> {
     await requestJson(`/projects/${projectId}`, { method: 'DELETE' });
+  },
+
+  getChatSettings(projectId: string): Promise<ChatSettings> {
+    return requestJson<ChatSettings>(`/projects/${projectId}/chat-settings`);
+  },
+
+  updateChatSettings(projectId: string, settings: ChatSettings): Promise<ChatSettings> {
+    return requestJson<ChatSettings>(`/projects/${projectId}/chat-settings`, {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    });
   },
 
   /**

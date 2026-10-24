@@ -242,3 +242,36 @@ if __name__ == "__main__":
     test_delete_project()
     print("✓ Delete project test passed")
     print("\n✅ All tests passed!")
+
+
+def test_chat_settings_default_until_set():
+    """A new project answers with the default role and length."""
+    project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
+
+    response = client.get(f"/api/projects/{project_id}/chat-settings")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "role": "default", "instructions": "", "answer_length": "default"}
+
+
+def test_chat_settings_persist():
+    """Saved chat settings are what the project reads back."""
+    project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
+    settings = {"role": "custom", "instructions": "Answer as a terse reviewer.",
+                "answer_length": "shorter"}
+
+    assert client.put(
+        f"/api/projects/{project_id}/chat-settings", json=settings).json() == settings
+    assert client.get(f"/api/projects/{project_id}/chat-settings").json() == settings
+
+
+def test_chat_settings_reject_unknown_values_and_long_instructions():
+    """Only the listed roles and lengths are accepted, and instructions are capped."""
+    project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
+    url = f"/api/projects/{project_id}/chat-settings"
+
+    assert client.put(url, json={"role": "pirate"}).status_code == 422
+    assert client.put(url, json={"answer_length": "epic"}).status_code == 422
+    assert client.put(url, json={"instructions": "x" * 2001}).status_code == 422
+    assert client.get(url).json()["role"] == "default"

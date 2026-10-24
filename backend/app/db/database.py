@@ -115,6 +115,9 @@ ADDED_COLUMNS = (
         "TEXT",
         None,
     ),
+    ("projects", "chat_role", "VARCHAR", None),
+    ("projects", "chat_instructions", "TEXT", None),
+    ("projects", "answer_length", "VARCHAR", None),
 )
 
 
