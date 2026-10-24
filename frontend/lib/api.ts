@@ -67,6 +67,18 @@ export interface Message {
   citations?: Citation[];
 }
 
+export interface Note {
+  id: string;
+  project_id: string;
+  title: string;
+  /** Markdown. A saved answer carries its source list in here. */
+  content: string;
+  origin: 'manual' | 'answer';
+  source_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface QueryRequest {
   project_id: string;
   query: string;
@@ -790,6 +802,36 @@ const api = {
     return requestDetachedExportBlob(`/export/project/${projectId}/summary`, {
       method: 'POST',
     });
+  },
+
+  listNotes(projectId: string): Promise<Note[]> {
+    return requestJson<Note[]>(`/projects/${projectId}/notes`);
+  },
+
+  /** With `source_message_id` the server writes the content from that answer. */
+  createNote(
+    projectId: string,
+    note: { title: string; content?: string; source_message_id?: string },
+  ): Promise<Note> {
+    return requestJson<Note>(`/projects/${projectId}/notes`, {
+      method: 'POST',
+      body: JSON.stringify(note),
+    });
+  },
+
+  updateNote(
+    projectId: string,
+    noteId: string,
+    changes: { title?: string; content?: string },
+  ): Promise<Note> {
+    return requestJson<Note>(`/projects/${projectId}/notes/${noteId}`, {
+      method: 'PUT',
+      body: JSON.stringify(changes),
+    });
+  },
+
+  async deleteNote(projectId: string, noteId: string): Promise<void> {
+    await requestJson(`/projects/${projectId}/notes/${noteId}`, { method: 'DELETE' });
   },
 
   /** The same summary as text, for reading aloud rather than downloading. */
