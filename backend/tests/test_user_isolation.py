@@ -1011,6 +1011,13 @@ class TestExportIsolation:
         )
         assert bob_created.status_code == 200, bob_created.text
         bob_conversation = bob_created.json()["id"]
+        project = env.session.get(Project, project_id)
+        project.overview_json = {
+            "overview": "A summary of the shared source.",
+            "questions": [],
+            "source_ids": [linked],
+        }
+        env.session.commit()
 
         bob_export = env.bob.get(
             "/api/export/project/%s?format=json" % project_id
@@ -1033,11 +1040,12 @@ class TestExportIsolation:
         assert [doc["id"] for doc in bob_data["documents"]] == [linked]
         assert [row["id"] for row in bob_data["conversations"]] == [bob_conversation]
         assert bob_summary.status_code == 200
-        assert "**Conversations**: 1" in bob_summary.text
-        assert "Bob private" in bob_summary.text
+        assert "A summary of the shared source." in bob_summary.text
+        assert "**Conversations**" not in bob_summary.text
+        assert "Bob private" not in bob_summary.text
         assert "Alice private" not in bob_summary.text
         assert bob_selected_summary.status_code == 200
-        assert "Shared export source" in bob_selected_summary.text
+        assert "A summary of the shared source." in bob_selected_summary.text
         assert rejected_selection.status_code == 404
 
         assert alice_export.status_code == 200
@@ -1330,6 +1338,27 @@ SELECTION_ROUTES = [
 class TestSourceSelectionIsolation:
     """A source selection names document ids, so every one is checked."""
 
+    def _install_summary_stub(self, monkeypatch):
+        service = ProjectOverviewService(llm_service=OfflineLLM())
+        generated_titles = []
+
+        def generate(documents):
+            titles = [document.title for document in documents]
+            generated_titles.append(titles)
+            return {
+                "title": None,
+                "overview": "Summary of " + ", ".join(titles),
+                "questions": [],
+            }
+
+        monkeypatch.setattr(service, "_generate", generate)
+        monkeypatch.setitem(
+            production_app.dependency_overrides,
+            get_project_overview_service,
+            lambda: service,
+        )
+        return generated_titles
+
     def _own_project_with_two_sources(self, env):
         project_id = make_project(env.alice)
         kept = make_document(env.session, env.alice_user, "Kept source")
@@ -1395,8 +1424,9 @@ class TestSourceSelectionIsolation:
         sources = [s["document_id"] for s in response.json()["scenes"] if s["kind"] == "source"]
         assert sources == [kept]
 
-    def test_the_report_covers_only_the_selection(self, env):
+    def test_the_report_summarizes_only_the_selection(self, env, monkeypatch):
         project_id, kept = self._own_project_with_two_sources(env)
+        generated_titles = self._install_summary_stub(monkeypatch)
 
         response = env.alice.post(
             "/api/export/project/%s/summary" % project_id,
@@ -1404,16 +1434,21 @@ class TestSourceSelectionIsolation:
         )
 
         assert response.status_code == 200
-        assert "Kept source" in response.text
+        assert "Summary of Kept source" in response.text
         assert "Dropped source" not in response.text
+        assert generated_titles == [["Kept source"]]
 
-    def test_omitting_the_selection_keeps_every_source(self, env):
+    def test_omitting_the_selection_summarizes_every_source(self, env, monkeypatch):
         project_id, _ = self._own_project_with_two_sources(env)
+        generated_titles = self._install_summary_stub(monkeypatch)
 
         response = env.alice.post("/api/export/project/%s/summary" % project_id)
 
-        assert "Kept source" in response.text
+        assert response.status_code == 200
+        assert "Summary of " in response.text
         assert "Dropped source" in response.text
+        assert "Kept source" in response.text
+        assert set(generated_titles[0]) == {"Dropped source", "Kept source"}
 
 
 class TestProjectOverviewIsolation:

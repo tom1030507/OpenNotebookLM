@@ -12,21 +12,12 @@ from app.db.models import User
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_conversation, require_project
 from app.schemas import FollowUpResponse, ProjectOverviewResponse
-from app.services.project_overview import ProjectOverviewService
+from app.services.project_overview import (
+    ProjectOverviewService,
+    get_project_overview_service,
+)
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
-
-_service = ProjectOverviewService()
-
-
-def get_project_overview_service() -> ProjectOverviewService:
-    """Provide the shared service; a dependency so tests can inject an offline model.
-
-    Returns:
-        The shared service.
-    """
-    return _service
-
 
 @router.get("/projects/{project_id}/overview", response_model=ProjectOverviewResponse)
 def project_overview(

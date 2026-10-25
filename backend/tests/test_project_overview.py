@@ -130,6 +130,9 @@ def test_no_ready_source_means_no_overview_and_no_model_call(env):
     add_source(session_factory, project_id, status="processing")
 
     body = client.get("/api/projects/%s/overview" % project_id).json()
+    with session_factory() as db:
+        project = db.get(Project, project_id)
+        assert ProjectOverviewService(llm_service=llm).summary(db, project) is None
 
     assert body == {"project_name": "Untitled notebook", "overview": None, "questions": []}
     assert llm.prompts == []
@@ -151,6 +154,43 @@ def test_overview_is_generated_stored_and_titles_an_untitled_project(env):
     assert second == first
     assert len(llm.prompts) == 1
     assert client.get("/api/projects/%s" % project_id).json()["name"] == "Glacier Retreat"
+
+
+def test_summary_reuses_the_overview_for_all_ready_sources(env):
+    client, session_factory, llm = env
+    project_id = client.post("/api/projects", json={}).json()["id"]
+    add_source(session_factory, project_id)
+
+    with session_factory() as db:
+        project = db.get(Project, project_id)
+        service = ProjectOverviewService(llm_service=llm)
+        first = service.summary(db, project)
+        second = service.summary(db, project)
+
+    assert first == second == OVERVIEW_REPLY["overview"]
+    assert len(llm.prompts) == 1
+
+
+def test_summary_for_a_source_subset_does_not_overwrite_the_project_overview(env):
+    client, session_factory, llm = env
+    project_id = client.post(
+        "/api/projects", json={"name": "My sources"}
+    ).json()["id"]
+    selected_id = add_source(session_factory, project_id, title="Volcanoes")
+    add_source(session_factory, project_id, title="Sea ice")
+
+    with session_factory() as db:
+        project = db.get(Project, project_id)
+        summary = ProjectOverviewService(llm_service=llm).summary(
+            db, project, [selected_id]
+        )
+
+        assert project.name == "My sources"
+        assert project.overview_json is None
+
+    assert summary == OVERVIEW_REPLY["overview"]
+    assert "Source 1: Volcanoes" in llm.prompts[0]
+    assert "Sea ice" not in llm.prompts[0]
 
 
 def test_a_changed_source_set_regenerates(env):
