@@ -4,7 +4,6 @@ import {
   type SessionCredentialSnapshot,
 } from './session';
 import { retireCurrentSession } from './sessionBoundary';
-import { isSupportedUploadFileName } from './uploadValidation';
 
 
 export interface Project {
@@ -19,6 +18,11 @@ export interface Project {
   role: ProjectRole;
   cover_emoji?: string | null;
   cover_color?: string | null;
+}
+
+export interface UploadConfig {
+  allowed_file_types: string[];
+  max_file_size_mb: number;
 }
 
 export type ProjectAnalyticsWindow = 7 | 30 | 90;
@@ -865,11 +869,11 @@ const api = {
     return documents.map(normalizeDocument);
   },
 
-  uploadDocument(projectId: string, file: File): Promise<Document> {
-    if (!isSupportedUploadFileName(file.name)) {
-      return Promise.reject(new Error(`${file.name} is not a supported file type`));
-    }
+  getUploadConfig(): Promise<UploadConfig> {
+    return requestJson<UploadConfig>('/upload-config');
+  },
 
+  uploadDocument(projectId: string, file: File): Promise<Document> {
     const formData = new FormData();
     formData.append('file', file);
     return completeDocumentCreation(requestJson<FileUploadResponse>(

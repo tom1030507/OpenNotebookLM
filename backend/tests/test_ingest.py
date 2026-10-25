@@ -98,6 +98,23 @@ def test_upload_route_returns_413_before_calling_the_document_service(monkeypatc
     assert response.status_code == 413
 
 
+def test_upload_config_reports_effective_runtime_limits(monkeypatch):
+    """The client sees only formats that the current backend accepts."""
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    monkeypatch.setattr(ingest.settings, "allowed_file_types", "PDF, .txt, docx, exe")
+    monkeypatch.setattr(ingest.settings, "max_file_size_mb", 23)
+
+    response = TestClient(app).get("/api/upload-config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "allowed_file_types": ["docx", "pdf", "txt"],
+        "max_file_size_mb": 23,
+    }
+
+
 def test_upload_route_rejects_oversized_content_length_before_service(monkeypatch):
     """A declared oversized request is refused before its file is copied."""
     app = FastAPI()

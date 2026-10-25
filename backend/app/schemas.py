@@ -261,6 +261,12 @@ class DocumentStatusResponse(BaseModel):
 
 
 # Upload schemas
+class UploadConfigResponse(BaseModel):
+    """Runtime file constraints advertised to the source upload form."""
+    allowed_file_types: List[str]
+    max_file_size_mb: int
+
+
 class FileUploadResponse(BaseModel):
     """Schema for file upload response."""
     doc_id: str
