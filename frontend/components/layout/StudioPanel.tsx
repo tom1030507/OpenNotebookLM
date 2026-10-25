@@ -13,9 +13,11 @@ import {
   Square,
 } from 'lucide-react';
 import useStore, { selectedSourceIds } from '@/store/useStore';
+import useNotes from '@/store/useNotes';
 import api, { ApiError } from '@/lib/api';
-import type { MindMap, VideoSummary } from '@/lib/api';
+import type { MindMap, StudioNoteKind, VideoSummary } from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
+import MarkdownRenderer from '../MarkdownRenderer';
 import NotesSection from './NotesSection';
 
 const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
@@ -25,6 +27,18 @@ const AudioOverviewDialog = React.lazy(() => import('@/components/AudioOverviewD
 interface ProjectResult<T> {
   projectId: string;
   value: T;
+}
+
+async function saveStudioNote(
+  projectId: string,
+  title: string,
+  fields: { studio_kind: StudioNoteKind } & {
+    content?: string;
+    payload_json?: MindMap | VideoSummary;
+  },
+): Promise<void> {
+  const note = await api.createNote(projectId, { title: title.slice(0, 200), ...fields });
+  useNotes.getState().upsert(note);
 }
 
 const StudioDialogFallback = () => (
@@ -68,6 +82,8 @@ export default function StudioPanel({
   const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [report, setReport] = useState<ProjectResult<string> | null>(null);
+  const [reportSaveState, setReportSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
   const [mindMap, setMindMap] = useState<ProjectResult<MindMap> | null>(null);
@@ -128,6 +144,8 @@ export default function StudioPanel({
     setIsBuildingMindMap(false);
     setIsPreparingVideo(false);
     setMindMap(null);
+    setReport(null);
+    setReportSaveState('idle');
     setVideoSummary(null);
     setIsAudioOverviewOpen(false);
     setReportError('');
@@ -257,6 +275,8 @@ export default function StudioPanel({
 
     setIsGeneratingReport(true);
     setReportError('');
+    setReport(null);
+    setReportSaveState('idle');
 
     try {
       const blob = await api.exportProjectSummary(
@@ -264,6 +284,9 @@ export default function StudioPanel({
         selectedSourceIds(useStore.getState()),
       );
       if (!operation.isCurrent()) return;
+      const content = await blob.text();
+      if (!operation.isCurrent()) return;
+      setReport({ projectId: operation.project.id, value: content });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -302,6 +325,9 @@ export default function StudioPanel({
   // dialog from being rendered during the B commit that triggered that effect.
   const currentMindMap = mindMap !== null && mindMap.projectId === currentProject?.id
     ? mindMap.value
+    : null;
+  const currentReport = report !== null && report.projectId === currentProject?.id
+    ? report.value
     : null;
   const currentVideoSummary = videoSummary !== null && videoSummary.projectId === currentProject?.id
     ? videoSummary.value
@@ -499,6 +525,41 @@ export default function StudioPanel({
             </p>
           )}
 
+          {currentReport !== null && currentProject && (
+            <section aria-label="Generated report" className="mt-4 rounded-lg border border-[var(--border)] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-medium">{currentProject.name} report</h3>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setReportSaveState('saving');
+                    try {
+                      await saveStudioNote(currentProject.id, `${currentProject.name} report`, {
+                        studio_kind: 'report', content: currentReport,
+                      });
+                      setReportSaveState('saved');
+                    } catch {
+                      setReportSaveState('error');
+                    }
+                  }}
+                  disabled={reportSaveState === 'saving' || reportSaveState === 'saved'}
+                  className="rounded px-2 py-1 text-xs hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-50"
+                >
+                  {reportSaveState === 'saving' ? 'Saving…'
+                    : reportSaveState === 'saved' ? 'Saved to notes' : 'Save report to notes'}
+                </button>
+              </div>
+              {reportSaveState === 'error' && (
+                <p role="alert" className="mt-2 text-xs text-[var(--error)]">
+                  Could not save to notes. Please try again.
+                </p>
+              )}
+              <div className="mt-3 max-h-80 overflow-y-auto">
+                <MarkdownRenderer content={currentReport} className="text-sm" />
+              </div>
+            </section>
+          )}
+
           {/* More Options */}
           <button
             disabled
@@ -526,6 +587,10 @@ export default function StudioPanel({
           <MindMapDialog
             map={currentMindMap}
             onClose={() => setMindMap(null)}
+            onSave={() => saveStudioNote(currentMindMap.project_id,
+              `${currentMindMap.project_name} mind map`, {
+                studio_kind: 'mindmap', payload_json: currentMindMap,
+              })}
             onAsk={(question) => {
               useStore.getState().draftMindMapQuestion(currentMindMap.project_id, question);
               setMindMap(null);
@@ -539,6 +604,10 @@ export default function StudioPanel({
           <VideoSummaryDialog
             summary={currentVideoSummary}
             onClose={() => setVideoSummary(null)}
+            onSave={() => saveStudioNote(currentVideoSummary.project_id,
+              `${currentVideoSummary.project_name} video summary`, {
+                studio_kind: 'video_summary', payload_json: currentVideoSummary,
+              })}
           />
         </React.Suspense>
       )}

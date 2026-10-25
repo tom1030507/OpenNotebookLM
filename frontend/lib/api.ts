@@ -85,14 +85,18 @@ export interface Message {
   rating?: MessageRating;
 }
 
+export type StudioNoteKind = 'report' | 'mindmap' | 'video_summary';
+
 export interface Note {
   id: string;
   project_id: string;
   title: string;
   /** Markdown. A saved answer carries its source list in here. */
   content: string;
-  origin: 'manual' | 'answer';
+  origin: 'manual' | 'answer' | 'studio';
   source_message_id: string | null;
+  studio_kind: StudioNoteKind | null;
+  payload_json: MindMap | VideoSummary | null;
   created_at: string;
   updated_at: string;
 }
@@ -994,7 +998,13 @@ const api = {
   /** With `source_message_id` the server writes the content from that answer. */
   createNote(
     projectId: string,
-    note: { title: string; content?: string; source_message_id?: string },
+    note: {
+      title: string;
+      content?: string;
+      source_message_id?: string;
+      studio_kind?: StudioNoteKind;
+      payload_json?: MindMap | VideoSummary;
+    },
   ): Promise<Note> {
     return requestJson<Note>(`/projects/${projectId}/notes`, {
       method: 'POST',

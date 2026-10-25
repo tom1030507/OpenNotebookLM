@@ -157,6 +157,26 @@ describe('Studio video summary', () => {
     expect(screen.getByText('Research notes video summary')).toBeTruthy();
   });
 
+  it('saves the displayed video summary payload to notes', async () => {
+    installSpeech();
+    vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(summary());
+    const create = vi.spyOn(api, 'createNote').mockResolvedValue({
+      id: 'video-note', project_id: 'project-1', title: 'Research notes video summary',
+      content: '', origin: 'studio', source_message_id: null,
+      studio_kind: 'video_summary', payload_json: summary(),
+      created_at: '2026-10-25T00:00:00Z', updated_at: '2026-10-25T00:00:00Z',
+    });
+
+    await openVideoSummary();
+    fireEvent.click(screen.getByRole('button', { name: 'Save to notes' }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith('project-1', {
+      title: 'Research notes video summary',
+      studio_kind: 'video_summary', payload_json: summary(),
+    }));
+    expect(await screen.findByRole('button', { name: 'Saved to notes' })).toBeTruthy();
+  });
+
   it('shows the first scene on the slide', async () => {
     installSpeech();
     vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(summary());

@@ -55,7 +55,7 @@ afterEach(() => {
 
 describe('Studio report', () => {
   it('downloads a project summary when a project is selected', async () => {
-    const blob = new Blob(['# Summary'], { type: 'text/markdown' });
+    const blob = { text: async () => '# Summary' } as Blob;
     const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue(blob);
     const clicks: string[] = [];
     const realCreate = document.createElement.bind(document);
@@ -80,7 +80,9 @@ describe('Studio report', () => {
   });
 
   it('reports on the selected sources only', async () => {
-    const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue(new Blob(['#']));
+    const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue({
+      text: async () => '#',
+    } as Blob);
     useStore.getState().toggleSourceSelected('project-1', 'doc-2');
     render(<StudioPanel />);
 

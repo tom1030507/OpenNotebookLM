@@ -339,6 +339,8 @@ class MindMapNode(BaseModel):
     The same shape at every level — project, document, topic — so the browser can
     draw the tree with one recursive renderer instead of three.
     """
+    model_config = {"extra": "forbid"}
+
     id: str
     label: str
     kind: str = Field(..., pattern="^(project|document|topic)$")
@@ -433,7 +435,7 @@ class MindMapResponse(BaseModel):
     # pinned pydantic 2.5.0 warns about every such field at import time. The name
     # is kept because a query answer already reports `model_used` and the browser
     # reads that key; the guard is waived rather than the field renamed.
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
 
     project_id: str
     project_name: str
@@ -457,6 +459,8 @@ class VideoScene(BaseModel):
     The same shape for all three kinds — title card, source, closing recap — so
     the browser plays them with one renderer instead of three.
     """
+    model_config = {"extra": "forbid"}
+
     id: str
     kind: str = Field(..., pattern="^(title|source|closing)$")
     # One clause naming what this scene is about.
@@ -551,7 +555,7 @@ class VideoSummaryResponse(BaseModel):
     # is kept because a query answer and a mind map already report `model_used`
     # and the browser reads that key; the guard is waived rather than the field
     # renamed.
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
 
     project_id: str
     project_name: str
@@ -573,17 +577,22 @@ class VideoSummaryResponse(BaseModel):
 # Note schemas
 # A bound on what one request can store; long enough for any answer or essay.
 NOTE_CONTENT_MAX_LENGTH = 100_000
+NOTE_PAYLOAD_MAX_BYTES = 750_000
 
 
 class NoteCreate(BaseModel):
     """Schema for creating a note.
 
-    With `source_message_id` the note is a saved answer: the server writes its
-    content from the stored message and citations, and `content` is ignored.
+    `source_message_id` saves an answer from stored data; `studio_kind` saves
+    client-supplied report Markdown or a validated Studio JSON result.
     """
+    model_config = {"extra": "forbid"}
+
     title: str = Field(..., min_length=1, max_length=200)
     content: str = Field(default="", max_length=NOTE_CONTENT_MAX_LENGTH)
     source_message_id: Optional[str] = None
+    studio_kind: Optional[Literal["report", "mindmap", "video_summary"]] = None
+    payload_json: Optional[Dict[str, Any]] = None
 
 
 class NoteUpdate(BaseModel):
@@ -600,6 +609,8 @@ class NoteResponse(BaseModel):
     content: str
     origin: str
     source_message_id: Optional[str] = None
+    studio_kind: Optional[Literal["report", "mindmap", "video_summary"]] = None
+    payload_json: Optional[Dict[str, Any]] = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

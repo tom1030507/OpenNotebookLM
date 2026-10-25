@@ -3,9 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
-import type { Note } from '@/lib/api';
+import type { MindMap, Note, VideoSummary } from '@/lib/api';
 import useNotes from '@/store/useNotes';
 import MarkdownRenderer from '../MarkdownRenderer';
+
+const MindMapDialog = React.lazy(() => import('../MindMapDialog'));
+const VideoSummaryDialog = React.lazy(() => import('../VideoSummaryDialog'));
 
 interface Draft {
   /** `null` while writing a new note. */
@@ -16,11 +19,14 @@ interface Draft {
 
 const inputClass = 'w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]';
 const actionClass = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--muted)] transition-base disabled:opacity-50';
+const EMPTY_NOTES: Note[] = [];
 
 export default function NotesSection({ projectId }: { projectId: string | null }) {
-  const notes = useNotes((state) => state.notes);
-  const loading = useNotes((state) => state.loading);
-  const loadError = useNotes((state) => state.error);
+  const notes = useNotes((state) => state.projectId === projectId ? state.notes : EMPTY_NOTES);
+  const loading = useNotes((state) => (
+    state.projectId === projectId ? state.loading : projectId !== null
+  ));
+  const loadError = useNotes((state) => state.projectId === projectId ? state.error : '');
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -34,6 +40,8 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   }, [projectId]);
 
   if (!projectId) return null;
+
+  const viewerNote = notes.find((note) => note.id === openId && note.origin === 'studio');
 
   const saveDraft = async () => {
     if (!draft || !draft.title.trim()) return;
@@ -101,6 +109,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   );
 
   return (
+    <>
     <section aria-label="Notes" className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-medium">Notes</h3>
@@ -138,20 +147,39 @@ export default function NotesSection({ projectId }: { projectId: string | null }
             <li key={note.id}>
               {draft?.noteId === note.id ? editor : (
                 <div className="bg-[var(--secondary)] rounded-lg">
-                  <button
-                    type="button"
-                    aria-expanded={openId === note.id}
-                    onClick={() => setOpenId(openId === note.id ? null : note.id)}
-                    className="w-full p-3 text-left text-sm font-medium break-words"
-                  >
-                    {note.title}
-                    {note.origin === 'answer' && (
-                      <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
-                        Saved answer
-                      </span>
+                  <div className="flex items-start">
+                    <button
+                      type="button"
+                      aria-expanded={openId === note.id}
+                      onClick={() => setOpenId(openId === note.id ? null : note.id)}
+                      className="min-w-0 flex-1 p-3 text-left text-sm font-medium break-words"
+                    >
+                      {note.title}
+                      {note.origin === 'answer' && (
+                        <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                          Saved answer
+                        </span>
+                      )}
+                      {note.origin === 'studio' && (
+                        <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                          Studio · {note.studio_kind === 'mindmap' ? 'Mind map'
+                            : note.studio_kind === 'video_summary' ? 'Video summary' : 'Report'}
+                        </span>
+                      )}
+                    </button>
+                    {note.origin === 'studio' && note.studio_kind !== 'report' && (
+                      <button
+                        type="button"
+                        onClick={() => deleteNote(note)}
+                        aria-label={`Delete note ${note.title}`}
+                        className="shrink-0 self-stretch px-3 text-[var(--error)] hover:bg-[var(--muted)]"
+                      >
+                        <Trash2 aria-hidden="true" className="h-4 w-4" />
+                      </button>
                     )}
-                  </button>
-                  {openId === note.id && (
+                  </div>
+                  {openId === note.id
+                    && (note.origin !== 'studio' || note.studio_kind === 'report') && (
                     <div className="px-3 pb-3">
                       <MarkdownRenderer content={note.content} className="text-sm" />
                       <div className="flex justify-end gap-2 mt-2">
@@ -183,5 +211,22 @@ export default function NotesSection({ projectId }: { projectId: string | null }
         </ul>
       )}
     </section>
+      {viewerNote?.studio_kind === 'mindmap' && viewerNote.payload_json && (
+        <React.Suspense fallback={<div role="status">Loading saved mind map…</div>}>
+          <MindMapDialog
+            map={viewerNote.payload_json as MindMap}
+            onClose={() => setOpenId(null)}
+          />
+        </React.Suspense>
+      )}
+      {viewerNote?.studio_kind === 'video_summary' && viewerNote.payload_json && (
+        <React.Suspense fallback={<div role="status">Loading saved video summary…</div>}>
+          <VideoSummaryDialog
+            summary={viewerNote.payload_json as VideoSummary}
+            onClose={() => setOpenId(null)}
+          />
+        </React.Suspense>
+      )}
+    </>
   );
 }
