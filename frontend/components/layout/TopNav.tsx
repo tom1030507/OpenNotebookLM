@@ -10,12 +10,14 @@ import {
   MoreHorizontal,
   Sun,
   User,
+  Users,
   FolderPlus,
   LogOut,
   Bell,
   HelpCircle
 } from 'lucide-react';
 import ExportDialog from '../ExportDialog';
+import ShareProjectDialog from '../ShareProjectDialog';
 import TopNavInfoDialog from './TopNavInfoDialog';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import Settings from '../Settings';
@@ -55,6 +57,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const [showProfile, setShowProfile] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const moreActionsRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const firstOverflowActionRef = useRef<HTMLButtonElement>(null);
@@ -230,6 +233,22 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           <h1 className="text-[15px] font-semibold text-[var(--foreground)] truncate">
             {displayedTitle}
           </h1>
+          {currentProject && currentProject.role !== 'owner' && (
+            <span className="shrink-0 rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs text-[var(--muted-foreground)]">
+              Shared · {currentProject.role === 'editor' ? 'Editor' : 'Viewer'}
+            </span>
+          )}
+          {currentProject?.role === 'owner' && (
+            <button
+              type="button"
+              aria-label="Share project"
+              title="Share project"
+              onClick={() => setShowShare(true)}
+              className="shrink-0 rounded-md p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
+            >
+              <Users className="h-4 w-4" />
+            </button>
+          )}
           {currentConversation && (
             <>
               <ChevronDown className="w-4 h-4 shrink-0 text-[var(--muted-foreground)] rotate-[-90deg]" />
@@ -440,6 +459,14 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           id={currentConversation?.id || currentProject?.id || ''}
           name={currentConversation?.title || currentProject?.name || ''}
           onClose={() => setShowExport(false)}
+        />
+      )}
+
+      {showShare && currentProject?.role === 'owner' && (
+        <ShareProjectDialog
+          project={currentProject}
+          isOpen
+          onClose={() => setShowShare(false)}
         />
       )}
       

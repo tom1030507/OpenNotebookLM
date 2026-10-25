@@ -21,8 +21,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings, get_settings
 from app.db.database import get_db
-from app.db.models import AudioOverview, Base, Document, Project, User
+from app.db.models import (
+    AudioOverview,
+    Base,
+    Conversation,
+    Document,
+    Message,
+    Project,
+    ProjectDocument,
+    ProjectMember,
+    User,
+)
 
 # Retrieval and model inference are not what these tests exercise. Replacing the
 # RAG service before the app is imported keeps them in the minimal environment;
@@ -191,6 +202,302 @@ def make_conversation(client, project_id, title="Notes"):
     return response.json()["id"]
 
 
+def grant_project_role(env, project_id, role):
+    """Give Bob a project role for an authorization test.
+
+    Args:
+        env: Two-account route-test environment.
+        project_id: Project Alice owns.
+        role: Viewer or editor role to grant.
+
+    Returns:
+        The stored membership.
+    """
+    membership = ProjectMember(
+        project_id=project_id,
+        user_id=env.bob_user.id,
+        role=role,
+    )
+    env.session.add(membership)
+    env.session.commit()
+    return membership
+
+
+class FakeDocumentService:
+    """No-op ingestion/deletion service for role checks."""
+
+    class QueuedDocument:
+        id = "queued-shared-document"
+        status = "queued"
+
+    async def _queued(self, **kwargs):
+        kwargs["operation_lease"].release()
+        return self.QueuedDocument()
+
+    async def process_pdf_upload(self, **kwargs):
+        return await self._queued(**kwargs)
+
+    async def process_text(self, **kwargs):
+        return await self._queued(**kwargs)
+
+    async def process_youtube(self, **kwargs):
+        return await self._queued(**kwargs)
+
+    async def process_url(self, **kwargs):
+        """Return a queued record without network or extraction work."""
+        return await self._queued(**kwargs)
+
+    def delete_document(self, db, document_id):
+        """Report success if a route reaches the deletion service."""
+        return True
+
+
+class TestSharedProjectSourceRoles:
+    """Shared roles govern project sources and related mutations."""
+
+    def test_invalid_foreign_source_link_is_hidden_from_project_reads(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.bob_user, title="Bob private source", content="Private text"
+        )
+        env.session.add(ProjectDocument(project_id=project_id, document_id=document_id))
+        env.session.commit()
+
+        listed = env.alice.get("/api/projects/%s/documents" % project_id)
+        direct = env.alice.get("/api/docs/%s" % document_id)
+        query = env.alice.post("/api/query", json={
+            "query": "Read Bob's source",
+            "project_id": project_id,
+            "document_ids": [document_id],
+        })
+        exported = env.alice.get("/api/export/project/%s?format=json" % project_id)
+
+        assert listed.status_code == 200
+        assert all(row["id"] != document_id for row in listed.json())
+        assert direct.status_code == 404
+        assert query.status_code == 404
+        assert exported.status_code == 200
+        assert all(row["id"] != document_id for row in exported.json()["documents"])
+
+    def test_removing_source_owner_keeps_linked_source_in_project(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.bob_user, title="Bob source", content="Shared text"
+        )
+        grant_project_role(env, project_id, "editor")
+        attached = env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        )
+        assert attached.status_code == 200
+
+        removed = env.alice.delete(
+            "/api/projects/%s/members/%s" % (project_id, env.bob_user.id)
+        )
+
+        assert removed.status_code == 200
+        assert env.alice.get("/api/docs/%s/content" % document_id).json() == {
+            "content": "Shared text"
+        }
+        listed = env.alice.get("/api/projects/%s/documents" % project_id)
+        assert [row["id"] for row in listed.json()] == [document_id]
+        exported = env.alice.get("/api/export/project/%s?format=json" % project_id)
+        assert [row["id"] for row in exported.json()["documents"]] == [document_id]
+
+    def test_private_and_missing_answer_ids_have_the_same_note_error(self, env):
+        project_id = make_project(env.alice)
+        conversation_id = make_conversation(env.alice, project_id)
+        message = Message(
+            id=str(uuid.uuid4()), conversation_id=conversation_id,
+            role="assistant", text="Private answer",
+        )
+        env.session.add(message)
+        env.session.commit()
+        grant_project_role(env, project_id, "editor")
+        base = "/api/projects/%s/notes" % project_id
+
+        private = env.bob.post(base, json={
+            "title": "Private", "source_message_id": message.id,
+        })
+        missing = env.bob.post(base, json={
+            "title": "Missing", "source_message_id": "not-a-message",
+        })
+
+        assert private.status_code == missing.status_code == 404
+        assert private.json() == missing.json()
+
+    def test_every_ingest_route_requires_editor_access(self, env, monkeypatch):
+        from app.routers.ingest import get_document_service
+
+        project_id = make_project(env.alice)
+        production_app.dependency_overrides[get_document_service] = lambda: FakeDocumentService()
+        monkeypatch.setattr("app.routers.ingest.settings.enable_yt_transcription", True)
+
+        def upload_statuses(client):
+            base = "/api/projects/%s" % project_id
+            return [
+                client.post(
+                    "%s/upload" % base,
+                    files={"file": ("shared.pdf", b"shared source", "application/pdf")},
+                ).status_code,
+                client.post(
+                    "%s/upload-url" % base,
+                    json={"url": "https://example.com"},
+                ).status_code,
+                client.post(
+                    "%s/upload-youtube" % base,
+                    json={"youtube_url": "https://www.youtube.com/watch?v=video"},
+                ).status_code,
+                client.post(
+                    "%s/upload-text" % base,
+                    json={"title": "Shared notes", "text": "Source text"},
+                ).status_code,
+            ]
+
+        assert upload_statuses(env.bob) == [404, 404, 404, 404]
+        membership = grant_project_role(env, project_id, "viewer")
+        assert upload_statuses(env.bob) == [404, 404, 404, 404]
+
+        membership.role = "editor"
+        env.session.commit()
+        assert upload_statuses(env.bob) == [200, 200, 200, 200]
+        assert upload_statuses(env.alice) == [200, 200, 200, 200]
+
+    def test_viewer_can_read_project_source_and_file(self, env, tmp_path, monkeypatch):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.alice_user, source_type="pdf", content="Shared source text"
+        )
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        source_file = tmp_path / "shared.pdf"
+        source_file.write_bytes(b"shared pdf bytes")
+        monkeypatch.setattr(
+            "app.routers.files.resolve_stored_file", lambda _source_url: source_file
+        )
+
+        project = env.bob.get("/api/projects/%s" % project_id)
+        documents = env.bob.get("/api/projects/%s/documents" % project_id)
+
+        assert project.status_code == 200
+        assert project.json()["role"] == "viewer"
+        assert documents.status_code == 200
+        assert documents.json()[0]["id"] == document_id
+        assert env.bob.get(
+            "/api/projects/%s/chat-settings" % project_id
+        ).status_code == 200
+        assert env.bob.put(
+            "/api/projects/%s/chat-settings" % project_id,
+            json={"role": "learning_guide"},
+        ).status_code == 404
+        assert env.bob.get("/api/docs/%s" % document_id).status_code == 200
+        assert env.bob.get("/api/docs/%s/status" % document_id).status_code == 200
+        assert env.bob.get("/api/docs/%s/content" % document_id).json() == {
+            "content": "Shared source text"
+        }
+        file_response = env.bob.get("/api/docs/%s/file" % document_id)
+        assert file_response.status_code == 200
+        assert file_response.content == b"shared pdf bytes"
+
+    def test_editor_can_add_remove_own_source_and_ingest_but_viewer_cannot(
+        self, env, monkeypatch
+    ):
+        from app.routers.ingest import get_document_service
+
+        project_id = make_project(env.alice)
+        bob_document = make_document(env.session, env.bob_user, "Bob source")
+        alice_document = make_document(env.session, env.alice_user, "Alice source")
+        membership = grant_project_role(env, project_id, "viewer")
+        production_app.dependency_overrides[get_document_service] = lambda: FakeDocumentService()
+        upload_url = "/api/projects/%s/upload-url" % project_id
+        add_url = "/api/projects/%s/documents/%s"
+
+        assert env.bob.post(upload_url, json={"url": "https://example.com"}).status_code == 404
+        assert env.bob.post(add_url % (project_id, bob_document)).status_code == 404
+
+        membership.role = "editor"
+        env.session.commit()
+        upload = env.bob.post(upload_url, json={"url": "https://example.com"})
+        foreign_source = env.bob.post(add_url % (project_id, alice_document))
+        attached = env.bob.post(add_url % (project_id, bob_document))
+        removed = env.bob.delete(add_url % (project_id, bob_document))
+
+        assert upload.status_code == 200, upload.text
+        assert foreign_source.status_code == 404
+        assert attached.status_code == 200
+        assert removed.status_code == 200
+        assert env.bob.put(
+            "/api/projects/%s/chat-settings" % project_id,
+            json={"role": "learning_guide"},
+        ).status_code == 200
+
+    def test_editor_can_invalidate_shared_project_cache_but_viewer_cannot(
+        self, env, monkeypatch
+    ):
+        from app.services.cache import cache_service
+
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.alice_user)
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        membership = grant_project_role(env, project_id, "viewer")
+        monkeypatch.setattr(cache_service, "invalidate_project_cache", lambda _id: 1)
+        monkeypatch.setattr(cache_service, "invalidate_document_cache", lambda _id: 1)
+        project_cache = "/api/cache/invalidate/project/%s" % project_id
+        document_cache = "/api/cache/invalidate/document/%s" % document_id
+
+        assert env.bob.delete(project_cache).status_code == 404
+        assert env.bob.delete(document_cache).status_code == 404
+
+        membership.role = "editor"
+        env.session.commit()
+        assert env.bob.delete(project_cache).status_code == 200
+        assert env.bob.delete(document_cache).status_code == 200
+
+    def test_shared_editor_cannot_administer_project_or_mutate_owner_document(self, env):
+        from app.routers.ingest import get_document_service
+
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.alice_user)
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "editor")
+        production_app.dependency_overrides[get_document_service] = lambda: FakeDocumentService()
+
+        assert env.bob.put(
+            "/api/projects/%s" % project_id, json={"name": "Changed"}
+        ).status_code == 404
+        assert env.bob.post("/api/projects/%s/duplicate" % project_id).status_code == 404
+        assert env.bob.delete("/api/projects/%s" % project_id).status_code == 404
+        assert env.bob.put(
+            "/api/docs/%s" % document_id, json={"title": "Changed"}
+        ).status_code == 404
+        assert env.bob.delete("/api/docs/%s" % document_id).status_code == 404
+        assert env.alice.get("/api/docs/%s" % document_id).status_code == 200
+
+    def test_removing_membership_revokes_project_and_direct_source_access(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.alice_user)
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        assert env.bob.get("/api/projects/%s" % project_id).status_code == 200
+        assert env.bob.get("/api/docs/%s/content" % document_id).status_code == 200
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id,
+            user_id=env.bob_user.id,
+        ).delete()
+        env.session.commit()
+
+        assert env.bob.get("/api/projects/%s" % project_id).status_code == 404
+        assert env.bob.get("/api/docs/%s/content" % document_id).status_code == 404
+
+
 class TestProjectIsolation:
     """A project belongs to the account that created it."""
 
@@ -271,6 +578,65 @@ class TestAudioOverviewIsolation:
         ]
         assert [env.bob.get(path).status_code for path in paths] == [404, 404, 404]
         assert env.bob.delete(paths[1]).status_code == 404
+
+    def test_members_can_create_and_read_but_only_editors_can_delete(
+        self, env, monkeypatch, tmp_path
+    ):
+        from app.routers import audio_overview
+
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.alice_user, title="Shared audio source", content="Climate evidence."
+        )
+        unlinked = make_document(env.session, env.bob_user, title="Unlinked source")
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        production_app.dependency_overrides[get_settings] = lambda: Settings(
+            audio_overview_tts_enabled=True
+        )
+        audio_file = tmp_path / "shared.mp3"
+        audio_file.write_bytes(b"ID3 shared audio")
+        monkeypatch.setattr(audio_overview, "resolve_audio_file", lambda _key: audio_file)
+
+        created = env.bob.post(
+            "/api/projects/%s/audio-overviews" % project_id,
+            json={"document_ids": [document_id]},
+        )
+        assert created.status_code == 202, created.text
+        rejected = env.bob.post(
+            "/api/projects/%s/audio-overviews" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+        assert rejected.status_code == 404
+        overview_id = created.json()["id"]
+        overview = env.session.query(AudioOverview).filter_by(id=overview_id).first()
+        overview.status = "ready"
+        overview.file_path = "uploads/audio_overviews/shared.mp3"
+        overview.script_json = [{"speaker": "A", "text": "Shared transcript."}]
+        env.session.commit()
+
+        assert env.bob.get(
+            "/api/projects/%s/audio-overviews" % project_id
+        ).status_code == 200
+        assert env.bob.get(
+            "/api/projects/%s/audio-overviews/%s" % (project_id, overview_id)
+        ).status_code == 200
+        assert env.bob.get(
+            "/api/projects/%s/audio-overviews/%s/file" % (project_id, overview_id)
+        ).content == b"ID3 shared audio"
+        assert env.bob.delete(
+            "/api/projects/%s/audio-overviews/%s" % (project_id, overview_id)
+        ).status_code == 404
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "editor"})
+        env.session.commit()
+        assert env.bob.delete(
+            "/api/projects/%s/audio-overviews/%s" % (project_id, overview_id)
+        ).status_code == 204
 
 
 class TestRefusalLeaksNothing:
@@ -444,6 +810,86 @@ class TestConversationIsolation:
         assert env.alice.get("/api/conversations/%s" % conversation_id).status_code == 200
         assert env.alice.get("/api/projects/%s/conversations" % project_id).status_code == 200
 
+    def test_shared_project_conversations_belong_to_the_creator(self, env):
+        project_id = make_project(env.alice)
+        alice_conversation = make_conversation(env.alice, project_id, "Alice private")
+        grant_project_role(env, project_id, "viewer")
+
+        bob_created = env.bob.post(
+            "/api/projects/%s/conversations" % project_id,
+            json={"title": "Bob private"},
+        )
+        assert bob_created.status_code == 200, bob_created.text
+        bob_conversation = bob_created.json()["id"]
+        stored = env.session.query(Conversation).filter_by(id=bob_conversation).first()
+        assert stored.user_id == env.bob_user.id
+
+        message = Message(
+            id=str(uuid.uuid4()),
+            conversation_id=bob_conversation,
+            role="assistant",
+            text="Bob's answer",
+        )
+        env.session.add(message)
+        env.session.commit()
+
+        assert env.bob.get("/api/conversations/%s" % bob_conversation).status_code == 200
+        assert env.alice.get("/api/conversations/%s" % bob_conversation).status_code == 404
+        assert env.bob.get("/api/conversations/%s" % alice_conversation).status_code == 404
+        bob_list = env.bob.get("/api/projects/%s/conversations" % project_id)
+        alice_list = env.alice.get("/api/projects/%s/conversations" % project_id)
+        assert [row["id"] for row in bob_list.json()] == [bob_conversation]
+        assert [row["id"] for row in alice_list.json()] == [alice_conversation]
+        assert env.alice.put(
+            "/api/conversations/%s/messages/%s/rating" % (bob_conversation, message.id),
+            json={"rating": "up"},
+        ).status_code == 404
+        assert env.bob.put(
+            "/api/conversations/%s/messages/%s/rating" % (bob_conversation, message.id),
+            json={"rating": "up"},
+        ).status_code == 200
+        assert env.alice.get(
+            "/api/export/conversation/%s" % bob_conversation
+        ).status_code == 404
+        assert env.bob.get(
+            "/api/export/conversation/%s" % bob_conversation
+        ).status_code == 200
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).delete()
+        env.session.commit()
+        assert env.bob.get("/api/conversations/%s" % bob_conversation).status_code == 200
+        assert env.bob.get(
+            "/api/projects/%s/conversations" % project_id
+        ).status_code == 404
+        assert env.bob.post("/api/query", json={
+            "query": "Try the revoked project again",
+            "conversation_id": bob_conversation,
+        }).status_code == 404
+
+    def test_legacy_conversations_are_listed_only_for_the_project_owner(self, env):
+        project_id = make_project(env.alice)
+        conversation = Conversation(
+            id=str(uuid.uuid4()), project_id=project_id,
+            user_id=None, title="Legacy owner chat",
+        )
+        env.session.add(conversation)
+        env.session.commit()
+        grant_project_role(env, project_id, "viewer")
+
+        owner_list = env.alice.get("/api/projects/%s/conversations" % project_id)
+        member_list = env.bob.get("/api/projects/%s/conversations" % project_id)
+
+        assert [row["id"] for row in owner_list.json()] == [conversation.id]
+        assert member_list.json() == []
+        assert env.alice.get(
+            "/api/conversations/%s" % conversation.id
+        ).status_code == 200
+        assert env.bob.get(
+            "/api/conversations/%s" % conversation.id
+        ).status_code == 404
+
 
 class TestQueryIsolation:
     """Asking a question about someone else's project is not found."""
@@ -457,6 +903,65 @@ class TestQueryIsolation:
             "query": "what is in here?", "project_id": project_id})
 
         assert response.status_code == 404
+
+    def test_shared_query_uses_only_project_sources_and_keeps_no_project_scope_owned(
+        self, env
+    ):
+        from app.routers.query import get_rag_service
+
+        class RecordingRAG:
+            def __init__(self):
+                self.project_documents = None
+                self.owned_documents = None
+
+            def query_with_conversation(self, **kwargs):
+                self.project_documents = kwargs["allowed_document_ids"]
+                return {
+                    "answer": "shared answer", "sources": [], "chunks_used": 0,
+                    "model_used": "test", "usage": {},
+                }
+
+            def query(self, **kwargs):
+                self.owned_documents = kwargs["allowed_document_ids"]
+                return {
+                    "answer": "private answer", "sources": [], "chunks_used": 0,
+                    "model_used": "test", "usage": {},
+                }
+
+        project_id = make_project(env.alice)
+        linked = make_document(env.session, env.alice_user, "Linked source")
+        unlinked = make_document(env.session, env.alice_user, "Unlinked source")
+        bob_owned = make_document(env.session, env.bob_user, "Bob private source")
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        rag = RecordingRAG()
+        production_app.dependency_overrides[get_rag_service] = lambda: rag
+
+        response = env.bob.post(
+            "/api/query",
+            json={
+                "query": "Ask about the shared source",
+                "project_id": project_id,
+                "document_ids": [linked],
+            },
+        )
+        rejected = env.bob.post(
+            "/api/query",
+            json={
+                "query": "Try an unlinked source",
+                "project_id": project_id,
+                "document_ids": [unlinked],
+            },
+        )
+        private = env.bob.post("/api/query", json={"query": "My own source"})
+
+        assert response.status_code == 200, response.text
+        assert rag.project_documents == [linked]
+        assert rejected.status_code == 404
+        assert private.status_code == 200, private.text
+        assert rag.owned_documents == [bob_owned]
 
 
 class TestExportIsolation:
@@ -485,6 +990,72 @@ class TestExportIsolation:
 
         assert response.status_code == 404
 
+    def test_shared_project_exports_sources_and_only_the_callers_chats(self, env):
+        project_id = make_project(env.alice)
+        linked = make_document(env.session, env.alice_user, "Shared export source")
+        unlinked = make_document(env.session, env.alice_user, "Unlinked export source")
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        alice_conversation = make_conversation(env.alice, project_id, "Alice private")
+        env.session.add(Conversation(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            title="Legacy owner conversation",
+        ))
+        env.session.commit()
+        grant_project_role(env, project_id, "viewer")
+        bob_created = env.bob.post(
+            "/api/projects/%s/conversations" % project_id,
+            json={"title": "Bob private"},
+        )
+        assert bob_created.status_code == 200, bob_created.text
+        bob_conversation = bob_created.json()["id"]
+
+        bob_export = env.bob.get(
+            "/api/export/project/%s?format=json" % project_id
+        )
+        bob_summary = env.bob.post("/api/export/project/%s/summary" % project_id)
+        bob_selected_summary = env.bob.post(
+            "/api/export/project/%s/summary" % project_id,
+            json={"document_ids": [linked]},
+        )
+        rejected_selection = env.bob.post(
+            "/api/export/project/%s/summary" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+        alice_export = env.alice.get(
+            "/api/export/project/%s?format=json" % project_id
+        )
+
+        assert bob_export.status_code == 200, bob_export.text
+        bob_data = bob_export.json()
+        assert [doc["id"] for doc in bob_data["documents"]] == [linked]
+        assert [row["id"] for row in bob_data["conversations"]] == [bob_conversation]
+        assert bob_summary.status_code == 200
+        assert "**Conversations**: 1" in bob_summary.text
+        assert "Bob private" in bob_summary.text
+        assert "Alice private" not in bob_summary.text
+        assert bob_selected_summary.status_code == 200
+        assert "Shared export source" in bob_selected_summary.text
+        assert rejected_selection.status_code == 404
+
+        assert alice_export.status_code == 200
+        alice_data = alice_export.json()
+        assert {row["title"] for row in alice_data["conversations"]} == {
+            "Alice private",
+            "Legacy owner conversation",
+        }
+        assert any(
+            row["id"] == alice_conversation for row in alice_data["conversations"]
+        )
+        assert env.alice.get(
+            "/api/projects/%s" % project_id
+        ).json()["conversation_count"] == 2
+        assert env.bob.get(
+            "/api/projects/%s" % project_id
+        ).json()["conversation_count"] == 1
+
 
 class TestMindMapIsolation:
     """A mind map reads every source in a project, so it is scoped too."""
@@ -501,6 +1072,81 @@ class TestMindMapIsolation:
 
         assert response.status_code == 200
         assert response.json()["root"]["label"] == ALICE_PROJECT
+
+    def test_members_can_map_linked_sources_and_cannot_select_unlinked_sources(self, env):
+        project_id = make_project(env.alice)
+        linked = make_document(
+            env.session, env.bob_user, "Member source", "txt", "Exclusive study material."
+        )
+        unlinked = make_document(env.session, env.bob_user, "Private source")
+        grant_project_role(env, project_id, "editor")
+        assert env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "viewer"})
+        env.session.commit()
+
+        response = env.bob.post(
+            "/api/projects/%s/mindmap" % project_id,
+            json={"document_ids": [linked]},
+        )
+        rejected = env.bob.post(
+            "/api/projects/%s/mindmap" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["total_source_count"] == 1
+        assert rejected.status_code == 404
+
+
+class TestSharedStudioIsolation:
+    """Studio readers can use linked sources and keep selections project-bound."""
+
+    def test_video_summary_and_pptx_are_available_to_viewers(self, env):
+        project_id = make_project(env.alice)
+        linked = make_document(
+            env.session, env.bob_user, "Member source", "txt", "Shared material is useful."
+        )
+        unlinked = make_document(env.session, env.bob_user, "Private source")
+        grant_project_role(env, project_id, "editor")
+        assert env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "viewer"})
+        env.session.commit()
+
+        summary = env.bob.post(
+            "/api/projects/%s/video-summary" % project_id,
+            json={"document_ids": [linked]},
+        )
+        rejected_summary = env.bob.post(
+            "/api/projects/%s/video-summary" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+        assert summary.status_code == 200, summary.text
+        assert rejected_summary.status_code == 404
+        assert [scene["document_id"] for scene in summary.json()["scenes"]
+                if scene["kind"] == "source"] == [linked]
+        exported = env.bob.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": summary.json()["scenes"]},
+        )
+        assert exported.status_code == 200, exported.text
+
+        private_scenes = [dict(scene) for scene in summary.json()["scenes"]]
+        next(scene for scene in private_scenes if scene["kind"] == "source")[
+            "document_id"
+        ] = unlinked
+        rejected = env.bob.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": private_scenes},
+        )
+        assert rejected.status_code == 404
 
 
 class TestVideoSummaryIsolation:
@@ -636,6 +1282,43 @@ class TestNoteIsolation:
             "%s/%s" % (base, note_id), json={"content": "edited"}).status_code == 200
         assert env.alice.delete("%s/%s" % (base, note_id)).status_code == 200
 
+    def test_shared_notes_are_readable_but_writable_by_editors(self, env):
+        project_id = make_project(env.alice)
+        base = "/api/projects/%s/notes" % project_id
+        note_id = env.alice.post(base, json={"title": "Owner note"}).json()["id"]
+        conversation_id = make_conversation(env.alice, project_id)
+        message = Message(
+            id=str(uuid.uuid4()), conversation_id=conversation_id,
+            role="assistant", text="Alice's private answer",
+        )
+        env.session.add(message)
+        env.session.commit()
+        grant_project_role(env, project_id, "viewer")
+
+        readable = env.bob.get(base)
+        assert readable.status_code == 200, readable.text
+        assert [note["id"] for note in readable.json()] == [note_id]
+        assert env.bob.post(base, json={"title": "Viewer note"}).status_code == 404
+        assert env.bob.put(
+            "%s/%s" % (base, note_id), json={"title": "Changed by viewer"}
+        ).status_code == 404
+        assert env.bob.delete("%s/%s" % (base, note_id)).status_code == 404
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "editor"})
+        env.session.commit()
+        private_answer = env.bob.post(base, json={
+            "title": "Copied private answer", "source_message_id": message.id,
+        })
+        assert private_answer.status_code == 404
+        created = env.bob.post(base, json={"title": "Editor note", "content": "Shared."})
+        assert created.status_code == 200, created.text
+        assert env.bob.put(
+            "%s/%s" % (base, note_id), json={"title": "Edited by editor"}
+        ).status_code == 200
+        assert env.bob.delete("%s/%s" % (base, note_id)).status_code == 200
+
 
 SELECTION_ROUTES = [
     "/api/projects/%s/mindmap",
@@ -753,6 +1436,48 @@ class TestProjectOverviewIsolation:
         assert env.alice.get("/api/projects/%s/overview" % project_id).status_code == 200
         assert env.alice.post(
             "/api/conversations/%s/follow-ups" % conversation_id).status_code == 200
+
+    def test_shared_overview_includes_sources_uploaded_by_an_editor(self, env):
+        import json
+
+        from app.routers.project_overview import get_project_overview_service
+        from app.services.project_overview import ProjectOverviewService
+
+        class RecordingLLM:
+            prompts = []
+
+            def generate(self, prompt, **kwargs):
+                self.prompts.append(prompt)
+                return {
+                    "text": json.dumps({
+                        "overview": "The shared source covers a unique subject.",
+                        "questions": ["What does the source explain?"],
+                    }),
+                    "model": "test",
+                    "usage": {},
+                }
+
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session,
+            env.bob_user,
+            title="Bob source",
+            source_type="txt",
+            content="Exclusive member source text",
+        )
+        grant_project_role(env, project_id, "editor")
+        assert env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        llm = RecordingLLM()
+        service = ProjectOverviewService(llm_service=llm)
+        production_app.dependency_overrides[get_project_overview_service] = lambda: service
+
+        response = env.bob.get("/api/projects/%s/overview" % project_id)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["overview"] == "The shared source covers a unique subject."
+        assert "Exclusive member source text" in llm.prompts[0]
 
 
 class TestProjectDuplicateIsolation:

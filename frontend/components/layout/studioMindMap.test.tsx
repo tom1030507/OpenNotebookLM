@@ -17,6 +17,7 @@ const project: Project = {
   updated_at: '2026-08-20T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+  role: 'owner',
 };
 
 const mindMap = (modelUsed = 'test-model'): MindMap => ({

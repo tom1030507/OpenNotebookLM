@@ -230,11 +230,10 @@ class MindMapService:
             The tree plus the metadata the API exposes: which model named the
             topics, when it was built, and how many nodes it holds.
         """
-        # Project links alone do not prove document ownership. Imported or
-        # corrupted cross-account links must never send private text to a model.
+        # Project members can read every source that is linked to the project.
         documents = [
             document for document in project_documents(db, project, document_ids)
-            if document.status == "ready" and document.user_id == project.user_id
+            if document.status == "ready"
         ]
         root, model_used, source_count = self._build_tree_with_source_count(
             project.name, documents,

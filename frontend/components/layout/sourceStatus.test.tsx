@@ -17,6 +17,7 @@ const project: Project = {
   updated_at: '2026-08-13T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+  role: 'owner',
 };
 
 
@@ -25,6 +26,7 @@ function documentWith(status: DocumentStatus, error_message?: string): Document 
     id: `document-${status}`,
     name: 'Example Domain',
     type: 'url',
+    isOwnedByCaller: true,
     url: 'https://example.com',
     meta: {},
     status,

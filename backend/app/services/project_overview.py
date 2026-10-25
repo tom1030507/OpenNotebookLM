@@ -107,10 +107,10 @@ class ProjectOverviewService:
             The project's current name, the overview (or None) and the
             suggested questions (possibly empty).
         """
-        # Linked documents of another account must never reach the prompt.
+        # Every current project member can read each linked source.
         documents = [
             document for document in project_documents(db, project)
-            if document.status == "ready" and document.user_id == project.user_id
+            if document.status == "ready"
         ]
         source_ids = sorted(document.id for document in documents)
         stored = project.overview_json or {}

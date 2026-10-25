@@ -96,6 +96,7 @@ describe('login page', () => {
         updated_at: '2026-08-23T00:00:00Z',
         document_count: 1,
         conversation_count: 1,
+        role: 'owner',
       }],
       currentProject: {
         id: 'project-a',
@@ -106,11 +107,13 @@ describe('login page', () => {
         updated_at: '2026-08-23T00:00:00Z',
         document_count: 1,
         conversation_count: 1,
+        role: 'owner',
       },
       documents: [{
         id: 'document-a',
         name: 'Account A document',
         type: 'text',
+        isOwnedByCaller: true,
         meta: {},
         status: 'ready',
         created_at: '2026-08-23T00:00:00Z',
@@ -186,6 +189,7 @@ describe('login page', () => {
         updated_at: '2026-08-23T00:00:00Z',
         document_count: 1,
         conversation_count: 1,
+        role: 'owner',
       }],
       currentProject: {
         id: 'project-a',
@@ -196,11 +200,13 @@ describe('login page', () => {
         updated_at: '2026-08-23T00:00:00Z',
         document_count: 1,
         conversation_count: 1,
+        role: 'owner',
       },
       documents: [{
         id: 'document-a',
         name: 'Account A document',
         type: 'text',
+        isOwnedByCaller: true,
         meta: {},
         status: 'ready',
         created_at: '2026-08-23T00:00:00Z',

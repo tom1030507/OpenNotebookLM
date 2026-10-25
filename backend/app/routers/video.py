@@ -82,10 +82,12 @@ def project_video_summary(
     Returns:
         The scenes and generation metadata.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     document_ids = None
     if selection and selection.document_ids is not None:
-        document_ids = require_documents(db, selection.document_ids, current_user)
+        document_ids = require_documents(
+            db, selection.document_ids, current_user, project_id=project_id
+        )
 
     try:
         return service.generate(db, project, document_ids)
@@ -111,10 +113,10 @@ def export_project_video_summary_pptx(
     Returns:
         The PowerPoint bytes with a safe project-based download filename.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     document_ids = [scene.document_id for scene in request.scenes if scene.document_id]
     if document_ids:
-        require_documents(db, document_ids, current_user)
+        require_documents(db, document_ids, current_user, project_id=project_id)
 
     filename = re.sub(r'[\\/<>:"|?*\x00-\x1f\x7f]+', "_", project.name).strip(" .")
     filename = "%s.pptx" % (filename or "video-summary")

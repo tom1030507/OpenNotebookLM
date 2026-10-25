@@ -1,7 +1,7 @@
 """Pydantic schemas for API models."""
 from datetime import datetime
 from typing import Annotated, Optional, List, Dict, Any, Literal
-from pydantic import AfterValidator, BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 from app.utils.time import as_utc
 
@@ -155,6 +155,7 @@ class ProjectResponse(ProjectBase):
     updated_at: UtcDatetime
     document_count: int = 0
     conversation_count: int = 0
+    role: Literal["owner", "editor", "viewer"] = "owner"
     cover_emoji: Optional[str] = None
     cover_color: Optional[str] = None
     
@@ -182,6 +183,41 @@ class ProjectListResponse(BaseModel):
     per_page: int
 
 
+class ProjectMemberCreate(BaseModel):
+    """Add an existing account to a project by its username or email."""
+    username: Optional[str] = Field(None, min_length=3, max_length=64)
+    email: Optional[str] = Field(None, max_length=255, pattern=EMAIL_PATTERN)
+    role: Literal["viewer", "editor"]
+
+    @model_validator(mode="after")
+    def require_one_identity(self):
+        """Require exactly one account identifier.
+
+        Args:
+            self: Validated member request.
+
+        Returns:
+            This request when one identifier is present.
+        """
+        if bool(self.username) == bool(self.email):
+            raise ValueError("Provide either username or email")
+        return self
+
+
+class ProjectMemberUpdate(BaseModel):
+    """Change a member's project role."""
+    role: Literal["viewer", "editor"]
+
+
+class ProjectMemberResponse(BaseModel):
+    """Account and effective role shown in the project member list."""
+    user_id: str
+    username: str
+    email: str
+    role: Literal["owner", "editor", "viewer"]
+    created_at: UtcDatetime
+
+
 # Document schemas
 class DocumentBase(BaseModel):
     """Base document schema."""
@@ -204,6 +240,7 @@ class DocumentResponse(DocumentBase):
     created_at: UtcDatetime
     updated_at: UtcDatetime
     chunk_count: int = 0
+    is_owned_by_caller: bool = False
     
     class Config:
         from_attributes = True

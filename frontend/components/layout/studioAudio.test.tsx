@@ -17,6 +17,7 @@ const project: Project = {
   updated_at: '2026-08-13T00:00:00Z',
   document_count: 2,
   conversation_count: 1,
+  role: 'owner',
 };
 
 

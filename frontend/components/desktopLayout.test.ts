@@ -31,12 +31,14 @@ const project: Project = {
   updated_at: '2026-08-12T00:00:00Z',
   document_count: 2,
   conversation_count: 1,
+  role: 'owner',
 };
 const documents: Document[] = [
   {
     id: 'document-1',
     name: 'First document',
     type: 'text',
+    isOwnedByCaller: true,
     content: 'First content',
     meta: {},
     status: 'ready',
@@ -48,6 +50,7 @@ const documents: Document[] = [
     id: 'document-2',
     name: 'Second document',
     type: 'text',
+    isOwnedByCaller: true,
     content: 'Second content',
     meta: {},
     status: 'ready',

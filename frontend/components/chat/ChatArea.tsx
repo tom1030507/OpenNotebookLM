@@ -349,7 +349,8 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const readyDocumentCount = readyDocumentIds.length;
   const hasDocuments = readyDocumentCount > 0;
   const canChat = currentProject && hasDocuments;
-  const canAddSources = Boolean(currentProject);
+  const canEditProject = currentProject?.role === 'owner' || currentProject?.role === 'editor';
+  const canAddSources = Boolean(currentProject && canEditProject);
   const pendingQueryIsActive = pendingQuery !== null
     && pendingQuery.projectId === currentProject?.id
     && pendingQuery.conversationId === (currentConversation?.id ?? null);
@@ -433,7 +434,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   ? 'Create a project to get started'
                   : hasDocuments
                     ? 'Ask anything about your sources'
-                    : 'Add a source to get started'}
+                    : canAddSources ? 'Add a source to get started' : 'Waiting for a project source'}
               </h2>
 
               <p className="max-w-2xl mx-auto text-sm text-[var(--muted-foreground)] mb-6">
@@ -441,7 +442,9 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   ? 'Projects keep your sources and conversations organized.'
                   : hasDocuments
                     ? 'OpenNotebookLM can be inaccurate. Please verify its responses.'
-                    : 'Answers are grounded in the sources you add, and cite them.'}
+                    : canAddSources
+                      ? 'Answers are grounded in the sources you add, and cite them.'
+                      : 'Ask the project owner or an editor to add a source.'}
               </p>
 
               {currentProject && hasDocuments && (
@@ -458,8 +461,9 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   ? projectDialog ? () => projectDialog.openProjectDialog() : undefined
                   : hasDocuments
                     ? () => composerRef.current?.focus()
-                    : handleRequestAddSources}
-                disabled={!currentProject && !projectDialog}
+                    : canAddSources ? handleRequestAddSources : undefined}
+                disabled={(!currentProject && !projectDialog)
+                  || (Boolean(currentProject) && !hasDocuments && !canAddSources)}
                 className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
               >
                 {!currentProject ? (
@@ -472,11 +476,13 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     <MessageSquare className="w-5 h-5" />
                     <span>Start asking</span>
                   </>
-                ) : (
+                ) : canAddSources ? (
                   <>
                     <Upload className="w-5 h-5" />
                     <span>Upload sources</span>
                   </>
+                ) : (
+                  <span>Ask an editor to add sources</span>
                 )}
               </button>
 
@@ -490,15 +496,19 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                       the two things a reader actually does from here. */}
                   <button
                     type="button"
-                    onClick={handleRequestAddSources}
+                    onClick={canAddSources ? handleRequestAddSources : undefined}
+                    disabled={!canAddSources}
                     className="text-left bg-[var(--card)] rounded-lg border border-[var(--border)] hover:border-[var(--input)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] transition-base"
                     style={welcomeHeroStyles.card}
                   >
                     <span className="block font-medium text-sm mb-1">Add more sources</span>
                     <span className="block text-sm text-[var(--muted-foreground)]">
-                      Files, web pages, YouTube videos or pasted text
+                      {canAddSources
+                        ? 'Files, web pages, YouTube videos or pasted text'
+                        : 'Ask an owner or editor to add sources'}
                     </span>
                   </button>
+                  {canEditProject && (
                   <button
                     type="button"
                     onClick={() => setShowChatSettings(true)}
@@ -510,6 +520,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                       Role and length; every answer still cites its sources
                     </span>
                   </button>
+                  )}
                 </div>
               )}
             </div>
@@ -569,7 +580,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       >
         <div className="max-w-3xl mx-auto">
           <div className={`min-w-0 flex items-end ${currentProject ? 'gap-3' : 'gap-2'}`}>
-            {currentProject && (
+            {currentProject && canAddSources && (
               <button
                 onClick={handleRequestAddSources}
                 aria-label={'Attach file'}
@@ -579,7 +590,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 <Paperclip className="w-5 h-5" />
               </button>
             )}
-            {currentProject && (
+            {currentProject && canEditProject && (
               <button
                 type="button"
                 onClick={() => setShowChatSettings(true)}
@@ -606,7 +617,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   !currentProject
                     ? 'Create a project to start chatting'
                     : !canChat
-                      ? 'Add sources to start chatting'
+                      ? canAddSources ? 'Add sources to start chatting' : 'Waiting for a project source'
                       : noSourcesSelected
                         ? 'Select a source to start chatting'
                         : 'Ask anything about your sources...'
@@ -649,7 +660,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
         </div>
       </div>
 
-      {showChatSettings && currentProject && (
+      {showChatSettings && currentProject && canEditProject && (
         <ChatSettingsDialog
           projectId={currentProject.id}
           onClose={() => setShowChatSettings(false)}

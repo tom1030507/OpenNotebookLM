@@ -109,21 +109,20 @@ async def export_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Export one of the caller's projects in full.
-    
-    Includes all documents, conversations, and metadata.
+    """Export a visible project with source metadata and caller-owned chats.
     """
     # Validate format
     if format not in ["json", "markdown"]:
         raise HTTPException(status_code=400, detail="Invalid export format")
     
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     
     try:
         # Export project
         content, content_type, filename = export_service.export_project(
             db=db,
             project=project,
+            user_id=current_user.id,
             format=format,
             include_documents=include_documents,
             include_conversations=include_conversations
@@ -154,7 +153,7 @@ async def export_project_summary(
     Includes statistics, key insights, and document overview.
 
     Args:
-        project_id: Project to resolve through the current user's ownership.
+        project_id: Project to resolve through the current user's access.
         selection: Optional subset of sources to report on; omitted means all.
         db: Database session.
         current_user: Authenticated caller.
@@ -162,15 +161,19 @@ async def export_project_summary(
     Returns:
         The report as a Markdown attachment.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     # Resolved before the try below, which would turn a 404 into a 500.
     document_ids = None
     if selection and selection.document_ids is not None:
-        document_ids = require_documents(db, selection.document_ids, current_user)
+        document_ids = require_documents(
+            db, selection.document_ids, current_user, project_id=project_id
+        )
 
     try:
         # Generate summary
-        summary = export_service.generate_project_summary(db, project, document_ids)
+        summary = export_service.generate_project_summary(
+            db, project, current_user.id, document_ids
+        )
         
         # Create markdown report
         report = f"""# Project Summary: {project.name}

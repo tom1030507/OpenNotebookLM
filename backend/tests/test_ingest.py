@@ -81,7 +81,7 @@ def test_upload_route_returns_413_before_calling_the_document_service(monkeypatc
         enabled=False
     )
     app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     monkeypatch.setattr(ingest.settings, "max_file_size_mb", 0)
 
     class MustNotRun:
@@ -108,7 +108,7 @@ def test_upload_route_rejects_oversized_content_length_before_service(monkeypatc
         enabled=False
     )
     app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     monkeypatch.setattr(ingest.settings, "max_file_size_mb", 1)
 
     class MustNotRun:
@@ -132,7 +132,7 @@ def test_route_allows_declared_multipart_envelope_above_exact_file_cap(monkeypat
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     monkeypatch.setattr(ingest.settings, "max_file_size_mb", 1)
 
     class AcceptingService:
@@ -156,7 +156,7 @@ def test_upload_route_queues_supported_text_files_as_file_jobs(monkeypatch):
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         ingest.settings,
         "allowed_file_types",
@@ -187,7 +187,7 @@ def test_upload_route_queues_supported_audio_files_as_file_jobs(monkeypatch):
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         ingest.settings,
         "allowed_file_types",
@@ -222,7 +222,7 @@ def test_upload_route_queues_supported_image_files_as_file_jobs(monkeypatch):
         enabled=False
     )
     app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         ingest.settings,
         "allowed_file_types",
@@ -259,7 +259,7 @@ def test_invalid_image_content_has_a_stable_400_response(monkeypatch):
         enabled=False
     )
     app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
 
     class RefusingService:
         async def process_file_upload(self, **kwargs):
@@ -282,7 +282,7 @@ def test_upload_route_refuses_extensions_outside_the_configured_allowlist(monkey
     app.include_router(ingest.router, prefix="/api")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     monkeypatch.setattr(ingest.settings, "allowed_file_types", "pdf,txt,md")
 
     class MustNotRun:
@@ -314,7 +314,7 @@ def test_invalid_office_content_has_a_stable_400_response(monkeypatch):
         enabled=False
     )
     app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
 
     class RefusingService:
         async def process_file_upload(self, **kwargs):
@@ -399,7 +399,7 @@ def test_url_upload_route_returns_400_for_a_fetch_boundary_refusal(monkeypatch):
         enabled=False
     )
     app.dependency_overrides[get_concurrency_limiter] = lambda: ConcurrencyLimiter()
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
 
     class RefusingService:
         async def process_url(self, **kwargs):
@@ -436,7 +436,7 @@ def url_ingest_client(monkeypatch, service, request_limiter=None, concurrency=No
     app.dependency_overrides[get_db] = lambda: object()
     app.dependency_overrides[get_rate_limiter] = lambda: request_limiter
     app.dependency_overrides[get_concurrency_limiter] = lambda: concurrency
-    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     app.dependency_overrides[ingest.get_document_service] = lambda: service
     return TestClient(app)
 

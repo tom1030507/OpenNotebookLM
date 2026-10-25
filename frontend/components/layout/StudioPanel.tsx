@@ -77,6 +77,7 @@ export default function StudioPanel({
   const availabilityLabel = 'coming soon';
   const optionHintIdPrefix = useId();
   const currentProject = useStore((state) => state.currentProject);
+  const canEditProject = currentProject?.role === 'owner' || currentProject?.role === 'editor';
   const documents = useStore((state) => state.documents);
   const loadingDocuments = useStore((state) => state.loadingDocuments);
   const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
@@ -532,25 +533,27 @@ export default function StudioPanel({
             <section aria-label="Generated report" className="mt-4 rounded-lg border border-[var(--border)] p-3">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-sm font-medium">{currentProject.name} report</h3>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setReportSaveState('saving');
-                    try {
-                      await saveStudioNote(currentProject.id, `${currentProject.name} report`, {
-                        studio_kind: 'report', content: currentReport,
-                      });
-                      setReportSaveState('saved');
-                    } catch {
-                      setReportSaveState('error');
-                    }
-                  }}
-                  disabled={reportSaveState === 'saving' || reportSaveState === 'saved'}
-                  className="rounded px-2 py-1 text-xs hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-50"
-                >
-                  {reportSaveState === 'saving' ? 'Saving…'
-                    : reportSaveState === 'saved' ? 'Saved to notes' : 'Save report to notes'}
-                </button>
+                {canEditProject && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setReportSaveState('saving');
+                      try {
+                        await saveStudioNote(currentProject.id, `${currentProject.name} report`, {
+                          studio_kind: 'report', content: currentReport,
+                        });
+                        setReportSaveState('saved');
+                      } catch {
+                        setReportSaveState('error');
+                      }
+                    }}
+                    disabled={reportSaveState === 'saving' || reportSaveState === 'saved'}
+                    className="rounded px-2 py-1 text-xs hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-50"
+                  >
+                    {reportSaveState === 'saving' ? 'Saving…'
+                      : reportSaveState === 'saved' ? 'Saved to notes' : 'Save report to notes'}
+                  </button>
+                )}
               </div>
               {reportSaveState === 'error' && (
                 <p role="alert" className="mt-2 text-xs text-[var(--error)]">
@@ -590,10 +593,10 @@ export default function StudioPanel({
           <MindMapDialog
             map={currentMindMap}
             onClose={() => setMindMap(null)}
-            onSave={() => saveStudioNote(currentMindMap.project_id,
+            onSave={canEditProject ? () => saveStudioNote(currentMindMap.project_id,
               `${currentMindMap.project_name} mind map`, {
                 studio_kind: 'mindmap', payload_json: currentMindMap,
-              })}
+              }) : undefined}
             onAsk={(question) => {
               useStore.getState().draftMindMapQuestion(currentMindMap.project_id, question);
               setMindMap(null);
@@ -607,10 +610,10 @@ export default function StudioPanel({
           <VideoSummaryDialog
             summary={currentVideoSummary}
             onClose={() => setVideoSummary(null)}
-            onSave={() => saveStudioNote(currentVideoSummary.project_id,
+            onSave={canEditProject ? () => saveStudioNote(currentVideoSummary.project_id,
               `${currentVideoSummary.project_name} video summary`, {
                 studio_kind: 'video_summary', payload_json: currentVideoSummary,
-              })}
+              }) : undefined}
           />
         </React.Suspense>
       )}

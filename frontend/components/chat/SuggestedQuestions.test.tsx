@@ -18,6 +18,7 @@ const project: Project = {
   updated_at: '2026-10-01T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+  role: 'owner',
 };
 
 afterEach(() => {

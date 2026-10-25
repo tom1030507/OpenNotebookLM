@@ -20,11 +20,12 @@ from app.db.models import (
     Message,
     Project,
     ProjectDocument,
+    User,
 )
 from app.routers import export
 from app.services import export as export_service_module
 from app.services.export import ExportService
-from conftest import authenticated_client, owner_id
+from conftest import authenticated_client, owner_id, seed_user
 
 
 app = FastAPI()
@@ -161,6 +162,70 @@ def test_project_summary_only_includes_own_documents(two_projects_with_own_docum
     assert "**Documents**: 1" in response.text
     assert "Only In A" in response.text
     assert "Only In B" not in response.text
+
+
+def test_shared_project_exports_only_the_callers_conversations():
+    """Shared project exports keep source metadata and hide other chats."""
+    project_id = "shared-export-project"
+    conversation_ids = ["owner-export-chat", "member-export-chat", "legacy-export-chat"]
+    document_id = "shared-export-source"
+    with TestingSessionLocal() as db:
+        owner_id_value = owner_id(db)
+        member = seed_user(db, "shared-export-member")
+        project = Project(id=project_id, user_id=owner_id_value, name="Shared export")
+        document = Document(
+            id=document_id,
+            user_id=owner_id_value,
+            title="Project source",
+            source_type="pdf",
+            status="ready",
+        )
+        db.add_all([
+            project,
+            document,
+            ProjectDocument(project_id=project_id, document_id=document_id),
+            Conversation(
+                id=conversation_ids[0], project_id=project_id,
+                user_id=owner_id_value, title="Owner private chat",
+            ),
+            Conversation(
+                id=conversation_ids[1], project_id=project_id,
+                user_id=member.id, title="Member private chat",
+            ),
+            Conversation(
+                id=conversation_ids[2], project_id=project_id,
+                user_id=None, title="Legacy owner chat",
+            ),
+        ])
+        db.commit()
+
+        try:
+            service = ExportService()
+            exported, _, _ = service.export_project(
+                db, project, format="json", user_id=member.id
+            )
+            summary = service.generate_project_summary(
+                db, project, user_id=member.id
+            )
+
+            assert [doc["id"] for doc in json.loads(exported)["documents"]] == [document_id]
+            assert [chat["id"] for chat in json.loads(exported)["conversations"]] == [
+                conversation_ids[1]
+            ]
+            assert summary["conversation_count"] == 1
+            assert [chat["title"] for chat in summary["recent_conversations"]] == [
+                "Member private chat"
+            ]
+        finally:
+            db.rollback()
+            db.query(Conversation).filter(Conversation.id.in_(conversation_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(ProjectDocument).filter_by(project_id=project_id).delete()
+            db.query(Document).filter(Document.id == document_id).delete()
+            db.query(Project).filter(Project.id == project_id).delete()
+            db.query(User).filter(User.id == member.id).delete()
+            db.commit()
 
 
 def test_get_cannot_generate_a_project_summary(two_projects_with_own_documents):

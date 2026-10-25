@@ -114,7 +114,7 @@ def test_a_source_selection_becomes_the_retrieval_scope(monkeypatch):
     """Selected ids replace the owned set once they resolve as the caller's."""
     rag = ScopeRecordingRAG()
     client = query_client(monkeypatch, rag)
-    monkeypatch.setattr(query, "require_documents", lambda db, ids, user: ids)
+    monkeypatch.setattr(query, "require_documents", lambda db, ids, user, **kwargs: ids)
 
     response = client.post(
         "/api/query", json={"query": "hello", "document_ids": ["doc-1"]},
@@ -122,6 +122,53 @@ def test_a_source_selection_becomes_the_retrieval_scope(monkeypatch):
 
     assert response.status_code == 200
     assert rag.allowed == ["doc-1"]
+
+
+def test_project_conversation_query_scopes_selection_to_visible_project(monkeypatch):
+    """A saved chat retrieves only sources linked to its current project."""
+    class RecordingRAG:
+        allowed = None
+
+        def query_with_conversation(self, **kwargs):
+            self.allowed = kwargs["allowed_document_ids"]
+            return QUERY_RESULT
+
+    rag = RecordingRAG()
+    client = query_client(monkeypatch, rag)
+    project_checks = []
+    document_scopes = []
+    conversation = SimpleNamespace(project_id="project-1")
+
+    def record_project(_db, project_id, _user, min_role="owner"):
+        project_checks.append((project_id, min_role))
+        return object()
+
+    def record_documents(_db, document_ids, _user, project_id=None):
+        document_scopes.append(project_id)
+        return document_ids
+
+    monkeypatch.setattr(
+        query, "owned_document_ids",
+        lambda _db, _user, project_id=None: ["project-doc"] if project_id else ["owned-doc"],
+    )
+    monkeypatch.setattr(query, "require_project", record_project)
+    monkeypatch.setattr(query, "require_conversation", lambda *_args: conversation)
+    monkeypatch.setattr(query, "require_documents", record_documents)
+
+    response = client.post(
+        "/api/query",
+        json={
+            "query": "What does the shared source say?",
+            "project_id": "project-1",
+            "conversation_id": "conversation-1",
+            "document_ids": ["project-doc"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert project_checks == [("project-1", "viewer")]
+    assert document_scopes == ["project-1"]
+    assert rag.allowed == ["project-doc"]
 
 
 def test_query_rejects_more_than_500_selected_sources_with_422(monkeypatch):

@@ -80,6 +80,7 @@ describe('API client', () => {
         updated_at: '2026-01-01T00:00:00Z',
         document_count: 0,
         conversation_count: 0,
+        role: 'owner',
       }],
       total: 1,
       page: 1,
@@ -96,11 +97,44 @@ describe('API client', () => {
       updated_at: '2026-01-01T00:00:00Z',
       document_count: 0,
       conversation_count: 0,
+      role: 'owner',
     }]);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/projects');
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Accept')).toBe(
       'application/json',
     );
+  });
+
+  it('uses the project member endpoints and request bodies', async () => {
+    const member = {
+      user_id: 'user-1',
+      username: 'reader',
+      email: 'reader@example.com',
+      role: 'viewer',
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([member]))
+      .mockResolvedValueOnce(jsonResponse(member))
+      .mockResolvedValueOnce(jsonResponse({ ...member, role: 'editor' }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getProjectMembers('project-1')).resolves.toEqual([member]);
+    await api.addProjectMember('project-1', { email: member.email, role: 'viewer' });
+    await api.updateProjectMember('project-1', 'user/1', { role: 'editor' });
+    await api.removeProjectMember('project-1', 'user/1');
+
+    expect(fetchMock.mock.calls.map(([path, init]) => [path, init.method])).toEqual([
+      ['/api/projects/project-1/members', undefined],
+      ['/api/projects/project-1/members', 'POST'],
+      ['/api/projects/project-1/members/user%2F1', 'PATCH'],
+      ['/api/projects/project-1/members/user%2F1', 'DELETE'],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      email: member.email, role: 'viewer',
+    });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ role: 'editor' });
   });
 
   it('normalizes backend document fields for components', async () => {
@@ -109,6 +143,7 @@ describe('API client', () => {
       title: 'Paper',
       source_type: 'pdf',
       source_url: null,
+      is_owned_by_caller: true,
       meta_json: { author: 'Ada' },
       status: 'ready',
       error_message: null,
@@ -122,6 +157,7 @@ describe('API client', () => {
       name: 'Paper',
       type: 'pdf',
       url: undefined,
+      isOwnedByCaller: true,
       content: undefined,
       meta: { author: 'Ada' },
       status: 'ready',

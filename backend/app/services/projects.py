@@ -3,7 +3,8 @@ import copy
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import IntegrityError
 import structlog
 
 from app.db.models import (
@@ -13,6 +14,8 @@ from app.db.models import (
     Note,
     Project,
     ProjectDocument,
+    ProjectMember,
+    User,
 )
 from app.schemas import (
     PROJECT_COVER_EMOJIS,
@@ -30,6 +33,40 @@ UNTITLED_PROJECT_NAME = "Untitled notebook"
 
 class ProjectService:
     """Service for project operations."""
+
+    @staticmethod
+    def project_document_query(db: Session, project_id: Optional[str] = None):
+        """Return linked sources authorized by the owner or a project member.
+
+        Args:
+            db: Database session.
+            project_id: Optional project whose linked sources are being read.
+
+        Returns:
+            A query of linked documents the project may still read.
+        """
+        query = db.query(Document).join(
+            ProjectDocument,
+            ProjectDocument.document_id == Document.id,
+        ).join(
+            Project,
+            Project.id == ProjectDocument.project_id,
+        ).outerjoin(
+            ProjectMember,
+            and_(
+                ProjectMember.project_id == Project.id,
+                ProjectMember.user_id == Document.user_id,
+            ),
+        ).filter(
+            or_(
+                Document.user_id == Project.user_id,
+                ProjectMember.user_id.isnot(None),
+                ProjectDocument.shared_by_user_id == Document.user_id,
+            ),
+        )
+        if project_id is not None:
+            query = query.filter(Project.id == project_id)
+        return query
 
     @staticmethod
     def default_cover_emoji(project_id: str) -> str:
@@ -111,7 +148,11 @@ class ProjectService:
             cover_emoji=ProjectService.default_cover_emoji(duplicate_id),
         )
         links = [
-            ProjectDocument(project_id=duplicate_id, document_id=row.document_id)
+            ProjectDocument(
+                project_id=duplicate_id,
+                document_id=row.document_id,
+                shared_by_user_id=user_id,
+            )
             for row in documents
         ]
         copied_notes = []
@@ -145,16 +186,33 @@ class ProjectService:
         return duplicate
     
     @staticmethod
-    def get_project(db: Session, project_id: str) -> Optional[Project]:
-        """Get a project by ID."""
+    def get_project(db: Session, project_id: str, user_id: str) -> Optional[Project]:
+        """Get a project with counts scoped to the caller's conversations.
+
+        Args:
+            db: Database session.
+            project_id: Project to load.
+            user_id: Account whose private conversations are counted.
+
+        Returns:
+            The project, or None when it does not exist.
+        """
         project = db.query(Project).filter(Project.id == project_id).first()
         
         if project:
             # Add counts
-            project.document_count = db.query(func.count(ProjectDocument.document_id))\
-                .filter(ProjectDocument.project_id == project_id).scalar() or 0
-            project.conversation_count = db.query(func.count(Conversation.id))\
-                .filter(Conversation.project_id == project_id).scalar() or 0
+            project.document_count = ProjectService.project_document_query(
+                db, project_id
+            ).count()
+            conversations = db.query(func.count(Conversation.id)).filter(
+                Conversation.project_id == project_id,
+            )
+            conversations = conversations.filter(
+                or_(Conversation.user_id == user_id, Conversation.user_id.is_(None))
+                if project.user_id == user_id
+                else Conversation.user_id == user_id
+            )
+            project.conversation_count = conversations.scalar() or 0
         
         return project
     
@@ -169,8 +227,7 @@ class ProjectService:
         """Get one account's projects, paginated.
 
         `user_id` is positional and has no default on purpose: a listing that
-        forgets it would quietly return every account's projects, which is the
-        bug this parameter exists to prevent.
+        forgets it would quietly return projects the caller cannot see.
 
         Args:
             db: Database session
@@ -180,9 +237,14 @@ class ProjectService:
             search: Optional name/description filter
 
         Returns:
-            The page of projects and the total for this account
+            The page of owned and shared projects and the visible total.
         """
-        query = db.query(Project).filter(Project.user_id == user_id)
+        query = db.query(Project).outerjoin(
+            ProjectMember,
+            ProjectMember.project_id == Project.id,
+        ).filter(
+            or_(Project.user_id == user_id, ProjectMember.user_id == user_id)
+        ).distinct()
         
         # Apply search filter if provided
         if search:
@@ -195,19 +257,179 @@ class ProjectService:
         total = query.count()
         
         # Get paginated results
-        projects = query.order_by(Project.created_at.desc())\
+        projects = query.order_by(Project.created_at.desc(), Project.id)\
             .offset(skip)\
             .limit(limit)\
             .all()
         
         # Add counts for each project
         for project in projects:
-            project.document_count = db.query(func.count(ProjectDocument.document_id))\
-                .filter(ProjectDocument.project_id == project.id).scalar() or 0
-            project.conversation_count = db.query(func.count(Conversation.id))\
-                .filter(Conversation.project_id == project.id).scalar() or 0
+            project.document_count = ProjectService.project_document_query(
+                db, project.id
+            ).count()
+            conversations = db.query(func.count(Conversation.id)).filter(
+                Conversation.project_id == project.id,
+            )
+            conversations = conversations.filter(
+                or_(Conversation.user_id == user_id, Conversation.user_id.is_(None))
+                if project.user_id == user_id
+                else Conversation.user_id == user_id
+            )
+            project.conversation_count = conversations.scalar() or 0
         
         return projects, total
+
+    @staticmethod
+    def get_project_members(db: Session, project: Project) -> list[dict]:
+        """Return the owner and stored members with their effective roles.
+
+        Args:
+            db: Database session.
+            project: Project whose member list is requested.
+
+        Returns:
+            Owner first, followed by members ordered by username.
+        """
+        result = []
+        owner = db.query(User).filter(User.id == project.user_id).first()
+        if owner is not None:
+            result.append({
+                "user_id": owner.id,
+                "username": owner.username,
+                "email": owner.email,
+                "role": "owner",
+                "created_at": project.created_at,
+            })
+
+        members = db.query(ProjectMember, User).join(
+            User, User.id == ProjectMember.user_id
+        ).filter(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id != project.user_id,
+        ).order_by(User.username).all()
+        result.extend({
+            "user_id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": membership.role,
+            "created_at": membership.created_at,
+        } for membership, user in members)
+        return result
+
+    @staticmethod
+    def add_project_member(
+        db: Session,
+        project: Project,
+        username: Optional[str],
+        email: Optional[str],
+        role: str,
+    ) -> dict:
+        """Add one existing account to a project.
+
+        Args:
+            db: Database session.
+            project: Project, already checked for owner access.
+            username: Exact username, or None when adding by email.
+            email: Exact email, or None when adding by username.
+            role: Requested viewer or editor role.
+
+        Returns:
+            The stored member response fields.
+
+        Raises:
+            LookupError: If the account does not exist.
+            ValueError: If the owner is targeted or membership already exists.
+        """
+        account = db.query(User).filter(
+            User.username == username if username is not None else User.email == email
+        ).first()
+        if account is None:
+            raise LookupError("User not found")
+        if account.id == project.user_id:
+            raise ValueError("Project owner is already a member")
+        if db.query(ProjectMember).filter_by(
+            project_id=project.id,
+            user_id=account.id,
+        ).first() is not None:
+            raise ValueError("User is already a member")
+
+        membership = ProjectMember(
+            project_id=project.id,
+            user_id=account.id,
+            role=role,
+        )
+        db.add(membership)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise ValueError("User is already a member")
+        db.refresh(membership)
+        return {
+            "user_id": account.id,
+            "username": account.username,
+            "email": account.email,
+            "role": membership.role,
+            "created_at": membership.created_at,
+        }
+
+    @staticmethod
+    def update_project_member(
+        db: Session,
+        project_id: str,
+        user_id: str,
+        role: str,
+    ) -> Optional[dict]:
+        """Change one stored membership's role.
+
+        Args:
+            db: Database session.
+            project_id: Project containing the membership.
+            user_id: Member account id.
+            role: New viewer or editor role.
+
+        Returns:
+            Updated member response fields, or None when no membership exists.
+        """
+        membership = db.query(ProjectMember).filter_by(
+            project_id=project_id,
+            user_id=user_id,
+        ).first()
+        if membership is None:
+            return None
+        membership.role = role
+        db.commit()
+        db.refresh(membership)
+        account = db.query(User).filter(User.id == user_id).first()
+        return {
+            "user_id": account.id,
+            "username": account.username,
+            "email": account.email,
+            "role": membership.role,
+            "created_at": membership.created_at,
+        }
+
+    @staticmethod
+    def remove_project_member(db: Session, project_id: str, user_id: str) -> bool:
+        """Remove a stored membership from a project.
+
+        Args:
+            db: Database session.
+            project_id: Project containing the membership.
+            user_id: Member account id.
+
+        Returns:
+            Whether a membership row was removed.
+        """
+        membership = db.query(ProjectMember).filter_by(
+            project_id=project_id,
+            user_id=user_id,
+        ).first()
+        if membership is None:
+            return False
+        db.delete(membership)
+        db.commit()
+        return True
     
     @staticmethod
     def update_project(
@@ -313,9 +535,7 @@ class ProjectService:
         limit: int = 100
     ) -> List[Document]:
         """Get documents for a project."""
-        documents = db.query(Document)\
-            .join(ProjectDocument)\
-            .filter(ProjectDocument.project_id == project_id)\
+        documents = ProjectService.project_document_query(db, project_id)\
             .order_by(Document.created_at.desc())\
             .offset(skip)\
             .limit(limit)\
@@ -353,7 +573,8 @@ class ProjectService:
         # Create link
         link = ProjectDocument(
             project_id=project_id,
-            document_id=document_id
+            document_id=document_id,
+            shared_by_user_id=document.user_id,
         )
         db.add(link)
         db.commit()

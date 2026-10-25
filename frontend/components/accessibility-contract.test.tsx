@@ -41,11 +41,13 @@ const project: Project = {
   updated_at: '2026-08-12T00:00:00Z',
   document_count: 0,
   conversation_count: 0,
+  role: 'owner',
 };
 const previewDocument: Document = {
   id: 'document-1',
   name: 'Accessibility Notes',
   type: 'text',
+  isOwnedByCaller: true,
   content: 'Document content',
   meta: {},
   status: 'ready',
@@ -568,7 +570,7 @@ describe('workspace accessibility contract', () => {
 
     [
       'New Project', 'Export', 'Toggle theme', 'Notifications', 'Help', 'Settings', 'User menu',
-      'Attach file', 'Chat settings', 'Send message', 'Preview document', 'Delete document', 'Copy content', 'Download document', 'Toggle fullscreen', 'Close document preview dialog',
+      'Attach file', 'Chat settings', 'Send message', 'Preview document', 'Remove source', 'Copy content', 'Download document', 'Toggle fullscreen', 'Close document preview dialog',
       // Each name must exist; uniqueness is not required, since the top
       // navigation and the Sources panel both legitimately offer New Project.
     ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));

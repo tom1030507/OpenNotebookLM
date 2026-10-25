@@ -46,6 +46,7 @@ const seedWorkspace = (account: 'a' | 'b') => {
     updated_at: '2026-08-23T00:00:00Z',
     document_count: 1,
     conversation_count: 1,
+    role: 'owner' as const,
   };
   const conversation = {
     id: `conversation-${account}`,
@@ -63,6 +64,7 @@ const seedWorkspace = (account: 'a' | 'b') => {
       id: `document-${account}`,
       name: `Account ${account.toUpperCase()} document`,
       type: 'text',
+      isOwnedByCaller: true,
       content: 'Private source',
       meta: {},
       status: 'ready',
@@ -167,6 +169,7 @@ describe('API client authorization', () => {
       updated_at: '2026-01-01T00:00:00Z',
       document_count: 0,
       conversation_count: 0,
+      role: 'owner',
     }));
     vi.stubGlobal('fetch', fetchMock);
 

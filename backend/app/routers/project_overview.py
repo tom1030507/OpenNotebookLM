@@ -46,7 +46,7 @@ def project_overview(
     Returns:
         The project's name, overview and suggested questions.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     return service.overview(db, project)
 
 

@@ -39,6 +39,7 @@ const createdProject: Project = {
   updated_at: '2026-08-12T00:00:00Z',
   document_count: 0,
   conversation_count: 0,
+  role: 'owner',
   cover_emoji: '📚',
   cover_color: 'blue',
 };

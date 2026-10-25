@@ -43,6 +43,23 @@ OLD_SCHEMA = (
     )
     """,
     """
+    CREATE TABLE conversations (
+        id VARCHAR NOT NULL PRIMARY KEY,
+        project_id VARCHAR NOT NULL,
+        title VARCHAR,
+        created_at DATETIME,
+        updated_at DATETIME
+    )
+    """,
+    """
+    CREATE TABLE project_documents (
+        project_id VARCHAR NOT NULL,
+        document_id VARCHAR NOT NULL,
+        added_at DATETIME,
+        PRIMARY KEY (project_id, document_id)
+    )
+    """,
+    """
     CREATE TABLE notes (
         id VARCHAR NOT NULL PRIMARY KEY,
         project_id VARCHAR NOT NULL,
@@ -74,8 +91,14 @@ def old_database(tmp_path):
     connection.execute(
         "INSERT INTO projects (id, name) VALUES ('project-1', 'Existing work')")
     connection.execute(
+        "INSERT INTO conversations (id, project_id, title)"
+        " VALUES ('conversation-1', 'project-1', 'Existing conversation')")
+    connection.execute(
         "INSERT INTO documents (id, title, source_type, status)"
         " VALUES ('document-1', 'Existing upload', 'pdf', 'ready')")
+    connection.execute(
+        "INSERT INTO project_documents (project_id, document_id)"
+        " VALUES ('project-1', 'document-1')")
     connection.execute(
         "INSERT INTO notes (id, project_id, title, content, origin, created_at, updated_at)"
         " VALUES ('note-1', 'project-1', 'Kept note', '# Body', 'manual',"
@@ -97,9 +120,11 @@ class TestUpgrade:
         added = ensure_added_columns(old_database)
 
         assert sorted(added) == [
+            "conversations.user_id",
             "documents.user_id",
             "notes.payload_json",
             "notes.studio_kind",
+            "project_documents.shared_by_user_id",
             "projects.answer_length",
             "projects.auto_title",
             "projects.chat_instructions",
@@ -132,8 +157,11 @@ class TestUpgrade:
         with old_database.connect() as connection:
             rows = list(connection.exec_driver_sql(
                 "SELECT id, name, user_id FROM projects"))
+            conversations = list(connection.exec_driver_sql(
+                "SELECT id, project_id, user_id FROM conversations"))
 
         assert rows == [("project-1", "Existing work", None)]
+        assert conversations == [("conversation-1", "project-1", None)]
 
     def test_running_twice_changes_nothing(self, old_database):
         assert ensure_added_columns(old_database)
@@ -170,8 +198,12 @@ class TestUpgrade:
             notes = list(connection.exec_driver_sql(
                 "SELECT id, title, content, origin, studio_kind, payload_json FROM notes"
             ))
+            project_documents = list(connection.exec_driver_sql(
+                "SELECT project_id, document_id, shared_by_user_id FROM project_documents"
+            ))
 
         assert projects == [("project-1", "Existing work")]
+        assert project_documents == [("project-1", "document-1", None)]
         assert documents == [("document-1", "Existing upload", "ready")]
         assert jobs == 0
 

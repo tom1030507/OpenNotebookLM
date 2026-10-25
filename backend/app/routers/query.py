@@ -17,6 +17,7 @@ an async one that blocks the loop is not.
 from functools import lru_cache
 from typing import Any, Literal, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, field_validator
 import structlog
@@ -176,39 +177,43 @@ def query(
         Answer, source, model, usage, and conversation metadata.
     """
     try:
-        # Retrieval is confined to the caller's own documents, always, and
-        # independently of the project scope below. Without this a question with
-        # no project selected searched every chunk in the database.
-        allowed_document_ids = owned_document_ids(db, current_user)
-        if request.document_ids is not None:
-            allowed_document_ids = require_documents(
-                db, request.document_ids, current_user
-            )
-
-        # Validate project if specified
-        if request.project_id:
-            require_project(db, request.project_id, current_user)
-        
         # Resolve every ownership-bearing id before abuse controls. Otherwise a
         # depleted limiter would turn another account's normally indistinguishable
         # 404 into a 429 and reveal that the probed id follows a different path.
+        project_id = request.project_id
         conversation_id = request.conversation_id
         conversation = None
         if request.conversation_id:
             conversation = require_conversation(db, request.conversation_id, current_user)
 
             if (
-                request.project_id
-                and conversation.project_id != request.project_id
+                project_id
+                and conversation.project_id != project_id
             ):
                 raise HTTPException(
                     status_code=400,
                     detail="Conversation does not belong to the selected project",
                 )
-            
-            # Use conversation's project if not specified
-            if not request.project_id and conversation.project_id:
-                request.project_id = conversation.project_id
+            project_id = project_id or conversation.project_id
+
+        if project_id:
+            require_project(db, project_id, current_user, min_role="viewer")
+            allowed_document_ids = owned_document_ids(
+                db, current_user, project_id=project_id
+            )
+            if request.document_ids is not None:
+                allowed_document_ids = require_documents(
+                    db,
+                    request.document_ids,
+                    current_user,
+                    project_id=project_id,
+                )
+        else:
+            allowed_document_ids = owned_document_ids(db, current_user)
+            if request.document_ids is not None:
+                allowed_document_ids = require_documents(
+                    db, request.document_ids, current_user
+                )
 
         lease = UnlimitedConcurrencyLease()
         if settings.rate_limit_enabled:
@@ -231,7 +236,7 @@ def query(
                     db=db,
                     query=request.query,
                     conversation_id=conversation_id,
-                    project_id=request.project_id,
+                    project_id=project_id,
                     top_k=request.top_k,
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
@@ -240,10 +245,11 @@ def query(
                 )
             else:
                 # Create new conversation if project is specified
-                if request.project_id:
+                if project_id:
                     conversation = Conversation(
                         id=str(uuid.uuid4()),
-                        project_id=request.project_id,
+                        project_id=project_id,
+                        user_id=current_user.id,
                         title=request.query[:100]
                     )
                     db.add(conversation)
@@ -254,7 +260,7 @@ def query(
                         db=db,
                         query=request.query,
                         conversation_id=conversation_id,
-                        project_id=request.project_id,
+                        project_id=project_id,
                         top_k=request.top_k,
                         temperature=request.temperature,
                         max_tokens=request.max_tokens,
@@ -265,7 +271,7 @@ def query(
                     result = rag_service.query(
                         db=db,
                         query=request.query,
-                        project_id=request.project_id,
+                        project_id=project_id,
                         top_k=request.top_k,
                         temperature=request.temperature,
                         max_tokens=request.max_tokens,
@@ -302,11 +308,12 @@ def create_conversation(
     current_user: User = Depends(get_current_user),
 ):
     """Create an empty conversation in one of the caller's projects."""
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="viewer")
 
     conversation = Conversation(
         id=str(uuid.uuid4()),
         project_id=project_id,
+        user_id=current_user.id,
         title=request.title,
     )
     db.add(conversation)
@@ -425,11 +432,17 @@ def list_project_conversations(
     current_user: User = Depends(get_current_user)
 ):
     """List the conversations in one of the caller's projects."""
-    require_project(db, project_id, current_user)
-    
-    conversations = db.query(Conversation).filter(
+    project = require_project(db, project_id, current_user, min_role="viewer")
+
+    query = db.query(Conversation).filter(
         Conversation.project_id == project_id
-    ).order_by(Conversation.updated_at.desc()).all()
+    )
+    query = query.filter(
+        or_(Conversation.user_id == current_user.id, Conversation.user_id.is_(None))
+        if project.user_id == current_user.id
+        else Conversation.user_id == current_user.id
+    )
+    conversations = query.order_by(Conversation.updated_at.desc()).all()
     
     return [
         {

@@ -219,9 +219,11 @@ class TestApiTimestampsAreMarkedUtc:
     ):
         project = create_project(client)
         with session_factory() as db:
+            project_row = db.get(Project, project["id"])
             db.add(
                 Document(
                     id="document-1",
+                    user_id=project_row.user_id,
                     title="Example Domain",
                     source_type="url",
                     source_url="https://example.com",
