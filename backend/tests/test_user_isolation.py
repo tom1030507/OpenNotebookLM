@@ -1532,7 +1532,7 @@ class TestSourceSelectionIsolation:
         service = ProjectOverviewService(llm_service=OfflineLLM())
         generated_titles = []
 
-        def generate(documents):
+        def generate(documents, _output_language="auto"):
             titles = [document.title for document in documents]
             generated_titles.append(titles)
             return {
