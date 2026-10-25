@@ -23,6 +23,7 @@ export interface Project {
 export interface UploadConfig {
   allowed_file_types: string[];
   max_file_size_mb: number;
+  max_text_characters: number;
 }
 
 export type ProjectAnalyticsWindow = 7 | 30 | 90;

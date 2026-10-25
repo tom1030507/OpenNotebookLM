@@ -72,6 +72,10 @@ def get_upload_config() -> UploadConfigResponse:
             extension.lstrip(".") for extension in _configured_upload_extensions()
         ),
         max_file_size_mb=settings.max_file_size_mb,
+        max_text_characters=(
+            settings.max_chunks_per_doc
+            * max(1, settings.chunk_size - settings.chunk_overlap)
+        ),
     )
 
 

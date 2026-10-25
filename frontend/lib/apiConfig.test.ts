@@ -30,4 +30,12 @@ describe('browser API routing', () => {
       destination: 'http://internal-backend:9000/api/:path*',
     });
   });
+
+  test('buffers uploads up to the backend limit plus multipart allowance', async () => {
+    vi.stubEnv('MAX_FILE_SIZE_MB', '12');
+
+    const { default: nextConfig } = await import('../next.config');
+
+    expect(nextConfig.experimental?.middlewareClientMaxBodySize).toBe('14mb');
+  });
 });
