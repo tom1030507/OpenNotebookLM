@@ -53,6 +53,35 @@ def test_sentences_without_valid_citations_do_not_trigger_embeddings():
     assert embedder.calls == []
 
 
+def test_sentence_indexes_ignore_hidden_markdown_link_destinations():
+    embedder = StubEmbedder()
+
+    checks = check_citation_support(
+        "See [the docs](https://example.com/a_(b).pdf). Claim [Source 1].",
+        [{"text": "A passage about the claim."}],
+        embedder,
+        threshold=0.5,
+    )
+
+    assert checks[0]["sentence_index"] == 1
+    assert "https://example.com" not in embedder.calls[0][0][0]
+
+
+def test_embedding_uses_visible_markdown_link_text_without_its_destination():
+    embedder = StubEmbedder()
+
+    checks = check_citation_support(
+        "See [the docs](https://example.com) [Source 1].",
+        [{"text": "The docs explain the claim."}],
+        embedder,
+        threshold=0.5,
+    )
+
+    assert checks[0]["sentence_index"] == 0
+    assert "the docs" in embedder.calls[0][0][0]
+    assert "https://example.com" not in embedder.calls[0][0][0]
+
+
 def test_threshold_uses_full_precision_before_rounding_the_display_score():
     class NearThresholdEmbedder:
         def generate_embedding(self, texts, role):

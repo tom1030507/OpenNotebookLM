@@ -135,4 +135,17 @@ describe('inline citation previews', () => {
     const warning = container.querySelector('[data-citation-support="unsupported"]');
     expect(warning?.textContent).toContain('Second claim');
   });
+
+  it('keeps sentence indexes aligned when a Markdown link hides punctuation', () => {
+    const { container } = render(<MarkdownRenderer
+      content="See [the docs](https://example.com/a_(b).pdf). Claim [Source 1]."
+      citations={citations}
+      citationChecks={[
+        { sentence_index: 1, cited_labels: [1], score: 0.31, supported: false },
+      ]}
+    />);
+
+    const warning = container.querySelector('[data-citation-support="unsupported"]');
+    expect(warning?.textContent).toContain('Claim');
+  });
 });

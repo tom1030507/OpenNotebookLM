@@ -12,6 +12,41 @@ SENTENCE_END = re.compile(
 )
 
 
+# shortcut: reference links need an AST if answers start using them.
+def _markdown_link_destinations(text: str):
+    """Find inline-link destinations, including balanced URL parentheses."""
+    cursor = 0
+    while (marker := text.find("](", cursor)) >= 0:
+        backslashes = 0
+        index = marker - 1
+        while index >= 0 and text[index] == "\\":
+            backslashes += 1
+            index -= 1
+        if backslashes % 2 or (
+            text.rfind("[", 0, marker) < text.rfind("]", 0, marker)
+        ):
+            cursor = marker + 2
+            continue
+
+        depth = 1
+        index = marker + 2
+        while index < len(text) and text[index] not in "\r\n":
+            if text[index] == "\\" and index + 1 < len(text):
+                index += 2
+                continue
+            if text[index] == "(":
+                depth += 1
+            elif text[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    yield marker + 1, index + 1
+                    cursor = index + 1
+                    break
+            index += 1
+        else:
+            cursor = marker + 2
+
+
 def check_citation_support(
     answer: str,
     context_chunks: List[Dict[str, Any]],
@@ -32,7 +67,12 @@ def check_citation_support(
     sentences = []
     sentence_index = 0
     start = 0
-    for boundary in SENTENCE_END.finditer(answer):
+    # Link destinations are hidden in Markdown, so their punctuation must not shift UI indexes.
+    boundary_text = list(answer)
+    for link_start, link_end in _markdown_link_destinations(answer):
+        boundary_text[link_start:link_end] = [" "] * (link_end - link_start)
+    boundary_text = "".join(boundary_text)
+    for boundary in SENTENCE_END.finditer(boundary_text):
         sentence = answer[start:boundary.end()].strip()
         if sentence:
             labels = list(dict.fromkeys(
@@ -42,7 +82,7 @@ def check_citation_support(
                 and str(context_chunks[int(match.group(1)) - 1].get("text", "")).strip()
             ))
             if labels:
-                sentence_text = SOURCE_LABEL.sub("", sentence).strip()
+                sentence_text = SOURCE_LABEL.sub("", boundary_text[start:boundary.end()]).strip()
                 if sentence_text:
                     sentences.append((sentence_index, sentence_text, labels))
             sentence_index += 1
@@ -57,7 +97,7 @@ def check_citation_support(
             and str(context_chunks[int(match.group(1)) - 1].get("text", "")).strip()
         ))
         if labels:
-            sentence_text = SOURCE_LABEL.sub("", sentence).strip()
+            sentence_text = SOURCE_LABEL.sub("", boundary_text[start:]).strip()
             if sentence_text:
                 sentences.append((sentence_index, sentence_text, labels))
 
