@@ -263,6 +263,8 @@ export interface StudyResponse<T> {
   project_name: string;
   generated_at: string;
   model_used: string;
+  selected_ready_source_count: number;
+  sources_considered: number;
   items: T[];
   sources: StudySource[];
 }

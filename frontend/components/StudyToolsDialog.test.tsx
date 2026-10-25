@@ -23,6 +23,8 @@ const flashcards = (items = [card]): FlashcardsResponse => ({
   project_name: 'Biology',
   generated_at: '2026-10-25T00:00:00Z',
   model_used: 'test-model',
+  selected_ready_source_count: 1,
+  sources_considered: 1,
   items,
   sources: items.length ? [source] : [],
 });
@@ -40,6 +42,8 @@ const quiz = (items = [question]): QuizResponse => ({
   project_name: 'Biology',
   generated_at: '2026-10-25T00:00:00Z',
   model_used: 'test-model',
+  selected_ready_source_count: 1,
+  sources_considered: 1,
   items,
   sources: items.length ? [source] : [],
 });
@@ -147,6 +151,25 @@ describe('StudyToolsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText(card.front)).toBeTruthy();
     expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it('warns when only some selected ready sources fit in the generation', async () => {
+    const coverage = { selected_ready_source_count: 25, sources_considered: 24 };
+    vi.spyOn(api, 'fetchProjectFlashcards')
+      .mockResolvedValue(Object.assign(flashcards(), coverage));
+    const view = render(
+      <StudyToolsDialog projectId="project-1" mode="flashcards" documentIds={['doc-1']} onClose={() => {}} />,
+    );
+
+    await generate();
+    expect(await screen.findByText(/Only 24 of 25 selected ready sources/)).toBeTruthy();
+
+    vi.spyOn(api, 'fetchProjectQuiz').mockResolvedValue(Object.assign(quiz(), coverage));
+    view.rerender(
+      <StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />,
+    );
+    await generate('quiz');
+    expect(await screen.findByText(/Only 24 of 25 selected ready sources/)).toBeTruthy();
   });
 
   it('explains when no ready source is selected and skips the request', () => {

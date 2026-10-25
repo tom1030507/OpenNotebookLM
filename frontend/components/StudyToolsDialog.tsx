@@ -73,7 +73,8 @@ export default function StudyToolsDialog({
   const hasResult = mode === 'flashcards' ? flashcards !== null : quiz !== null;
   const cards = flashcards?.items ?? [];
   const questions = quiz?.items ?? [];
-  const sources = mode === 'flashcards' ? flashcards?.sources ?? [] : quiz?.sources ?? [];
+  const response = mode === 'flashcards' ? flashcards : quiz;
+  const sources = response?.sources ?? [];
   const noReadySource = documentIds !== undefined && documentIds.length === 0;
 
   const generate = async () => {
@@ -210,6 +211,13 @@ export default function StudyToolsDialog({
                 {error ? 'Retry' : loading ? 'Generating…' : `Generate ${mode === 'flashcards' ? 'flashcards' : 'quiz'}`}
               </button>
             </section>
+          )}
+
+          {hasResult && response && response.sources_considered < response.selected_ready_source_count && (
+            <p role="status" className="mb-4 text-sm text-[var(--muted-foreground)]">
+              Only {response.sources_considered} of {response.selected_ready_source_count} selected ready sources
+              were considered; results may not cover them all.
+            </p>
           )}
 
           {hasResult && mode === 'flashcards' && cards.length === 0 && (

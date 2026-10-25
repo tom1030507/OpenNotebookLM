@@ -301,6 +301,7 @@ describe('API client', () => {
     const response = {
       project_id: 'project-1', project_name: 'Research',
       generated_at: '2026-10-25T00:00:00Z', model_used: 'test-model',
+      selected_ready_source_count: 1, sources_considered: 1,
       items: [{ front: 'Term', back: 'Meaning', document_id: 'doc-1' }],
       sources: [{ document_id: 'doc-1', title: 'Paper', excerpt: 'Source excerpt.' }],
     };
@@ -319,6 +320,7 @@ describe('API client', () => {
     const response = {
       project_id: 'project-1', project_name: 'Research',
       generated_at: '2026-10-25T00:00:00Z', model_used: 'test-model',
+      selected_ready_source_count: 1, sources_considered: 1,
       items: [{
         question: 'Which term?', options: ['A', 'B', 'C', 'D'], answer_index: 1,
         explanation: 'The source says B.', document_id: 'doc-1',

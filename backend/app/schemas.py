@@ -527,6 +527,8 @@ class FlashcardsResponse(BaseModel):
     project_name: str
     generated_at: UtcDatetime
     model_used: str
+    selected_ready_source_count: int = Field(..., ge=0)
+    sources_considered: int = Field(..., ge=0)
     items: List[FlashcardItem]
     sources: List[StudySource]
 
@@ -540,6 +542,8 @@ class QuizResponse(BaseModel):
     project_name: str
     generated_at: UtcDatetime
     model_used: str
+    selected_ready_source_count: int = Field(..., ge=0)
+    sources_considered: int = Field(..., ge=0)
     items: List[QuizItem]
     sources: List[StudySource]
 

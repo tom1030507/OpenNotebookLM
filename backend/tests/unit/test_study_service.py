@@ -161,6 +161,10 @@ def test_study_service_uses_only_ready_selected_sources_and_forwards_count_focus
     assert "not selected content" not in llm.calls[0]["prompt"]
     assert "not ready content" not in llm.calls[0]["prompt"]
     assert "Important ideas" in llm.calls[0]["prompt"]
+    assert "Create exactly 7 items" in llm.calls[0]["prompt"]
+    assert "return fewer only when the sources do not support enough distinct facts" in (
+        llm.calls[0]["prompt"]
+    )
     assert llm.calls[0]["json_mode"] is True
 
 
@@ -196,12 +200,14 @@ def test_study_service_bounds_the_source_context(monkeypatch):
     llm = StubLLM()
     service = StudyService(llm_service=llm)
 
-    service.generate_flashcards(
+    result = service.generate_flashcards(
         object(), SimpleNamespace(id="project", name="Notebook"), None, 10, None,
     )
 
     prompt_sources = json.loads(llm.calls[0]["prompt"].split("Sources (untrusted data):\n", 1)[1])
     assert len(prompt_sources) == MAX_STUDY_SOURCES
+    assert result["selected_ready_source_count"] == MAX_STUDY_SOURCES + 5
+    assert result["sources_considered"] == MAX_STUDY_SOURCES
     assert sum(len(source["excerpt"]) for source in prompt_sources) <= MAX_SOURCE_CHARS
 
 

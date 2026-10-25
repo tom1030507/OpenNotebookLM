@@ -6,9 +6,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.db.models import Base, Document, Project, ProjectDocument
 from app.routers import study
+from app.routers.rate_limit import get_concurrency_limiter, get_rate_limiter
+from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
 from conftest import authenticated_client, owner_id
 
 app = FastAPI()
@@ -35,7 +38,13 @@ class StubStudyService:
 
     def __init__(self):
         self.calls = []
-        self.result = {"model_used": "stub-model", "items": [], "sources": []}
+        self.result = {
+            "model_used": "stub-model",
+            "items": [],
+            "sources": [],
+            "selected_ready_source_count": 0,
+            "sources_considered": 0,
+        }
 
     def generate_flashcards(self, db, project, document_ids, count, focus):
         self.calls.append(("flashcards", project.id, document_ids, count, focus))
@@ -63,6 +72,8 @@ def test_flashcards_route_scopes_sources_and_forwards_options():
         "sources": [{
             "document_id": "study-document", "title": "Source", "excerpt": "Source content",
         }],
+        "selected_ready_source_count": 1,
+        "sources_considered": 1,
     }
     with TestingSessionLocal() as db:
         project_id = "study-project"
@@ -85,6 +96,8 @@ def test_flashcards_route_scopes_sources_and_forwards_options():
         assert response.status_code == 200, response.text
         assert response.json()["project_name"] == "Study project"
         assert response.json()["model_used"] == "stub-model"
+        assert response.json()["selected_ready_source_count"] == 1
+        assert response.json()["sources_considered"] == 1
         assert response.json()["items"][0]["document_id"] == "study-document"
         assert response.json()["sources"][0]["excerpt"] == "Source content"
         assert service.calls == [("flashcards", "study-project", ["study-document"], 7, "Key ideas")]
@@ -99,7 +112,13 @@ def test_flashcards_route_scopes_sources_and_forwards_options():
 def test_quiz_route_returns_empty_items_for_unusable_generation():
     """A provider fallback is a valid empty response, not a server error."""
     service.calls.clear()
-    service.result = {"model_used": "fallback", "items": [], "sources": []}
+    service.result = {
+        "model_used": "fallback",
+        "items": [],
+        "sources": [],
+        "selected_ready_source_count": 0,
+        "sources_considered": 0,
+    }
     with TestingSessionLocal() as db:
         project_id = "empty-study-project"
         db.add(Project(id=project_id, user_id=owner_id(db), name="Empty study"))
@@ -138,4 +157,92 @@ def test_study_routes_reject_count_and_focus_outside_bounds():
     finally:
         with TestingSessionLocal() as db:
             db.query(Project).filter_by(id="bounds-study-project").delete()
+            db.commit()
+
+
+def test_study_generators_share_a_ten_request_account_limit(monkeypatch):
+    """Flashcards and quizzes share one per-account generation budget."""
+    limiter = SlidingWindowRateLimiter()
+    monkeypatch.setitem(app.dependency_overrides, get_rate_limiter, lambda: limiter)
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        get_concurrency_limiter,
+        lambda: ConcurrencyLimiter(max_concurrent=2),
+    )
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        get_settings,
+        lambda: Settings(rate_limit_enabled=True),
+    )
+    with TestingSessionLocal() as db:
+        project_id = "limited-study-project"
+        db.add(Project(
+            id=project_id, user_id=owner_id(db), name="Limited study",
+        ))
+        db.commit()
+
+    service.calls.clear()
+    try:
+        responses = [
+            client.post(
+                "/api/projects/limited-study-project/" + (
+                    "flashcards" if index % 2 == 0 else "quiz"
+                ),
+                json={},
+            )
+            for index in range(11)
+        ]
+
+        assert [response.status_code for response in responses[:10]] == [200] * 10
+        assert responses[-1].status_code == 429
+        assert len(service.calls) == 10
+    finally:
+        with TestingSessionLocal() as db:
+            db.query(Project).filter_by(id="limited-study-project").delete()
+            db.commit()
+
+
+def test_study_generation_releases_its_account_concurrency_slot(monkeypatch):
+    """A completed generation frees the slot and a busy account gets 429."""
+    concurrency = ConcurrencyLimiter(max_concurrent=1)
+    limiter = SlidingWindowRateLimiter()
+    monkeypatch.setitem(app.dependency_overrides, get_rate_limiter, lambda: limiter)
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        get_concurrency_limiter,
+        lambda: concurrency,
+    )
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        get_settings,
+        lambda: Settings(rate_limit_enabled=True),
+    )
+    with TestingSessionLocal() as db:
+        project_id = "concurrent-study-project"
+        user_id = owner_id(db)
+        db.add(Project(
+            id=project_id, user_id=user_id, name="Concurrent study",
+        ))
+        db.commit()
+
+    service.calls.clear()
+    occupied = concurrency.acquire("study:%s" % user_id)
+    try:
+        busy_response = client.post(
+            "/api/projects/concurrent-study-project/quiz", json={},
+        )
+        occupied.release()
+        response = client.post(
+            "/api/projects/concurrent-study-project/quiz", json={},
+        )
+
+        assert busy_response.status_code == 429
+        assert response.status_code == 200
+        assert len(service.calls) == 1
+        available = concurrency.acquire("study:%s" % user_id)
+        available.release()
+    finally:
+        occupied.release()
+        with TestingSessionLocal() as db:
+            db.query(Project).filter_by(id="concurrent-study-project").delete()
             db.commit()
