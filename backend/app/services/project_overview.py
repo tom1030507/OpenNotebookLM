@@ -138,6 +138,48 @@ class ProjectOverviewService:
             "questions": stored.get("questions", []) if current else [],
         }
 
+    def summary(
+        self,
+        db: Session,
+        project: Project,
+        document_ids: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        """Summarize all ready project sources or an uncached selected subset.
+
+        Args:
+            db: Database session.
+            project: A project the caller can read.
+            document_ids: Optional validated source subset.
+
+        Returns:
+            The grounded overview, or None when no usable summary is available.
+        """
+        if document_ids is None:
+            return self.overview(db, project)["overview"]
+
+        sources = [
+            document for document in project_documents(db, project)
+            if document.status == "ready"
+        ]
+        if not sources:
+            return None
+
+        selected_ids = set(document_ids)
+        selected = [
+            document for document in sources
+            if document.id in selected_ids
+        ]
+        if not selected:
+            return None
+        if {document.id for document in selected} == {
+            document.id for document in sources
+        }:
+            return self.overview(db, project)["overview"]
+
+        # shortcut: matches the overview's 12-source prompt cap; raise both limits for broader reports.
+        generated = self._generate(selected[:MAX_SOURCE_DOCUMENTS])
+        return generated["overview"] if generated else None
+
     def follow_ups(self, conversation: Conversation) -> List[str]:
         """Suggest questions that follow from the conversation's last answer.
 
@@ -220,3 +262,15 @@ class ProjectOverviewService:
         if not isinstance(result, dict) or result.get("model") in (None, FALLBACK_MODEL):
             return None
         return result.get("text")
+
+
+_service = ProjectOverviewService()
+
+
+def get_project_overview_service() -> ProjectOverviewService:
+    """Provide the shared overview service for both overview and report routes.
+
+    Returns:
+        The shared service.
+    """
+    return _service

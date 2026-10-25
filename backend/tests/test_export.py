@@ -148,7 +148,7 @@ def test_markdown_export_only_includes_own_documents(two_projects_with_own_docum
 
 
 def test_project_summary_only_includes_own_documents(two_projects_with_own_documents):
-    """A project summary report must not leak another project's sources.
+    """A project summary uses cached source content without exposing metadata.
 
     Args:
         two_projects_with_own_documents: Seeded project/document rows.
@@ -156,12 +156,26 @@ def test_project_summary_only_includes_own_documents(two_projects_with_own_docum
     Returns:
         None.
     """
+    with TestingSessionLocal() as db:
+        project = db.get(Project, "project-a")
+        db.get(Document, "document-a").source_url = "uploads/private.pdf"
+        project.overview_json = {
+            "overview": "Rainfall increased across the western region.",
+            "questions": [],
+            "source_ids": ["document-a"],
+        }
+        db.commit()
+
     response = client.post("/api/export/project/project-a/summary")
 
     assert response.status_code == 200
-    assert "**Documents**: 1" in response.text
-    assert "Only In A" in response.text
+    assert "Rainfall increased across the western region." in response.text
+    assert "**Documents**" not in response.text
+    assert "Only In A" not in response.text
     assert "Only In B" not in response.text
+    assert "Source:" not in response.text
+    assert "uploads/private.pdf" not in response.text
+    assert "/uploads/" not in response.text
 
 
 def test_shared_project_exports_only_the_callers_conversations():
@@ -204,17 +218,9 @@ def test_shared_project_exports_only_the_callers_conversations():
             exported, _, _ = service.export_project(
                 db, project, format="json", user_id=member.id
             )
-            summary = service.generate_project_summary(
-                db, project, user_id=member.id
-            )
-
             assert [doc["id"] for doc in json.loads(exported)["documents"]] == [document_id]
             assert [chat["id"] for chat in json.loads(exported)["conversations"]] == [
                 conversation_ids[1]
-            ]
-            assert summary["conversation_count"] == 1
-            assert [chat["title"] for chat in summary["recent_conversations"]] == [
-                "Member private chat"
             ]
         finally:
             db.rollback()

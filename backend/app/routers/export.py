@@ -13,6 +13,10 @@ from app.db.database import get_db
 from app.db.models import User
 from app.schemas import SourceSelection
 from app.services.export import ExportService, MAX_BATCH_EXPORT_CONVERSATIONS
+from app.services.project_overview import (
+    ProjectOverviewService,
+    get_project_overview_service,
+)
 from app.utils.time import utc_now
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_conversation, require_documents, require_project
@@ -142,24 +146,24 @@ async def export_project(
 
 
 @router.post("/export/project/{project_id}/summary")
-async def export_project_summary(
+def export_project_summary(
     project_id: str,
     selection: Optional[SourceSelection] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    service: ProjectOverviewService = Depends(get_project_overview_service),
 ):
-    """Generate and export a summary report of one of the caller's projects.
-
-    Includes statistics, key insights, and document overview.
+    """Export a grounded summary report of one of the caller's projects.
 
     Args:
         project_id: Project to resolve through the current user's access.
         selection: Optional subset of sources to report on; omitted means all.
         db: Database session.
         current_user: Authenticated caller.
+        service: Shared grounded-summary generator.
 
     Returns:
-        The report as a Markdown attachment.
+        The source summary as a Markdown attachment.
     """
     project = require_project(db, project_id, current_user, min_role="viewer")
     # Resolved before the try below, which would turn a 404 into a 500.
@@ -170,42 +174,12 @@ async def export_project_summary(
         )
 
     try:
-        # Generate summary
-        summary = export_service.generate_project_summary(
-            db, project, current_user.id, document_ids
+        summary = service.summary(db, project, document_ids)
+        report = (
+            f"# Project Summary: {project.name}\n\n"
+            "## Overview\n\n"
+            f"{summary or 'No summary is available for the selected sources.'}\n"
         )
-        
-        # Create markdown report
-        report = f"""# Project Summary: {project.name}
-
-**Generated**: {utc_now().isoformat()}
-
-## Overview
-{project.description or 'No description provided.'}
-
-## Statistics
-- **Documents**: {summary['document_count']}
-- **Total Chunks**: {summary['total_chunks']}
-- **Conversations**: {summary['conversation_count']}
-- **Total Messages**: {summary['total_messages']}
-
-## Documents
-"""
-        
-        for doc in summary['documents']:
-            report += f"\n### {doc['title']}\n"
-            report += f"- Type: {doc['source_type']}\n"
-            report += f"- Chunks: {doc['chunk_count']}\n"
-            report += f"- Status: {doc['status']}\n"
-            if doc.get('source_url'):
-                report += f"- Source: {doc['source_url']}\n"
-        
-        if summary['recent_conversations']:
-            report += "\n## Recent Conversations\n"
-            for conv in summary['recent_conversations']:
-                report += f"\n### {conv['title']}\n"
-                report += f"- Messages: {conv['message_count']}\n"
-                report += f"- Created: {conv['created_at']}\n"
         
         return Response(
             content=report,
