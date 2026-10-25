@@ -20,6 +20,7 @@ import NotesSection from './NotesSection';
 
 const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
 const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
+const AudioOverviewDialog = React.lazy(() => import('@/components/AudioOverviewDialog'));
 
 interface ProjectResult<T> {
   projectId: string;
@@ -72,6 +73,18 @@ export default function StudioPanel({
   const [mindMap, setMindMap] = useState<ProjectResult<MindMap> | null>(null);
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
   const [videoSummary, setVideoSummary] = useState<ProjectResult<VideoSummary> | null>(null);
+  const [audioOverviewCapability, setAudioOverviewCapability] = useState<{
+    projectId: string;
+    enabled: boolean;
+  } | null>(null);
+  const [isCheckingAudioCapability, setIsCheckingAudioCapability] = useState(false);
+  const [isAudioOverviewOpen, setIsAudioOverviewOpen] = useState(false);
+  const audioOverviewCapabilityKnown = Boolean(
+    currentProject && audioOverviewCapability?.projectId === currentProject.id,
+  );
+  const audioOverviewTtsEnabled = audioOverviewCapabilityKnown
+    ? audioOverviewCapability?.enabled ?? true
+    : true;
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   // Identifies the reading in progress. Stopping retires it, so anything the
@@ -110,10 +123,13 @@ export default function StudioPanel({
     stopSpeaking();
     setIsGeneratingReport(false);
     setIsPreparingAudio(false);
+    setIsSpeaking(false);
+    setIsCheckingAudioCapability(false);
     setIsBuildingMindMap(false);
     setIsPreparingVideo(false);
     setMindMap(null);
     setVideoSummary(null);
+    setIsAudioOverviewOpen(false);
     setReportError('');
   }, [currentProject?.id]);
 
@@ -155,6 +171,32 @@ export default function StudioPanel({
     stopSpeaking();
     setIsPreparingAudio(false);
     setIsSpeaking(false);
+  };
+
+  const openAudioOverview = async () => {
+    const operation = beginProjectOperation();
+    if (!operation) return;
+    setIsCheckingAudioCapability(true);
+    setReportError('');
+    try {
+      const { enabled } = await api.listAudioOverviews(operation.project.id);
+      if (!operation.isCurrent()) return;
+      setAudioOverviewCapability({ projectId: operation.project.id, enabled });
+      if (enabled) {
+        setIsAudioOverviewOpen(true);
+      } else if (speechSupported) {
+        setIsCheckingAudioCapability(false);
+        await playAudioSummary();
+      } else {
+        setReportError('Audio playback is not supported in this browser.');
+      }
+    } catch {
+      if (operation.isCurrent()) {
+        setReportError('Audio summary availability could not be checked. Please try again.');
+      }
+    } finally {
+      if (operation.isCurrent()) setIsCheckingAudioCapability(false);
+    }
   };
 
   const buildMindMap = async () => {
@@ -242,7 +284,11 @@ export default function StudioPanel({
     if (option.action === 'report') return generateReport;
     if (option.action === 'mindmap') return buildMindMap;
     if (option.action === 'video') return playVideoSummary;
-    if (option.action === 'audio') return isSpeaking ? stopAudioSummary : playAudioSummary;
+    if (option.action === 'audio') {
+      if (!audioOverviewCapabilityKnown) return openAudioOverview;
+      if (audioOverviewTtsEnabled) return () => setIsAudioOverviewOpen(true);
+      return isSpeaking ? stopAudioSummary : playAudioSummary;
+    }
     return undefined;
   };
 
@@ -263,12 +309,17 @@ export default function StudioPanel({
 
   // A reading already under way stays stoppable after its sources are cleared.
   const blockedBySelection = (option: StudioOption) => (
-    noSourcesSelected && !(option.action === 'audio' && isSpeaking)
+    noSourcesSelected && !(option.action === 'audio'
+      && audioOverviewCapabilityKnown && !audioOverviewTtsEnabled && isSpeaking)
   );
 
   const optionDisabled = (option: StudioOption) => {
     if (!option.available || !currentProject || blockedBySelection(option)) return true;
-    if (option.action === 'audio') return !speechSupported || isPreparingAudio;
+    if (option.action === 'audio') {
+      return isCheckingAudioCapability
+        || (audioOverviewCapabilityKnown && !audioOverviewTtsEnabled && !speechSupported)
+        || isPreparingAudio;
+    }
     if (option.action === 'mindmap') return isBuildingMindMap || currentMindMap !== null;
     if (option.action === 'video') {
       return isPreparingVideo || currentVideoSummary !== null || hasNoSources;
@@ -278,12 +329,18 @@ export default function StudioPanel({
 
   const optionLabel = (option: StudioOption) => {
     if (!option.available) return `${option.title} (${availabilityLabel})`;
-    if (option.action === 'audio' && isSpeaking) return 'Stop audio summary';
+    if (option.action === 'audio' && audioOverviewCapabilityKnown
+      && !audioOverviewTtsEnabled && isSpeaking) {
+      return 'Stop audio summary';
+    }
     return option.title;
   };
 
   const optionIcon = (option: StudioOption) => {
-    if (option.action === 'audio') {
+    if (option.action === 'audio' && isCheckingAudioCapability) {
+      return <Loader2 className="w-5 h-5 animate-spin" />;
+    }
+    if (option.action === 'audio' && !audioOverviewTtsEnabled) {
       if (isPreparingAudio) return <Loader2 className="w-5 h-5 animate-spin" />;
       if (isSpeaking) return <Square className="w-5 h-5" />;
       return option.icon;
@@ -310,6 +367,9 @@ export default function StudioPanel({
     if (blockedBySelection(option)) return 'Select a source first';
 
     if (option.action === 'audio') {
+      if (isCheckingAudioCapability) return 'Checking audio summary availability…';
+      if (!audioOverviewCapabilityKnown) return 'Check audio summary availability';
+      if (audioOverviewTtsEnabled) return 'Choose the format and length for this audio overview';
       if (!speechSupported) return 'Not supported in this browser';
       if (isPreparingAudio) return 'Preparing audio…';
       if (isSpeaking) return 'Playing — select to stop';
@@ -479,6 +539,15 @@ export default function StudioPanel({
           <VideoSummaryDialog
             summary={currentVideoSummary}
             onClose={() => setVideoSummary(null)}
+          />
+        </React.Suspense>
+      )}
+      {isAudioOverviewOpen && currentProject && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <AudioOverviewDialog
+            projectId={currentProject.id}
+            documentIds={selectedSourceIds(useStore.getState())}
+            onClose={() => setIsAudioOverviewOpen(false)}
           />
         </React.Suspense>
       )}

@@ -389,6 +389,43 @@ class SourceSelection(BaseModel):
         return unique_ids
 
 
+class AudioOverviewCreate(SourceSelection):
+    """Generation style and source selection for one audio overview."""
+
+    format: Literal["deep_dive", "brief", "critique", "debate"] = "deep_dive"
+    length: Literal["short", "default"] = "default"
+    focus: Optional[str] = Field(default=None, max_length=500)
+
+
+class AudioOverviewTurn(BaseModel):
+    """One validated host turn in the stored transcript."""
+
+    speaker: Literal["A", "B"]
+    text: str = Field(..., min_length=1, max_length=300)
+
+
+class AudioOverviewResponse(BaseModel):
+    """Persisted status, options, transcript, and timing for an overview."""
+
+    id: str
+    status: Literal["queued", "running", "ready", "failed"]
+    options: AudioOverviewCreate
+    script: List[AudioOverviewTurn] = Field(default_factory=list)
+    duration_seconds: Optional[float] = None
+    error: Optional[str] = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    started_at: Optional[UtcDatetime] = None
+    completed_at: Optional[UtcDatetime] = None
+
+
+class AudioOverviewListResponse(BaseModel):
+    """Stored overviews and the runtime synthesis capability."""
+
+    enabled: bool
+    items: List[AudioOverviewResponse] = Field(default_factory=list)
+
+
 class MindMapResponse(BaseModel):
     """Schema for a generated mind map."""
 

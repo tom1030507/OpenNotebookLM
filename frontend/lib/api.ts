@@ -188,6 +188,39 @@ export interface VideoSummary {
   scenes: VideoScene[];
 }
 
+export type AudioOverviewFormat = 'deep_dive' | 'brief' | 'critique' | 'debate';
+export type AudioOverviewLength = 'short' | 'default';
+
+export interface AudioOverviewOptions {
+  document_ids?: string[];
+  format: AudioOverviewFormat;
+  length: AudioOverviewLength;
+  focus?: string | null;
+}
+
+export interface AudioOverviewTurn {
+  speaker: 'A' | 'B';
+  text: string;
+}
+
+export interface AudioOverview {
+  id: string;
+  status: 'queued' | 'running' | 'ready' | 'failed';
+  options: AudioOverviewOptions;
+  script: AudioOverviewTurn[];
+  duration_seconds: number | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AudioOverviewList {
+  enabled: boolean;
+  items: AudioOverview[];
+}
+
 interface ProjectListResponse {
   projects: Project[];
   total: number;
@@ -893,6 +926,39 @@ const api = {
     return requestJson<VideoSummary>(
       `/projects/${projectId}/video-summary`,
       studioRequest(documentIds),
+    );
+  },
+
+  listAudioOverviews(projectId: string): Promise<AudioOverviewList> {
+    return requestJson<AudioOverviewList>(`/projects/${projectId}/audio-overviews`);
+  },
+
+  createAudioOverview(
+    projectId: string,
+    options: AudioOverviewOptions & { document_ids?: string[] },
+  ): Promise<AudioOverview> {
+    return requestJson<AudioOverview>(`/projects/${projectId}/audio-overviews`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
+  },
+
+  getAudioOverview(projectId: string, overviewId: string): Promise<AudioOverview> {
+    return requestJson<AudioOverview>(
+      `/projects/${projectId}/audio-overviews/${overviewId}`,
+    );
+  },
+
+  fetchAudioOverviewFile(projectId: string, overviewId: string): Promise<Blob> {
+    return requestBlob(
+      `/projects/${projectId}/audio-overviews/${overviewId}/file`,
+    );
+  },
+
+  async deleteAudioOverview(projectId: string, overviewId: string): Promise<void> {
+    await requestJson(
+      `/projects/${projectId}/audio-overviews/${overviewId}`,
+      { method: 'DELETE' },
     );
   },
 

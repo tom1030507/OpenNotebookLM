@@ -61,7 +61,14 @@ const summary = '# Research notes\n\n- **Example Domain** overview';
 
 beforeEach(() => {
   useStore.setState({ currentProject: project, projects: [project] });
+  vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: false, items: [] });
 });
+
+async function clickAudioSummary() {
+  const audio = screen.getByRole('button', { name: 'Audio summary' });
+  await waitFor(() => expect((audio as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(audio);
+}
 
 afterEach(() => {
   cleanup();
@@ -76,10 +83,7 @@ describe('Studio audio summary', () => {
     const spy = vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
     render(<StudioPanel />);
 
-    const audio = screen.getByRole('button', { name: 'Audio summary' });
-    expect((audio as HTMLButtonElement).disabled).toBe(false);
-
-    fireEvent.click(audio);
+    await clickAudioSummary();
 
     await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
     await waitFor(() => expect(spoken).toHaveLength(1));
@@ -93,7 +97,7 @@ describe('Studio audio summary', () => {
     vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
     const stop = await screen.findByRole('button', { name: 'Stop audio summary' });
     expect(stop).toBeTruthy();
 
@@ -110,7 +114,7 @@ describe('Studio audio summary', () => {
     vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
     const stop = await screen.findByRole('button', { name: 'Stop audio summary' });
     fireEvent.click(stop);
 
@@ -123,7 +127,7 @@ describe('Studio audio summary', () => {
     vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
     fireEvent.click(await screen.findByRole('button', { name: 'Stop audio summary' }));
 
     await waitFor(() => expect(cancel).toHaveBeenCalled());
@@ -138,7 +142,7 @@ describe('Studio audio summary', () => {
     vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
     await screen.findByRole('button', { name: 'Stop audio summary' });
 
     spoken[0].onerror?.({ error: 'synthesis-failed' });
@@ -152,13 +156,13 @@ describe('Studio audio summary', () => {
     vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
     await screen.findByRole('button', { name: 'Stop audio summary' });
 
     // Stop, then play again: the second run must not inherit the first's cancel.
     fireEvent.click(screen.getByRole('button', { name: 'Stop audio summary' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Audio summary' })).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
 
     await waitFor(() => expect(spoken).toHaveLength(2));
     expect(screen.queryByRole('alert')).toBeNull();
@@ -172,11 +176,11 @@ describe('Studio audio summary', () => {
     vi.spyOn(api, 'fetchProjectSummaryText').mockResolvedValue(summary);
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
     fireEvent.click(await screen.findByRole('button', { name: 'Stop audio summary' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Audio summary' })).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
     await waitFor(() => expect(spoken).toHaveLength(2));
     await screen.findByRole('button', { name: 'Stop audio summary' });
 
@@ -190,13 +194,15 @@ describe('Studio audio summary', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('explains itself when the browser cannot speak', () => {
+  it('explains itself when the browser cannot speak and server synthesis is disabled', async () => {
     vi.stubGlobal('speechSynthesis', undefined);
     render(<StudioPanel />);
 
+    await clickAudioSummary();
+
     const audio = screen.getByRole('button', { name: /^Audio summary/ });
     expect((audio as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/not supported in this browser/i)).toBeTruthy();
+    await waitFor(() => expect(audio.getAttribute('title')).toContain('Not supported in this browser'));
   });
 
   it('surfaces a summary failure without leaving the control stuck', async () => {
@@ -204,7 +210,7 @@ describe('Studio audio summary', () => {
     vi.spyOn(api, 'fetchProjectSummaryText').mockRejectedValue(new Error('nope'));
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    await clickAudioSummary();
 
     expect(await screen.findByText(/could not be read out/i)).toBeTruthy();
     await waitFor(() => expect(

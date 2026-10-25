@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 import structlog
 
-from app.db.models import Project, ProjectDocument, Document, Conversation
+from app.db.models import (
+    AudioOverview,
+    Conversation,
+    Document,
+    Project,
+    ProjectDocument,
+)
 from app.schemas import ChatSettings, ProjectCreate, ProjectUpdate
 
 logger = structlog.get_logger()
@@ -187,9 +193,20 @@ class ProjectService:
         if not project:
             return False
         
-        # Cascade delete will handle related records
+        audio_paths = [
+            overview.file_path
+            for overview in db.query(AudioOverview).filter(
+                AudioOverview.project_id == project_id,
+            ).all()
+        ]
         db.delete(project)
         db.commit()
+
+        # Generated files live outside SQLite, so the row cascade cannot remove them.
+        from app.services.audio_overview import remove_audio_file
+
+        for audio_path in audio_paths:
+            remove_audio_file(audio_path)
         
         logger.info("Project deleted", project_id=project_id)
         return True
