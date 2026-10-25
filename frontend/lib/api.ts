@@ -27,7 +27,7 @@ export interface ChatSettings {
   answer_length: AnswerLength;
 }
 
-export type DocumentStatus = 'queued' | 'processing' | 'ready' | 'error';
+export type DocumentStatus = 'queued' | 'processing' | 'transcribing' | 'ready' | 'error';
 export type DocumentType =
   | 'pdf'
   | 'docx'
@@ -36,6 +36,12 @@ export type DocumentType =
   | 'epub'
   | 'txt'
   | 'md'
+  | 'mp3'
+  | 'm4a'
+  | 'wav'
+  | 'ogg'
+  | 'webm'
+  | 'flac'
   | 'url'
   | 'youtube'
   | 'text';

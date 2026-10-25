@@ -92,7 +92,7 @@ class Document(Base):
     source_url = Column(Text)
     content = Column(Text)  # Full content for reference
     meta_json = Column(JSON, default={})
-    status = Column(String, default="queued")  # queued, processing, ready, error
+    status = Column(String, default="queued")  # queued, processing, transcribing, ready, error
     error_message = Column(Text)
     created_at = Column(UTCDateTime, default=func.now())
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())

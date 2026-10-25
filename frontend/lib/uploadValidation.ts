@@ -10,6 +10,12 @@ export const SUPPORTED_UPLOAD_FILE_EXTENSIONS = [
   '.jpg',
   '.jpeg',
   '.webp',
+  '.mp3',
+  '.m4a',
+  '.wav',
+  '.ogg',
+  '.webm',
+  '.flac',
 ] as const;
 
 export const isSupportedUploadFileName = (fileName: string): boolean => {

@@ -306,7 +306,9 @@ describe('TopNav controls that were previously inert', () => {
   });
 
   it('reports document processing state through notifications', () => {
-    useStore.setState({ documents: [processing] });
+    useStore.setState({
+      documents: [{ ...processing, status: 'transcribing' }],
+    });
     renderTopNav();
 
     const bell = screen.getByRole('button', { name: /^Notifications/ });
@@ -315,7 +317,7 @@ describe('TopNav controls that were previously inert', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Notifications' });
     expect(within(dialog).getByText('Working paper')).toBeTruthy();
-    expect(within(dialog).getByText(/processing/i)).toBeTruthy();
+    expect(within(dialog).getByText(/transcribing/i)).toBeTruthy();
   });
 
   it('says so when there is nothing to notify about', () => {

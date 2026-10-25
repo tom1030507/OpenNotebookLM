@@ -61,11 +61,36 @@ def test_allowed_upload_types_match_the_documented_example():
     expected = [
         "pdf", "txt", "md", "docx", "pptx", "xlsx", "epub",
         "png", "jpg", "jpeg", "webp",
+        "mp3", "m4a", "wav", "ogg", "webm", "flac",
     ]
     example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
 
     assert Settings(_env_file=None).allowed_file_types_list == expected
     assert "ALLOWED_FILE_TYPES=" + ",".join(expected) in example
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    assert compose["services"]["backend"]["environment"]["ALLOWED_FILE_TYPES"] == (
+        "${ALLOWED_FILE_TYPES:-" + ",".join(expected) + "}"
+    )
+
+
+def test_audio_transcription_duration_defaults_and_environment_override(monkeypatch):
+    """Uploaded audio inherits the YouTube 30-minute safety default."""
+    monkeypatch.delenv("AUDIO_MAX_DURATION_SECONDS", raising=False)
+    assert Settings(_env_file=None).audio_max_duration_seconds == 1800
+
+    example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "AUDIO_MAX_DURATION_SECONDS=1800" in example
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    assert compose["services"]["backend"]["environment"][
+        "AUDIO_MAX_DURATION_SECONDS"
+    ] == "${AUDIO_MAX_DURATION_SECONDS:-1800}"
+
+    monkeypatch.setenv("AUDIO_MAX_DURATION_SECONDS", "900")
+    assert Settings(_env_file=None).audio_max_duration_seconds == 900
 
 
 def test_ocr_is_enabled_and_models_cache_under_the_volume(monkeypatch):
@@ -94,7 +119,8 @@ def test_ocr_is_enabled_and_models_cache_under_the_volume(monkeypatch):
         "${OCR_MODEL_CACHE_DIR:-/app/models/rapidocr}"
     )
     assert backend_environment["ALLOWED_FILE_TYPES"] == (
-        "${ALLOWED_FILE_TYPES:-pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp}"
+        "${ALLOWED_FILE_TYPES:-pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp,"
+        "mp3,m4a,wav,ogg,webm,flac}"
     )
 
 

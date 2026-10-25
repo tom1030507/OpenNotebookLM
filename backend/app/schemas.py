@@ -173,7 +173,7 @@ class DocumentContentResponse(BaseModel):
 class DocumentStatusResponse(BaseModel):
     """Schema for document status response."""
     id: str
-    status: str  # queued, processing, ready, error
+    status: str  # queued, processing, transcribing, ready, error
     meta: Optional[Dict[str, Any]] = {}
     error_message: Optional[str] = None
     progress: Optional[float] = None

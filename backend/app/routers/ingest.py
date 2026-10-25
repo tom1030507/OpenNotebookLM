@@ -392,7 +392,7 @@ async def get_document_status(
     progress = None
     if document.status == "queued":
         progress = 0.0
-    elif document.status == "processing":
+    elif document.status in {"processing", "transcribing"}:
         progress = 0.5
     elif document.status == "ready":
         progress = 1.0

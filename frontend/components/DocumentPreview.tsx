@@ -32,6 +32,7 @@ type ContentRequest =
 
 const EXTRACTED_TEXT_TYPES: Document['type'][] = [
   'docx', 'pptx', 'xlsx', 'epub', 'txt', 'md',
+  'mp3', 'm4a', 'wav', 'ogg', 'webm', 'flac',
 ];
 
 export default function DocumentPreview({ document, onClose }: DocumentPreviewProps) {
@@ -445,7 +446,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         </div>
 
         {/* Footer */}
-        {document.status === 'processing' && (
+        {['processing', 'transcribing'].includes(document.status) && (
           <div className="p-4 border-t border-[var(--border)] bg-yellow-50 dark:bg-yellow-900/20">
             <p className="text-sm text-yellow-800 dark:text-yellow-200">
               This document is still being processed. Some features may not be available yet.

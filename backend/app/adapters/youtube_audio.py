@@ -1,16 +1,13 @@
 """Local audio transcription fallback for captionless YouTube videos."""
 from pathlib import Path
 import tempfile
-import threading
 from typing import Any, Callable, Dict, Optional
 
 import structlog
 
-logger = structlog.get_logger()
+from app.adapters.audio import WhisperTranscriber
 
-_MODEL_LOCK = threading.Lock()
-_TRANSCRIPTION_LOCK = threading.Lock()
-_MODELS: Dict[tuple[str, str], Any] = {}
+logger = structlog.get_logger()
 
 
 class VideoDurationError(ValueError):
@@ -29,21 +26,6 @@ def _default_youtube_dl_factory(options: Dict[str, Any]) -> Any:
     import yt_dlp
 
     return yt_dlp.YoutubeDL(options)
-
-
-def _default_model_loader(model_name: str, download_root: str) -> Any:
-    """Load one Whisper model without importing Whisper at app startup.
-
-    Args:
-        model_name: Whisper model size or name.
-        download_root: Persistent model cache directory.
-
-    Returns:
-        A loaded Whisper model.
-    """
-    import whisper
-
-    return whisper.load_model(model_name, download_root=download_root)
 
 
 class YouTubeAudioTranscriber:
@@ -75,7 +57,11 @@ class YouTubeAudioTranscriber:
         self.youtube_dl_factory = (
             youtube_dl_factory or _default_youtube_dl_factory
         )
-        self.model_loader = model_loader or _default_model_loader
+        self.transcriber = WhisperTranscriber(
+            model_name=model_name,
+            cache_dir=cache_dir,
+            model_loader=model_loader,
+        )
 
     def transcribe(self, url: str) -> Dict[str, Any]:
         """Transcribe one bounded, non-live YouTube video's audio.
@@ -91,27 +77,21 @@ class YouTubeAudioTranscriber:
 
         self._validate_video(info)
 
-        # One CPU transcription at a time prevents concurrent imports from
-        # multiplying model memory and exhausting every core on a small host.
-        with _TRANSCRIPTION_LOCK:
-            with tempfile.TemporaryDirectory(
-                prefix="opennotebook-youtube-"
-            ) as temp_dir:
-                options = self._download_options(
-                    str(Path(temp_dir) / "%(id)s.%(ext)s")
-                )
-                with self.youtube_dl_factory(options) as downloader:
-                    downloaded_info = downloader.extract_info(url, download=True)
-                    audio_path = downloader.prepare_filename(downloaded_info)
+        with tempfile.TemporaryDirectory(
+            prefix="opennotebook-youtube-"
+        ) as temp_dir:
+            options = self._download_options(
+                str(Path(temp_dir) / "%(id)s.%(ext)s")
+            )
+            with self.youtube_dl_factory(options) as downloader:
+                downloaded_info = downloader.extract_info(url, download=True)
+                audio_path = downloader.prepare_filename(downloaded_info)
 
-                model = self._get_model()
-                result = model.transcribe(
-                    audio_path,
-                    fp16=False,
-                    verbose=False,
-                )
-
-                normalized = self._normalize_result(url, info, result)
+            transcription = self.transcriber.transcribe(
+                audio_path,
+                float(info["duration"]),
+            )
+            normalized = self._normalize_result(url, info, transcription)
 
         logger.info(
             "YouTube audio transcribed locally",
@@ -154,63 +134,31 @@ class YouTubeAudioTranscriber:
                 f"Video is longer than the {minutes} minutes limit"
             )
 
-    def _get_model(self) -> Any:
-        """Return the cached model, loading it once across concurrent callers."""
-        key = (self.model_name, self.cache_dir)
-        with _MODEL_LOCK:
-            model = _MODELS.get(key)
-            if model is None:
-                Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
-                model = self.model_loader(self.model_name, self.cache_dir)
-                _MODELS[key] = model
-            return model
-
     def _normalize_result(
         self,
         url: str,
         info: Dict[str, Any],
         result: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Normalize Whisper output to the caption adapter's result contract."""
-        segments = []
-        for raw_segment in result.get("segments", []):
-            text = str(raw_segment.get("text", "")).strip()
-            if not text:
-                continue
-            start = float(raw_segment.get("start", 0))
-            end = float(raw_segment.get("end", start))
-            segments.append({
-                "start": start,
-                "end": end,
-                "duration": max(0.0, end - start),
-                "text": text,
-            })
+        """Add YouTube identity to the shared Whisper result contract.
 
-        text = str(result.get("text", "")).strip()
-        if not text:
-            text = " ".join(segment["text"] for segment in segments)
-        if not text:
-            raise ValueError("No speech could be transcribed from this video")
+        Args:
+            url: Original YouTube watch URL.
+            info: Metadata returned by yt-dlp.
+            result: Normalized shared Whisper transcription.
 
-        duration = float(info["duration"])
-        language = str(result.get("language") or "unknown")
+        Returns:
+            The existing YouTube transcript result shape.
+        """
         video_id = str(info.get("id") or "unknown")
         metadata = {
+            **result["metadata"],
             "video_id": video_id,
             "title": info.get("title", ""),
-            "duration": duration,
-            "language": language,
-            "model": self.model_name,
-            "transcription_source": "whisper",
         }
-
         return {
+            **result,
             "video_id": video_id,
             "url": info.get("webpage_url") or url,
-            "text": text,
-            "segments": segments,
-            "duration": duration,
-            "language": language,
             "metadata": metadata,
-            "transcription_source": "whisper",
         }

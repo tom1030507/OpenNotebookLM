@@ -103,12 +103,16 @@ class Settings(BaseSettings):
     yt_whisper_model: str = "base"
     yt_max_duration_seconds: int = 1800
     yt_whisper_cache_dir: str = "./models/whisper"
+    audio_max_duration_seconds: int = Field(default=1800, ge=1)
     ocr_enabled: bool = True
     ocr_model_cache_dir: str = "./models/rapidocr"
     
     # File Upload
     max_file_size_mb: int = 50
-    allowed_file_types: str = "pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp"
+    allowed_file_types: str = (
+        "pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp,"
+        "mp3,m4a,wav,ogg,webm,flac"
+    )
     max_url_download_mb: int = 10
     max_url_redirects: int = 5
     url_connect_timeout_seconds: int = 5

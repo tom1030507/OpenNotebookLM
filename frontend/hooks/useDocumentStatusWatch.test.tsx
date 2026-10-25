@@ -130,6 +130,20 @@ describe('useDocumentStatusWatch', () => {
     expect(refreshDocuments).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps polling while a source is being transcribed', async () => {
+    const refreshDocuments = vi.fn(async () => undefined);
+    useStore.setState({
+      documents: [documentWith('transcribing' as DocumentStatus)],
+      refreshDocuments,
+    });
+    render(<Watcher />);
+
+    await advance(POLL_INTERVAL_MS);
+    await advance(POLL_INTERVAL_MS);
+
+    expect(refreshDocuments).toHaveBeenCalledTimes(2);
+  });
+
   it('stops as soon as every source has settled', async () => {
     const refreshDocuments = vi.fn(async () => undefined);
     useStore.setState({ documents: [documentWith('processing')], refreshDocuments });

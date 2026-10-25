@@ -9,7 +9,8 @@ export const POLL_INTERVAL_MS = 2000;
 // settles should not keep a forgotten tab polling for the rest of the day.
 export const MAX_POLLS = 150;
 
-const isPending = (status: string) => status === 'queued' || status === 'processing';
+const isPending = (status: string) =>
+  status === 'queued' || status === 'processing' || status === 'transcribing';
 
 /**
  * Keep watching a source until it is usable.

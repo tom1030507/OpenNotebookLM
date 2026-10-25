@@ -71,6 +71,11 @@ describe('source status', () => {
     expect(screen.getByText('Processing...')).toBeTruthy();
     cleanup();
 
+    useStore.setState({ documents: [documentWith('transcribing' as DocumentStatus)] });
+    renderPanel();
+    expect(screen.getByText('Transcribing...')).toBeTruthy();
+    cleanup();
+
     useStore.setState({ documents: [documentWith('ready')] });
     renderPanel();
     expect(screen.getByText('Ready')).toBeTruthy();

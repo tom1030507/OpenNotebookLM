@@ -21,8 +21,10 @@ from app.db.models import (
     IngestionJob,
     Project,
     ProjectDocument,
+    User,
 )
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
+from app.services.retrieval_index import get_retrieval_index
 from app.services import documents as document_module
 from app.services import ingestion_jobs as ingestion_job_module
 from app.services.documents import DocumentService
@@ -284,17 +286,25 @@ def test_file_job_extracts_using_the_persisted_extension_and_indexes_text(lifecy
                 "metadata": {"format": "docx"},
             }
 
-    class Chunker:
-        def chunk_document(self, db, document_id, max_chunks=None):
-            return [object()]
-
     class Embedder:
         def embed_chunks(self, db, document_id):
-            return [object()]
+            chunks = db.query(Chunk).filter_by(document_id=document_id).all()
+            embeddings = [
+                Embedding(
+                    id="%s-embedding" % chunk.id,
+                    chunk_id=chunk.id,
+                    vector_json=[0.1, 0.2],
+                    model_name="fake-model",
+                )
+                for chunk in chunks
+            ]
+            db.add_all(embeddings)
+            db.commit()
+            return embeddings
 
     office = OfficeExtractor()
     service = DocumentService(
-        chunking_service=Chunker(),
+        chunking_service=ChunkingService(chunk_size=128, chunk_overlap=0),
         embedding_service=Embedder(),
         office_adapter=office,
     )
@@ -343,6 +353,163 @@ def test_non_pdf_upload_persists_its_extension_and_a_file_job(
     assert document.source_url.endswith("_notes.md")
     assert job.job_type == "file"
     assert job.payload_json == {"file_path": document.source_url}
+
+
+def test_audio_upload_rejects_overlong_file_before_creating_document_or_job(
+    lifecycle_db,
+    tmp_path,
+    monkeypatch,
+):
+    """Audio preflight errors clean up the upload before durable enqueue."""
+    from app.adapters.audio import InvalidAudioFileError
+    from app.services.documents import InvalidUploadFileError
+
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+
+    class AudioProbe:
+        def validate_file(self, file_path):
+            raise InvalidAudioFileError("Audio is longer than the 30 minutes limit")
+
+        def transcribe_file(self, file_path):
+            raise AssertionError("an invalid upload must not reach Whisper")
+
+    service = DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+        audio_adapter=AudioProbe(),
+    )
+
+    with pytest.raises(InvalidUploadFileError, match="30 minutes"):
+        asyncio.run(service.process_file_upload(
+            db=lifecycle_db,
+            project_id="project-1",
+            user_id="user-1",
+            file=BytesIO(b"not an audio file"),
+            filename="lecture.mp3",
+            file_extension=".mp3",
+        ))
+
+    assert list(tmp_path.iterdir()) == []
+    assert lifecycle_db.query(Document).count() == 0
+    assert lifecycle_db.query(IngestionJob).count() == 0
+
+
+def test_audio_file_job_transcribes_in_worker_and_stores_timestamp_metadata(
+    lifecycle_file_db,
+    tmp_path,
+    monkeypatch,
+):
+    """The worker persists transcribing status and indexes timestamp sections."""
+    monkeypatch.setattr(document_module, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(document_module, "notify_ingestion_worker", lambda: None)
+    lifecycle_file_db.add(User(
+        id="user-1",
+        username="audio-test-user",
+        email="audio-test@example.com",
+        hashed_password="not-a-real-hash",
+    ))
+    lifecycle_file_db.commit()
+    visible_statuses = []
+
+    class AudioTranscriber:
+        document_id = None
+
+        def validate_file(self, file_path):
+            return 125
+
+        def transcribe_file(self, file_path):
+            with sessionmaker(
+                bind=lifecycle_file_db.get_bind(),
+                expire_on_commit=False,
+            )() as observer:
+                visible_statuses.append(
+                    observer.get(Document, self.document_id).status
+                )
+            return {
+                "text": (
+                    "## 00:00:00\nWelcome to the lecture.\n"
+                    "## 00:02:00\nThe key idea is searchable."
+                ),
+                "segments": [
+                    {"start": 1.0, "end": 3.0, "duration": 2.0, "text": "Welcome."},
+                    {"start": 121.0, "end": 124.0, "duration": 3.0, "text": "The key idea is searchable."},
+                ],
+                "duration": 125,
+                "language": "en",
+                "metadata": {"model": "base", "transcription_source": "whisper"},
+            }
+
+    class Embedder:
+        def embed_chunks(self, db, document_id):
+            chunks = (
+                db.query(Chunk)
+                .filter(Chunk.document_id == document_id)
+                .order_by(Chunk.start_offset, Chunk.id)
+                .all()
+            )
+            embeddings = [
+                Embedding(
+                    id="audio-embedding-%s" % index,
+                    chunk_id=chunk.id,
+                    vector_json=[float(index)],
+                    model_name="fake-model",
+                )
+                for index, chunk in enumerate(chunks)
+            ]
+            db.add_all(embeddings)
+            db.commit()
+            return embeddings
+
+    audio = AudioTranscriber()
+    service = DocumentService(
+        chunking_service=ChunkingService(chunk_size=128, chunk_overlap=0),
+        embedding_service=Embedder(),
+        audio_adapter=audio,
+    )
+
+    document = asyncio.run(service.process_file_upload(
+        db=lifecycle_file_db,
+        project_id="project-1",
+        user_id="user-1",
+        file=BytesIO(b"audio bytes"),
+        filename="lecture.mp3",
+        file_extension=".mp3",
+    ))
+    audio.document_id = document.id
+    job = lifecycle_file_db.query(IngestionJob).filter_by(
+        document_id=document.id,
+    ).one()
+    assert visible_statuses == []
+
+    status = service.process_ingestion_job(
+        lifecycle_file_db,
+        document_id=document.id,
+        job_type=job.job_type,
+        payload=job.payload_json,
+    )
+
+    chunks = lifecycle_file_db.query(Chunk).filter_by(
+        document_id=document.id,
+    ).order_by(Chunk.start_offset).all()
+    assert status == document.status == "ready"
+    assert visible_statuses == ["transcribing"]
+    assert document.content.startswith("## 00:00:00")
+    assert document.meta_json["segments"][1]["start"] == 121.0
+    assert [chunk.heading_path for chunk in chunks] == ["00:00:00", "00:02:00"]
+    assert lifecycle_file_db.query(Embedding).join(Chunk).filter(
+        Chunk.document_id == document.id,
+    ).count() == len(chunks)
+    search_results = get_retrieval_index().lexical_search(
+        lifecycle_file_db,
+        "searchable",
+        document_ids=[document.id],
+    )
+    assert [result.chunk_id for result in search_results] == [chunks[1].id]
+
+    stored_path = Path(document.source_url)
+    assert stored_path.is_file()
+    assert service.delete_document(lifecycle_file_db, document.id) is True
+    assert not stored_path.exists()
 
 
 def test_image_upload_runs_ocr_and_indexes_searchable_text(
