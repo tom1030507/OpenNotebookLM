@@ -196,10 +196,18 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const projectDialog = useOptionalProjectDialog();
   
   const currentProject = useStore((state) => state.currentProject);
-  // Until the first project list arrives there is no telling a new account
-  // from a returning one; showing "Create a project" in that gap told every
-  // returning reader, for a second or two, that their work was gone.
+  // Until the first project list (or a project's source list) arrives there is
+  // no telling an empty account or project from a full one; showing "Create a
+  // project" or "Add a source" in that gap told a returning reader, for a
+  // second or two, that their work was gone.
   const awaitingProjects = useStore((state) => state.loadingProjects && !state.currentProject);
+  // Only for a project known to hold sources: a new or empty one goes straight
+  // to "Add a source", which is also where creation hands focus.
+  const awaitingSources = useStore((state) => (
+    (state.currentProject?.document_count ?? 0) > 0
+      && state.loadingDocuments
+      && state.documents.length === 0
+  ));
   const currentConversation = useStore((state) => state.currentConversation);
   const messages = useStore((state) => state.messages);
   const documents = useStore((state) => state.documents);
@@ -393,10 +401,10 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
     >
       {/* Chat Messages Area */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {awaitingProjects ? (
+        {awaitingProjects || (awaitingSources && visibleMessages.length === 0) ? (
           <div className="min-h-full flex items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]" role="status">
             <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-            Loading your projects…
+            {awaitingProjects ? 'Loading your projects…' : 'Loading sources…'}
           </div>
         ) : visibleMessages.length === 0 ? (
           <div

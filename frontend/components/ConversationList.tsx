@@ -7,8 +7,6 @@ import {
   Edit2, 
   Check, 
   X,
-  ChevronDown,
-  ChevronRight
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import { parseApiTimestamp } from '@/lib/datetime';
@@ -26,7 +24,6 @@ interface ConversationListProps {
 export default function ConversationList({ embedded = false }: ConversationListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [isCollapsed, setIsCollapsed] = useState(false);
   
   const {
     conversations,
@@ -141,23 +138,12 @@ export default function ConversationList({ embedded = false }: ConversationListP
       {/* Header */}
       <div className="px-4 py-3">
         <div className="flex items-center justify-between">
-          <div className="min-w-0 flex items-center gap-2">
-            <button
-              onClick={() => setIsCollapsed(!isCollapsed)}
-              aria-controls="conversation-panel-content"
-              aria-expanded={!isCollapsed}
-              aria-label={isCollapsed ? 'Expand conversations' : 'Collapse conversations'}
-              title={isCollapsed ? 'Expand conversations' : 'Collapse conversations'}
-              className="p-1 hover:bg-[var(--muted)] rounded transition-base"
-            >
-              {isCollapsed ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-            <h3 className="truncate text-sm font-medium">Conversations</h3>
-          </div>
+          {/* No collapse toggle. In the sidebar, collapsing hid the whole list
+              and dropped its header to the window's bottom edge, which read as
+              the conversations vanishing; in the drawer the list is the only
+              content, so collapsing emptied it. The list is capped by its slot
+              and scrolls instead. */}
+          <h3 className="truncate text-sm font-semibold">Conversations</h3>
           {/* One quiet control in both states. Add Source and Send are the
               screen's filled actions; a third black button here competed with
               them for the first click. */}
@@ -178,7 +164,6 @@ export default function ConversationList({ embedded = false }: ConversationListP
         id="conversation-panel-content"
         role="region"
         aria-label="Conversations panel content"
-        hidden={isCollapsed}
         className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
       >
           {Object.keys(groupedConversations).length === 0 ? (

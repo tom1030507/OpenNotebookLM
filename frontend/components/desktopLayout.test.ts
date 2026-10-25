@@ -330,39 +330,21 @@ describe('desktop workspace layout', () => {
     expect(document.activeElement).toBe(toggle);
   });
 
-  test('uses a compact Traditional Chinese conversation header contract', () => {
+  test('uses a compact conversation header with a single New Conversation action', () => {
     render(createElement(Home));
 
     expect(screen.getByRole('heading', { name: 'Conversations' })).toBeTruthy();
-    const toggle = screen.getByRole('button', { name: 'Collapse conversations' });
-
-    // Expanded, the labelled button is the only way in: the header's icon
-    // button was the same action a few pixels away, and read as a second one.
-    expect(screen.getAllByRole('button', { name: 'New Conversation' })).toHaveLength(1);
-
-    // Collapsed, the labelled button is gone, so the icon has to come back —
-    // otherwise the action is unreachable without expanding first.
-    fireEvent.click(toggle);
     expect(screen.getAllByRole('button', { name: 'New Conversation' })).toHaveLength(1);
   });
 
-  test('keeps the controlled conversation content mounted while collapsed', () => {
+  // There is no collapse toggle any more: collapsing hid the whole list and
+  // read as the conversations disappearing. The list stays on screen.
+  test('always shows the conversation list', () => {
     render(createElement(Home));
-    const toggle = screen.getByRole('button', { name: 'Collapse conversations' });
-    const content = screen.getByRole('region', {
-      name: 'Conversations panel content',
-      hidden: true,
-    });
+    const content = screen.getByRole('region', { name: 'Conversations panel content' });
 
-    expect(toggle.getAttribute('aria-controls')).toBe(content.id);
     expect(content.hidden).toBe(false);
-
-    fireEvent.click(toggle);
-
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-controls')).toBe(content.id);
-    expect(content.hidden).toBe(true);
-    expect(document.getElementById(content.id)).toBe(content);
+    expect(screen.queryByRole('button', { name: /(Collapse|Expand) conversations/ })).toBeNull();
   });
 
   test('releases center width when supporting panels collapse', () => {
