@@ -54,6 +54,7 @@ interface AppState {
     cover_emoji?: string | null;
     cover_color?: string | null;
   }) => Promise<Project | null>;
+  updateProjectTags: (id: string, tags: string[]) => Promise<void>;
   duplicateProject: (id: string) => Promise<Project | null>;
   deleteProject: (id: string) => Promise<void>;
   
@@ -80,6 +81,7 @@ interface AppState {
   ) => Promise<void>;
 
   toggleSourceSelected: (projectId: string, documentId: string) => void;
+  setSourcesSelected: (projectId: string, documentIds: string[], selected: boolean) => void;
   setAllSourcesSelected: (projectId: string, selected: boolean) => void;
   
   // Actions - Conversations
@@ -421,6 +423,25 @@ const useStore = create<AppState>()(
           }
         },
 
+        updateProjectTags: async (id, tags) => {
+          const epoch = accountEpoch;
+          try {
+            const savedTags = await api.updateProjectTags(id, tags);
+            if (accountEpoch !== epoch) return;
+            set((state) => ({
+              projects: state.projects.map((project) => (
+                project.id === id ? { ...project, tags: savedTags } : project
+              )),
+              currentProject: state.currentProject?.id === id
+                ? { ...state.currentProject, tags: savedTags }
+                : state.currentProject,
+            }));
+          } catch (error) {
+            if (accountEpoch === epoch) console.error('Failed to update project tags:', error);
+            throw error;
+          }
+        },
+
         duplicateProject: async (id) => {
           const epoch = accountEpoch;
           try {
@@ -685,6 +706,18 @@ const useStore = create<AppState>()(
               },
             };
           });
+        },
+
+        setSourcesSelected: (projectId, documentIds, selected) => {
+          const sourceIds = new Set(documentIds);
+          set((state) => ({
+            deselectedSources: {
+              ...state.deselectedSources,
+              [projectId]: selected
+                ? (state.deselectedSources[projectId] ?? []).filter((id) => !sourceIds.has(id))
+                : [...new Set([...(state.deselectedSources[projectId] ?? []), ...documentIds])],
+            },
+          }));
         },
 
         setAllSourcesSelected: (projectId, selected) => {

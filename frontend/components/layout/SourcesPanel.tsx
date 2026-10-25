@@ -28,7 +28,7 @@ import DocumentPreview from '../DocumentPreview';
 import ProjectSearch from '../ProjectSearch';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
-import api, { Document, DocumentStatus } from '@/lib/api';
+import api, { Document, DocumentStatus, ProjectSourceGroup } from '@/lib/api';
 import {
   closeAddSourcesAfterSuccessfulUpload,
   requestAddSources,
@@ -68,6 +68,18 @@ export default function SourcesPanel({
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [projectActionError, setProjectActionError] = useState('');
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const [tagSaving, setTagSaving] = useState(false);
+  const [tagError, setTagError] = useState('');
+  const [sourceGroupsState, setSourceGroupsState] = useState<{
+    projectId: string;
+    groups: ProjectSourceGroup[];
+  } | null>(null);
+  const [newSourceGroupName, setNewSourceGroupName] = useState('');
+  const [sourceGroupSaving, setSourceGroupSaving] = useState(false);
+  const [sourceGroupError, setSourceGroupError] = useState('');
+  const [savingGroupDocumentId, setSavingGroupDocumentId] = useState<string | null>(null);
   const [watchedFolderEnabled, setWatchedFolderEnabled] = useState(false);
   const [watchedFolderPath, setWatchedFolderPath] = useState('');
   const [watchedFolderSaving, setWatchedFolderSaving] = useState(false);
@@ -113,6 +125,7 @@ export default function SourcesPanel({
     selectProject,
     duplicateProject,
     deleteProject,
+    updateProjectTags,
     uploadDocument,
     createDocument,
     deleteDocument,
@@ -121,12 +134,33 @@ export default function SourcesPanel({
     deselectedSources,
     toggleSourceSelected,
     setAllSourcesSelected,
+    setSourcesSelected,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
   const canManageProject = currentProject?.role === 'owner';
   const currentProjectId = currentProject?.id;
   const canManageSources = currentProject?.role === 'owner'
     || currentProject?.role === 'editor';
+  const sourceGroups = sourceGroupsState && sourceGroupsState.projectId === currentProjectId
+    ? sourceGroupsState.groups
+    : [];
+
+  useEffect(() => {
+    let active = true;
+    if (!currentProjectId) {
+      setSourceGroupsState(null);
+      return () => { active = false; };
+    }
+    setSourceGroupError('');
+    api.getProjectSourceGroups(currentProjectId).then((groups) => {
+      if (active) setSourceGroupsState({ projectId: currentProjectId, groups });
+    }).catch((error) => {
+      if (!active) return;
+      setSourceGroupsState({ projectId: currentProjectId, groups: [] });
+      setSourceGroupError(error instanceof Error ? error.message : 'Could not load source groups');
+    });
+    return () => { active = false; };
+  }, [currentProjectId]);
 
   const handleDuplicateProject = async () => {
     if (!currentProject || isDuplicating || isDeletingProject) return;
@@ -337,6 +371,100 @@ export default function SourcesPanel({
     }
   };
 
+  const saveProjectTags = async (tags: string[]): Promise<boolean> => {
+    if (!currentProject || tagSaving) return false;
+    setTagSaving(true);
+    setTagError('');
+    try {
+      await updateProjectTags(currentProject.id, tags);
+      return true;
+    } catch (error) {
+      setTagError(error instanceof Error ? error.message : 'Could not save project tags');
+      return false;
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  const addProjectTag = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const tag = tagInput.trim();
+    const tags = currentProject?.tags ?? [];
+    if (!tag || tags.some((value) => value.toLowerCase() === tag.toLowerCase())) return;
+    if (await saveProjectTags([...tags, tag])) setTagInput('');
+  };
+
+  const saveSourceGroups = (projectId: string, groups: ProjectSourceGroup[]) => {
+    if (currentProjectId === projectId) setSourceGroupsState({ projectId, groups });
+  };
+
+  const createSourceGroup = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = newSourceGroupName.trim();
+    if (!currentProjectId || !name || sourceGroupSaving || savingGroupDocumentId) return;
+    setSourceGroupSaving(true);
+    setSourceGroupError('');
+    try {
+      const group = await api.createProjectSourceGroup(currentProjectId, name);
+      saveSourceGroups(currentProjectId, [...sourceGroups, group]);
+      setNewSourceGroupName('');
+    } catch (error) {
+      setSourceGroupError(error instanceof Error ? error.message : 'Could not create source group');
+    } finally {
+      setSourceGroupSaving(false);
+    }
+  };
+
+  const renameSourceGroup = async (group: ProjectSourceGroup) => {
+    if (!currentProjectId || sourceGroupSaving || savingGroupDocumentId) return;
+    const name = prompt('Rename source group', group.name)?.trim();
+    if (!name || name === group.name) return;
+    setSourceGroupSaving(true);
+    setSourceGroupError('');
+    try {
+      const renamed = await api.renameProjectSourceGroup(currentProjectId, group.id, name);
+      saveSourceGroups(currentProjectId, sourceGroups.map((item) => (
+        item.id === group.id ? renamed : item
+      )));
+    } catch (error) {
+      setSourceGroupError(error instanceof Error ? error.message : 'Could not rename source group');
+    } finally {
+      setSourceGroupSaving(false);
+    }
+  };
+
+  const deleteSourceGroup = async (group: ProjectSourceGroup) => {
+    if (!currentProjectId || sourceGroupSaving || savingGroupDocumentId) return;
+    if (!confirm(`Delete "${group.name}"? Its sources will remain in the project.`)) return;
+    setSourceGroupSaving(true);
+    setSourceGroupError('');
+    try {
+      await api.deleteProjectSourceGroup(currentProjectId, group.id);
+      saveSourceGroups(currentProjectId, sourceGroups.filter((item) => item.id !== group.id));
+    } catch (error) {
+      setSourceGroupError(error instanceof Error ? error.message : 'Could not delete source group');
+    } finally {
+      setSourceGroupSaving(false);
+    }
+  };
+
+  const moveDocumentToGroup = async (documentId: string, groupId: string | null) => {
+    if (!currentProjectId || !canManageSources || sourceGroupSaving || savingGroupDocumentId) return;
+    const projectId = currentProjectId;
+    setSavingGroupDocumentId(documentId);
+    setSourceGroupSaving(true);
+    setSourceGroupError('');
+    try {
+      const groups = await api.setDocumentSourceGroup(projectId, documentId, groupId);
+      saveSourceGroups(projectId, groups);
+    } catch (error) {
+      setSourceGroupError(error instanceof Error ? error.message : 'Could not move source');
+    } finally {
+      setSavingGroupDocumentId(null);
+      setSourceGroupSaving(false);
+    }
+  };
+
   const openSearchResult = (projectId: string, documentId: string) => {
     const project = projects.find((item) => item.id === projectId);
     if (!project) return;
@@ -376,6 +504,158 @@ export default function SourcesPanel({
   const filteredDocuments = documents.filter(doc => 
     doc.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const availableTags = [...new Set(projects.flatMap((project) => project.tags ?? []))]
+    .sort((left, right) => left.localeCompare(right));
+  const filteredProjects = projects.filter((project) => (
+    tagFilter.length === 0 || tagFilter.some((filter) => (
+      project.tags?.some((tag) => tag.toLowerCase() === filter.toLowerCase())
+    ))
+  ));
+  if (currentProject && !filteredProjects.some((project) => project.id === currentProject.id)) {
+    filteredProjects.push(currentProject);
+  }
+  const groupedDocumentIds = new Set(sourceGroups.flatMap((group) => group.document_ids));
+  const ungroupedDocuments = filteredDocuments.filter((doc) => !groupedDocumentIds.has(doc.id));
+
+  const renderSourceRow = (doc: Document) => {
+    const groupId = sourceGroups.find((group) => group.document_ids.includes(doc.id))?.id ?? '';
+    return (
+      <div
+        key={doc.id}
+        // Rows, not bordered cards: a list of peers read as a stack of boxes.
+        className="relative px-2 py-2 rounded-md hover:bg-[var(--muted)] transition-base cursor-pointer group"
+        onClick={() => setPreviewDocument(doc)}
+      >
+        <div className="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            checked={doc.status !== 'error' && !deselected.includes(doc.id)}
+            disabled={doc.status === 'error'}
+            onChange={() => toggleSourceSelected(currentProject!.id, doc.id)}
+            onClick={(event) => event.stopPropagation()}
+            aria-label={`Use ${doc.name} in answers and Studio`}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)] cursor-pointer"
+          />
+          <span className="mt-0.5 shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
+            {getSourceIcon(doc.type)}
+          </span>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-medium truncate" title={doc.name}>{doc.name}</h3>
+            <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+              {STATUS_LABELS[doc.status] ?? doc.status}
+            </p>
+            {canManageSources && sourceGroups.length > 0 && (
+              <select
+                aria-label={`Move ${doc.name} to group`}
+                value={groupId}
+                disabled={sourceGroupSaving || savingGroupDocumentId === doc.id}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => void moveDocumentToGroup(doc.id, event.target.value || null)}
+                className="mt-1 max-w-full h-7 px-1.5 bg-[var(--card)] border border-[var(--input)] rounded text-xs"
+              >
+                <option value="">Ungrouped</option>
+                {sourceGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+            )}
+            {doc.last_synced_at && (
+              <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                Last synced <time dateTime={doc.last_synced_at}>{new Date(doc.last_synced_at).toLocaleString()}</time>
+                {doc.last_sync_changed !== null && doc.last_sync_changed !== undefined
+                  ? ` · ${doc.last_sync_changed ? 'Changed' : 'No changes'}`
+                  : ''}
+              </p>
+            )}
+            {doc.status === 'error' && doc.error_message && (
+              <p className="text-xs text-[var(--error)] mt-1 break-words">{doc.error_message}</p>
+            )}
+          </div>
+        </div>
+        {/* Overlay actions save filename width until pointer or keyboard focus needs them. */}
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-[var(--muted)] pl-1 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100">
+          <button
+            onClick={(event) => { event.stopPropagation(); setPreviewDocument(doc); }}
+            className="p-1 hover:bg-[var(--card)] rounded"
+            aria-label="Preview document"
+            title="Preview document"
+          >
+            <Eye className="w-3 h-3" />
+          </button>
+          {doc.isOwnedByCaller && (
+            <button
+              onClick={(event) => { event.stopPropagation(); void handleRenameDocument(doc); }}
+              className="p-1 hover:bg-[var(--muted)] rounded"
+              aria-label="Rename document"
+              title="Rename document"
+            >
+              <Pencil className="w-3 h-3" />
+            </button>
+          )}
+          {canManageSources && (doc.type === 'url' || doc.type === 'youtube') && (
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); void handleResyncDocument(doc.id); }}
+              disabled={Boolean(resyncingDocumentId) || ['queued', 'processing', 'transcribing'].includes(doc.status)}
+              className="p-1 hover:bg-[var(--card)] rounded disabled:opacity-50"
+              aria-label="Re-sync source"
+              title="Re-sync source"
+            >
+              {resyncingDocumentId === doc.id
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <RefreshCw className="w-3 h-3" />}
+            </button>
+          )}
+          {canManageSources && (
+            <button
+              onClick={(event) => { event.stopPropagation(); void handleDeleteDocument(doc.id); }}
+              className="p-1 hover:bg-[var(--card)] rounded"
+              aria-label="Remove source"
+              title="Remove source"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSourceSection = (
+    key: string,
+    name: string,
+    visibleDocs: Document[],
+    selectableDocs: Document[],
+  ) => {
+    const selected = selectableDocs.filter((doc) => !deselected.includes(doc.id)).length;
+    const checked = selectableDocs.length > 0 && selected === selectableDocs.length;
+    const label = key === 'ungrouped' ? 'Select ungrouped sources' : `Select sources in ${name}`;
+    return (
+      <div key={key} className="flex items-start gap-2 rounded-md border border-[var(--input)] px-2">
+          <input
+            type="checkbox"
+            aria-label={label}
+            checked={checked}
+            disabled={selectableDocs.length === 0}
+            ref={(input) => {
+              if (input) input.indeterminate = selected > 0 && !checked;
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onChange={() => currentProject && setSourcesSelected(
+              currentProject.id,
+              selectableDocs.map((doc) => doc.id),
+              !checked,
+            )}
+            className="mt-2 h-4 w-4 shrink-0 accent-[var(--primary)]"
+          />
+          <details open className="min-w-0 flex-1">
+            <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-xs text-[var(--muted-foreground)]">
+              <span className="flex-1 font-medium text-[var(--foreground)]">{name}</span>
+              <span>{selected} of {selectableDocs.length} selected</span>
+            </summary>
+            <div className="space-y-0.5 pb-1">{visibleDocs.map(renderSourceRow)}</div>
+          </details>
+      </div>
+    );
+  };
 
   return (
     <aside
@@ -432,7 +712,7 @@ export default function SourcesPanel({
               className="min-w-0 flex-1 h-9 px-2.5 bg-[var(--card)] border border-[var(--input)] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
             >
               <option value="">Select a project</option>
-              {projects.map((project) => (
+              {filteredProjects.map((project) => (
                 <option
                   key={project.id}
                   value={project.id}
@@ -454,6 +734,28 @@ export default function SourcesPanel({
             </button>
           </div>
           <ProjectSearch onOpenResult={openSearchResult} />
+          {availableTags.length > 0 && (
+            <details className="rounded-md border border-[var(--input)] px-2 py-1.5">
+              <summary className="cursor-pointer text-xs font-medium">Filter projects by tag</summary>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                {availableTags.map((tag) => (
+                  <label key={tag} className="inline-flex items-center gap-1.5 text-xs">
+                    <input
+                      type="checkbox"
+                      aria-label={`Filter by tag ${tag}`}
+                      checked={tagFilter.some((value) => value.toLowerCase() === tag.toLowerCase())}
+                      onChange={(event) => setTagFilter((selected) => event.target.checked
+                        ? [...selected, tag]
+                        : selected.filter((value) => value.toLowerCase() !== tag.toLowerCase()))}
+                      className="h-3.5 w-3.5 accent-[var(--primary)]"
+                    />
+                    {tag}
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-[var(--muted-foreground)]">Projects with any selected tag are shown.</p>
+            </details>
+          )}
           {canManageProject && currentProject && (
             <div className="flex flex-wrap items-center gap-1">
               <button
@@ -498,6 +800,113 @@ export default function SourcesPanel({
             </div>
           )}
         </div>
+
+        {currentProject && (
+          <details className="mb-2 rounded-md border border-[var(--input)] px-2.5 py-2">
+            <summary className="cursor-pointer text-xs font-medium">My project tags</summary>
+            <div className="mt-2 space-y-2">
+              <p className="text-xs text-[var(--muted-foreground)]">
+                These tags are private to your account.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {(currentProject.tags ?? []).map((tag) => (
+                  <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-[var(--muted)] px-2 py-1 text-xs">
+                    {tag}
+                    <button
+                      type="button"
+                      aria-label={`Remove tag ${tag}`}
+                      disabled={tagSaving}
+                      onClick={() => void saveProjectTags(
+                        (currentProject.tags ?? []).filter((value) => value !== tag),
+                      )}
+                      className="rounded hover:text-[var(--error)] disabled:opacity-50"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <form onSubmit={(event) => void addProjectTag(event)} className="flex gap-1.5">
+                <input
+                  type="text"
+                  aria-label="Add a tag"
+                  value={tagInput}
+                  maxLength={50}
+                  onChange={(event) => setTagInput(event.target.value)}
+                  placeholder="Add a tag"
+                  disabled={tagSaving}
+                  className="min-w-0 flex-1 h-8 px-2 bg-[var(--card)] border border-[var(--input)] rounded-md text-xs"
+                />
+                <button
+                  type="submit"
+                  disabled={tagSaving || !tagInput.trim()}
+                  className="h-8 px-2 rounded-md border border-[var(--input)] text-xs disabled:opacity-50"
+                >
+                  {tagSaving ? 'Saving...' : 'Add tag'}
+                </button>
+              </form>
+              {tagError && <p role="alert" className="text-xs text-[var(--error)]">{tagError}</p>}
+            </div>
+          </details>
+        )}
+
+        {currentProject && (
+          <details className="mb-2 rounded-md border border-[var(--input)] px-2.5 py-2">
+            <summary className="cursor-pointer text-xs font-medium">Source groups</summary>
+            <div className="mt-2 space-y-2">
+              {canManageSources && (
+                <form onSubmit={(event) => void createSourceGroup(event)} className="flex gap-1.5">
+                  <input
+                    type="text"
+                    aria-label="New source group"
+                    value={newSourceGroupName}
+                    maxLength={100}
+                    onChange={(event) => setNewSourceGroupName(event.target.value)}
+                    placeholder="New group name"
+                    disabled={sourceGroupSaving || Boolean(savingGroupDocumentId)}
+                    className="min-w-0 flex-1 h-8 px-2 bg-[var(--card)] border border-[var(--input)] rounded-md text-xs"
+                  />
+                  <button
+                    type="submit"
+                    disabled={sourceGroupSaving || Boolean(savingGroupDocumentId) || !newSourceGroupName.trim()}
+                    className="h-8 px-2 rounded-md border border-[var(--input)] text-xs disabled:opacity-50"
+                  >
+                    Create group
+                  </button>
+                </form>
+              )}
+              {sourceGroups.length > 0 ? (
+                <ul className="space-y-1">
+                  {sourceGroups.map((group) => (
+                    <li key={group.id} className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 truncate">{group.name}</span>
+                      {canManageSources && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`Rename ${group.name}`}
+                            disabled={sourceGroupSaving || Boolean(savingGroupDocumentId)}
+                            onClick={() => void renameSourceGroup(group)}
+                            className="hover:underline disabled:opacity-50"
+                          >Rename</button>
+                          <button
+                            type="button"
+                            aria-label={`Delete ${group.name}`}
+                            disabled={sourceGroupSaving || Boolean(savingGroupDocumentId)}
+                            onClick={() => void deleteSourceGroup(group)}
+                            className="text-[var(--error)] hover:underline disabled:opacity-50"
+                          >Delete</button>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-[var(--muted-foreground)]">No source groups yet.</p>
+              )}
+            </div>
+          </details>
+        )}
 
         {canManageProject && currentProject && (
           <details className="mb-2 rounded-md border border-[var(--input)] px-2.5 py-2">
@@ -576,6 +985,7 @@ export default function SourcesPanel({
       {/* Sources List */}
       {currentProject && (
         <div className="flex-1 overflow-y-auto px-2 py-3">
+          {sourceGroupError && <p role="alert" className="mb-2 px-2 text-xs text-[var(--error)]">{sourceGroupError}</p>}
           {loadingDocuments ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
@@ -610,112 +1020,21 @@ export default function SourcesPanel({
                 <span className="flex-1">Select all sources</span>
                 <span>{selectedCount} of {selectableDocuments.length} selected</span>
               </label>
-              {filteredDocuments.map((doc) => (
-                <div
-                  key={doc.id}
-                  // Rows, not bordered cards: a list of peers read as a stack of
-                  // boxes, and each border cost the name a few characters.
-                  className="relative px-2 py-2 rounded-md hover:bg-[var(--muted)] transition-base cursor-pointer group"
-                  onClick={() => setPreviewDocument(doc)}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={doc.status !== 'error' && !deselected.includes(doc.id)}
-                      disabled={doc.status === 'error'}
-                      onChange={() => toggleSourceSelected(currentProject.id, doc.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label={`Use ${doc.name} in answers and Studio`}
-                      className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)] cursor-pointer"
-                    />
-                    <span className="mt-0.5 shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
-                      {getSourceIcon(doc.type)}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium truncate" title={doc.name}>
-                        {doc.name}
-                      </h3>
-                      <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                        {STATUS_LABELS[doc.status] ?? doc.status}
-                      </p>
-                      {doc.last_synced_at && (
-                        <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                          Last synced <time dateTime={doc.last_synced_at}>{new Date(doc.last_synced_at).toLocaleString()}</time>
-                          {doc.last_sync_changed !== null && doc.last_sync_changed !== undefined
-                            ? ` · ${doc.last_sync_changed ? 'Changed' : 'No changes'}`
-                            : ''}
-                        </p>
-                      )}
-                      {doc.status === 'error' && doc.error_message && (
-                        <p className="text-xs text-[var(--error)] mt-1 break-words">
-                          {doc.error_message}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {/* Out of flow on purpose. In the flex row this pair held 44px
-                      of a 190px card even while invisible at opacity-0, which is
-                      what cut a filename down to a handful of characters.
-                      Overlaying it spends that width only while it is on screen,
-                      and focus-within keeps it reachable by keyboard. */}
-                  <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-[var(--muted)] pl-1 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPreviewDocument(doc);
-                      }}
-                      className="p-1 hover:bg-[var(--card)] rounded"
-                      aria-label={'Preview document'}
-                      title={'Preview document'}
-                    >
-                      <Eye className="w-3 h-3" />
-                    </button>
-                    {doc.isOwnedByCaller && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleRenameDocument(doc);
-                        }}
-                        className="p-1 hover:bg-[var(--muted)] rounded"
-                        aria-label={'Rename document'}
-                        title={'Rename document'}
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
-                    )}
-                    {canManageSources && (doc.type === 'url' || doc.type === 'youtube') && (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleResyncDocument(doc.id);
-                        }}
-                        disabled={Boolean(resyncingDocumentId) || ['queued', 'processing', 'transcribing'].includes(doc.status)}
-                        className="p-1 hover:bg-[var(--card)] rounded disabled:opacity-50"
-                        aria-label="Re-sync source"
-                        title="Re-sync source"
-                      >
-                        {resyncingDocumentId === doc.id
-                          ? <Loader2 className="w-3 h-3 animate-spin" />
-                          : <RefreshCw className="w-3 h-3" />}
-                      </button>
-                    )}
-                    {canManageSources && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDocument(doc.id);
-                        }}
-                        className="p-1 hover:bg-[var(--card)] rounded"
-                        aria-label={'Remove source'}
-                        title={'Remove source'}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+              {sourceGroups.map((group) => {
+                const groupDocumentIds = new Set(group.document_ids);
+                const visibleDocs = filteredDocuments.filter((doc) => groupDocumentIds.has(doc.id));
+                if (searchQuery && visibleDocs.length === 0) return null;
+                const selectableDocs = documents.filter((doc) => (
+                  groupDocumentIds.has(doc.id) && doc.status !== 'error'
+                ));
+                return renderSourceSection(group.id, group.name, visibleDocs, selectableDocs);
+              })}
+              {renderSourceSection(
+                'ungrouped',
+                'Ungrouped',
+                ungroupedDocuments,
+                documents.filter((doc) => !groupedDocumentIds.has(doc.id) && doc.status !== 'error'),
+              )}
             </div>
           )}
         </div>

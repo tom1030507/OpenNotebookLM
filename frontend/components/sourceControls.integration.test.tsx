@@ -100,6 +100,7 @@ beforeEach(() => {
     max_text_characters: 462000,
     search_enabled: false,
   });
+  vi.spyOn(api, 'getProjectSourceGroups').mockResolvedValue([]);
   useStore.setState({
     projects: [currentProject],
     currentProject,

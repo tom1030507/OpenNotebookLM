@@ -142,6 +142,7 @@ class TestUpgrade:
             "notes.payload_json",
             "notes.studio_kind",
             "project_documents.shared_by_user_id",
+            "project_documents.source_group_id",
             "projects.answer_length",
             "projects.auto_title",
             "projects.chat_instructions",

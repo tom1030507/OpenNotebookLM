@@ -1,4 +1,6 @@
 """Tests for project management API."""
+import uuid
+
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import create_engine, event
@@ -105,6 +107,123 @@ def test_get_project():
     assert data["name"] == "Get Test Project"
 
 
+def test_project_tags_can_be_replaced_and_are_returned_for_the_caller():
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Tagged project"},
+    ).json()["id"]
+
+    saved = client.put(
+        f"/api/projects/{project_id}/tags",
+        json={"tags": ["  Research ", "Priority", "research"]},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == ["Priority", "Research"]
+
+    listed = client.get("/api/projects").json()["projects"]
+    project = next(project for project in listed if project["id"] == project_id)
+    assert project["tags"] == ["Priority", "Research"]
+
+    cleared = client.put(
+        f"/api/projects/{project_id}/tags",
+        json={"tags": []},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json() == []
+
+
+@pytest.mark.parametrize("tag", ["   ", "x" * 51])
+def test_project_tags_reject_blank_or_overlong_values(tag):
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Invalid tag project"},
+    ).json()["id"]
+
+    response = client.put(
+        f"/api/projects/{project_id}/tags",
+        json={"tags": [tag]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_source_groups_move_sources_and_delete_without_deleting_sources():
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Grouped sources"},
+    ).json()["id"]
+    with TestingSessionLocal() as db:
+        user = db.query(User).first()
+        document_id = str(uuid.uuid4())
+        db.add(Document(
+            id=document_id,
+            user_id=user.id,
+            title="Source to group",
+            source_type="text",
+            content="source body",
+            status="ready",
+        ))
+        db.commit()
+        db.add(ProjectDocument(project_id=project_id, document_id=document_id))
+        db.commit()
+
+    groups_path = f"/api/projects/{project_id}/source-groups"
+    references = client.post(groups_path, json={"name": "References"})
+    notes = client.post(groups_path, json={"name": "Notes"})
+    assert references.status_code == 201, references.text
+    assert notes.status_code == 201, notes.text
+
+    renamed = client.patch(
+        f"{groups_path}/{references.json()['id']}",
+        json={"name": "Papers"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Papers"
+
+    assignment_path = f"/api/projects/{project_id}/documents/{document_id}/group"
+    first_assignment = client.put(
+        assignment_path,
+        json={"group_id": references.json()["id"]},
+    )
+    assert first_assignment.status_code == 200, first_assignment.text
+
+    moved = client.put(
+        assignment_path,
+        json={"group_id": notes.json()["id"]},
+    )
+    assert moved.status_code == 200, moved.text
+    groups = {group["id"]: group for group in client.get(groups_path).json()}
+    assert groups[references.json()["id"]]["document_ids"] == []
+    assert groups[notes.json()["id"]]["document_ids"] == [document_id]
+
+    ungrouped = client.put(assignment_path, json={"group_id": None})
+    assert ungrouped.status_code == 200, ungrouped.text
+    deleted = client.delete(f"{groups_path}/{notes.json()['id']}")
+    assert deleted.status_code == 200, deleted.text
+
+    remaining_groups = client.get(groups_path).json()
+    assert [group["id"] for group in remaining_groups] == [references.json()["id"]]
+    assert remaining_groups[0]["document_ids"] == []
+    documents = client.get(f"/api/projects/{project_id}/documents").json()
+    assert [document["id"] for document in documents] == [document_id]
+
+
+def test_source_group_names_must_be_nonempty_and_unique_per_project():
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Group names"},
+    ).json()["id"]
+    groups_path = f"/api/projects/{project_id}/source-groups"
+
+    blank = client.post(groups_path, json={"name": "  "})
+    created = client.post(groups_path, json={"name": "References"})
+    duplicate = client.post(groups_path, json={"name": "References"})
+
+    assert blank.status_code == 422
+    assert created.status_code == 201, created.text
+    assert duplicate.status_code == 409
+
+
 def test_get_nonexistent_project():
     """Test getting a project that doesn't exist."""
     response = client.get("/api/projects/nonexistent-id")
@@ -207,7 +326,7 @@ def test_search_projects():
     client.post("/api/projects", json={"name": "Gamma Project"})
     
     # Search for projects containing "Project"
-    response = client.get("/api/projects?search=Project")
+    response = client.get("/api/projects?search=Project&per_page=100")
     assert response.status_code == 200
     data = response.json()
     

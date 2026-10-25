@@ -185,9 +185,81 @@ class ProjectResponse(ProjectBase):
     role: Literal["owner", "editor", "viewer"] = "owner"
     cover_emoji: Optional[str] = None
     cover_color: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
     
     class Config:
         from_attributes = True
+
+
+class ProjectTagsUpdate(BaseModel):
+    """Replace the caller's personal tags for one project."""
+    tags: List[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, values: List[str]) -> List[str]:
+        """Trim, validate, and deduplicate tags without changing their case.
+
+        Args:
+            values: Tags submitted by the caller.
+
+        Returns:
+            Non-empty, case-insensitively unique tags in stable order.
+
+        Raises:
+            ValueError: If a tag is empty or longer than 50 characters.
+        """
+        tags = {}
+        for value in values:
+            tag = value.strip()
+            if not tag or len(tag) > 50:
+                raise ValueError("Tags must contain 1 to 50 characters")
+            tags.setdefault(tag.casefold(), tag)
+        return sorted(tags.values(), key=str.casefold)
+
+
+class ProjectSourceGroupBase(BaseModel):
+    """Validated name shared by source-group create and rename requests."""
+    name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        """Trim a group name and reject whitespace-only values.
+
+        Args:
+            value: Name submitted by the caller.
+
+        Returns:
+            The trimmed name.
+
+        Raises:
+            ValueError: If the name contains only whitespace.
+        """
+        name = value.strip()
+        if not name:
+            raise ValueError("A group name is required")
+        return name
+
+
+class ProjectSourceGroupCreate(ProjectSourceGroupBase):
+    """Create one source group in a project."""
+
+
+class ProjectSourceGroupUpdate(ProjectSourceGroupBase):
+    """Rename one source group."""
+
+
+class ProjectSourceGroupAssignmentRequest(BaseModel):
+    """Assign a source to a group, or clear its group with null."""
+    group_id: Optional[str] = Field(...)
+
+
+class ProjectSourceGroupResponse(BaseModel):
+    """Shared group metadata and its project-linked source ids."""
+    id: str
+    name: str
+    document_ids: List[str] = Field(default_factory=list)
 
 
 # Custom instructions ride along with every question, so an unbounded block would

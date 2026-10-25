@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy import (
     Column, String, Integer, Text,
-    ForeignKey, JSON, Float, Boolean, LargeBinary, Index, CheckConstraint, text
+    ForeignKey, JSON, Float, Boolean, LargeBinary, Index, CheckConstraint,
+    UniqueConstraint, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -55,6 +56,16 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    project_tags = relationship(
+        "UserProjectTag",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+    source_groups = relationship(
+        "ProjectSourceGroup",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
     conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="project", cascade="all, delete-orphan")
     audio_overviews = relationship(
@@ -88,6 +99,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    project_tags = relationship(
+        "UserProjectTag",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     api_keys = relationship(
         "APIKey",
         back_populates="user",
@@ -98,6 +114,28 @@ class User(Base):
         Index("idx_users_username", "username"),
         Index("idx_users_email", "email"),
     )
+
+
+class UserProjectTag(Base):
+    """A project label visible only to the user who added it."""
+    __tablename__ = "user_project_tags"
+
+    user_id = Column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    project_id = Column(
+        String,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag = Column(String(50), primary_key=True)
+
+    user = relationship("User", back_populates="project_tags")
+    project = relationship("Project", back_populates="project_tags")
+
+    __table_args__ = (Index("idx_user_project_tags_project_user", "project_id", "user_id"),)
 
 
 class APIKey(Base):
@@ -236,6 +274,26 @@ class AudioOverview(Base):
     )
 
 
+class ProjectSourceGroup(Base):
+    """A shared named group of sources within one project."""
+    __tablename__ = "project_source_groups"
+
+    id = Column(String, primary_key=True)
+    project_id = Column(
+        String,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name = Column(String(100), nullable=False)
+
+    project = relationship("Project", back_populates="source_groups")
+    documents = relationship("ProjectDocument", back_populates="source_group")
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_project_source_groups_name"),
+    )
+
+
 class ProjectDocument(Base):
     """Many-to-many relationship between projects and documents."""
     __tablename__ = "project_documents"
@@ -244,11 +302,16 @@ class ProjectDocument(Base):
     document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
     # A linked source stays shared when its owner is later removed from the project.
     shared_by_user_id = Column(String)
+    source_group_id = Column(
+        String,
+        ForeignKey("project_source_groups.id", ondelete="SET NULL"),
+    )
     added_at = Column(UTCDateTime, default=func.now())
     
     # Relationships
     project = relationship("Project", back_populates="documents")
     document = relationship("Document", back_populates="projects")
+    source_group = relationship("ProjectSourceGroup", back_populates="documents")
 
 
 class ProjectMember(Base):

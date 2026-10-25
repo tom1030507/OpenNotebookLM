@@ -2169,3 +2169,90 @@ def test_personal_api_key_shares_the_account_query_rate_limit(env):
     assert all(response.status_code == 200 for response in jwt_responses)
     assert [response.status_code for response in api_key_responses[:15]] == [200] * 15
     assert api_key_responses[-1].status_code == 429
+
+
+def test_project_tags_are_private_to_each_visible_member(env):
+    project_id = make_project(env.alice, "Personal tags in a shared project")
+    path = f"/api/projects/{project_id}/tags"
+
+    saved = env.alice.put(path, json={"tags": ["research"]})
+    hidden = env.bob.put(path, json={"tags": ["private-to-bob"]})
+
+    assert saved.status_code == 200, saved.text
+    assert hidden.status_code == 404
+
+    env.session.add(ProjectMember(
+        project_id=project_id,
+        user_id=env.bob_user.id,
+        role="viewer",
+    ))
+    env.session.commit()
+
+    bob_saved = env.bob.put(path, json={"tags": ["private-to-bob"]})
+    assert bob_saved.status_code == 200, bob_saved.text
+
+    alice_project = next(
+        project for project in env.alice.get("/api/projects").json()["projects"]
+        if project["id"] == project_id
+    )
+    bob_project = next(
+        project for project in env.bob.get("/api/projects").json()["projects"]
+        if project["id"] == project_id
+    )
+    assert alice_project["tags"] == ["research"]
+    assert bob_project["tags"] == ["private-to-bob"]
+
+
+def test_source_group_routes_hide_other_projects_and_reject_cross_project_sources(env):
+    first_project_id = make_project(env.alice, "First grouped project")
+    second_project_id = make_project(env.alice, "Second grouped project")
+    first_document_id = make_document(env.session, env.alice_user, "First source")
+    second_document_id = make_document(env.session, env.alice_user, "Second source")
+    env.session.add_all([
+        ProjectDocument(project_id=first_project_id, document_id=first_document_id),
+        ProjectDocument(project_id=second_project_id, document_id=second_document_id),
+    ])
+    env.session.commit()
+
+    first_groups = "/api/projects/%s/source-groups" % first_project_id
+    second_groups = "/api/projects/%s/source-groups" % second_project_id
+    created = env.alice.post(first_groups, json={"name": "References"})
+    assert created.status_code == 201, created.text
+    group_id = created.json()["id"]
+
+    assert env.bob.get(first_groups).status_code == 404
+    assert env.bob.post(first_groups, json={"name": "Private"}).status_code == 404
+    assert env.bob.patch(
+        "%s/%s" % (first_groups, group_id),
+        json={"name": "Private"},
+    ).status_code == 404
+    assert env.bob.delete("%s/%s" % (first_groups, group_id)).status_code == 404
+    assert env.bob.put(
+        "/api/projects/%s/documents/%s/group" % (
+            first_project_id,
+            first_document_id,
+        ),
+        json={"group_id": group_id},
+    ).status_code == 404
+    wrong_project = env.alice.put(
+        "/api/projects/%s/documents/%s/group" % (
+            first_project_id,
+            second_document_id,
+        ),
+        json={"group_id": group_id},
+    )
+    foreign_group = env.alice.put(
+        "/api/projects/%s/documents/%s/group" % (
+            second_project_id,
+            second_document_id,
+        ),
+        json={"group_id": group_id},
+    )
+
+    assert wrong_project.status_code == 404
+    assert foreign_group.status_code == 404
+    assert env.alice.patch(
+        "%s/%s" % (second_groups, group_id),
+        json={"name": "Wrong project"},
+    ).status_code == 404
+    assert env.alice.delete("%s/%s" % (second_groups, group_id)).status_code == 404

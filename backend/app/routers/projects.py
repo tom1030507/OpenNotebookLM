@@ -10,7 +10,9 @@ from app.schemas import (
     ChatSettings, ProjectCreate, ProjectUpdate, ProjectResponse, 
     ProjectListResponse, DocumentResponse, ProjectMemberCreate,
     ProjectMemberUpdate, ProjectMemberResponse, ProjectAnalyticsResponse,
-    WatchedFolderRequest, WatchedFolderResponse,
+    ProjectTagsUpdate, ProjectSourceGroupAssignmentRequest,
+    ProjectSourceGroupCreate, ProjectSourceGroupResponse,
+    ProjectSourceGroupUpdate, WatchedFolderRequest, WatchedFolderResponse,
 )
 from app.db.models import User
 from app.services.projects import ProjectService
@@ -81,6 +83,7 @@ async def list_projects(
                 document_count=getattr(p, 'document_count', 0),
                 conversation_count=getattr(p, 'conversation_count', 0),
                 role=project_role(db, p, current_user),
+                tags=getattr(p, 'tags', []),
             ) for p in projects
         ]
         
@@ -117,7 +120,198 @@ async def get_project(
         document_count=getattr(project, 'document_count', 0),
         conversation_count=getattr(project, 'conversation_count', 0),
         role=project_role(db, project, current_user),
+        tags=ProjectService.get_project_tags(db, current_user.id, project.id),
     )
+
+
+@router.put("/projects/{project_id}/tags", response_model=list[str])
+def update_project_tags(
+    project_id: str,
+    request: ProjectTagsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[str]:
+    """Replace the caller's private tags on a project they can view.
+
+    Args:
+        project_id: Project whose tags are being changed.
+        request: Replacement tag list.
+        db: Database session.
+        current_user: Signed-in account that owns these tags.
+
+    Returns:
+        The caller's saved tags.
+    """
+    require_project(db, project_id, current_user, min_role="viewer")
+    return ProjectService.replace_project_tags(
+        db,
+        project_id,
+        current_user.id,
+        request.tags,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/source-groups",
+    response_model=list[ProjectSourceGroupResponse],
+)
+def list_source_groups(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """List shared source groups visible to the project member.
+
+    Args:
+        project_id: Project whose groups are requested.
+        db: Database session.
+        current_user: Signed-in project member.
+
+    Returns:
+        Groups with the document ids assigned to each.
+    """
+    require_project(db, project_id, current_user, min_role="viewer")
+    return ProjectService.get_source_groups(db, project_id)
+
+
+@router.post(
+    "/projects/{project_id}/source-groups",
+    response_model=ProjectSourceGroupResponse,
+    status_code=201,
+)
+def create_source_group(
+    project_id: str,
+    request: ProjectSourceGroupCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ProjectSourceGroupResponse:
+    """Create a source group shared by project members.
+
+    Args:
+        project_id: Project that owns the new group.
+        request: Validated group name.
+        db: Database session.
+        current_user: Signed-in project owner or editor.
+
+    Returns:
+        The created, initially empty group.
+    """
+    require_project(db, project_id, current_user, min_role="editor")
+    try:
+        group = ProjectService.create_source_group(db, project_id, request.name)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ProjectSourceGroupResponse(
+        id=group.id,
+        name=group.name,
+        document_ids=[],
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/source-groups/{group_id}",
+    response_model=ProjectSourceGroupResponse,
+)
+def rename_source_group(
+    project_id: str,
+    group_id: str,
+    request: ProjectSourceGroupUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ProjectSourceGroupResponse:
+    """Rename one project source group.
+
+    Args:
+        project_id: Project that owns the group.
+        group_id: Group being renamed.
+        request: Validated replacement name.
+        db: Database session.
+        current_user: Signed-in project owner or editor.
+
+    Returns:
+        The renamed group and its current source ids.
+    """
+    require_project(db, project_id, current_user, min_role="editor")
+    try:
+        group = ProjectService.rename_source_group(
+            db,
+            project_id,
+            group_id,
+            request.name,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if group is None:
+        raise HTTPException(status_code=404, detail="Source group not found")
+    document_ids = next(
+        entry["document_ids"]
+        for entry in ProjectService.get_source_groups(db, project_id)
+        if entry["id"] == group_id
+    )
+    return ProjectSourceGroupResponse(
+        id=group.id,
+        name=group.name,
+        document_ids=document_ids,
+    )
+
+
+@router.delete("/projects/{project_id}/source-groups/{group_id}")
+def delete_source_group(
+    project_id: str,
+    group_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Delete a source group while keeping its sources in the project.
+
+    Args:
+        project_id: Project that owns the group.
+        group_id: Group being deleted.
+        db: Database session.
+        current_user: Signed-in project owner or editor.
+
+    Returns:
+        A success status after assignments have been cleared.
+    """
+    require_project(db, project_id, current_user, min_role="editor")
+    if not ProjectService.delete_source_group(db, project_id, group_id):
+        raise HTTPException(status_code=404, detail="Source group not found")
+    return {"status": "success"}
+
+
+@router.put(
+    "/projects/{project_id}/documents/{document_id}/group",
+    response_model=list[ProjectSourceGroupResponse],
+)
+def assign_source_group(
+    project_id: str,
+    document_id: str,
+    request: ProjectSourceGroupAssignmentRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Move one project source into a group or back to ungrouped.
+
+    Args:
+        project_id: Project containing the source.
+        document_id: Source being moved.
+        request: Group id in this project, or null to ungroup.
+        db: Database session.
+        current_user: Signed-in project owner or editor.
+
+    Returns:
+        The project's groups and their updated source ids.
+    """
+    require_project(db, project_id, current_user, min_role="editor")
+    require_document(db, document_id, current_user)
+    if not ProjectService.assign_source_group(
+        db,
+        project_id,
+        document_id,
+        request.group_id,
+    ):
+        raise HTTPException(status_code=404, detail="Project source or group not found")
+    return ProjectService.get_source_groups(db, project_id)
 
 
 @router.get(
@@ -283,7 +477,8 @@ async def update_project(
         created_at=project.created_at,
         updated_at=project.updated_at,
         document_count=getattr(project, 'document_count', 0),
-        conversation_count=getattr(project, 'conversation_count', 0)
+        conversation_count=getattr(project, 'conversation_count', 0),
+        tags=ProjectService.get_project_tags(db, current_user.id, project.id),
     )
 
 
@@ -388,6 +583,7 @@ async def duplicate_project(
         updated_at=duplicate.updated_at,
         document_count=getattr(duplicate, "document_count", 0),
         conversation_count=getattr(duplicate, "conversation_count", 0),
+        tags=ProjectService.get_project_tags(db, current_user.id, duplicate.id),
     )
 
 

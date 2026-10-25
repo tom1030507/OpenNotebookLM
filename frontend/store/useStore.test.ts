@@ -26,6 +26,7 @@ const testStorage = vi.hoisted(() => {
 const apiMock = vi.hoisted(() => ({
   getProjects: vi.fn(),
   createProject: vi.fn(),
+  updateProjectTags: vi.fn(),
   deleteProject: vi.fn(),
   getDocuments: vi.fn(),
   uploadDocument: vi.fn(),
@@ -612,6 +613,16 @@ describe('application store', () => {
 
       useStore.getState().setAllSourcesSelected('project-1', true);
       expect(selectedSourceIds(useStore.getState())).toBeUndefined();
+    });
+
+    it('changes only the listed sources when selecting a group', () => {
+      useStore.setState({ deselectedSources: { 'project-1': ['b', 'outside'] } });
+
+      useStore.getState().setSourcesSelected('project-1', ['a', 'b'], false);
+      expect(useStore.getState().deselectedSources['project-1']).toEqual(['b', 'outside', 'a']);
+
+      useStore.getState().setSourcesSelected('project-1', ['a', 'b'], true);
+      expect(useStore.getState().deselectedSources['project-1']).toEqual(['outside']);
     });
 
     it('does not count failed sources as selected', () => {

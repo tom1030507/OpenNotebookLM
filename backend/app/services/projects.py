@@ -15,6 +15,8 @@ from app.db.models import (
     Project,
     ProjectDocument,
     ProjectMember,
+    ProjectSourceGroup,
+    UserProjectTag,
     User,
 )
 from app.schemas import (
@@ -216,6 +218,219 @@ class ProjectService:
             project.conversation_count = conversations.scalar() or 0
         
         return project
+
+    @staticmethod
+    def get_project_tags(db: Session, user_id: str, project_id: str) -> list[str]:
+        """Return one user's tags for a visible project.
+
+        Args:
+            db: Database session.
+            user_id: Account whose tags are requested.
+            project_id: Project id.
+
+        Returns:
+            The account's tags in stable case-insensitive order.
+        """
+        return [tag for (tag,) in db.query(UserProjectTag.tag).filter(
+            UserProjectTag.user_id == user_id,
+            UserProjectTag.project_id == project_id,
+        ).order_by(func.lower(UserProjectTag.tag), UserProjectTag.tag).all()]
+
+    @staticmethod
+    def replace_project_tags(
+        db: Session,
+        project_id: str,
+        user_id: str,
+        tags: list[str],
+    ) -> list[str]:
+        """Replace one account's personal tags for a project.
+
+        Args:
+            db: Database session.
+            project_id: Project whose tags are being replaced.
+            user_id: Account that owns these tags.
+            tags: Validated, normalized replacement tags.
+
+        Returns:
+            The account's saved tags.
+        """
+        db.query(UserProjectTag).filter(
+            UserProjectTag.project_id == project_id,
+            UserProjectTag.user_id == user_id,
+        ).delete(synchronize_session=False)
+        db.add_all(
+            UserProjectTag(user_id=user_id, project_id=project_id, tag=tag)
+            for tag in tags
+        )
+        db.commit()
+        return tags
+
+    @staticmethod
+    def get_source_groups(db: Session, project_id: str) -> list[dict]:
+        """Return a project's source groups with their linked document ids.
+
+        Args:
+            db: Database session.
+            project_id: Project whose groups are requested.
+
+        Returns:
+            Groups ordered by name, each with document ids linked to it.
+        """
+        groups = db.query(ProjectSourceGroup).filter(
+            ProjectSourceGroup.project_id == project_id,
+        ).order_by(
+            func.lower(ProjectSourceGroup.name),
+            ProjectSourceGroup.id,
+        ).all()
+        document_ids = {group.id: [] for group in groups}
+        if document_ids:
+            for group_id, document_id in db.query(
+                ProjectDocument.source_group_id,
+                ProjectDocument.document_id,
+            ).filter(
+                ProjectDocument.project_id == project_id,
+                ProjectDocument.source_group_id.in_(document_ids),
+            ).all():
+                document_ids[group_id].append(document_id)
+        return [
+            {
+                "id": group.id,
+                "name": group.name,
+                "document_ids": document_ids[group.id],
+            }
+            for group in groups
+        ]
+
+    @staticmethod
+    def create_source_group(
+        db: Session,
+        project_id: str,
+        name: str,
+    ) -> ProjectSourceGroup:
+        """Create a named group shared by the project's members.
+
+        Args:
+            db: Database session.
+            project_id: Project that owns the group.
+            name: Validated group name.
+
+        Returns:
+            The created group.
+
+        Raises:
+            ValueError: If the project already has a group with this name.
+        """
+        group = ProjectSourceGroup(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            name=name,
+        )
+        db.add(group)
+        try:
+            db.commit()
+        except IntegrityError as error:
+            db.rollback()
+            raise ValueError("A group with this name already exists") from error
+        db.refresh(group)
+        return group
+
+    @staticmethod
+    def rename_source_group(
+        db: Session,
+        project_id: str,
+        group_id: str,
+        name: str,
+    ) -> Optional[ProjectSourceGroup]:
+        """Rename a group without changing its source assignments.
+
+        Args:
+            db: Database session.
+            project_id: Project that owns the group.
+            group_id: Group being renamed.
+            name: Validated replacement name.
+
+        Returns:
+            The renamed group, or None if it is outside the project.
+
+        Raises:
+            ValueError: If another group in the project already has this name.
+        """
+        group = db.query(ProjectSourceGroup).filter(
+            ProjectSourceGroup.id == group_id,
+            ProjectSourceGroup.project_id == project_id,
+        ).first()
+        if group is None:
+            return None
+        group.name = name
+        try:
+            db.commit()
+        except IntegrityError as error:
+            db.rollback()
+            raise ValueError("A group with this name already exists") from error
+        db.refresh(group)
+        return group
+
+    @staticmethod
+    def delete_source_group(db: Session, project_id: str, group_id: str) -> bool:
+        """Delete one group and leave its sources in the project ungrouped.
+
+        Args:
+            db: Database session.
+            project_id: Project that owns the group.
+            group_id: Group being deleted.
+
+        Returns:
+            Whether a matching group was deleted.
+        """
+        group = db.query(ProjectSourceGroup).filter(
+            ProjectSourceGroup.id == group_id,
+            ProjectSourceGroup.project_id == project_id,
+        ).first()
+        if group is None:
+            return False
+        db.query(ProjectDocument).filter(
+            ProjectDocument.project_id == project_id,
+            ProjectDocument.source_group_id == group_id,
+        ).update(
+            {ProjectDocument.source_group_id: None},
+            synchronize_session=False,
+        )
+        db.delete(group)
+        db.commit()
+        return True
+
+    @staticmethod
+    def assign_source_group(
+        db: Session,
+        project_id: str,
+        document_id: str,
+        group_id: Optional[str],
+    ) -> bool:
+        """Move a project-linked document to a group or ungroup it.
+
+        Args:
+            db: Database session.
+            project_id: Project containing the document.
+            document_id: Document being moved.
+            group_id: Group in this project, or None to ungroup.
+
+        Returns:
+            Whether the source link and optional group belong to the project.
+        """
+        link = db.query(ProjectDocument).filter(
+            ProjectDocument.project_id == project_id,
+            ProjectDocument.document_id == document_id,
+        ).first()
+        if link is None:
+            return False
+        if group_id is not None and db.query(ProjectSourceGroup.id).filter(
+            ProjectSourceGroup.project_id == project_id,
+            ProjectSourceGroup.id == group_id,
+        ).first() is None:
+            return False
+        link.source_group_id = group_id
+        db.commit()
+        return True
     
     @staticmethod
     def get_projects(
@@ -262,9 +477,22 @@ class ProjectService:
             .offset(skip)\
             .limit(limit)\
             .all()
+
+        project_ids = [project.id for project in projects]
+        project_tags = {}
+        if project_ids:
+            for project_id, tag in db.query(
+                UserProjectTag.project_id,
+                UserProjectTag.tag,
+            ).filter(
+                UserProjectTag.user_id == user_id,
+                UserProjectTag.project_id.in_(project_ids),
+            ).order_by(func.lower(UserProjectTag.tag), UserProjectTag.tag).all():
+                project_tags.setdefault(project_id, []).append(tag)
         
         # Add counts for each project
         for project in projects:
+            project.tags = project_tags.get(project.id, [])
             project.document_count = ProjectService.project_document_query(
                 db, project.id
             ).count()

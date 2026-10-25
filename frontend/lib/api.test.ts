@@ -191,7 +191,7 @@ describe('API client', () => {
       }],
       total: 1,
       page: 1,
-      per_page: 10,
+      per_page: 100,
     }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -206,10 +206,103 @@ describe('API client', () => {
       conversation_count: 0,
       role: 'owner',
     }]);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects?page=1&per_page=100');
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Accept')).toBe(
       'application/json',
     );
+  });
+
+  it('loads every page of projects', async () => {
+    const project = (id: string) => ({
+      id,
+      name: `Project ${id}`,
+      description: null,
+      meta_json: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      document_count: 0,
+      conversation_count: 0,
+      role: 'owner',
+    });
+    const firstPage = Array.from({ length: 100 }, (_, index) => project(`project-${index + 1}`));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        projects: firstPage, total: 101, page: 1, per_page: 100,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        projects: [project('project-101')], total: 101, page: 2, per_page: 100,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getProjects()).resolves.toEqual([...firstPage, project('project-101')]);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/projects?page=1&per_page=100',
+      '/api/projects?page=2&per_page=100',
+    ]);
+  });
+
+  it('stops paging when a later page is empty', async () => {
+    const firstPage = [{
+      id: 'project-1',
+      name: 'Project one',
+      description: null,
+      meta_json: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      document_count: 0,
+      conversation_count: 0,
+      role: 'owner',
+    }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        projects: firstPage, total: 101, page: 1, per_page: 100,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        projects: [], total: 101, page: 2, per_page: 100,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getProjects()).resolves.toEqual(firstPage);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('updates personal project tags and manages shared source groups', async () => {
+    const groups = [{
+      id: 'group-1',
+      name: 'Reading list',
+      document_ids: ['document-1'],
+    }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(['Research']))
+      .mockResolvedValueOnce(jsonResponse(groups))
+      .mockResolvedValueOnce(jsonResponse(groups[0], 201))
+      .mockResolvedValueOnce(jsonResponse({ ...groups[0], name: 'To read' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'success' }))
+      .mockResolvedValueOnce(jsonResponse(groups));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.updateProjectTags('project-1', ['Research'])).resolves.toEqual(['Research']);
+    await expect(api.getProjectSourceGroups('project-1')).resolves.toEqual(groups);
+    await expect(api.createProjectSourceGroup('project-1', 'Reading list')).resolves.toEqual(groups[0]);
+    await expect(api.renameProjectSourceGroup('project-1', 'group-1', 'To read'))
+      .resolves.toEqual({ ...groups[0], name: 'To read' });
+    await expect(api.deleteProjectSourceGroup('project-1', 'group-1'))
+      .resolves.toBeUndefined();
+    await expect(api.setDocumentSourceGroup('project-1', 'document-1', null))
+      .resolves.toEqual(groups);
+
+    expect(fetchMock.mock.calls.map(([path, options]) => [path, options.method ?? 'GET'])).toEqual([
+      ['/api/projects/project-1/tags', 'PUT'],
+      ['/api/projects/project-1/source-groups', 'GET'],
+      ['/api/projects/project-1/source-groups', 'POST'],
+      ['/api/projects/project-1/source-groups/group-1', 'PATCH'],
+      ['/api/projects/project-1/source-groups/group-1', 'DELETE'],
+      ['/api/projects/project-1/documents/document-1/group', 'PUT'],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ tags: ['Research'] });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ name: 'Reading list' });
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ name: 'To read' });
+    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({ group_id: null });
   });
 
   it('uses the project member endpoints and request bodies', async () => {
