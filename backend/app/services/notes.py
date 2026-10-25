@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import Conversation, Message, Note, Project
+from app.db.models import Conversation, Document, Message, Note, Project
 
 from app.schemas import (
     MindMapResponse,
@@ -108,9 +108,52 @@ def list_notes(db: Session, project: Project) -> List[Note]:
     Returns:
         The notes.
     """
-    return db.query(Note).filter(Note.project_id == project.id).order_by(
+    notes = db.query(Note).filter(Note.project_id == project.id).order_by(
         Note.created_at.desc(), Note.id.desc()
     ).all()
+    _attach_source_documents(db, notes)
+    return notes
+
+
+def _attach_source_documents(db: Session, notes: List[Note]) -> None:
+    """Expose linked source state on the note API response without storing it twice."""
+    if not notes:
+        return
+    sources = db.query(Document.note_id, Document.id).filter(
+        Document.note_id.in_([note.id for note in notes])
+    ).all()
+    by_note = {note_id: document_id for note_id, document_id in sources}
+    for note in notes:
+        note.source_document_id = by_note.get(note.id)
+
+
+def get_note_source(db: Session, note: Note) -> Document | None:
+    """Return the text source linked to a note, if one still exists.
+
+    Args:
+        db: Database session.
+        note: Note already resolved for the caller.
+
+    Returns:
+        The linked document or ``None`` after it has been deleted.
+    """
+    return db.query(Document).filter(Document.note_id == note.id).first()
+
+
+def note_source_text(note: Note) -> str:
+    """Return note Markdown without answer citations that cannot resolve here.
+
+    Args:
+        note: Note being converted into an independent source.
+
+    Returns:
+        Clean Markdown to store and index as the new source.
+    """
+    content = note.content or ""
+    if note.origin == ORIGIN_ANSWER:
+        content = re.split(r"\n\s*\*\*Sources\*\*\s*\n", content, maxsplit=1)[0]
+        content = re.sub(r"\[(?:Source\s+)?\d+\]", "", content, flags=re.IGNORECASE)
+    return content.strip()
 
 
 def get_note(db: Session, project: Project, note_id: str) -> Note:
@@ -268,6 +311,7 @@ def update_note(db: Session, note: Note, data: NoteUpdate) -> Note:
         setattr(note, field, value)
     db.commit()
     db.refresh(note)
+    _attach_source_documents(db, [note])
     return note
 
 
@@ -281,5 +325,8 @@ def delete_note(db: Session, note: Note) -> None:
     Returns:
         None.
     """
+    source = get_note_source(db, note)
+    if source is not None:
+        source.note_id = None
     db.delete(note)
     db.commit()

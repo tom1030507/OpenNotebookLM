@@ -105,6 +105,9 @@ class Document(Base):
     # at all -- so deriving ownership from membership would leave those rows with
     # no answer to "whose is this?".
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    # A source made from a note can be removed or its note can be deleted
+    # without deleting the other record; the service clears this link on note deletion.
+    note_id = Column(String, nullable=True)
     title = Column(String, nullable=False)
     source_type = Column(String, nullable=False)  # pdf, office extension, url, youtube, text
     source_url = Column(Text)
@@ -129,6 +132,7 @@ class Document(Base):
         Index("idx_documents_status", "status"),
         Index("idx_documents_source_type", "source_type"),
         Index("idx_documents_user_id", "user_id"),
+        Index("idx_documents_note_id", "note_id"),
     )
 
 

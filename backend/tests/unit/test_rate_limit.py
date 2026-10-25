@@ -9,6 +9,7 @@ from app.routers.rate_limit import get_client_ip
 from app.services.rate_limit import (
     ConcurrencyLimitError,
     ConcurrencyLimiter,
+    OperationLeaseGroup,
     SlidingWindowRateLimiter,
 )
 
@@ -122,6 +123,18 @@ def test_concurrency_lease_releases_after_an_exception():
         assert limiter.active("query:user") == 1
 
     assert limiter.active("query:user") == 0
+
+
+def test_operation_lease_group_holds_one_slot_until_all_jobs_finish():
+    limiter = ConcurrencyLimiter(max_concurrent=1)
+    lease = OperationLeaseGroup(limiter.acquire("ingest:user"), operations=2)
+
+    lease.release()
+    assert limiter.active("ingest:user") == 1
+
+    lease.release()
+    lease.release()
+    assert limiter.active("ingest:user") == 0
 
 
 def test_release_waits_for_deferred_underlying_future_and_happens_once():

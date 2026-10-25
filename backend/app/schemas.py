@@ -817,11 +817,25 @@ class NoteResponse(BaseModel):
     source_message_id: Optional[str] = None
     studio_kind: Optional[Literal["report", "mindmap", "video_summary"]] = None
     payload_json: Optional[Dict[str, Any]] = None
+    source_document_id: Optional[str] = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
     class Config:
         from_attributes = True
+
+
+class NoteSourceResponse(BaseModel):
+    """A searchable text source created from one note."""
+    note_id: str
+    doc_id: str
+    status: str
+
+
+class NoteSourceBatchResponse(BaseModel):
+    """Sources created from a batch of eligible notes."""
+    sources: List[NoteSourceResponse]
+    failed_note_ids: List[str] = Field(default_factory=list)
 
 
 # Project overview schemas

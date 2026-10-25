@@ -1345,6 +1345,31 @@ class TestNoteIsolation:
         assert [n["title"] for n in env.alice.get(
             "/api/projects/%s/notes" % project_id).json()] == ["Alice"]
 
+    def test_converting_someone_elses_note_to_a_source_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        base = "/api/projects/%s/notes" % project_id
+        note_id = env.alice.post(
+            base, json={"title": "Alice", "content": "Private note"}
+        ).json()["id"]
+
+        response = env.bob.post("%s/%s/source" % (base, note_id))
+
+        assert response.status_code == 404
+        assert env.bob.post("%s/sources" % base).status_code == 404
+
+    def test_viewers_cannot_convert_shared_notes_to_sources(self, env):
+        project_id = make_project(env.alice)
+        base = "/api/projects/%s/notes" % project_id
+        note_id = env.alice.post(
+            base, json={"title": "Owner note", "content": "Shared note"}
+        ).json()["id"]
+        grant_project_role(env, project_id, "viewer")
+
+        response = env.bob.post("%s/%s/source" % (base, note_id))
+
+        assert response.status_code == 404
+        assert env.bob.post("%s/sources" % base).status_code == 404
+
     def test_your_own_are_reachable(self, env):
         """Pins that the routes exist: an unmounted route also answers 404."""
         project_id = make_project(env.alice)

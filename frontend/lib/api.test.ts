@@ -19,6 +19,23 @@ afterEach(() => {
 
 
 describe('API client', () => {
+  it('converts one note or a batch of notes into sources', async () => {
+    const source = { note_id: 'note-1', doc_id: 'doc-1', status: 'queued' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(source))
+      .mockResolvedValueOnce(jsonResponse({ sources: [source], failed_note_ids: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.convertNoteToSource('project-1', 'note-1')).resolves.toEqual(source);
+    await expect(api.convertAllNotesToSources('project-1')).resolves.toEqual({
+      sources: [source], failed_note_ids: [],
+    });
+    expect(fetchMock.mock.calls.map(([url, options]) => [url, options.method])).toEqual([
+      ['/api/projects/project-1/notes/note-1/source', 'POST'],
+      ['/api/projects/project-1/notes/sources', 'POST'],
+    ]);
+  });
+
   it('fetches the runtime upload formats and limits', async () => {
     const config = {
       allowed_file_types: ['pdf', 'md'],
