@@ -23,10 +23,12 @@ from app.schemas import DocumentCreate
 from app.adapters import OfficeAdapter, PDFAdapter, URLAdapter, YouTubeAdapter
 from app.adapters.office import (
     InvalidOfficeFileError,
+    SUPPORTED_AUDIO_EXTENSIONS,
     SUPPORTED_IMAGE_EXTENSIONS,
     SUPPORTED_FILE_EXTENSIONS,
     SUPPORTED_UPLOAD_EXTENSIONS,
 )
+from app.adapters.audio import AudioAdapter, InvalidAudioFileError
 from app.adapters.ocr import InvalidImageError, OCRAdapter
 from app.config import get_settings
 from app.services.chunking import ChunkingService, ChunkLimitExceededError
@@ -200,12 +202,14 @@ class DocumentService:
         session_context: Callable[[], ContextManager[Session]] = get_db_context,
         max_chunks_per_doc: Optional[int] = None,
         ocr_adapter: Any | None = None,
+        audio_adapter: Any | None = None,
     ):
         """Initialize document processing dependencies.
 
         Args:
             chunking_service: Optional chunking implementation.
             embedding_service: Optional embedding implementation.
+            audio_adapter: Optional local audio validation and transcription.
             pdf_adapter: Optional PDF extraction implementation.
             office_adapter: Optional local file extraction implementation.
             ocr_adapter: Optional local OCR implementation for images and scans.
@@ -241,6 +245,7 @@ class DocumentService:
         self.office_adapter = (
             office_adapter if office_adapter is not None else OfficeAdapter()
         )
+        self.audio_adapter = audio_adapter
         self.url_adapter = (
             url_adapter
             if url_adapter is not None
@@ -290,6 +295,20 @@ class DocumentService:
             audio_transcriber=audio_transcriber
         )
         return self.youtube_adapter
+
+    def _get_audio_adapter(self) -> AudioAdapter:
+        """Return the process-local adapter for uploaded audio files.
+
+        Returns:
+            A lazily configured local audio adapter.
+        """
+        if self.audio_adapter is None:
+            self.audio_adapter = AudioAdapter(
+                model_name=self.settings.yt_whisper_model,
+                max_duration_seconds=self.settings.audio_max_duration_seconds,
+                cache_dir=self.settings.yt_whisper_cache_dir,
+            )
+        return self.audio_adapter
 
     def _index_document(self, db: Session, doc_id: str, source_label: str) -> str:
         """Chunk and embed a document, then mark it ready.
@@ -627,6 +646,11 @@ class DocumentService:
                 try:
                     self.office_adapter.validate_file(str(file_path), file_extension)
                 except InvalidOfficeFileError as error:
+                    raise InvalidUploadFileError(str(error)) from error
+            elif file_extension in SUPPORTED_AUDIO_EXTENSIONS:
+                try:
+                    self._get_audio_adapter().validate_file(str(file_path))
+                except InvalidAudioFileError as error:
                     raise InvalidUploadFileError(str(error)) from error
 
             job_type = "pdf" if file_extension == ".pdf" else "file"
@@ -1342,7 +1366,11 @@ class DocumentService:
         if job_type == "file":
             file_source_types = {
                 extension[1:]
-                for extension in SUPPORTED_FILE_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS
+                for extension in (
+                    SUPPORTED_FILE_EXTENSIONS
+                    | SUPPORTED_IMAGE_EXTENSIONS
+                    | SUPPORTED_AUDIO_EXTENSIONS
+                )
             }
             if document.source_type not in file_source_types:
                 raise ValueError(
@@ -1376,7 +1404,9 @@ class DocumentService:
                 file_extension = (document.meta_json or {}).get("file_extension")
                 if (
                     file_extension not in (
-                        SUPPORTED_FILE_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS
+                        SUPPORTED_FILE_EXTENSIONS
+                        | SUPPORTED_IMAGE_EXTENSIONS
+                        | SUPPORTED_AUDIO_EXTENSIONS
                     )
                     or file_extension[1:] != document.source_type
                 ):
@@ -1387,8 +1417,16 @@ class DocumentService:
         elif source_reference != document.source_url:
             raise ValueError("Ingestion job source does not match its document")
 
-        document.status = "processing"
+        file_extension = (document.meta_json or {}).get("file_extension")
+        is_audio_file = (
+            job_type == "file" and file_extension in SUPPORTED_AUDIO_EXTENSIONS
+        )
+        document.status = "transcribing" if is_audio_file else "processing"
         document.error_message = None
+        if is_audio_file:
+            # Pollers need a committed status during the long model call; if it
+            # stayed in this transaction, users would only see "queued".
+            db.commit()
 
         if job_type == "pdf":
             result = self.pdf_adapter.extract_text_from_file(source_reference)
@@ -1402,27 +1440,40 @@ class DocumentService:
             }
         elif job_type == "file":
             file_extension = document.meta_json["file_extension"]
-            if file_extension in SUPPORTED_IMAGE_EXTENSIONS:
-                filename = (document.meta_json or {}).get("filename") or Path(
-                    source_reference
-                ).name
-                result = self.ocr_adapter.extract_text_from_image(
-                    source_reference,
-                    filename,
-                )
+            if file_extension in SUPPORTED_AUDIO_EXTENSIONS:
+                result = self._get_audio_adapter().transcribe_file(source_reference)
+                document.content = result["text"]
+                document.meta_json = {
+                    **(document.meta_json or {}),
+                    "duration": result["duration"],
+                    "language": result["language"],
+                    "segments": result["segments"],
+                    "metadata": result.get("metadata", {}),
+                    "num_segments": len(result["segments"]),
+                    "processed_at": utc_now_iso(),
+                }
             else:
-                result = self.office_adapter.extract_text_from_file(
-                    source_reference,
-                    file_extension,
-                )
-            document.content = result["text"]
-            document.meta_json = {
-                **(document.meta_json or {}),
-                "num_pages": result["num_pages"],
-                "pages": result.get("pages", []),
-                "metadata": result.get("metadata", {}),
-                "processed_at": utc_now_iso(),
-            }
+                if file_extension in SUPPORTED_IMAGE_EXTENSIONS:
+                    filename = (document.meta_json or {}).get("filename") or Path(
+                        source_reference
+                    ).name
+                    result = self.ocr_adapter.extract_text_from_image(
+                        source_reference,
+                        filename,
+                    )
+                else:
+                    result = self.office_adapter.extract_text_from_file(
+                        source_reference,
+                        file_extension,
+                    )
+                document.content = result["text"]
+                document.meta_json = {
+                    **(document.meta_json or {}),
+                    "num_pages": result["num_pages"],
+                    "pages": result.get("pages", []),
+                    "metadata": result.get("metadata", {}),
+                    "processed_at": utc_now_iso(),
+                }
         elif job_type == "text":
             # Pasted text was stored with the document; there is nothing to extract.
             pass
@@ -1517,7 +1568,11 @@ class DocumentService:
                 and (
                     doc.source_type == "pdf"
                     or ".%s" % doc.source_type
-                    in (SUPPORTED_FILE_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS)
+                    in (
+                        SUPPORTED_FILE_EXTENSIONS
+                        | SUPPORTED_IMAGE_EXTENSIONS
+                        | SUPPORTED_AUDIO_EXTENSIONS
+                    )
                 )
             )
             else None

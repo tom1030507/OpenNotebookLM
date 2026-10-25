@@ -181,6 +181,37 @@ def test_upload_route_queues_supported_text_files_as_file_jobs(monkeypatch):
     assert calls[0]["file_extension"] == ".txt"
 
 
+def test_upload_route_queues_supported_audio_files_as_file_jobs(monkeypatch):
+    """Configured audio files enter the same durable file-job route."""
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(ingest, "require_project", lambda *args: object())
+    monkeypatch.setattr(
+        ingest.settings,
+        "allowed_file_types",
+        "pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp,mp3,m4a,wav,ogg,webm,flac",
+    )
+    calls = []
+
+    class AcceptingService:
+        async def process_file_upload(self, **kwargs):
+            calls.append(kwargs)
+            kwargs["operation_lease"].release()
+            return SimpleNamespace(id="document", status="queued")
+
+    app.dependency_overrides[ingest.get_document_service] = AcceptingService
+    response = TestClient(app).post(
+        "/api/projects/project/upload",
+        files={"file": ("lecture.mp3", b"audio", "audio/mpeg")},
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["filename"] == "lecture.mp3"
+    assert calls[0]["file_extension"] == ".mp3"
+
+
 def test_upload_route_queues_supported_image_files_as_file_jobs(monkeypatch):
     """Configured raster images use the same durable file ingestion path."""
     app = FastAPI()
@@ -298,6 +329,30 @@ def test_invalid_office_content_has_a_stable_400_response(monkeypatch):
 
     assert response.status_code == 400
     assert "valid Office document" in response.json()["detail"]
+
+
+def test_document_status_reports_transcribing_progress(monkeypatch):
+    """The status endpoint treats active Whisper work as in progress."""
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(
+        ingest,
+        "require_document",
+        lambda *args: SimpleNamespace(
+            id="document",
+            status="transcribing",
+            meta_json={},
+            error_message=None,
+        ),
+    )
+
+    response = TestClient(app).get("/api/docs/document/status")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "transcribing"
+    assert response.json()["progress"] == 0.5
 
 
 def test_asgi_cap_rejects_actual_upload_before_auth_and_form_route(monkeypatch):

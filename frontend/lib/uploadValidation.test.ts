@@ -7,6 +7,7 @@ describe('file upload validation', () => {
   it.each([
     'pdf', 'txt', 'md', 'docx', 'pptx', 'xlsx', 'epub',
     'png', 'jpg', 'jpeg', 'webp',
+    'mp3', 'm4a', 'wav', 'ogg', 'webm', 'flac',
   ])(
     'accepts .%s files dropped onto the upload area',
     (extension) => {

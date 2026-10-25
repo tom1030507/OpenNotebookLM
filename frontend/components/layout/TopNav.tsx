@@ -104,7 +104,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   // Documents are the only asynchronous work the workspace runs today, so their
   // status is what there is to notify about.
   const pendingDocuments = documents.filter(
-    (document) => document.status === 'queued' || document.status === 'processing',
+    (document) => ['queued', 'processing', 'transcribing'].includes(document.status),
   );
   const failedDocuments = documents.filter((document) => document.status === 'error');
   const notificationCount = pendingDocuments.length + failedDocuments.length;

@@ -35,6 +35,7 @@ import useDialogFocus from '@/hooks/useDialogFocus';
 const STATUS_LABELS: Partial<Record<DocumentStatus, string>> = {
   queued: 'Queued',
   processing: 'Processing...',
+  transcribing: 'Transcribing...',
   ready: 'Ready',
   error: 'Failed',
 };

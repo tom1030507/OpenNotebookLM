@@ -214,7 +214,7 @@ def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
                 job.id,
                 job.document_id,
                 job.document is not None
-                and job.document.status == "processing",
+                and job.document.status in {"processing", "transcribing"},
             )
             for job in abandoned
         ]
@@ -222,7 +222,10 @@ def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
             job.status = "queued"
             job.started_at = None
             job.completed_at = None
-            if job.document is not None and job.document.status == "processing":
+            if job.document is not None and job.document.status in {
+                "processing",
+                "transcribing",
+            }:
                 job.document.status = "queued"
                 job.document.error_message = None
         try:

@@ -107,6 +107,37 @@ describe('DocumentPreview', () => {
     expect(fetchContent).toHaveBeenCalledWith('document-1');
   });
 
+  it('fetches and previews the timestamped transcript for an audio source', async () => {
+    const document = await loadDocument({
+      source_type: 'mp3' as Document['type'],
+      source_url: 'uploads/document-1_lecture.mp3',
+      title: 'Lecture',
+    });
+    const fetchContent = vi.spyOn(api, 'fetchDocumentContent')
+      .mockResolvedValue('## 00:00:00\nWelcome to the lecture.');
+
+    render(<DocumentPreview document={document} onClose={() => {}} />);
+
+    expect(await screen.findByText(/## 00:00:00/)).toBeTruthy();
+    expect(fetchContent).toHaveBeenCalledWith('document-1');
+  });
+
+  it('shows the in-progress notice while an audio source is transcribing', async () => {
+    const document = await loadDocument({
+      source_type: 'mp3' as Document['type'],
+      source_url: 'uploads/document-1_lecture.mp3',
+      title: 'Lecture',
+    });
+    document.status = 'transcribing';
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('');
+
+    render(<DocumentPreview document={document} onClose={() => {}} />);
+
+    expect(
+      await screen.findByText(/This document is still being processed/),
+    ).toBeTruthy();
+  });
+
   it('fetches an uploaded PDF with the session token and previews the bytes', async () => {
     // The file route requires a bearer token and a browser cannot put an
     // Authorization header on an <iframe src>, so pointing the frame straight at

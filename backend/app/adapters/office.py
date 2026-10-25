@@ -18,10 +18,19 @@ SUPPORTED_FILE_EXTENSIONS = frozenset({
     ".epub",
 })
 SUPPORTED_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+SUPPORTED_AUDIO_EXTENSIONS = frozenset({
+    ".mp3",
+    ".m4a",
+    ".wav",
+    ".ogg",
+    ".webm",
+    ".flac",
+})
 SUPPORTED_UPLOAD_EXTENSIONS = frozenset({
     ".pdf",
     *SUPPORTED_FILE_EXTENSIONS,
     *SUPPORTED_IMAGE_EXTENSIONS,
+    *SUPPORTED_AUDIO_EXTENSIONS,
 })
 
 # Pandas materializes a worksheet during MarkItDown conversion, so bound the

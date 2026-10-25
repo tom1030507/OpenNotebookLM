@@ -13,7 +13,10 @@ import {
   FileText,
   Loader2,
 } from 'lucide-react';
-import { getUploadFileError } from '@/lib/uploadValidation';
+import {
+  getUploadFileError,
+  SUPPORTED_UPLOAD_FILE_EXTENSIONS,
+} from '@/lib/uploadValidation';
 
 interface FileUploadProps {
   onUpload: (files: File[] | string[]) => Promise<void>;
@@ -26,7 +29,7 @@ interface FileUploadProps {
 
 export default function FileUpload({ 
   onUpload, 
-  accept = '.pdf,.txt,.md,.docx,.pptx,.xlsx,.epub,.png,.jpg,.jpeg,.webp',
+  accept = SUPPORTED_UPLOAD_FILE_EXTENSIONS.join(','),
   multiple = false,
   maxSize = 10,
   onUploadingChange,
@@ -309,7 +312,7 @@ export default function FileUpload({
             </label>
           </p>
           <p className="text-sm text-gray-500">
-            PDF, TXT, Markdown, Word, PowerPoint, Excel, EPUB, or images · Maximum file size: {maxSize}MB
+            PDF, TXT, Markdown, Word, PowerPoint, Excel, EPUB, images, or audio · Maximum file size: {maxSize}MB
           </p>
         </div>
       )}

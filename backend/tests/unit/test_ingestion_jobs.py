@@ -693,7 +693,8 @@ def test_active_enqueue_result_cannot_replace_winner_lease_if_job_finishes(
         ingestion_jobs.release_all_operation_leases()
 
 
-def test_recovery_requeues_abandoned_running_jobs(job_database):
+@pytest.mark.parametrize("document_status", ["processing", "transcribing"])
+def test_recovery_requeues_abandoned_running_jobs(job_database, document_status):
     """Startup makes work abandoned by a crashed process claimable again.
 
     Args:
@@ -714,7 +715,7 @@ def test_recovery_requeues_abandoned_running_jobs(job_database):
         job.status = "running"
         job.attempts = 1
         job.started_at = utc_now()
-        document.status = "processing"
+        document.status = document_status
         db.commit()
         job_id = job.id
 
