@@ -5,6 +5,7 @@ import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
 import type { MindMap, Note, VideoSummary } from '@/lib/api';
 import useNotes from '@/store/useNotes';
+import useStore from '@/store/useStore';
 import MarkdownRenderer from '../MarkdownRenderer';
 
 const MindMapDialog = React.lazy(() => import('../MindMapDialog'));
@@ -22,6 +23,8 @@ const actionClass = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded ho
 const EMPTY_NOTES: Note[] = [];
 
 export default function NotesSection({ projectId }: { projectId: string | null }) {
+  const canEdit = useStore((state) => state.currentProject?.id === projectId
+    && (state.currentProject.role === 'owner' || state.currentProject.role === 'editor'));
   const notes = useNotes((state) => state.projectId === projectId ? state.notes : EMPTY_NOTES);
   const loading = useNotes((state) => (
     state.projectId === projectId ? state.loading : projectId !== null
@@ -39,12 +42,16 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     setError('');
   }, [projectId]);
 
+  useEffect(() => {
+    if (!canEdit) setDraft(null);
+  }, [canEdit]);
+
   if (!projectId) return null;
 
   const viewerNote = notes.find((note) => note.id === openId && note.origin === 'studio');
 
   const saveDraft = async () => {
-    if (!draft || !draft.title.trim()) return;
+    if (!canEdit || !draft || !draft.title.trim()) return;
     setSaving(true);
     setError('');
     try {
@@ -63,6 +70,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   };
 
   const deleteNote = async (note: Note) => {
+    if (!canEdit) return;
     if (!confirm(`Delete the note "${note.title}"?`)) return;
     setError('');
     try {
@@ -73,7 +81,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     }
   };
 
-  const editor = draft && (
+  const editor = canEdit && draft && (
     <div className="space-y-2 p-3 border border-[var(--border)] rounded-lg">
       <input
         aria-label="Note title"
@@ -113,15 +121,17 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     <section aria-label="Notes" className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-medium">Notes</h3>
-        <button
-          type="button"
-          onClick={() => setDraft({ noteId: null, title: '', content: '' })}
-          disabled={draft?.noteId === null}
-          className={actionClass}
-        >
-          <Plus className="w-3.5 h-3.5" />
-          New note
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setDraft({ noteId: null, title: '', content: '' })}
+            disabled={draft?.noteId === null}
+            className={actionClass}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New note
+          </button>
+        )}
       </div>
 
       {error && (
@@ -167,7 +177,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                         </span>
                       )}
                     </button>
-                    {note.origin === 'studio' && note.studio_kind !== 'report' && (
+                    {canEdit && note.origin === 'studio' && note.studio_kind !== 'report' && (
                       <button
                         type="button"
                         onClick={() => deleteNote(note)}
@@ -182,26 +192,28 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                     && (note.origin !== 'studio' || note.studio_kind === 'report') && (
                     <div className="px-3 pb-3">
                       <MarkdownRenderer content={note.content} className="text-sm" />
-                      <div className="flex justify-end gap-2 mt-2">
-                        <button
-                          type="button"
-                          onClick={() => setDraft({
-                            noteId: note.id, title: note.title, content: note.content,
-                          })}
-                          className={actionClass}
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteNote(note)}
-                          className={`${actionClass} text-[var(--error)]`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Delete
-                        </button>
-                      </div>
+                      {canEdit && (
+                        <div className="flex justify-end gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setDraft({
+                              noteId: note.id, title: note.title, content: note.content,
+                            })}
+                            className={actionClass}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteNote(note)}
+                            className={`${actionClass} text-[var(--error)]`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

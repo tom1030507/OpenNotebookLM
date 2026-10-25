@@ -240,6 +240,7 @@ class DocumentResponse(DocumentBase):
     created_at: UtcDatetime
     updated_at: UtcDatetime
     chunk_count: int = 0
+    is_owned_by_caller: bool = False
     
     class Config:
         from_attributes = True

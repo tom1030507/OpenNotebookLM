@@ -17,12 +17,14 @@ const project: Project = {
   updated_at: '2026-08-13T00:00:00Z',
   document_count: 2,
   conversation_count: 1,
+  role: 'owner',
 };
 
 const source: Document = {
   id: 'doc-1',
   name: 'Example Domain',
   type: 'url',
+  isOwnedByCaller: true,
   url: 'https://example.com',
   meta: {},
   status: 'ready',

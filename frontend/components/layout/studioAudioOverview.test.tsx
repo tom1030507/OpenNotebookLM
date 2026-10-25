@@ -15,6 +15,7 @@ const project: Project = {
   updated_at: '2026-10-25T00:00:00Z',
   document_count: 2,
   conversation_count: 0,
+  role: 'owner',
 };
 const NativeURL = globalThis.URL;
 
@@ -39,8 +40,8 @@ beforeEach(() => {
     currentProject: project,
     projects: [project],
     documents: [
-      { id: 'source-a', name: 'Source A', type: 'text', status: 'ready', meta: {}, created_at: '', updated_at: '', chunk_count: 1 },
-      { id: 'source-b', name: 'Source B', type: 'text', status: 'ready', meta: {}, created_at: '', updated_at: '', chunk_count: 1 },
+      { id: 'source-a', name: 'Source A', type: 'text', isOwnedByCaller: true, status: 'ready', meta: {}, created_at: '', updated_at: '', chunk_count: 1 },
+      { id: 'source-b', name: 'Source B', type: 'text', isOwnedByCaller: true, status: 'ready', meta: {}, created_at: '', updated_at: '', chunk_count: 1 },
     ],
     deselectedSources: { 'audio-project': ['source-b'] },
   });

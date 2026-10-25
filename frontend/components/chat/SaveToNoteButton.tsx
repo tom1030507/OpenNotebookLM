@@ -20,7 +20,9 @@ function noteTitle(answer: Message): string {
 }
 
 export default function SaveToNoteButton({ message }: { message: Message }) {
-  const projectId = useStore((state) => state.currentProject?.id ?? null);
+  const project = useStore((state) => state.currentProject);
+  const projectId = project?.id ?? null;
+  const canEdit = project?.role === 'owner' || project?.role === 'editor';
   const alreadySaved = useNotes((state) => (
     state.projectId === projectId
     && state.notes.some((note) => note.source_message_id === message.id)
@@ -32,7 +34,7 @@ export default function SaveToNoteButton({ message }: { message: Message }) {
   const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle');
 
   const save = async () => {
-    if (!projectId) return;
+    if (!projectId || !canEdit) return;
     setState('saving');
     try {
       // The server writes the content from the stored answer, so the note keeps
@@ -58,6 +60,8 @@ export default function SaveToNoteButton({ message }: { message: Message }) {
     saved: 'Saved to notes',
     error: 'Could not save. Try again',
   }[visibleState];
+
+  if (!canEdit) return null;
 
   return (
     <button

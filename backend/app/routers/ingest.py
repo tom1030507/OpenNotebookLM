@@ -430,7 +430,8 @@ async def get_document(
         error_message=document.error_message,
         created_at=document.created_at,
         updated_at=document.updated_at,
-        chunk_count=chunk_count
+        chunk_count=chunk_count,
+        is_owned_by_caller=document.user_id == current_user.id,
     )
 
 
@@ -490,6 +491,7 @@ async def rename_document(
         created_at=document.created_at,
         updated_at=document.updated_at,
         chunk_count=len(document.chunks) if document.chunks else 0,
+        is_owned_by_caller=True,
     )
 
 

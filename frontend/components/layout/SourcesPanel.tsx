@@ -105,6 +105,9 @@ export default function SourcesPanel({
     setAllSourcesSelected,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
+  const canManageProject = currentProject?.role === 'owner';
+  const canManageSources = currentProject?.role === 'owner'
+    || currentProject?.role === 'editor';
 
   const handleDuplicateProject = async () => {
     if (!currentProject || isDuplicating) return;
@@ -140,7 +143,7 @@ export default function SourcesPanel({
   }, [isAddSourcesOpen]);
 
   const handleUpload = async (items: File[] | string[]) => {
-    if (!currentProject) {
+    if (!currentProject || !canManageSources) {
       alert('Please select or create a project first');
       return;
     }
@@ -172,7 +175,7 @@ export default function SourcesPanel({
   };
 
   const handleAddText = async (title: string, content: string) => {
-    if (!currentProject) return;
+    if (!currentProject || !canManageSources) return;
 
     const projectId = currentProject.id;
     const uploadSession = modalSession;
@@ -316,6 +319,7 @@ export default function SourcesPanel({
                   style={projectCoverStyle(project.cover_color)}
                 >
                   {project.cover_emoji ? `${project.cover_emoji} ` : ''}{project.name}
+                  {project.role !== 'owner' ? ` · Shared (${project.role})` : ''}
                 </option>
               ))}
             </select>
@@ -328,7 +332,7 @@ export default function SourcesPanel({
             <FolderOpen className="w-4 h-4" />
             <span className="text-sm">New Project</span>
           </button>
-          {currentProject && (
+          {canManageProject && currentProject && (
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -355,7 +359,7 @@ export default function SourcesPanel({
         </div>
         
         {/* Add Source Button */}
-        {currentProject && (
+        {canManageSources && currentProject && (
           <button 
             onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
             className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base"
@@ -396,7 +400,7 @@ export default function SourcesPanel({
               <p className="text-sm text-[var(--muted-foreground)]">
                 {searchQuery ? 'No sources found' : 'No sources yet'}
               </p>
-              {!searchQuery && (
+              {!searchQuery && canManageSources && (
                 <p className="text-xs text-[var(--muted-foreground)] mt-2">
                   Click &ldquo;Add Source&rdquo; to upload files, URLs, or YouTube videos
                 </p>
@@ -466,28 +470,32 @@ export default function SourcesPanel({
                     >
                       <Eye className="w-3 h-3" />
                     </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleRenameDocument(doc);
-                      }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
-                      aria-label={'Rename document'}
-                      title={'Rename document'}
-                    >
-                      <Pencil className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteDocument(doc.id);
-                      }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
-                      aria-label={'Delete document'}
-                      title={'Delete document'}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                    {doc.isOwnedByCaller && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRenameDocument(doc);
+                        }}
+                        className="p-1 hover:bg-[var(--muted)] rounded"
+                        aria-label={'Rename document'}
+                        title={'Rename document'}
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
+                    {canManageSources && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDocument(doc.id);
+                        }}
+                        className="p-1 hover:bg-[var(--muted)] rounded"
+                        aria-label={'Remove source'}
+                        title={'Remove source'}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -498,7 +506,7 @@ export default function SourcesPanel({
       </div>
 
       {/* Upload Modal */}
-      {isAddSourcesOpen && currentProject && (
+      {isAddSourcesOpen && canManageSources && currentProject && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div
             ref={uploadDialogRef}

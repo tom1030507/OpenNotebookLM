@@ -24,6 +24,7 @@ const projectA: Project = {
   updated_at: '2026-08-23T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+  role: 'owner',
 };
 
 const projectB: Project = {
@@ -36,6 +37,7 @@ const readyDocument: Document = {
   id: 'document-a',
   name: 'Ready source',
   type: 'text',
+  isOwnedByCaller: true,
   meta: {},
   status: 'ready',
   created_at: '2026-08-23T00:00:00Z',
@@ -115,6 +117,19 @@ describe('StudioPanel', () => {
     ]) {
       expect(screen.getByRole('button', { name }).getAttribute('type')).toBe('button');
     }
+  });
+
+  it('lets viewers use Studio but hides controls that save results into notes', async () => {
+    const viewerProject = { ...projectA, role: 'viewer' as const };
+    useStore.setState({ currentProject: viewerProject, projects: [viewerProject] });
+    vi.spyOn(api, 'listNotes').mockResolvedValue([]);
+    vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMapFor(viewerProject));
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+
+    expect(await screen.findByRole('dialog', { name: `${viewerProject.name} mind map` })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Save to notes' })).toBeNull();
   });
 
   it('explains how to fix a video summary that exceeds the export limits', async () => {

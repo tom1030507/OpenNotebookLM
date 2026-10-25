@@ -16,8 +16,19 @@ export interface Project {
   updated_at: string;
   document_count: number;
   conversation_count: number;
+  role: ProjectRole;
   cover_emoji?: string | null;
   cover_color?: string | null;
+}
+
+export type ProjectRole = 'owner' | 'editor' | 'viewer';
+
+export interface ProjectMember {
+  user_id: string;
+  username: string;
+  email: string;
+  role: ProjectRole;
+  created_at: string;
 }
 
 export type ChatRole = 'default' | 'learning_guide' | 'custom';
@@ -53,6 +64,7 @@ export interface Document {
   name: string;
   type: DocumentType;
   url?: string;
+  isOwnedByCaller: boolean;
   content?: string;
   meta: Record<string, unknown>;
   status: DocumentStatus;
@@ -246,6 +258,7 @@ interface BackendDocument {
   created_at: string;
   updated_at: string;
   chunk_count: number;
+  is_owned_by_caller: boolean;
 }
 
 interface FileUploadResponse {
@@ -610,6 +623,7 @@ const normalizeDocument = (document: BackendDocument): Document => {
     created_at: document.created_at,
     updated_at: document.updated_at,
     chunk_count: document.chunk_count,
+    isOwnedByCaller: document.is_owned_by_caller,
   };
 };
 
@@ -721,6 +735,38 @@ const api = {
   async getProjects(): Promise<Project[]> {
     const response = await requestJson<ProjectListResponse>('/projects');
     return response.projects;
+  },
+
+  getProjectMembers(projectId: string): Promise<ProjectMember[]> {
+    return requestJson<ProjectMember[]>(`/projects/${projectId}/members`);
+  },
+
+  addProjectMember(
+    projectId: string,
+    member: { username?: string; email?: string; role: 'viewer' | 'editor' },
+  ): Promise<ProjectMember> {
+    return requestJson<ProjectMember>(`/projects/${projectId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(member),
+    });
+  },
+
+  updateProjectMember(
+    projectId: string,
+    userId: string,
+    member: { role: 'viewer' | 'editor' },
+  ): Promise<ProjectMember> {
+    return requestJson<ProjectMember>(
+      `/projects/${projectId}/members/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body: JSON.stringify(member) },
+    );
+  },
+
+  async removeProjectMember(projectId: string, userId: string): Promise<void> {
+    await requestJson(
+      `/projects/${projectId}/members/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' },
+    );
   },
 
   createProject(data: { name?: string; description?: string }): Promise<Project> {

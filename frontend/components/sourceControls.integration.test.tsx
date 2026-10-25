@@ -35,6 +35,7 @@ const currentProject: Project = {
   updated_at: '2026-08-12T00:00:00Z',
   document_count: 0,
   conversation_count: 0,
+  role: 'owner',
 };
 
 
@@ -125,6 +126,25 @@ describe('Add Sources controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close add sources dialog' }));
     fireEvent.click(screen.getByRole('button', { name: 'Attach file' }));
     expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
+  });
+
+  it('keeps viewers read-only while editors can add sources and change chat settings', () => {
+    const viewer = { ...currentProject, role: 'viewer' as const };
+    useStore.setState({ projects: [viewer], currentProject: viewer });
+    const { rerender } = render(<SourceWorkspace />);
+
+    expect(screen.queryByRole('button', { name: 'Add Source' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Attach file' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Chat settings' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit Project Cover' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
+    const editor = { ...currentProject, role: 'editor' as const };
+    act(() => useStore.setState({ projects: [editor], currentProject: editor }));
+    rerender(<SourceWorkspace />);
+    expect(screen.getByRole('button', { name: 'Add Source' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Chat settings' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit Project Cover' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
   });
 
   it('focuses the close button, closes with Escape, and restores focus to the opener', () => {

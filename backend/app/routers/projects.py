@@ -354,7 +354,8 @@ async def get_project_documents(
             error_message=doc.error_message,
             created_at=doc.created_at,
             updated_at=doc.updated_at,
-            chunk_count=getattr(doc, 'chunk_count', 0)
+            chunk_count=getattr(doc, 'chunk_count', 0),
+            is_owned_by_caller=doc.user_id == current_user.id,
         ) for doc in documents
     ]
 

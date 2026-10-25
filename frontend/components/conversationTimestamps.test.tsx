@@ -33,6 +33,7 @@ const project: Project = {
   updated_at: '2026-08-13T00:00:00Z',
   document_count: 0,
   conversation_count: 1,
+  role: 'owner',
 };
 
 function conversationCreatedAt(created_at: string): Conversation {

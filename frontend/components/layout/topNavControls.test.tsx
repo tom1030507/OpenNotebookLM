@@ -25,6 +25,7 @@ const project: Project = {
   updated_at: '2026-08-13T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+  role: 'owner',
   cover_emoji: '📚',
   cover_color: 'rose',
 };
@@ -33,6 +34,7 @@ const processing: Document = {
   id: 'document-1',
   name: 'Working paper',
   type: 'pdf',
+  isOwnedByCaller: true,
   content: '',
   meta: {},
   status: 'processing',

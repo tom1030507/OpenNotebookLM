@@ -122,9 +122,11 @@ describe('ResponsiveLayout component integration', () => {
         id: 'project-1', name: 'Research', description: null, meta_json: {},
         created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
         document_count: 1, conversation_count: 0,
+        role: 'owner',
       },
       documents: [{
         id: 'source-1', name: 'Research source', type: 'text', meta: {}, status: 'ready',
+        isOwnedByCaller: true,
         created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z', chunk_count: 1,
       }],
     });

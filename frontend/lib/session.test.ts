@@ -28,6 +28,7 @@ const seedAccountState = () => {
     updated_at: '2026-08-23T00:00:00Z',
     document_count: 1,
     conversation_count: 1,
+    role: 'owner' as const,
   };
   const conversation = {
     id: 'conversation-a',
@@ -45,6 +46,7 @@ const seedAccountState = () => {
       id: 'document-a',
       name: 'Account A document',
       type: 'text',
+      isOwnedByCaller: true,
       content: 'Private source',
       meta: {},
       status: 'ready',
@@ -184,11 +186,13 @@ describe('browser session', () => {
       updated_at: '2026-08-23T00:00:00Z',
       document_count: 1,
       conversation_count: 1,
+      role: 'owner',
     };
     const document: Document = {
       id: 'document-a',
       name: 'Account A document',
       type: 'text',
+      isOwnedByCaller: true,
       content: 'Private source',
       meta: {},
       status: 'ready',

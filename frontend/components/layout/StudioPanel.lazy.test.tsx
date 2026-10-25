@@ -27,12 +27,14 @@ const project: Project = {
   updated_at: '2026-08-23T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+  role: 'owner',
 };
 
 const readyDocument: Document = {
   id: 'document-1',
   name: 'Ready source',
   type: 'text',
+  isOwnedByCaller: true,
   meta: {},
   status: 'ready',
   created_at: '2026-08-23T00:00:00Z',

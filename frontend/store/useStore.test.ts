@@ -55,6 +55,7 @@ const project = (id: string): Project => ({
   updated_at: '2026-01-01T00:00:00Z',
   document_count: 0,
   conversation_count: 0,
+  role: 'owner',
 });
 
 const conversation = (id: string, projectId: string): Conversation => ({
@@ -78,6 +79,7 @@ const readyDocument: Document = {
   id: 'document-1',
   name: 'Paper',
   type: 'pdf',
+  isOwnedByCaller: true,
   meta: {},
   status: 'ready',
   created_at: '2026-01-01T00:00:00Z',

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import NotesSection from './NotesSection';
 import SaveToNoteButton from '../chat/SaveToNoteButton';
 import useStore from '@/store/useStore';
@@ -33,6 +33,12 @@ afterEach(() => {
 });
 
 describe('Studio notes', () => {
+  beforeEach(() => {
+    useStore.setState({
+      currentProject: { id: 'project-1', name: 'P', role: 'owner' } as Project,
+    });
+  });
+
   it('lists, creates and deletes notes', async () => {
     vi.spyOn(api, 'listNotes').mockResolvedValue([note({})]);
     const create = vi.spyOn(api, 'createNote').mockResolvedValue(
@@ -59,7 +65,7 @@ describe('Studio notes', () => {
   });
 
   it('saves an answer under the question it replied to', async () => {
-    const project = { id: 'project-1', name: 'P' } as Project;
+    const project = { id: 'project-1', name: 'P', role: 'owner' } as Project;
     const question: Message = {
       id: 'm1', conversation_id: 'c', role: 'user', content: 'Why is the sky blue?', created_at: '',
     };
@@ -84,7 +90,7 @@ describe('Studio notes', () => {
     const answer: Message = {
       id: 'm2', conversation_id: 'c', role: 'assistant', content: 'Scattering [1].', created_at: '',
     };
-    useStore.setState({ currentProject: { id: 'project-1', name: 'P' } as Project });
+    useStore.setState({ currentProject: { id: 'project-1', name: 'P', role: 'owner' } as Project });
     const saved = note({ origin: 'answer', source_message_id: 'm2' });
     vi.spyOn(api, 'listNotes').mockResolvedValue([saved]);
     await act(async () => useNotes.getState().load('project-1'));
@@ -107,7 +113,7 @@ describe('Studio notes', () => {
     const remove = vi.spyOn(api, 'deleteNote').mockResolvedValue();
     vi.stubGlobal('confirm', () => true);
 
-    useStore.setState({ currentProject: { id: 'project-1', name: 'P' } as Project });
+    useStore.setState({ currentProject: { id: 'project-1', name: 'P', role: 'owner' } as Project });
     render(<>
       <NotesSection projectId="project-1" />
       <SaveToNoteButton message={answer} />
@@ -152,6 +158,36 @@ describe('Studio notes', () => {
     expect(screen.getByText('Saved findings.')).toBeTruthy();
     expect(screen.getByText('Studio · Report')).toBeTruthy();
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('lets viewers read notes but hides every note write control', async () => {
+    useStore.setState({
+      currentProject: { id: 'project-1', name: 'P', role: 'viewer' } as Project,
+    });
+    vi.spyOn(api, 'listNotes').mockResolvedValue([note({ title: 'Shared note' })]);
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Shared note/ }));
+
+    expect(screen.getByText('Body')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'New note' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+  });
+
+  it('does not offer viewers a way to save a private answer into shared notes', () => {
+    const answer: Message = {
+      id: 'm2', conversation_id: 'c', role: 'assistant', content: 'Private answer.', created_at: '',
+    };
+    useStore.setState({
+      currentProject: { id: 'project-1', name: 'P', role: 'viewer' } as Project,
+      messages: [answer],
+    });
+    useNotes.setState({ projectId: 'project-1', notes: [] });
+
+    render(<SaveToNoteButton message={answer} />);
+
+    expect(screen.queryByRole('button', { name: 'Save to note' })).toBeNull();
   });
 
   it.each(['mindmap', 'video_summary'] as const)(
