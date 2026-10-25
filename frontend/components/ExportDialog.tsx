@@ -58,7 +58,8 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${name.replace(/[^a-z0-9]/gi, '_')}.${format}`;
+      const filename = name.replace(/[\\/:*?"<>|\u0000-\u001f\u007f-\u009f]/g, '_');
+      a.download = `${filename}.${format === 'markdown' ? 'md' : format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
