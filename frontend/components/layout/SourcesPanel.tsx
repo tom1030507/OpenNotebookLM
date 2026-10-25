@@ -19,6 +19,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  BarChart3,
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
@@ -31,6 +32,7 @@ import {
 } from '../sourceActions';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import ProjectCover from '../ProjectCover';
+import ProjectAnalyticsDialog from '../ProjectAnalyticsDialog';
 import { findProjectCoverColor, projectCoverStyle } from '@/lib/projectCover';
 
 // A source is only "Ready" once the backend can retrieve it, so the states
@@ -60,6 +62,7 @@ export default function SourcesPanel({
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [projectActionError, setProjectActionError] = useState('');
   const [modalSession, setModalSession] = useState(0);
   const uploadCloseRef = useRef<HTMLButtonElement>(null);
@@ -353,6 +356,14 @@ export default function SourcesPanel({
                 {isDuplicating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{isDuplicating ? 'Duplicating...' : 'Duplicate Project'}</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setIsAnalyticsOpen(true)}
+                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>Analytics</span>
+              </button>
               {projectActionError && (
                 <p role="alert" className="w-full px-2 text-xs text-[var(--error)]">{projectActionError}</p>
               )}
@@ -549,6 +560,13 @@ export default function SourcesPanel({
         <DocumentPreview
           document={previewDocument}
           onClose={() => setPreviewDocument(null)}
+        />
+      )}
+      {canManageProject && currentProject && (
+        <ProjectAnalyticsDialog
+          project={currentProject}
+          isOpen={isAnalyticsOpen}
+          onClose={() => setIsAnalyticsOpen(false)}
         />
       )}
     </aside>

@@ -1437,6 +1437,20 @@ class TestProjectOverviewIsolation:
         assert env.alice.post(
             "/api/conversations/%s/follow-ups" % conversation_id).status_code == 200
 
+
+class TestProjectAnalyticsIsolation:
+    """Analytics are private to the account that owns the project."""
+
+    def test_another_account_cannot_read_project_analytics(self, env):
+        project_id = make_project(env.alice)
+
+        assert env.bob.get(
+            "/api/projects/%s/analytics" % project_id
+        ).status_code == 404
+        assert env.alice.get(
+            "/api/projects/%s/analytics" % project_id
+        ).status_code == 200
+
     def test_shared_overview_includes_sources_uploaded_by_an_editor(self, env):
         import json
 

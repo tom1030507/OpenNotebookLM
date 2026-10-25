@@ -137,6 +137,26 @@ describe('API client', () => {
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ role: 'editor' });
   });
 
+  it('fetches analytics for the requested project and date range', async () => {
+    const analytics = {
+      days: 30,
+      questions_by_day: [{ date: '2026-10-25', question_count: 2 }],
+      conversation_count: 1,
+      top_cited_sources: [],
+      ratings: { up: 1, down: 0, unrated: 1 },
+      recent_down_rated_questions: [],
+      uncited_sources: [],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(analytics));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getProjectAnalytics('project-1', 30)).resolves.toEqual(analytics);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/projects/project-1/analytics?days=30',
+    );
+  });
+
   it('normalizes backend document fields for components', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{
       id: 'document-1',
