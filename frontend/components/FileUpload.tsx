@@ -115,8 +115,9 @@ export default function FileUpload({
 
       setErrors(errors);
       if (validFiles.length > 0) {
-        const newFileList = multiple ? [...files, ...validFiles] : validFiles;
-        setFiles(newFileList);
+        setFiles((currentFiles) => multiple
+          ? [...currentFiles, ...validFiles]
+          : validFiles);
       }
     } catch {
       setErrors(['Could not read the selected text file. Please try again.']);

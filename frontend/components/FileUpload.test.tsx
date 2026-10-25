@@ -113,4 +113,39 @@ describe('FileUpload', () => {
     )).toBeTruthy();
     expect(onAddText).not.toHaveBeenCalled();
   });
+
+  it('does not restore a removed file after text validation finishes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      allowed_file_types: ['pdf', 'txt'],
+      max_file_size_mb: 23,
+      max_text_characters: 100,
+    })));
+    const onUpload = vi.fn(async () => undefined);
+    const { container } = render(<FileUpload onUpload={onUpload} multiple />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await screen.findByText(
+      'Supported file types: .pdf, .txt · Maximum file size: 23MB · Plain text sources: about 100 characters per source',
+    );
+
+    const existingFile = new File(['pdf'], 'existing.pdf');
+    fireEvent.change(fileInput, { target: { files: [existingFile] } });
+    await screen.findByText('Selected Files:');
+
+    let finishReading: (text: string) => void = () => undefined;
+    const pendingText = new Promise<string>((resolve) => {
+      finishReading = resolve;
+    });
+    const textFile = new File(['text'], 'new.txt');
+    Object.defineProperty(textFile, 'text', { value: () => pendingText });
+    fireEvent.change(fileInput, { target: { files: [textFile] } });
+    await screen.findByText('Checking text source length…');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+    finishReading('valid text');
+
+    expect(await screen.findByText('new.txt')).toBeTruthy();
+    expect(screen.queryByText('existing.pdf')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Upload 1 file(s)' }));
+    await waitFor(() => expect(onUpload).toHaveBeenCalledWith([textFile]));
+  });
 });

@@ -119,6 +119,14 @@ def test_upload_config_reports_effective_runtime_limits(monkeypatch):
     }
 
 
+def test_upload_config_ignores_overlap_that_cannot_fit_a_next_chunk(monkeypatch):
+    monkeypatch.setattr(ingest.settings, "chunk_size", 512)
+    monkeypatch.setattr(ingest.settings, "chunk_overlap", 512)
+    monkeypatch.setattr(ingest.settings, "max_chunks_per_doc", 1000)
+
+    assert ingest.get_upload_config().max_text_characters == 512000
+
+
 def test_upload_route_rejects_oversized_content_length_before_service(monkeypatch):
     """A declared oversized request is refused before its file is copied."""
     app = FastAPI()
