@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatArea from './chat/ChatArea';
 import ConversationList from './ConversationList';
 import DocumentPreview from './DocumentPreview';
@@ -15,6 +15,7 @@ import ProjectDialog from './ProjectDialog';
 import Settings from './Settings';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
+import api from '@/lib/api';
 import LoginPage from '@/app/login/page';
 import type { Conversation, Document, Project } from '@/lib/api';
 
@@ -70,6 +71,13 @@ const conversation: Conversation = {
   updated_at: '2026-08-12T00:00:00Z',
   message_count: 1,
 };
+
+beforeEach(() => {
+  vi.spyOn(api, 'getUploadConfig').mockResolvedValue({
+    allowed_file_types: ['pdf', 'txt', 'md'],
+    max_file_size_mb: 50,
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -556,7 +564,7 @@ describe('workspace accessibility contract', () => {
     await waitFor(() => expect(events).toEqual(['busy:true', 'onUpload', 'busy:false']));
   });
 
-  it('covers the accessible names of every active icon control added to the workspace', () => {
+  it('covers the accessible names of every active icon control added to the workspace', async () => {
     configureSourcesStore([previewDocument]);
     renderWorkspace(
       <>
@@ -575,7 +583,9 @@ describe('workspace accessibility contract', () => {
       // navigation and the Sources panel both legitimately offer New Project.
     ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));
 
-    fireEvent.change(screen.getByLabelText('browse'), {
+    const fileInput = screen.getByLabelText('browse') as HTMLInputElement;
+    await waitFor(() => expect(fileInput.disabled).toBe(false));
+    fireEvent.change(fileInput, {
       target: { files: [new File(['pdf'], 'paper.pdf', { type: 'application/pdf' })] },
     });
     expect(screen.getByRole('button', { name: 'Remove file' })).toBeTruthy();

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Upload,
   X,
@@ -13,28 +13,24 @@ import {
   FileText,
   Loader2,
 } from 'lucide-react';
-import {
-  getUploadFileError,
-  SUPPORTED_UPLOAD_FILE_EXTENSIONS,
-} from '@/lib/uploadValidation';
+import api, { type UploadConfig } from '@/lib/api';
+import { getUploadFileError } from '@/lib/uploadValidation';
 
 interface FileUploadProps {
   onUpload: (files: File[] | string[]) => Promise<void>;
-  accept?: string;
   multiple?: boolean;
-  maxSize?: number; // in MB
   onUploadingChange?: (isUploading: boolean) => void;
   onAddText?: (title: string, text: string) => Promise<void>;
 }
 
 export default function FileUpload({ 
   onUpload, 
-  accept = SUPPORTED_UPLOAD_FILE_EXTENSIONS.join(','),
   multiple = false,
-  maxSize = 10,
   onUploadingChange,
   onAddText,
 }: FileUploadProps) {
+  const [uploadConfig, setUploadConfig] = useState<UploadConfig | null>(null);
+  const [uploadConfigFailed, setUploadConfigFailed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [urlInput, setUrlInput] = useState('');
@@ -44,6 +40,20 @@ export default function FileUpload({
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const uploadInFlightRef = useRef(false);
+  const allowedFileTypes = uploadConfig?.allowed_file_types ?? [];
+  const canUploadFiles = Boolean(uploadConfig && allowedFileTypes.length > 0);
+
+  useEffect(() => {
+    let current = true;
+    api.getUploadConfig().then((config) => {
+      if (current) setUploadConfig(config);
+    }).catch(() => {
+      if (current) setUploadConfigFailed(true);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
 
   const startUpload = () => {
     if (isUploading || uploadInFlightRef.current) return false;
@@ -71,6 +81,11 @@ export default function FileUpload({
   }, []);
 
   const validateAndAddFiles = (newFiles: File[]) => {
+    if (!canUploadFiles || !uploadConfig) {
+      setErrors(['Upload settings are unavailable. Please try again.']);
+      return;
+    }
+
     const errors: string[] = [];
     const validFiles: File[] = [];
 
@@ -79,8 +94,9 @@ export default function FileUpload({
     candidateFiles.forEach(file => {
       const error = getUploadFileError(
         file,
-        maxSize,
+        uploadConfig.max_file_size_mb,
         files.map(existingFile => existingFile.name),
+        allowedFileTypes,
       );
       if (error) {
         errors.push(error);
@@ -137,8 +153,8 @@ export default function FileUpload({
       await onUpload([urlInput]);
       setUrlInput('');
       setErrors([]);
-    } catch {
-      setErrors(['Upload failed. Please check the URL and try again.']);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : 'Upload failed. Please check the URL and try again.']);
     } finally {
       finishUpload();
     }
@@ -147,8 +163,13 @@ export default function FileUpload({
   const handleTextSubmit = async () => {
     if (!onAddText || !textTitle.trim() || !textInput.trim()) return;
 
-    if (new Blob([textInput]).size > maxSize * 1024 * 1024) {
-      setErrors([`Text exceeds ${maxSize}MB limit`]);
+    if (!uploadConfig) {
+      setErrors(['Upload settings are unavailable. Please try again.']);
+      return;
+    }
+
+    if (new Blob([textInput]).size > uploadConfig.max_file_size_mb * 1024 * 1024) {
+      setErrors([`Text exceeds ${uploadConfig.max_file_size_mb}MB limit`]);
       return;
     }
 
@@ -159,8 +180,8 @@ export default function FileUpload({
       setTextTitle('');
       setTextInput('');
       setErrors([]);
-    } catch {
-      setErrors(['Adding text failed. Please try again.']);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : 'Adding text failed. Please try again.']);
     } finally {
       finishUpload();
     }
@@ -185,8 +206,8 @@ export default function FileUpload({
         setUrlInput('');
       }
       setErrors([]);
-    } catch {
-      setErrors(['Upload failed. Please try again.']);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : 'Upload failed. Please try again.']);
     } finally {
       finishUpload();
     }
@@ -282,7 +303,7 @@ export default function FileUpload({
           />
           <button
             onClick={() => void handleTextSubmit()}
-            disabled={!textTitle.trim() || !textInput.trim() || isUploading}
+            disabled={!textTitle.trim() || !textInput.trim() || !uploadConfig || isUploading}
             className="px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Add text
@@ -310,14 +331,24 @@ export default function FileUpload({
               <input
                 type="file"
                 className="hidden"
-                accept={accept}
+                accept={allowedFileTypes.map((extension) => `.${extension}`).join(',')}
                 multiple={multiple}
+                disabled={!canUploadFiles}
                 onChange={handleFileInput}
               />
             </label>
           </p>
-          <p className="text-sm text-[var(--muted-foreground)]">
-            PDF, TXT, Markdown, Word, PowerPoint, Excel, EPUB, images, or audio · Maximum file size: {maxSize}MB
+          <p
+            className="text-sm text-[var(--muted-foreground)]"
+            role={!uploadConfig && uploadConfigFailed ? 'alert' : !uploadConfig ? 'status' : undefined}
+          >
+            {uploadConfig
+              ? allowedFileTypes.length > 0
+                ? `Supported file types: ${allowedFileTypes.map((extension) => `.${extension}`).join(', ')} · Maximum file size: ${uploadConfig.max_file_size_mb}MB`
+                : 'No file formats are enabled.'
+              : uploadConfigFailed
+                ? 'Upload settings are unavailable. Please try again.'
+                : 'Loading upload settings…'}
           </p>
         </div>
       )}

@@ -1,36 +1,11 @@
-export const SUPPORTED_UPLOAD_FILE_EXTENSIONS = [
-  '.pdf',
-  '.txt',
-  '.md',
-  '.docx',
-  '.pptx',
-  '.xlsx',
-  '.epub',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.webp',
-  '.mp3',
-  '.m4a',
-  '.wav',
-  '.ogg',
-  '.webm',
-  '.flac',
-] as const;
-
-export const isSupportedUploadFileName = (fileName: string): boolean => {
-  const extension = fileName.toLowerCase().slice(fileName.lastIndexOf('.'));
-  return SUPPORTED_UPLOAD_FILE_EXTENSIONS.includes(
-    extension as (typeof SUPPORTED_UPLOAD_FILE_EXTENSIONS)[number],
-  );
-};
-
 export const getUploadFileError = (
   file: File,
   maxSizeMb: number,
   existingNames: string[],
+  allowedFileTypes: string[],
 ): string | null => {
-  if (!isSupportedUploadFileName(file.name)) {
+  const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
+  if (!allowedFileTypes.includes(extension)) {
     return `${file.name} is not a supported file type`;
   }
 

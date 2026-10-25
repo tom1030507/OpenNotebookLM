@@ -8,7 +8,7 @@ import structlog
 
 from app.db.database import get_db
 from app.schemas import (
-    FileUploadResponse, URLUploadRequest, YouTubeUploadRequest,
+    FileUploadResponse, UploadConfigResponse, URLUploadRequest, YouTubeUploadRequest,
     DocumentResponse, DocumentContentResponse, DocumentStatusResponse, TextUploadRequest,
     DocumentUpdateRequest,
 )
@@ -38,6 +38,42 @@ from app.utils.network import UnsafeURLError
 router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
 settings = get_settings()
+
+
+def _configured_upload_extensions() -> set[str]:
+    """Return configured extensions the backend can actually process.
+
+    Args:
+        None.
+
+    Returns:
+        Lowercase extensions with a leading dot.
+    """
+    configured = {
+        "." + extension.strip().lower().lstrip(".")
+        for extension in settings.allowed_file_types_list
+        if extension.strip()
+    }
+    return configured & SUPPORTED_UPLOAD_EXTENSIONS
+
+
+@router.get("/upload-config", response_model=UploadConfigResponse)
+def get_upload_config() -> UploadConfigResponse:
+    """Return the upload limits configured on this backend instance.
+
+    Args:
+        None.
+
+    Returns:
+        Effective file extensions and the maximum upload size in megabytes.
+    """
+    return UploadConfigResponse(
+        allowed_file_types=sorted(
+            extension.lstrip(".") for extension in _configured_upload_extensions()
+        ),
+        max_file_size_mb=settings.max_file_size_mb,
+    )
+
 
 @lru_cache
 def get_document_service() -> Any:
@@ -128,16 +164,8 @@ async def upload_file(
     
     filename = file.filename or ""
     file_extension = Path(filename.replace("\\", "/")).suffix.lower()
-    configured_extensions = {
-        "." + extension.strip().lower().lstrip(".")
-        for extension in settings.allowed_file_types_list
-        if extension.strip()
-    }
-    if (
-        not filename
-        or file_extension not in SUPPORTED_UPLOAD_EXTENSIONS
-        or file_extension not in configured_extensions
-    ):
+    configured_extensions = _configured_upload_extensions()
+    if not filename or file_extension not in configured_extensions:
         raise HTTPException(
             status_code=400, 
             detail="File type is not supported. Allowed types: %s"

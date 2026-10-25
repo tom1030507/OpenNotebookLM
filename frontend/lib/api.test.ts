@@ -19,6 +19,15 @@ afterEach(() => {
 
 
 describe('API client', () => {
+  it('fetches the runtime upload formats and file size limit', async () => {
+    const config = { allowed_file_types: ['pdf', 'md'], max_file_size_mb: 23 };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(config));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getUploadConfig()).resolves.toEqual(config);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/upload-config');
+  });
+
   it('creates and reloads authenticated audio overview resources', async () => {
     const audio = {
       id: 'overview-1',
@@ -378,15 +387,17 @@ describe('API client', () => {
     );
   });
 
-  it('rejects unsupported file types before sending an upload', async () => {
-    const fetchMock = vi.fn();
+  it('lets the backend report unsupported file types', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      detail: 'File type is not supported. Allowed types: md, pdf, txt',
+    }, 400));
     vi.stubGlobal('fetch', fetchMock);
     const file = new File(['binary'], 'program.exe');
 
     await expect(api.uploadDocument('project-1', file)).rejects.toThrow(
-      'not a supported file type',
+      'File type is not supported. Allowed types: md, pdf, txt',
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/upload');
   });
 
   it('uploads supported office files through the existing upload route', async () => {

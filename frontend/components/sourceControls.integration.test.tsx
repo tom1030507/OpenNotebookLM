@@ -94,6 +94,10 @@ function openUrlUploader() {
 
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = () => undefined;
+  vi.spyOn(api, 'getUploadConfig').mockResolvedValue({
+    allowed_file_types: ['pdf', 'txt', 'md'],
+    max_file_size_mb: 50,
+  });
   useStore.setState({
     projects: [currentProject],
     currentProject,
@@ -185,6 +189,7 @@ describe('Add Sources controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Source' }));
     const input = screen.getByLabelText('browse') as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
     const files = [
       new File(['First source'], 'first.txt', { type: 'text/plain' }),
       new File(['Second source'], 'second.txt', { type: 'text/plain' }),
@@ -208,7 +213,7 @@ describe('Add Sources controls', () => {
     openUrlUploader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
-    expect(await screen.findByText('Upload failed. Please check the URL and try again.')).not.toBeNull();
+    expect(await screen.findByText('Upload failed')).not.toBeNull();
     expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
   });
 
