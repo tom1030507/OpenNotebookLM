@@ -360,18 +360,20 @@ class Message(Base):
 
 
 class Note(Base):
-    """A Markdown note kept beside a project's sources."""
+    """A manual, saved answer, or Studio result kept with a project's sources."""
     __tablename__ = "notes"
 
     id = Column(String, primary_key=True)
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False, default="")
-    origin = Column(String, nullable=False, default="manual")  # manual, answer
+    origin = Column(String, nullable=False, default="manual")  # manual, answer, studio
     # Deliberately not a foreign key: the note holds its own copy of the answer,
     # so deleting the conversation must neither take the note with it nor be
     # refused because a note still points at one of its messages.
     source_message_id = Column(String)
+    studio_kind = Column(String)
+    payload_json = Column(JSON)
     # Python-side so notes saved in quick succession still list in order.
     created_at = Column(UTCDateTime, default=ordered_utc_now, nullable=False)
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)

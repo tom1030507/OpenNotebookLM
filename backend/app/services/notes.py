@@ -1,21 +1,91 @@
 """Notes kept beside a project's sources.
 
-A note is either written by hand or saved from an assistant answer. A saved
-answer is a copy, not a reference: the conversation it came from can be deleted
-and the note still has to read the same, citations included.
+A note is written by hand, copied from an assistant answer, or saved from
+Studio. Answers and Studio results keep their displayed content so they remain
+readable after their source conversation or model call is gone.
 """
+import json
 import re
 import uuid
 from typing import List
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.db.models import Conversation, Message, Note, Project
-from app.schemas import NoteCreate, NoteUpdate
+
+from app.schemas import (
+    MindMapResponse,
+    NoteCreate,
+    NoteUpdate,
+    NOTE_PAYLOAD_MAX_BYTES,
+    VideoSummaryPptxRequest,
+    VideoSummaryResponse,
+)
 
 ORIGIN_MANUAL = "manual"
 ORIGIN_ANSWER = "answer"
+ORIGIN_STUDIO = "studio"
+
+
+def _studio_note_content_and_payload(
+    project: Project,
+    data: NoteCreate,
+) -> tuple[str, dict | None]:
+    """Validate client-supplied Studio data before it is persisted.
+
+    Args:
+        project: Project that owns the note.
+        data: Requested Studio note fields.
+
+    Returns:
+        Markdown content and a JSON payload, one of which is used per kind.
+
+    Raises:
+        HTTPException: If the fields do not describe a valid, bounded result.
+    """
+    if data.studio_kind is None:
+        if data.payload_json is not None:
+            raise HTTPException(status_code=422, detail="Studio kind is required")
+        return data.content, None
+
+    if data.source_message_id:
+        raise HTTPException(status_code=422, detail="Studio notes cannot save an answer")
+
+    if data.studio_kind == "report":
+        if not data.content.strip() or data.payload_json is not None:
+            raise HTTPException(status_code=422, detail="Invalid report note")
+        return data.content, None
+
+    if data.content:
+        raise HTTPException(status_code=422, detail="JSON Studio notes cannot include content")
+    if data.payload_json is None:
+        raise HTTPException(status_code=422, detail="Studio payload is required")
+
+    try:
+        payload_size = len(json.dumps(
+            data.payload_json, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError):
+        raise HTTPException(status_code=422, detail="Invalid Studio payload")
+    if payload_size > NOTE_PAYLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Studio payload is too large")
+
+    try:
+        if data.studio_kind == "mindmap":
+            parsed = MindMapResponse.model_validate(data.payload_json)
+        else:
+            parsed = VideoSummaryResponse.model_validate(data.payload_json)
+            VideoSummaryPptxRequest.model_validate({"scenes": [
+                scene.model_dump() for scene in parsed.scenes
+            ]})
+    except (ValidationError, ValueError, RecursionError):
+        raise HTTPException(status_code=422, detail="Invalid Studio payload")
+
+    if parsed.project_id != project.id:
+        raise HTTPException(status_code=422, detail="Studio payload belongs to another project")
+    return "", parsed.model_dump(mode="json")
 
 
 def list_notes(db: Session, project: Project) -> List[Note]:
@@ -89,7 +159,7 @@ def format_answer(message: Message) -> str:
 
 
 def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
-    """Create a note, either by hand or from an assistant answer.
+    """Create a manual note, saved answer, or validated Studio result.
 
     Args:
         db: Database session.
@@ -105,7 +175,10 @@ def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
             reading the message.
     """
     content, origin = data.content, ORIGIN_MANUAL
+    payload_json = None
     if data.source_message_id:
+        if data.studio_kind or data.payload_json is not None:
+            raise HTTPException(status_code=422, detail="Studio fields cannot save an answer")
         message = db.query(Message).join(Conversation).filter(
             Message.id == data.source_message_id,
             Message.role == "assistant",
@@ -115,7 +188,18 @@ def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
             )
+        existing = db.query(Note).filter(
+            Note.project_id == project.id,
+            Note.source_message_id == data.source_message_id,
+        ).first()
+        if existing:
+            return existing
         content, origin = format_answer(message), ORIGIN_ANSWER
+    elif data.studio_kind:
+        content, payload_json = _studio_note_content_and_payload(project, data)
+        origin = ORIGIN_STUDIO
+    elif data.payload_json is not None:
+        raise HTTPException(status_code=422, detail="Studio kind is required")
 
     note = Note(
         id=str(uuid.uuid4()),
@@ -124,6 +208,8 @@ def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
         content=content,
         origin=origin,
         source_message_id=data.source_message_id,
+        studio_kind=data.studio_kind,
+        payload_json=payload_json,
     )
     db.add(note)
     db.commit()

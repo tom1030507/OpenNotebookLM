@@ -84,6 +84,37 @@ CITATIONS = [{
     "text_preview": "At sea level,\nwater boils at 100 C.",
 }]
 
+MIND_MAP = {
+    "project_id": "project-1",
+    "project_name": "Research",
+    "generated_at": "2026-10-25T00:00:00Z",
+    "model_used": "fallback",
+    "node_count": 1,
+    "source_count": 0,
+    "total_source_count": 0,
+    "root": {
+        "id": "root", "label": "Research", "kind": "project",
+        "detail": None, "document_id": None, "children": [],
+    },
+}
+
+VIDEO_SUMMARY = {
+    "project_id": "project-1",
+    "project_name": "Research",
+    "generated_at": "2026-10-25T00:00:00Z",
+    "model_used": "fallback",
+    "scene_count": 2,
+    "estimated_seconds": 3,
+    "scenes": [
+        {"id": "title", "kind": "title", "headline": "Research",
+         "bullets": [], "narration": "Research overview.",
+         "document_id": None, "source_label": None},
+        {"id": "closing", "kind": "closing", "headline": "Summary",
+         "bullets": [], "narration": "That is the summary.",
+         "document_id": None, "source_label": None},
+    ],
+}
+
 
 def test_manual_note_can_be_created_edited_and_deleted(client):
     api, _ = client
@@ -131,6 +162,98 @@ def test_saving_an_answer_keeps_its_citations(client):
     assert note["content"].startswith("Water boils at 100 C [1].")
     assert "- [1] Physics handbook, page 12" in note["content"]
     assert "> At sea level, water boils at 100 C." in note["content"]
+
+
+@pytest.mark.parametrize(("kind", "payload"), [
+    ("mindmap", MIND_MAP),
+    ("video_summary", VIDEO_SUMMARY),
+])
+def test_studio_json_notes_keep_the_payload_needed_to_reopen(client, kind, payload):
+    api, _ = client
+    project_id = create_project(api)
+
+    response = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Saved %s" % kind,
+        "studio_kind": kind,
+        "payload_json": {**payload, "project_id": project_id},
+    })
+
+    assert response.status_code == 200
+    note = response.json()
+    assert note["origin"] == "studio"
+    assert note["studio_kind"] == kind
+    assert note["payload_json"] == {**payload, "project_id": project_id}
+    assert api.get("/api/projects/%s/notes" % project_id).json()[0] == note
+
+
+def test_studio_report_saves_its_markdown_content(client):
+    api, _ = client
+    project_id = create_project(api)
+
+    response = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Saved report",
+        "content": "# Report\n\nFindings",
+        "studio_kind": "report",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["origin"] == "studio"
+    assert response.json()["studio_kind"] == "report"
+    assert response.json()["content"] == "# Report\n\nFindings"
+    assert response.json()["payload_json"] is None
+
+
+@pytest.mark.parametrize("payload", [
+    {"project_id": "project-1"},
+    {**VIDEO_SUMMARY, "scenes": [VIDEO_SUMMARY["scenes"][0]]},
+])
+def test_malformed_studio_payload_is_rejected(client, payload):
+    api, _ = client
+    project_id = create_project(api)
+
+    response = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Invalid", "studio_kind": "video_summary", "payload_json": payload,
+    })
+
+    assert 400 <= response.status_code < 500
+
+
+def test_oversized_studio_payload_is_rejected(client):
+    api, _ = client
+    project_id = create_project(api)
+    payload = {**MIND_MAP, "project_id": project_id, "project_name": "x" * 800_000}
+
+    response = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Too large", "studio_kind": "mindmap", "payload_json": payload,
+    })
+
+    assert response.status_code == 413
+
+
+def test_studio_payload_must_belong_to_the_note_project(client):
+    api, _ = client
+    project_id = create_project(api)
+    payload = {**MIND_MAP, "project_id": "other-project"}
+
+    response = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Wrong project", "studio_kind": "mindmap", "payload_json": payload,
+    })
+
+    assert response.status_code == 422
+
+
+def test_saving_the_same_answer_twice_returns_the_existing_note(client):
+    api, session_factory = client
+    project_id = create_project(api)
+    message_id = add_message(session_factory, project_id)
+    base = "/api/projects/%s/notes" % project_id
+
+    first = api.post(base, json={"title": "First", "source_message_id": message_id})
+    second = api.post(base, json={"title": "Second", "source_message_id": message_id})
+
+    assert first.status_code == second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert [note["id"] for note in api.get(base).json()] == [first.json()["id"]]
 
 
 def test_saved_answer_outlives_its_conversation(client):

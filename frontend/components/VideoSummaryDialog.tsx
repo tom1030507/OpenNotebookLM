@@ -3,6 +3,8 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  BookmarkPlus,
+  Check,
   Download,
   Loader2,
   Pause,
@@ -29,6 +31,7 @@ import {
 interface VideoSummaryDialogProps {
   summary: VideoSummary;
   onClose: () => void;
+  onSave?: () => Promise<void>;
 }
 
 /** How often the progress bar catches up with the clock, in milliseconds. */
@@ -49,6 +52,7 @@ const PROGRESS_TICK_MS = 250;
 export default function VideoSummaryDialog({
   summary,
   onClose,
+  onSave,
 }: VideoSummaryDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -67,6 +71,7 @@ export default function VideoSummaryDialog({
   const [narrationFailed, setNarrationFailed] = useState(false);
   const [isExportingPptx, setIsExportingPptx] = useState(false);
   const [pptxError, setPptxError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   // Identifies the playback in progress. Anything that ends it retires the run,
   // so a promise or timer that settles afterwards cannot advance a scene the
@@ -161,6 +166,17 @@ export default function VideoSummaryDialog({
     URL.revokeObjectURL(url);
   };
 
+  const save = async () => {
+    if (!onSave) return;
+    setSaveState('saving');
+    try {
+      await onSave();
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  };
+
   const downloadPptx = async () => {
     setIsExportingPptx(true);
     setPptxError(null);
@@ -198,7 +214,7 @@ export default function VideoSummaryDialog({
         aria-labelledby={titleId}
         className="bg-[var(--background)] rounded-lg w-full max-w-3xl max-h-[85vh] flex flex-col"
       >
-        <div className="flex items-start justify-between gap-3 p-4 border-b border-[var(--border)]">
+        <div className="flex flex-wrap items-start justify-between gap-3 p-4 border-b border-[var(--border)]">
           <div className="min-w-0">
             {/* The name truncates on a narrow screen, so keep it reachable. */}
             <h2 id={titleId} title={title} className="text-lg font-semibold truncate">
@@ -206,7 +222,7 @@ export default function VideoSummaryDialog({
             </h2>
             <p className="text-xs text-[var(--muted-foreground)] mt-0.5">{provenance}</p>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
             <button
               type="button"
               onClick={download}
@@ -229,6 +245,15 @@ export default function VideoSummaryDialog({
                 : <Download aria-hidden="true" className="w-4 h-4" />}
               <span>{isExportingPptx ? 'Preparing…' : 'Download .pptx'}</span>
             </button>
+            {onSave && <button type="button" onClick={save}
+              disabled={saveState === 'saving' || saveState === 'saved'}
+              aria-label={saveState === 'saved' ? 'Saved to notes' : 'Save to notes'}
+              className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs hover:bg-[var(--muted)] disabled:opacity-50 rounded-lg transition-base">
+              {saveState === 'saving' ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" />
+                : saveState === 'saved' ? <Check aria-hidden="true" className="w-4 h-4" />
+                  : <BookmarkPlus aria-hidden="true" className="w-4 h-4" />}
+              <span>{saveState === 'saved' ? 'Saved to notes' : 'Save to notes'}</span>
+            </button>}
             <button
               ref={closeRef}
               type="button"
@@ -242,6 +267,12 @@ export default function VideoSummaryDialog({
             </button>
           </div>
         </div>
+
+        {saveState === 'error' && (
+          <p role="alert" className="px-4 pt-3 text-sm text-[var(--error)]">
+            Could not save to notes. Please try again.
+          </p>
+        )}
 
         {pptxError && (
           <p role="alert" className="px-4 pt-3 text-sm text-[var(--error)]">

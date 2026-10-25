@@ -20,10 +20,14 @@ function noteTitle(answer: Message): string {
 }
 
 export default function SaveToNoteButton({ message }: { message: Message }) {
+  const projectId = useStore((state) => state.currentProject?.id ?? null);
+  const alreadySaved = useNotes((state) => (
+    state.projectId === projectId
+    && state.notes.some((note) => note.source_message_id === message.id)
+  ));
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const save = async () => {
-    const projectId = useStore.getState().currentProject?.id;
     if (!projectId) return;
     setState('saving');
     try {
@@ -40,24 +44,25 @@ export default function SaveToNoteButton({ message }: { message: Message }) {
     }
   };
 
+  const visibleState = alreadySaved ? 'saved' : state;
   const label = {
     idle: 'Save to note',
     saving: 'Saving…',
     saved: 'Saved to notes',
     error: 'Could not save. Try again',
-  }[state];
+  }[visibleState];
 
   return (
     <button
       type="button"
       onClick={save}
-      disabled={state === 'saving' || state === 'saved'}
+      disabled={visibleState === 'saving' || visibleState === 'saved'}
       className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--muted)] transition-base disabled:cursor-default ${
-        state === 'error' ? 'text-[var(--error)]' : 'text-[var(--muted-foreground)]'
+        visibleState === 'error' ? 'text-[var(--error)]' : 'text-[var(--muted-foreground)]'
       }`}
     >
-      {state === 'saving' ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        : state === 'saved' ? <Check className="w-3.5 h-3.5" />
+      {visibleState === 'saving' ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        : visibleState === 'saved' ? <Check className="w-3.5 h-3.5" />
           : <BookmarkPlus className="w-3.5 h-3.5" />}
       {label}
     </button>
