@@ -219,6 +219,8 @@ describe('API client', () => {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-02T00:00:00Z',
       chunk_count: 3,
+      last_synced_at: '2026-01-03T00:00:00Z',
+      last_sync_changed: false,
     }])));
 
     await expect(api.getDocuments('project-1')).resolves.toEqual([{
@@ -234,7 +236,29 @@ describe('API client', () => {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-02T00:00:00Z',
       chunk_count: 3,
+      last_synced_at: '2026-01-03T00:00:00Z',
+      last_sync_changed: false,
     }]);
+  });
+
+  it('configures a watched folder and re-syncs a source', async () => {
+    const settings = { enabled: true, path: '/srv/sources/project-a' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(settings))
+      .mockResolvedValueOnce(jsonResponse(settings))
+      .mockResolvedValueOnce(jsonResponse({ doc_id: 'document-1', status: 'processing', message: 'queued' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getWatchedFolder('project-1')).resolves.toEqual(settings);
+    await expect(api.setWatchedFolder('project-1', settings.path)).resolves.toEqual(settings);
+    await expect(api.resyncDocument('project-1', 'document-1')).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls.map(([url, options]) => [url, options.method])).toEqual([
+      ['/api/projects/project-1/watched-folder', undefined],
+      ['/api/projects/project-1/watched-folder', 'PUT'],
+      ['/api/projects/project-1/documents/document-1/resync', 'POST'],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({ path: settings.path });
   });
 
   it('points an uploaded document at the API file route', async () => {

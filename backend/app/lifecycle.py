@@ -11,6 +11,7 @@ from app.services.auth import get_auth_service
 from app.services.bootstrap import ensure_demo_account
 from app.services.audio_overview_jobs import AudioOverviewWorker
 from app.services.ingestion_jobs import IngestionJobWorker
+from app.services.watched_folders import WatchedFolderWorker
 
 logger = structlog.get_logger()
 
@@ -74,6 +75,10 @@ async def lifespan(app: FastAPI):
         concurrency=settings.ingestion_worker_concurrency,
     )
 
+    watched_folder_worker = WatchedFolderWorker(SessionLocal, settings)
+    await watched_folder_worker.start()
+    app.state.watched_folder_worker = watched_folder_worker
+
     audio_overview_worker = AudioOverviewWorker(
         session_factory=SessionLocal,
         processor=getattr(app.state, "audio_overview_processor", None),
@@ -90,6 +95,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await watched_folder_worker.stop()
         await audio_overview_worker.stop()
         await ingestion_worker.stop()
         logger.info("Shutting down OpenNotebookLM")

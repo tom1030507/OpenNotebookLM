@@ -14,6 +14,9 @@ const apiMock = vi.hoisted(() => ({
   getConversations: vi.fn(),
   getDocuments: vi.fn(),
   getProjects: vi.fn(),
+  getWatchedFolder: vi.fn(),
+  setWatchedFolder: vi.fn(),
+  resyncDocument: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ default: apiMock }));
@@ -70,6 +73,7 @@ beforeEach(() => {
   apiMock.getProjects.mockResolvedValue([]);
   apiMock.getDocuments.mockResolvedValue([]);
   apiMock.getConversations.mockResolvedValue([]);
+  apiMock.getWatchedFolder.mockResolvedValue({ enabled: false, path: null });
   useStore.setState({
     projects: [],
     currentProject: null,
@@ -145,6 +149,7 @@ describe('project covers and duplication', () => {
     expect(option?.textContent).toContain('📚');
     expect(option?.getAttribute('data-cover-color')).toBe('blue');
   });
+
 });
 
 afterEach(() => {

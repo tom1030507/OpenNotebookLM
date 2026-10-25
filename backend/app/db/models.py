@@ -45,6 +45,7 @@ class Project(Base):
     # True while `name` is a placeholder or a generated title. Renaming clears it,
     # so a generated title can never overwrite a name the user chose.
     auto_title = Column(Boolean, default=False)
+    watched_folder = Column(Text)
     
     # Relationships
     owner = relationship("User", back_populates="projects")
@@ -115,6 +116,11 @@ class Document(Base):
     meta_json = Column(JSON, default={})
     status = Column(String, default="queued")  # queued, processing, transcribing, ready, error
     error_message = Column(Text)
+    content_hash = Column(String(64))
+    last_synced_at = Column(UTCDateTime)
+    last_sync_changed = Column(Boolean)
+    watch_source_path = Column(Text)
+    watch_file_hash = Column(String(64))
     created_at = Column(UTCDateTime, default=func.now())
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
     

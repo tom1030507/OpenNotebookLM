@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     db_path: str = "./data/opennotebook.db"
     database_url: str = "sqlite:///./data/opennotebook.db"
     ingestion_worker_concurrency: int = Field(default=1, ge=1, le=16)
+    watched_folder_root: Optional[str] = None
     
     # Embedding
     # Multilingual, unlike the English-only bge-small it replaced. Chosen over

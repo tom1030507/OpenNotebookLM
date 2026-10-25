@@ -21,6 +21,7 @@ import {
   Pencil,
   BarChart3,
   Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
@@ -66,6 +67,11 @@ export default function SourcesPanel({
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [projectActionError, setProjectActionError] = useState('');
+  const [watchedFolderEnabled, setWatchedFolderEnabled] = useState(false);
+  const [watchedFolderPath, setWatchedFolderPath] = useState('');
+  const [watchedFolderSaving, setWatchedFolderSaving] = useState(false);
+  const [watchedFolderError, setWatchedFolderError] = useState('');
+  const [resyncingDocumentId, setResyncingDocumentId] = useState<string | null>(null);
   const [modalSession, setModalSession] = useState(0);
   const uploadCloseRef = useRef<HTMLButtonElement>(null);
   const uploadDialogRef = useRef<HTMLDivElement>(null);
@@ -106,12 +112,14 @@ export default function SourcesPanel({
     createDocument,
     deleteDocument,
     renameDocument,
+    refreshDocuments,
     deselectedSources,
     toggleSourceSelected,
     setAllSourcesSelected,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
   const canManageProject = currentProject?.role === 'owner';
+  const currentProjectId = currentProject?.id;
   const canManageSources = currentProject?.role === 'owner'
     || currentProject?.role === 'editor';
 
@@ -150,6 +158,34 @@ export default function SourcesPanel({
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  useEffect(() => {
+    let current = true;
+    setWatchedFolderPath('');
+    setWatchedFolderEnabled(false);
+    setWatchedFolderError('');
+    if (!currentProjectId || !canManageProject) return () => { current = false; };
+
+    api.getWatchedFolder(currentProjectId).then((settings) => {
+      if (!current) return;
+      setWatchedFolderEnabled(settings.enabled);
+      setWatchedFolderPath(settings.path ?? '');
+    }).catch((error) => {
+      if (current) {
+        setWatchedFolderError(error instanceof Error ? error.message : 'Could not load folder settings');
+      }
+    });
+
+    return () => { current = false; };
+  }, [currentProjectId, canManageProject]);
+
+  useEffect(() => {
+    if (!currentProjectId || !canManageProject || !watchedFolderPath) return;
+    const interval = setInterval(() => {
+      void refreshDocuments(currentProjectId);
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [canManageProject, currentProjectId, refreshDocuments, watchedFolderPath]);
 
   // Session counter so a stale upload can never close a dialog reopened after it.
   useEffect(() => {
@@ -247,6 +283,37 @@ export default function SourcesPanel({
         console.error('Failed to delete document:', error);
         alert('Failed to delete document');
       }
+    }
+  };
+
+  const saveWatchedFolder = async (path: string | null) => {
+    if (!currentProject || !canManageProject || watchedFolderSaving) return;
+    const projectId = currentProject.id;
+    setWatchedFolderSaving(true);
+    setWatchedFolderError('');
+    try {
+      const settings = await api.setWatchedFolder(projectId, path);
+      setWatchedFolderPath(settings.path ?? '');
+      setWatchedFolderEnabled(settings.enabled);
+      await refreshDocuments(projectId);
+    } catch (error) {
+      setWatchedFolderError(error instanceof Error ? error.message : 'Could not save folder settings');
+    } finally {
+      setWatchedFolderSaving(false);
+    }
+  };
+
+  const handleResyncDocument = async (documentId: string) => {
+    if (!currentProject || resyncingDocumentId) return;
+    const projectId = currentProject.id;
+    setResyncingDocumentId(documentId);
+    try {
+      await api.resyncDocument(projectId, documentId);
+      await refreshDocuments(projectId);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not re-sync source');
+    } finally {
+      setResyncingDocumentId(null);
     }
   };
 
@@ -403,6 +470,53 @@ export default function SourcesPanel({
             </div>
           )}
         </div>
+
+        {canManageProject && currentProject && (
+          <details className="mb-2 rounded-md border border-[var(--input)] px-2.5 py-2">
+            <summary className="cursor-pointer text-xs font-medium">Watch a server folder</summary>
+            <div className="mt-2 space-y-2">
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Files are checked every minute. Enter a path inside the server’s configured folder root.
+              </p>
+              {!watchedFolderEnabled && (
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  Folder watching is not enabled by this server.
+                </p>
+              )}
+              <label className="block text-xs" htmlFor="watched-folder-path">Server folder path</label>
+              <input
+                id="watched-folder-path"
+                type="text"
+                value={watchedFolderPath}
+                onChange={(event) => setWatchedFolderPath(event.target.value)}
+                placeholder="/app/watched-folders/project"
+                disabled={!watchedFolderEnabled || watchedFolderSaving}
+                className="w-full h-8 px-2 bg-[var(--card)] border border-[var(--input)] rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:opacity-50"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void saveWatchedFolder(watchedFolderPath.trim() || null)}
+                  disabled={!watchedFolderEnabled || watchedFolderSaving || !watchedFolderPath.trim()}
+                  className="h-7 px-2 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-xs disabled:opacity-50"
+                >
+                  {watchedFolderSaving ? 'Saving...' : 'Save folder'}
+                </button>
+                {watchedFolderPath && (
+                  <button
+                    type="button"
+                    onClick={() => void saveWatchedFolder(null)}
+                    disabled={watchedFolderSaving}
+                    className="h-7 px-2 rounded-md text-xs hover:bg-[var(--muted)] disabled:opacity-50"
+                  >
+                    Stop watching
+                  </button>
+                )}
+              </div>
+              {watchedFolderError && <p role="status" className="text-xs text-[var(--error)]">{watchedFolderError}</p>}
+            </div>
+          </details>
+        )}
         
         {/* Add Source Button */}
         {canManageSources && currentProject && (
@@ -496,6 +610,14 @@ export default function SourcesPanel({
                       <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
                         {STATUS_LABELS[doc.status] ?? doc.status}
                       </p>
+                      {doc.last_synced_at && (
+                        <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                          Last synced <time dateTime={doc.last_synced_at}>{new Date(doc.last_synced_at).toLocaleString()}</time>
+                          {doc.last_sync_changed !== null && doc.last_sync_changed !== undefined
+                            ? ` · ${doc.last_sync_changed ? 'Changed' : 'No changes'}`
+                            : ''}
+                        </p>
+                      )}
                       {doc.status === 'error' && doc.error_message && (
                         <p className="text-xs text-[var(--error)] mt-1 break-words">
                           {doc.error_message}
@@ -531,6 +653,23 @@ export default function SourcesPanel({
                         title={'Rename document'}
                       >
                         <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
+                    {canManageSources && (doc.type === 'url' || doc.type === 'youtube') && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleResyncDocument(doc.id);
+                        }}
+                        disabled={Boolean(resyncingDocumentId) || ['queued', 'processing', 'transcribing'].includes(doc.status)}
+                        className="p-1 hover:bg-[var(--card)] rounded disabled:opacity-50"
+                        aria-label="Re-sync source"
+                        title="Re-sync source"
+                      >
+                        {resyncingDocumentId === doc.id
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : <RefreshCw className="w-3 h-3" />}
                       </button>
                     )}
                     {canManageSources && (

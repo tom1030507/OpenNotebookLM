@@ -1,4 +1,5 @@
 """Document ingestion service."""
+import hashlib
 import uuid
 import os
 from typing import Any, BinaryIO, Callable, ContextManager, Dict, Optional
@@ -46,7 +47,7 @@ from app.services.ingestion_jobs import (
 )
 from app.services.rate_limit import OperationLease, UnlimitedConcurrencyLease
 from app.services.source_digest import invalidate_source_guide
-from app.utils.time import utc_now_iso
+from app.utils.time import utc_now, utc_now_iso
 
 logger = structlog.get_logger()
 PDF_UPLOAD_BLOCK_BYTES = 1024 * 1024
@@ -1352,6 +1353,82 @@ class DocumentService:
             logger.error("Failed to add text source", error=str(e))
             raise
 
+    def enqueue_resync(
+        self,
+        db: Session,
+        project_id: str,
+        document: Document,
+        operation_lease: Optional[OperationLease] = None,
+    ) -> Document:
+        """Queue a fresh extraction for a URL or YouTube source.
+
+        Args:
+            db: Session holding the authorized document.
+            project_id: Project through which the caller manages the source.
+            document: Existing source whose id and relationships must survive.
+            operation_lease: Request quota retained until the durable job ends.
+
+        Returns:
+            The same document, queued for a fresh extraction when no work is active.
+        """
+        lease = _operation_lease(operation_lease)
+        job_id = None
+        retained = False
+        owns_retained_lease = False
+        try:
+            if document.source_type == "url":
+                payload = {"url": document.source_url}
+            elif document.source_type == "youtube":
+                payload = {"youtube_url": document.source_url}
+            else:
+                raise ValueError("Only URL and YouTube sources can be re-synced")
+            payload.update({
+                "previous_status": document.status,
+                "previous_error_message": document.error_message,
+            })
+            enqueue_result = enqueue_ingestion_job_with_result(
+                db,
+                document_id=document.id,
+                job_type="resync",
+                payload=payload,
+                force_new=True,
+            )
+            if not enqueue_result.created_new_active:
+                lease.release()
+                return document
+            job_id = enqueue_result.job.id
+            owns_retained_lease = retain_enqueued_operation_lease(
+                enqueue_result,
+                operation_lease,
+            )
+            _commit_ingestion_enqueue(
+                db,
+                document_id=document.id,
+                project_id=project_id,
+                job_id=job_id,
+                job_type="resync",
+                payload=payload,
+            )
+            retained = True
+            try:
+                notify_ingestion_worker()
+            except Exception as error:
+                logger.warning(
+                    "Could not wake ingestion worker after re-sync enqueue",
+                    job_id=job_id,
+                    error=str(error),
+                )
+            return document
+        except Exception as error:
+            db.rollback()
+            if isinstance(error, EnqueueCommitUncertainError):
+                retained = True
+            if owns_retained_lease and not retained:
+                release_operation_lease(job_id)
+            elif job_id is None:
+                lease.release()
+            raise
+
     def process_ingestion_job(
         self,
         db: Session,
@@ -1379,6 +1456,21 @@ class DocumentService:
         document = db.get(Document, document_id)
         if document is None:
             raise ValueError("Document %s not found" % document_id)
+        is_resync = job_type == "resync"
+        if is_resync:
+            if document.source_type in {"url", "youtube", "pdf"}:
+                job_type = document.source_type
+            elif document.source_type in {
+                extension[1:]
+                for extension in (
+                    SUPPORTED_FILE_EXTENSIONS
+                    | SUPPORTED_IMAGE_EXTENSIONS
+                    | SUPPORTED_AUDIO_EXTENSIONS
+                )
+            }:
+                job_type = "file"
+            else:
+                raise ValueError("This source type cannot be re-synced")
         if job_type == "reindex":
             if document.status != "ready":
                 raise ValueError("Only ready documents can be re-indexed")
@@ -1478,8 +1570,9 @@ class DocumentService:
         is_audio_file = (
             job_type == "file" and file_extension in SUPPORTED_AUDIO_EXTENSIONS
         )
-        document.status = "transcribing" if is_audio_file else "processing"
-        document.error_message = None
+        if not is_resync:
+            document.status = "transcribing" if is_audio_file else "processing"
+            document.error_message = None
         if is_audio_file:
             # Pollers need a committed status during the long model call; if it
             # stayed in this transaction, users would only see "queued".
@@ -1568,6 +1661,35 @@ class DocumentService:
                 "processed_at": utc_now_iso(),
             }
 
+        old_content_hash = document.content_hash
+        content_hash = hashlib.sha256(
+            (document.content or "").encode("utf-8")
+        ).hexdigest()
+        index_recovery_needed = bool(
+            (document.meta_json or {}).get("_resync_index_started")
+        )
+        unchanged_resync = (
+            is_resync
+            and payload.get("previous_status") == "ready"
+            and not index_recovery_needed
+            and old_content_hash == content_hash
+        )
+        document.content_hash = content_hash
+        document.last_sync_changed = old_content_hash != content_hash
+        if unchanged_resync:
+            document.status = "ready"
+            document.last_synced_at = utc_now()
+            document.error_message = None
+            db.commit()
+            return "ready"
+
+        if is_resync:
+            document.status = "processing"
+            document.meta_json = {
+                **(document.meta_json or {}),
+                "_resync_index_started": True,
+            }
+
         # A durable content checkpoint preserves the latest extracted text if a
         # later model/process step fails. Retries still repeat extraction and
         # rebuild the index from scratch, so these commits cannot duplicate it.
@@ -1592,6 +1714,11 @@ class DocumentService:
         document = db.get(Document, document_id)
         document.status = "ready"
         document.error_message = None
+        document.last_synced_at = utc_now()
+        if is_resync:
+            metadata = dict(document.meta_json or {})
+            metadata.pop("_resync_index_started", None)
+            document.meta_json = metadata
         self._publish_document_index(db, document_id)
         return "ready"
     

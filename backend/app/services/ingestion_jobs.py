@@ -23,7 +23,7 @@ logger = structlog.get_logger()
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
 TERMINAL_JOB_STATUSES = ("completed", "failed")
-SUPPORTED_JOB_TYPES = ("pdf", "file", "url", "youtube", "text", "reindex")
+SUPPORTED_JOB_TYPES = ("pdf", "file", "url", "youtube", "text", "reindex", "resync")
 
 JobProcessor = Callable[[Session, IngestionJob], Optional[str]]
 
@@ -56,7 +56,7 @@ def enqueue_ingestion_job(
     Args:
         db: Session whose surrounding transaction owns the document creation.
         document_id: Document to extract and index.
-        job_type: Source extraction type or ``reindex``.
+        job_type: Source extraction type, ``reindex``, or ``resync``.
         payload: Recoverable source references needed by the worker.
 
     Returns:
@@ -82,7 +82,7 @@ def enqueue_ingestion_job_with_result(
     Args:
         db: Session whose surrounding transaction owns the document creation.
         document_id: Document to extract and index.
-        job_type: Source extraction type or ``reindex``.
+        job_type: Source extraction type, ``reindex``, or ``resync``.
         payload: Recoverable source references needed by the worker.
         force_new: Queue completed source jobs again after replacing their text.
 
@@ -170,7 +170,10 @@ def enqueue_ingestion_job_with_result(
         return IngestionEnqueueResult(active, created_new_active=False)
 
     document = db.get(Document, document_id)
-    if document is not None and job_type != "reindex":
+    if document is not None and job_type == "resync":
+        document.status = "processing"
+        document.error_message = None
+    elif document is not None and job_type != "reindex":
         document.status = "queued"
         document.error_message = None
         if "indexing_failure" in (document.meta_json or {}):
@@ -215,7 +218,8 @@ def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
             (
                 job.id,
                 job.document_id,
-                job.document is not None
+                job.job_type != "resync"
+                and job.document is not None
                 and job.document.status in {"processing", "transcribing"},
             )
             for job in abandoned
@@ -224,10 +228,14 @@ def recover_abandoned_jobs(session_factory: sessionmaker) -> int:
             job.status = "queued"
             job.started_at = None
             job.completed_at = None
-            if job.document is not None and job.document.status in {
-                "processing",
-                "transcribing",
-            }:
+            if (
+                job.job_type != "resync"
+                and job.document is not None
+                and job.document.status in {
+                    "processing",
+                    "transcribing",
+                }
+            ):
                 job.document.status = "queued"
                 job.document.error_message = None
         try:
@@ -285,7 +293,7 @@ def claim_next_job(session_factory: sessionmaker) -> Optional[str]:
             return None
 
         job_id, document_id, attempts, job_type = claimed
-        if job_type != "reindex":
+        if job_type not in {"reindex", "resync"}:
             db.execute(
                 update(Document)
                 .where(Document.id == document_id)
@@ -372,6 +380,8 @@ def _claim_was_persisted(
         expected_document_status = (
             "ready" if job_type == "reindex" else "processing"
         )
+        if job_type == "resync":
+            return document_status in (None, "ready", "error", "processing")
         return document_status in (None, expected_document_status)
 
 
@@ -680,7 +690,7 @@ class IngestionJobWorker:
                     )
                     return
                 try:
-                    if job.job_type != "reindex":
+                    if job.job_type not in {"reindex", "resync"}:
                         self._delete_document_index(db, job.document_id)
                     while True:
                         indexed_title = self.processor(db, job)
@@ -726,7 +736,7 @@ class IngestionJobWorker:
                     db.rollback()
                     failed_job = db.get(IngestionJob, job_id)
                     if failed_job is not None:
-                        if failed_job.job_type != "reindex":
+                        if failed_job.job_type not in {"reindex", "resync"}:
                             self._delete_document_index(
                                 db,
                                 failed_job.document_id,
@@ -738,7 +748,7 @@ class IngestionJobWorker:
                         }
                         failed_job.completed_at = utc_now()
                         if (
-                            failed_job.job_type != "reindex"
+                            failed_job.job_type not in {"reindex", "resync"}
                             and failed_job.document is not None
                         ):
                             failed_job.document.status = "error"
@@ -760,6 +770,23 @@ class IngestionJobWorker:
                                         "action": action,
                                     },
                                 }
+                        elif (
+                            failed_job.job_type == "resync"
+                            and failed_job.document is not None
+                            and failed_job.document.status == "processing"
+                        ):
+                            document = failed_job.document
+                            metadata = dict(document.meta_json or {})
+                            if metadata.pop("_resync_index_started", False):
+                                document.status = "error"
+                                document.error_message = str(error)
+                            else:
+                                payload = failed_job.payload_json or {}
+                                document.status = payload.get("previous_status", "error")
+                                document.error_message = payload.get(
+                                    "previous_error_message"
+                                )
+                            document.meta_json = metadata
                         try:
                             db.commit()
                             terminal_persisted = True
@@ -876,7 +903,7 @@ class IngestionJobWorker:
                 db.rollback()
                 return self._job_is_terminal_or_missing(db, job_id)
 
-            if persisted_job.job_type != "reindex":
+            if persisted_job.job_type not in {"reindex", "resync"}:
                 # The conditional state transition obtains the writer boundary
                 # before index deletion. A concurrent terminal transition therefore
                 # wins without having its confirmed searchable index erased.

@@ -466,6 +466,17 @@ LLM_MODE=local                   # with OLLAMA_BASE_URL / OLLAMA_MODEL
 `GET /healthz` reports which provider is *configured*; `model_used` on a
 `/api/query` response tells you which one actually answered.
 
+### Watch a server folder
+
+Docker Compose exposes `./watched-folders` to the backend as
+`/app/watched-folders`, read-only. Set `WATCHED_FOLDER_HOST_PATH` in `.env` to
+use a different host directory, restart the backend, then open **Sources → Watch
+a server folder** in an owned project and enter a path inside that mounted root.
+The backend scans every minute, copies supported files into its private upload
+store, and removes deleted files from search without deleting the originals.
+For a backend run outside Docker, set `WATCHED_FOLDER_ROOT` to the allowed local
+directory.
+
 <details>
 <summary><b>LLM providers in detail</b> — Claude, OpenAI-compatible, local</summary>
 
