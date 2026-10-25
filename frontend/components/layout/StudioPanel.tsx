@@ -13,7 +13,7 @@ import {
   Square,
 } from 'lucide-react';
 import useStore, { selectedSourceIds } from '@/store/useStore';
-import api from '@/lib/api';
+import api, { ApiError } from '@/lib/api';
 import type { MindMap, VideoSummary } from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
 import NotesSection from './NotesSection';
@@ -238,9 +238,13 @@ export default function StudioPanel({
       if (operation.isCurrent()) {
         setVideoSummary({ projectId: operation.project.id, value: summary });
       }
-    } catch {
+    } catch (error) {
       if (operation.isCurrent()) {
-        setReportError('The video summary could not be prepared. Please try again.');
+        setReportError(
+          error instanceof ApiError && error.status === 413
+            ? 'This video summary is too large. Select fewer sources and try again.'
+            : 'The video summary could not be prepared. Please try again.',
+        );
       }
     } finally {
       if (operation.isCurrent()) setIsPreparingVideo(false);

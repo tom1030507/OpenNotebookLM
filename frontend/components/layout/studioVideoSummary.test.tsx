@@ -179,6 +179,30 @@ describe('Studio video summary', () => {
     expect(await screen.findByText(/This is a video summary of the project/)).toBeTruthy();
   });
 
+  it('downloads the scenes already shown as a PowerPoint', async () => {
+    installSpeech();
+    vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(summary());
+    const exportSpy = vi.spyOn(api, 'exportProjectVideoSummaryPptx')
+      .mockResolvedValue(new Blob(['pptx'], {
+        type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      }));
+    const downloads: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click(
+      this: HTMLAnchorElement,
+    ) {
+      downloads.push(this);
+    });
+
+    await openVideoSummary();
+    fireEvent.click(screen.getByRole('button', { name: 'Download .pptx' }));
+
+    await waitFor(() => expect(exportSpy).toHaveBeenCalledWith(
+      'project-1', summary().scenes,
+    ));
+    await waitFor(() => expect(downloads).toHaveLength(1));
+    expect(downloads[0].download).toBe('Research notes.pptx');
+  });
+
   it('starts reading the first scene out', async () => {
     const spoken = installSpeech();
     vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(summary());
@@ -332,7 +356,7 @@ describe('Studio video summary', () => {
     });
 
     await openVideoSummary();
-    fireEvent.click(await screen.findByRole('button', { name: /download/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download video summary script' }));
 
     await waitFor(() => expect(downloads).toEqual(['Research notes video summary.md']));
   });

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 
 import api, {
+  ApiError,
   type Document,
   type MindMap,
   type Project,
@@ -111,6 +112,17 @@ describe('StudioPanel', () => {
     ]) {
       expect(screen.getByRole('button', { name }).getAttribute('type')).toBe('button');
     }
+  });
+
+  it('explains how to fix a video summary that exceeds the export limits', async () => {
+    vi.spyOn(api, 'fetchProjectVideoSummary').mockRejectedValue(
+      new ApiError(413, 'Video summary exceeds the PowerPoint export limits'),
+    );
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
+
+    expect(await screen.findByText(/select fewer sources/i)).toBeTruthy();
   });
 
   it('does not open project A results after switching to project B', async () => {
