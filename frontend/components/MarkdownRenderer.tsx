@@ -4,7 +4,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, Check } from 'lucide-react';
-import type { Citation } from '@/lib/api';
+import type { Citation, CitationCheck } from '@/lib/api';
 import { citationId, rehypeCitations } from '@/lib/citations';
 import InlineCitation from './InlineCitation';
 
@@ -45,9 +45,15 @@ interface MarkdownRendererProps {
   content: string;
   className?: string;
   citations?: Citation[];
+  citationChecks?: CitationCheck[];
 }
 
-export default function MarkdownRenderer({ content, className = '', citations }: MarkdownRendererProps) {
+export default function MarkdownRenderer({
+  content,
+  className = '',
+  citations,
+  citationChecks,
+}: MarkdownRendererProps) {
   const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
   const citationsById = React.useMemo(() => {
     const byId = new Map<number, Citation>();
@@ -68,7 +74,10 @@ export default function MarkdownRenderer({ content, className = '', citations }:
     <div className={`prose prose-sm max-w-none ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeCitations, { ids: new Set(citationsById.keys()) }]]}
+        rehypePlugins={[[rehypeCitations, {
+          ids: new Set(citationsById.keys()),
+          citationChecks,
+        }]]}
         components={{
         // A language block renders its own fallback/highlighter container.
         // Keep ReactMarkdown's pre for ordinary fenced code, but unwrap this

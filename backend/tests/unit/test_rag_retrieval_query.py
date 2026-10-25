@@ -386,3 +386,12 @@ class TestProjectChatSettings:
             query="q", system_prompt=instance._system_prompt(
                 True, project=chat_settings(answer_length="shorter")))
         assert default != shorter
+
+    def test_changing_citation_threshold_changes_the_cache_key(self, service, monkeypatch):
+        instance, _, _ = service
+        module = real_rag_module()
+        original = module.settings.citation_check_threshold
+        default = instance._generate_cache_key(query="q")
+        monkeypatch.setattr(module.settings, "citation_check_threshold", original - 0.01)
+
+        assert default != instance._generate_cache_key(query="q")

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import Document, Chunk, Project, ProjectDocument
 from app.services import retrieval
+from app.services.citation_support import check_citation_support
 from app.services.overview import (
     is_overview_query,
     overview_chunk_ids,
@@ -138,7 +139,10 @@ class RAGService:
                     query=cache_key
                 )
                 
-                if cached_result:
+                if cached_result and (
+                    not settings.citation_check_enabled
+                    or "citation_checks" in cached_result
+                ):
                     logger.info(f"Cache hit for query: {query[:50]}...")
                     return cached_result
             
@@ -154,12 +158,15 @@ class RAGService:
             )
             
             if not relevant_chunks:
-                return {
+                response = {
                     "answer": "I couldn't find any relevant information in the documents to answer your question.",
                     "sources": [],
                     "chunks_used": 0,
                     "model_used": None
                 }
+                if settings.citation_check_enabled:
+                    response["citation_checks"] = []
+                return response
             
             # 2. Prepare context
             context, context_chunks = self._prepare_grounded_context(relevant_chunks)
@@ -205,6 +212,17 @@ class RAGService:
                 "model_used": answer["model"],
                 "usage": answer.get("usage", {})
             }
+            if settings.citation_check_enabled:
+                try:
+                    response["citation_checks"] = check_citation_support(
+                        answer_text,
+                        context_chunks,
+                        self.embedding_service,
+                        settings.citation_check_threshold,
+                    )
+                except Exception as exc:
+                    # Embedding checks must not turn a usable answer into a failed query.
+                    logger.warning("Citation support check failed", error=str(exc))
             
             logger.info(
                 "RAG query completed",
@@ -213,7 +231,10 @@ class RAGService:
             )
             
             # Cache the result if enabled
-            if use_cache and cache_service:
+            if use_cache and cache_service and (
+                not settings.citation_check_enabled
+                or "citation_checks" in response
+            ):
                 cache_key = self._generate_cache_key(
                     query=query,
                     project_id=project_id,
@@ -280,7 +301,7 @@ class RAGService:
         scope = "any" if allowed_document_ids is None else ",".join(sorted(allowed_document_ids))
 
         key_parts = [
-            "overview-citations-v1",
+            "overview-citations-v2",
             query,
             str(retrieval_query),
             scope,
@@ -289,7 +310,9 @@ class RAGService:
             str(temperature),
             str(max_tokens),
             str(include_sources),
-            str(system_prompt)
+            str(system_prompt),
+            str(settings.citation_check_enabled),
+            str(settings.citation_check_threshold),
         ]
         key_string = "|".join(key_parts)
         
@@ -1045,6 +1068,7 @@ Current question: {query}"""
             role="assistant",
             text=response["answer"],
             citations_json=response.get("sources", []),
+            citation_checks_json=response.get("citation_checks"),
             used_mode=response.get("model_used"),
             token_count=response.get("usage", {}).get("total_tokens")
         )

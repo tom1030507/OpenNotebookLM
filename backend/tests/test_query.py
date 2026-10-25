@@ -100,6 +100,39 @@ def test_query_uses_maximum_output_budget_when_caller_omits_limit(monkeypatch):
     assert received_max_tokens == 8192
 
 
+def test_query_response_exposes_citation_checks_from_rag(monkeypatch):
+    checks = [{
+        "sentence_index": 2,
+        "cited_labels": [1, 3],
+        "score": 0.42,
+        "supported": False,
+    }]
+
+    class CheckedRAG:
+        def query(self, **kwargs):
+            return {**QUERY_RESULT, "citation_checks": checks}
+
+    response = query_client(monkeypatch, CheckedRAG()).post(
+        "/api/query", json={"query": "hello"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["citation_checks"] == checks
+
+
+def test_query_response_omits_citation_checks_when_rag_has_none(monkeypatch):
+    class LegacyRAG:
+        def query(self, **kwargs):
+            return QUERY_RESULT
+
+    response = query_client(monkeypatch, LegacyRAG()).post(
+        "/api/query", json={"query": "hello"},
+    )
+
+    assert response.status_code == 200
+    assert "citation_checks" not in response.json()
+
+
 class ScopeRecordingRAG:
     """Records the document scope the route hands to retrieval."""
 

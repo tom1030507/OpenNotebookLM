@@ -166,3 +166,52 @@ def test_extractive_fallback_preserves_its_passage_reference(
     assert response["sources"]
     assert response["sources"][0]["chunk_id"] == "chunk-1"
     assert "[Source 1]" in response["answer"]
+
+
+def test_query_returns_citation_checks_when_the_feature_is_enabled(
+    rag_module, monkeypatch, passages,
+):
+    expected = [{
+        "sentence_index": 0,
+        "cited_labels": [1],
+        "score": 0.83,
+        "supported": True,
+    }]
+    monkeypatch.setattr(rag_module.settings, "citation_check_enabled", True, raising=False)
+    monkeypatch.setattr(rag_module.settings, "citation_check_threshold", 0.6, raising=False)
+    monkeypatch.setattr(
+        rag_module,
+        "check_citation_support",
+        lambda answer, chunks, embedding, threshold: expected,
+        raising=False,
+    )
+    service = rag_module.RAGService(
+        embedding_service=object(),
+        llm_service=SimpleNamespace(generate=lambda **kwargs: {
+            "text": "Attention helps [Source 1].",
+            "model": "test-provider",
+            "usage": {},
+        }),
+    )
+    monkeypatch.setattr(service, "_retrieve_chunks", lambda **kwargs: passages)
+
+    response = service.query(db=None, query="How does attention work?", use_cache=False)
+
+    assert response["citation_checks"] == expected
+
+
+def test_disabled_citation_checks_keep_the_legacy_query_shape(
+    rag_module, monkeypatch, passages,
+):
+    monkeypatch.setattr(rag_module.settings, "citation_check_enabled", False, raising=False)
+    monkeypatch.setattr(
+        rag_module,
+        "check_citation_support",
+        lambda *args: pytest.fail("disabled checks must not embed answers"),
+        raising=False,
+    )
+    response, _ = answer_with(
+        rag_module, monkeypatch, passages, "Attention [Source 1].",
+    )
+
+    assert set(response) == {"answer", "sources", "chunks_used", "model_used", "usage"}

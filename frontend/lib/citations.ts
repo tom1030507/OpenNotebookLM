@@ -3,7 +3,7 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import remarkRehype from 'remark-rehype';
-import type { Citation } from './api';
+import type { Citation, CitationCheck } from './api';
 
 const CITATION_LABEL = /\[(?:Source\s+)?(\d+)\]/gi;
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
@@ -20,10 +20,94 @@ export function referencedCitationIds(content: string, citations: Citation[]): S
   return transformCitations(tree, ids);
 }
 
-export function rehypeCitations({ ids }: { ids: Set<number> }) {
+export function rehypeCitations({
+  ids,
+  citationChecks,
+}: {
+  ids: Set<number>;
+  citationChecks?: CitationCheck[];
+}) {
   return (tree: Root) => {
     transformCitations(tree, ids);
+    transformCitationChecks(tree, citationChecks ?? []);
   };
+}
+
+function transformCitationChecks(tree: Root, checks: CitationCheck[]): void {
+  const unsupported = new Set(
+    checks.filter((check) => !check.supported).map((check) => check.sentence_index),
+  );
+  if (unsupported.size === 0) return;
+
+  let sentenceIndex = 0;
+  let sentenceHasText = false;
+  const boundary = /(?<!\d)[.!?。！？]+(?:\s*\[Source\s+\d+\])*|\n+/g;
+  const wrap = (child: ElementContent): Element => ({
+    type: 'element',
+    tagName: 'span',
+    properties: {
+      className: ['border-b', 'border-dotted', 'border-[var(--muted-foreground)]'],
+      title: 'The cited passage may not support this.',
+      'data-citation-support': 'unsupported',
+    },
+    children: [child],
+  });
+
+  const visit = (parent: Root | Element) => {
+    for (let index = 0; index < parent.children.length; index += 1) {
+      const child = parent.children[index];
+      if (child.type === 'text') {
+        const replacement: ElementContent[] = [];
+        let offset = 0;
+        for (const match of child.value.matchAll(boundary)) {
+          const end = match.index! + match[0].length;
+          const value = child.value.slice(offset, end);
+          if (value) {
+            const text: ElementContent = { type: 'text', value };
+            replacement.push(unsupported.has(sentenceIndex) && value.trim() ? wrap(text) : text);
+            sentenceHasText ||= Boolean(value.trim());
+          }
+          if (sentenceHasText) sentenceIndex += 1;
+          sentenceHasText = false;
+          offset = end;
+        }
+        const tail = child.value.slice(offset);
+        if (tail) {
+          const text: ElementContent = { type: 'text', value: tail };
+          replacement.push(unsupported.has(sentenceIndex) && tail.trim() ? wrap(text) : text);
+          sentenceHasText ||= Boolean(tail.trim());
+        }
+        if (replacement.length > 0) {
+          parent.children.splice(index, 1, ...replacement);
+          index += replacement.length - 1;
+        }
+        continue;
+      }
+      if (child.type !== 'element') continue;
+
+      if (child.tagName === 'br') {
+        if (sentenceHasText) sentenceIndex += 1;
+        sentenceHasText = false;
+        continue;
+      }
+
+      if (child.tagName === 'a' && child.properties['data-citation-id'] !== undefined) {
+        sentenceHasText = true;
+        if (unsupported.has(sentenceIndex)) {
+          parent.children[index] = wrap(child);
+        }
+        continue;
+      }
+
+      visit(child);
+      if (/^(p|h[1-6]|li|td|th|pre)$/.test(child.tagName)) {
+        if (sentenceHasText) sentenceIndex += 1;
+        sentenceHasText = false;
+      }
+    }
+  };
+
+  visit(tree);
 }
 
 // The source list and inline controls must share this walk: scanning raw

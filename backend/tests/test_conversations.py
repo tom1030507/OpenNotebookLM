@@ -162,6 +162,12 @@ def test_conversation_details_include_message_text_and_citations(client):
                     "page_num": 4,
                     "text_preview": "Evidence",
                 }],
+                citation_checks_json=[{
+                    "sentence_index": 0,
+                    "cited_labels": [1],
+                    "score": 0.31,
+                    "supported": False,
+                }],
             )
         )
         db.commit()
@@ -180,6 +186,12 @@ def test_conversation_details_include_message_text_and_citations(client):
                 "document_title": "Research paper",
                 "page_num": 4,
                 "text_preview": "Evidence",
+            }],
+            "citation_checks": [{
+                "sentence_index": 0,
+                "cited_labels": [1],
+                "score": 0.31,
+                "supported": False,
             }],
             "rating": None,
         }
