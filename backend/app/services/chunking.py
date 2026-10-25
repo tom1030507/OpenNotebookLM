@@ -1026,9 +1026,13 @@ class ChunkingService:
         Returns:
             List of chunks with metadata
         """
-        chunks = self._chunk_text_content(
-            document.content,
-            max_chunks=max_chunks,
+        chunks = (
+            self._chunk_pdf_content(document, max_chunks=max_chunks)
+            if (document.meta_json or {}).get("pages")
+            else self._chunk_text_content(
+                document.content,
+                max_chunks=max_chunks,
+            )
         )
 
         # Fall back to the page title when a chunk sits above the first heading,

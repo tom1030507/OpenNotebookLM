@@ -259,6 +259,7 @@ class DocumentService:
                 max_download_bytes=self.settings.max_url_download_mb * 1024 * 1024,
                 max_redirects=self.settings.max_url_redirects,
                 max_download_seconds=self.settings.url_download_timeout_seconds,
+                pdf_adapter=self.pdf_adapter,
             )
         )
         self.youtube_adapter = youtube_adapter
@@ -1498,6 +1499,10 @@ class DocumentService:
                 "metadata": result.get("metadata", {}),
                 "headings": result.get("headings", []),
                 "num_links": len(result.get("links", [])),
+                **({
+                    "num_pages": result["num_pages"],
+                    "pages": result.get("pages", []),
+                } if "num_pages" in result else {}),
                 "processed_at": utc_now_iso(),
             }
         else:

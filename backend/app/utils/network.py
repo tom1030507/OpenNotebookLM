@@ -53,26 +53,18 @@ def validate_public_http_url(
     return normalized
 
 
-def resolve_public_http_url(
-    url: str,
-    resolver: Callable = socket.getaddrinfo,
-) -> Tuple[str, List[str]]:
-    """Validate a URL and return the public addresses resolved for this fetch.
-
-    The caller must connect to one of the returned addresses rather than resolve
-    the hostname a second time. Otherwise a rebinding DNS server can answer with
-    a public address for validation and a private address for the actual socket.
+def validate_http_url_syntax(url: str) -> str:
+    """Validate URL parts that are unsafe regardless of DNS results.
 
     Args:
         url: User-supplied URL.
-        resolver: DNS resolver compatible with ``socket.getaddrinfo``.
 
     Returns:
-        A pair containing the normalized URL and its unique public IP strings.
+        The normalized HTTP(S) URL with its fragment removed.
 
     Raises:
-        UnsafeURLError: If URL syntax, scheme, credentials, DNS, or any resolved
-            address violates the public-network policy.
+        UnsafeURLError: If the scheme, credentials, hostname, or literal IP is
+            not allowed.
     """
     try:
         parsed = urlsplit(url)
@@ -94,7 +86,58 @@ def resolve_public_http_url(
         raise UnsafeURLError("URL hostname is invalid") from exc
     if not hostname or any(character.isspace() for character in hostname):
         raise UnsafeURLError("URL hostname is invalid")
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        raise UnsafeURLError("URL destination must be globally routable")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        try:
+            address = ipaddress.IPv4Address(socket.inet_aton(hostname))
+        except OSError:
+            address = None
+    if address is not None and not _is_public_address(address):
+        raise UnsafeURLError("URL destination must be globally routable")
 
+    normalized_host = "[%s]" % hostname if ":" in hostname else hostname
+    normalized_netloc = normalized_host
+    if port is not None:
+        normalized_netloc += ":%s" % port
+    normalized = SplitResult(
+        scheme=scheme,
+        netloc=normalized_netloc,
+        path=parsed.path,
+        query=parsed.query,
+        fragment="",
+    )
+    return urlunsplit(normalized)
+
+
+def resolve_public_http_url(
+    url: str,
+    resolver: Callable = socket.getaddrinfo,
+) -> Tuple[str, List[str]]:
+    """Validate a URL and return the public addresses resolved for this fetch.
+
+    The caller must connect to one of the returned addresses rather than resolve
+    the hostname a second time. Otherwise a rebinding DNS server can answer with
+    a public address for validation and a private address for the actual socket.
+
+    Args:
+        url: User-supplied URL.
+        resolver: DNS resolver compatible with ``socket.getaddrinfo``.
+
+    Returns:
+        A pair containing the normalized URL and its unique public IP strings.
+
+    Raises:
+        UnsafeURLError: If URL syntax, scheme, credentials, DNS, or any resolved
+            address violates the public-network policy.
+    """
+    normalized = validate_http_url_syntax(url)
+    parsed = urlsplit(normalized)
+    scheme = parsed.scheme
+    hostname = parsed.hostname
+    port = parsed.port
     lookup_port = port if port is not None else (443 if scheme == "https" else 80)
     try:
         answers = resolver(hostname, lookup_port, type=socket.SOCK_STREAM)
@@ -115,15 +158,4 @@ def resolve_public_http_url(
         if address not in addresses:
             addresses.append(address)
 
-    normalized_host = "[%s]" % hostname if ":" in hostname else hostname
-    normalized_netloc = normalized_host
-    if port is not None:
-        normalized_netloc += ":%s" % port
-    normalized = SplitResult(
-        scheme=scheme,
-        netloc=normalized_netloc,
-        path=parsed.path,
-        query=parsed.query,
-        fragment="",
-    )
-    return urlunsplit(normalized), addresses
+    return normalized, addresses

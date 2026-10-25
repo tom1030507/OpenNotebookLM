@@ -10,7 +10,7 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     TimeoutError as FutureTimeoutError,
 )
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 import structlog
 import requests
@@ -48,6 +48,7 @@ ACCEPTED_CONTENT_TYPES = frozenset({
     "text/html",
     "application/xhtml+xml",
     "text/plain",
+    "application/pdf",
 })
 _URL_DOWNLOAD_EXECUTOR = ThreadPoolExecutor(
     max_workers=URL_DOWNLOAD_WORKERS,
@@ -562,6 +563,7 @@ class URLAdapter:
         max_download_seconds: int = 30,
         clock: Callable[[], float] = time.monotonic,
         executor: Optional[Executor] = None,
+        pdf_adapter: Optional[Any] = None,
     ):
         """Initialize URL adapter.
 
@@ -580,6 +582,7 @@ class URLAdapter:
             executor: Optional fixed-size executor. Production shares a bounded
                 process-wide pool so stalled DNS cannot create one thread per
                 request.
+            pdf_adapter: Existing PDF parser used for downloaded PDF responses.
         """
         _require_supported_requests_transport()
         self.timeout = timeout
@@ -592,6 +595,7 @@ class URLAdapter:
         self.max_download_seconds = max_download_seconds
         self.clock = clock
         self.executor = executor or _URL_DOWNLOAD_EXECUTOR
+        self.pdf_adapter = pdf_adapter
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -623,7 +627,28 @@ class URLAdapter:
     def _extract_content(self, url: str, control: _FetchControl) -> Dict[str, any]:
         """Run validation, download, and parsing inside one bounded worker."""
         try:
-            final_url, body = self._download(url, control)
+            final_url, body, media_type = self._download(url, control)
+
+            if media_type == "application/pdf":
+                if self.pdf_adapter is None:
+                    raise UnsafeURLError("No PDF adapter is configured for this URL")
+                result = self.pdf_adapter.extract_text_from_bytes(body)
+                metadata = {
+                    **(result.get("metadata") or {}),
+                    "url": final_url,
+                    "domain": urlparse(final_url).netloc,
+                }
+                return {
+                    "url": final_url,
+                    "title": metadata.get("title") or final_url,
+                    "text": result["text"],
+                    "html": "",
+                    "metadata": metadata,
+                    "headings": [],
+                    "links": [],
+                    "pages": result.get("pages", []),
+                    "num_pages": result.get("num_pages", 0),
+                }
 
             # Parse with BeautifulSoup
             soup = BeautifulSoup(body, 'html.parser')
@@ -664,7 +689,7 @@ class URLAdapter:
             control: Cancellation registry for this extraction.
 
         Returns:
-            A pair of final normalized URL and its capped body bytes.
+            The final normalized URL, its capped body bytes, and its media type.
 
         Raises:
             UnsafeURLError: If a hop, content type, redirect count, or body size
@@ -699,7 +724,11 @@ class URLAdapter:
                 content_type = response.headers.get("Content-Type", "")
                 media_type = content_type.split(";", 1)[0].strip().lower()
                 if media_type not in ACCEPTED_CONTENT_TYPES:
-                    raise UnsafeURLError("URL response content type is not accepted")
+                    raise UnsafeURLError(
+                        "URL response content type %r is not supported; "
+                        "supported formats are HTML, plain text, and PDF"
+                        % (media_type or "unknown")
+                    )
 
                 content_length = response.headers.get("Content-Length")
                 if content_length:
@@ -725,7 +754,7 @@ class URLAdapter:
                         )
                     body.extend(block)
                 self._ensure_within_time_limit(started_at)
-                return current_url, bytes(body)
+                return current_url, bytes(body), media_type
             finally:
                 response.close()
                 control.unregister(response)

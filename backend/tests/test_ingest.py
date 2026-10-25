@@ -52,6 +52,17 @@ class OversizedPDFStream:
         return b"x" * block_size
 
 
+def test_document_service_passes_its_pdf_adapter_to_url_downloads():
+    pdf_adapter = object()
+    service = DocumentService(
+        chunking_service=object(),
+        embedding_service=object(),
+        pdf_adapter=pdf_adapter,
+    )
+
+    assert service.url_adapter.pdf_adapter is pdf_adapter
+
+
 def test_oversized_pdf_stops_streaming_and_removes_the_partial_file(tmp_path, monkeypatch):
     """A 50 MiB+ body is rejected without one unbounded in-memory read."""
     stream = OversizedPDFStream(50 * 1024 * 1024 + 1)
@@ -468,6 +479,30 @@ def url_ingest_client(monkeypatch, service, request_limiter=None, concurrency=No
     monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
     app.dependency_overrides[ingest.get_document_service] = lambda: service
     return TestClient(app)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "http://localhost/admin",
+        "http://127.0.0.1/admin",
+        "http://0x7f000001/admin",
+        "http://[::1]/admin",
+    ],
+)
+def test_url_upload_rejects_local_destinations_before_enqueue(monkeypatch, url):
+    """No-network URL refusals return 400 before a failed job is created."""
+    class MustNotEnqueue:
+        async def process_url(self, **kwargs):
+            raise AssertionError("invalid URL reached the document service")
+
+    response = url_ingest_client(monkeypatch, MustNotEnqueue()).post(
+        "/api/projects/project/upload-url",
+        json={"url": url},
+    )
+
+    assert response.status_code == 400
 
 
 def test_eleventh_ingestion_for_one_account_returns_429(monkeypatch):

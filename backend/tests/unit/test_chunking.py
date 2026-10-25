@@ -319,6 +319,26 @@ class TestPdfPages:
 class TestUrlChunking:
     """URL chunks fall back to the page title only above the first heading."""
 
+    def test_pdf_url_chunks_keep_page_numbers_and_the_pdf_title(self):
+        pages = [
+            {"page_num": 1, "text": "First page content is useful for the report."},
+            {"page_num": 2, "text": "Second page content continues the report."},
+        ]
+        document = FakeDocument(
+            content=PAGE_SEPARATOR.join(page["text"] for page in pages),
+            title="https://example.com/report.pdf",
+            meta_json={"pages": pages, "metadata": {"title": "Research report"}},
+        )
+        chunks = ChunkingService(chunk_size=60, chunk_overlap=0)._chunk_url_content(
+            document
+        )
+
+        assert [chunk["metadata"]["page_num"] for chunk in chunks] == [1, 2]
+        assert all(
+            chunk["metadata"]["heading_path"] == "Research report"
+            for chunk in chunks
+        )
+
     def test_title_is_used_when_there_is_no_heading(self):
         document = FakeDocument(content=ENGLISH, title="Attention (machine learning)")
         chunks = ChunkingService()._chunk_url_content(document)
