@@ -436,8 +436,14 @@ class VideoScene(BaseModel):
     source_label: Optional[str] = None
 
 
-MAX_VIDEO_SUMMARY_PPTX_SCENES = MAX_DOCUMENT_SELECTION + 2
+# Summary generation covers every project source, not only the 500-source
+# selection request. Keep export bounded while supporting large projects.
+# shortcut: 1,000 source slides max; raise after measuring larger deck exports.
+MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES = 1_000
+MAX_VIDEO_SUMMARY_PPTX_SCENES = MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 2
 MAX_VIDEO_SUMMARY_PPTX_TEXT_CHARS = 500_000
+MAX_VIDEO_SUMMARY_PPTX_BULLET_CHARS = 120
+MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS = 10_000
 
 
 class VideoSummaryPptxScene(VideoScene):
@@ -447,8 +453,12 @@ class VideoSummaryPptxScene(VideoScene):
 
     id: str = Field(..., min_length=1, max_length=128)
     headline: str = Field(..., min_length=1, max_length=500)
-    bullets: List[str] = Field(default_factory=list, max_length=4)
-    narration: str = Field(..., min_length=1, max_length=10_000)
+    bullets: List[
+        Annotated[str, Field(max_length=MAX_VIDEO_SUMMARY_PPTX_BULLET_CHARS)]
+    ] = Field(default_factory=list, max_length=4)
+    narration: str = Field(
+        ..., min_length=1, max_length=MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
+    )
     document_id: Optional[str] = Field(None, max_length=128)
     source_label: Optional[str] = Field(None, max_length=500)
 

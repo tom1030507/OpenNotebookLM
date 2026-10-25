@@ -286,6 +286,13 @@ interface ErrorResponse {
   detail?: string | ValidationErrorItem[];
 }
 
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 /** Same-origin prefix that Next proxies to the internal backend. */
 export const API_BASE_URL = '/api';
 
@@ -405,13 +412,14 @@ const extractError = async (response: Response): Promise<Error> => {
     const payload = await response.json() as ErrorResponse;
     const detail = describeDetail(payload.detail);
     if (detail) {
-      return new Error(detail);
+      return new ApiError(response.status, detail);
     }
   } catch {
     // Fall back to the HTTP status below when the response is not JSON.
   }
 
-  return new Error(
+  return new ApiError(
+    response.status,
     response.statusText || `Request failed with status ${response.status}`,
   );
 };
@@ -897,7 +905,11 @@ const api = {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenes }),
+        body: JSON.stringify({
+          scenes: scenes.map(({ id, kind, headline, bullets, narration, document_id }) => ({
+            id, kind, headline, bullets, narration, document_id,
+          })),
+        }),
       },
     );
   },

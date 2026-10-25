@@ -18,7 +18,8 @@ from sqlalchemy.pool import StaticPool
 from app.db.database import get_db
 from app.db.models import Base, Chunk, Document, Project, ProjectDocument
 from app.routers import video
-from app.services.video_summary import VideoSummaryService
+from app.services.source_digest import project_documents
+from app.services.video_summary import VideoSummaryService, VideoSummaryTooLargeError
 from conftest import OfflineLLM, auth_headers, authenticated_client, owner_id
 
 app = FastAPI()
@@ -254,6 +255,32 @@ def test_scene_count_and_duration_describe_the_script(
     assert body["scene_count"] == 3
     assert body["scene_count"] == len(body["scenes"])
     assert body["estimated_seconds"] > 0
+
+
+def test_oversized_video_summary_returns_payload_too_large(
+    two_projects_with_own_documents,
+    monkeypatch,
+):
+    """The UI never receives a script that cannot be exported."""
+    def reject_summary(*_args, **_kwargs):
+        raise VideoSummaryTooLargeError("Video summary exceeds the export limits")
+
+    monkeypatch.setattr(VideoSummaryService, "generate", reject_summary)
+
+    response = client.post("/api/projects/project-a/video-summary")
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Video summary exceeds the export limits"
+
+
+def test_project_document_loader_applies_a_query_limit(two_projects_with_own_documents):
+    """The summary can detect oversized projects without loading every source."""
+    with TestingSessionLocal() as db:
+        project = db.query(Project).filter_by(id="project-a").one()
+
+        documents = project_documents(db, project, limit=1)
+
+    assert len(documents) == 1
 
 
 def test_the_model_is_reported(two_projects_with_own_documents):

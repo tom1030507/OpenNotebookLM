@@ -52,6 +52,7 @@ def project_documents(
     db: Session,
     project: Project,
     document_ids: Optional[List[str]] = None,
+    limit: Optional[int] = None,
 ) -> List[Document]:
     """List the documents attached to a project, in a stable order.
 
@@ -59,6 +60,7 @@ def project_documents(
         db: Database session.
         project: The project.
         document_ids: Optional subset to keep; `None` keeps every document.
+        limit: Optional maximum number of ordered documents to load.
 
     Returns:
         The documents. Ordered by title after `added_at`, because `added_at`
@@ -73,10 +75,13 @@ def project_documents(
     )
     if document_ids is not None:
         query = query.filter(Document.id.in_(document_ids))
-    return query.order_by(
+    query = query.order_by(
         ProjectDocument.added_at,
         Document.title,
-    ).all()
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
 
 
 def document_text(document: Any) -> str:

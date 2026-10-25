@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import api from './api';
+import api, { ApiError } from './api';
 
 
 const jsonResponse = (body: unknown, status = 200) => new Response(
@@ -185,7 +185,7 @@ describe('API client', () => {
       bullets: ['Finding'],
       narration: 'Narration.',
       document_id: null,
-      source_label: null,
+      source_label: 'Research source',
     }];
     const fetchMock = vi.fn().mockResolvedValue(new Response('pptx bytes', {
       headers: {
@@ -200,7 +200,16 @@ describe('API client', () => {
       '/api/projects/project-1/video-summary/pptx',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ scenes }),
+        body: JSON.stringify({
+          scenes: [{
+            id: 'title',
+            kind: 'title',
+            headline: 'Research',
+            bullets: ['Finding'],
+            narration: 'Narration.',
+            document_id: null,
+          }],
+        }),
       }),
     );
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Content-Type')).toBe(
@@ -210,6 +219,16 @@ describe('API client', () => {
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     );
     await expect(blob.text()).resolves.toBe('pptx bytes');
+  });
+
+  it('preserves the HTTP status on API errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      detail: 'Video summary exceeds the export limits',
+    }, 413)));
+    const request = api.fetchProjectVideoSummary('project-1');
+
+    await expect(request).rejects.toBeInstanceOf(ApiError);
+    await expect(request).rejects.toMatchObject({ status: 413 });
   });
 
   it('fetches the complete document after a file upload', async () => {

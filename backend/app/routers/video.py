@@ -14,7 +14,7 @@ import re
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 import structlog
@@ -25,7 +25,7 @@ from app.routers.auth import get_current_user
 from app.routers.ownership import require_documents, require_project
 from app.schemas import SourceSelection, VideoSummaryPptxRequest, VideoSummaryResponse
 from app.services.slides_export import render_video_summary_pptx
-from app.services.video_summary import VideoSummaryService
+from app.services.video_summary import VideoSummaryService, VideoSummaryTooLargeError
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -87,7 +87,10 @@ def project_video_summary(
     if selection and selection.document_ids is not None:
         document_ids = require_documents(db, selection.document_ids, current_user)
 
-    return service.generate(db, project, document_ids)
+    try:
+        return service.generate(db, project, document_ids)
+    except VideoSummaryTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
 
 
 @router.post("/projects/{project_id}/video-summary/pptx")

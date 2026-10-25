@@ -37,9 +37,16 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import structlog
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.db.models import Project
+from app.schemas import (
+    MAX_VIDEO_SUMMARY_PPTX_BULLET_CHARS,
+    MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
+    MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES,
+    VideoSummaryPptxRequest,
+)
 from app.services.llm import FALLBACK_MODEL, LLMService
 from app.services.source_digest import (
     document_excerpt,
@@ -58,7 +65,7 @@ MAX_BULLETS_PER_SCENE = 4
 
 # A slide line has to fit on the slide. Longer bullets are shortened at a word
 # boundary rather than wrapped into a paragraph.
-BULLET_MAX_CHARS = 120
+BULLET_MAX_CHARS = MAX_VIDEO_SUMMARY_PPTX_BULLET_CHARS
 
 # Extracted text is full of headers, page numbers and captions. Anything
 # shorter than this many words is one of those, not a sentence.
@@ -80,12 +87,16 @@ SCRIPT_SYSTEM_PROMPT = (
 )
 
 
+class VideoSummaryTooLargeError(ValueError):
+    """Raised when a project summary exceeds the bounded export contract."""
+
+
 def shorten(text: str, limit: int = BULLET_MAX_CHARS) -> str:
     """Fit a line onto a slide, cutting at a word boundary.
 
     Args:
         text: The line, with any internal whitespace.
-        limit: Most characters to keep before the ellipsis.
+        limit: Maximum total characters, including a truncation ellipsis.
 
     Returns:
         The line, collapsed to single spaces, with an ellipsis appended if it
@@ -95,9 +106,11 @@ def shorten(text: str, limit: int = BULLET_MAX_CHARS) -> str:
     if len(trimmed) <= limit:
         return trimmed
 
-    head = trimmed[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    # Include the ellipsis in the limit so generated bullets satisfy the export
+    # schema without a second truncation.
+    head = trimmed[:limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:-")
 
-    return "%s…" % (head or trimmed[:limit])
+    return "%s…" % (head or trimmed[:limit - 1])
 
 
 def leading_sentences(
@@ -207,7 +220,10 @@ def parse_llm_scenes(text: str, document_count: int) -> Dict[int, Dict[str, Any]
         scenes[index] = {
             "headline": _clean_line(entry.get("headline")),
             "bullets": _clean_bullets(entry.get("bullets")),
-            "narration": " ".join(narration.split()),
+            "narration": shorten(
+                " ".join(narration.split()),
+                MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
+            ),
         }
 
     return scenes
@@ -314,11 +330,31 @@ class VideoSummaryService:
             The scenes plus the metadata the API exposes: which model wrote
             them, when they were built, and how long they take to play.
         """
-        documents = project_documents(db, project, document_ids)
+        documents = project_documents(
+            db,
+            project,
+            document_ids,
+            limit=MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 1,
+        )
+        if len(documents) > MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES:
+            raise VideoSummaryTooLargeError(
+                "Video summaries support at most %d sources"
+                % MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES
+            )
+
         generated_at = utc_now()
         scenes, model_used = self.build_scenes(
             project.name, documents, generated_at,
         )
+        try:
+            VideoSummaryPptxRequest(scenes=[
+                {key: value for key, value in scene.items() if key != "source_label"}
+                for scene in scenes
+            ])
+        except ValidationError as error:
+            raise VideoSummaryTooLargeError(
+                "Video summary exceeds the PowerPoint export limits"
+            ) from error
 
         return {
             "project_id": project.id,
@@ -428,13 +464,13 @@ class VideoSummaryService:
         bullets, origin = self._extracted_bullets(document)
 
         if written:
-            headline = written["headline"] or document.title
+            headline = shorten(written["headline"] or document.title)
             # A model that writes a paragraph and no points still needs points:
             # a scene with nothing on the slide is a voice over a blank screen.
             scene_bullets = written["bullets"] or bullets
             narration = written["narration"]
         else:
-            headline = document.title
+            headline = shorten(document.title)
             scene_bullets = bullets
             narration = self._extracted_narration(document, bullets, origin)
 
@@ -520,7 +556,7 @@ class VideoSummaryService:
 
         keywords = topics_from_keywords(text, limit=MAX_BULLETS_PER_SCENE)
         if keywords:
-            return keywords, "keywords"
+            return [shorten(keyword) for keyword in keywords], "keywords"
 
         return [], "none"
 
@@ -547,17 +583,17 @@ class VideoSummaryService:
         if origin == "sentences":
             # Already sentences: reading them out is the honest thing to do.
             return "This source is %s. It begins: %s" % (
-                document.title, " ".join(bullets),
+                shorten(document.title), " ".join(bullets),
             )
 
         if bullets:
             return "This source is %s. It covers %s." % (
-                document.title, _join_phrase(bullets),
+                shorten(document.title), _join_phrase(bullets),
             )
 
         return (
             "This source is %s. Its text has not been extracted yet."
-            % document.title
+            % shorten(document.title)
         )
 
     def _written_scenes(
