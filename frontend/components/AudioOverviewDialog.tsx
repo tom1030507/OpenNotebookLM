@@ -8,6 +8,7 @@ import api, {
   type AudioOverview,
   type AudioOverviewFormat,
   type AudioOverviewLength,
+  type AudioOverviewVoice,
   type StudioOutputOptions,
 } from '@/lib/api';
 
@@ -33,14 +34,21 @@ export default function AudioOverviewDialog({
 }: AudioOverviewDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const titleId = useId();
   const [format, setFormat] = useState<AudioOverviewFormat>('deep_dive');
   const [length, setLength] = useState<AudioOverviewLength>(initialOptions?.length ?? 'default');
   const [audience, setAudience] = useState(initialOptions?.audience ?? 'general');
   const [focus, setFocus] = useState(initialOptions?.focus ?? '');
+  const [voiceA, setVoiceA] = useState<AudioOverviewVoice>('af_heart');
+  const [voiceB, setVoiceB] = useState<AudioOverviewVoice>('am_adam');
+  const [voices, setVoices] = useState<AudioOverviewVoice[]>([]);
   const [items, setItems] = useState<AudioOverview[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ host: 'A' | 'B'; url: string } | null>(null);
+  const [previewing, setPreviewing] = useState<'A' | 'B' | null>(null);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -49,9 +57,10 @@ export default function AudioOverviewDialog({
 
   useEffect(() => {
     let active = true;
-    api.listAudioOverviews(projectId).then(({ items: saved }) => {
+    api.listAudioOverviews(projectId).then(({ items: saved, voices: availableVoices }) => {
       if (!active) return;
       setItems(saved);
+      setVoices(availableVoices);
       setSelectedId(saved[0]?.id ?? null);
     }).catch(() => {
       if (active) setError('Saved audio overviews could not be loaded.');
@@ -61,8 +70,30 @@ export default function AudioOverviewDialog({
     return () => { active = false; };
   }, [projectId]);
 
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = playbackRate;
+  }, [audioUrl, playbackRate]);
+
+  useEffect(() => {
+    if (!preview) return undefined;
+    return () => URL.revokeObjectURL(preview.url);
+  }, [preview]);
+
   const selected = items.find((item) => item.id === selectedId) ?? null;
   const selectedStatus = selected?.status;
+
+  const previewVoice = async (host: 'A' | 'B', voice: AudioOverviewVoice) => {
+    setPreviewing(host);
+    setError('');
+    try {
+      const sample = await api.fetchAudioOverviewVoicePreview(voice);
+      setPreview({ host, url: URL.createObjectURL(sample) });
+    } catch {
+      setError('The voice preview could not be loaded.');
+    } finally {
+      setPreviewing(null);
+    }
+  };
 
   useEffect(() => {
     if (!selectedId || (selectedStatus !== 'queued' && selectedStatus !== 'running')) {
@@ -114,6 +145,8 @@ export default function AudioOverviewDialog({
         length,
         audience,
         focus: focus.trim() || null,
+        voice_a: voiceA,
+        voice_b: voiceB,
         ...(documentIds ? { document_ids: documentIds } : {}),
       });
       setItems((saved) => [overview, ...saved.filter((item) => item.id !== overview.id)]);
@@ -194,6 +227,58 @@ export default function AudioOverviewDialog({
                 </select>
               </label>
             </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {([
+                { host: 'A' as const, voice: voiceA, setVoice: setVoiceA },
+                { host: 'B' as const, voice: voiceB, setVoice: setVoiceB },
+              ]).map(({ host, voice, setVoice }) => (
+                <div key={host} className="space-y-1.5 text-sm">
+                  <label htmlFor={`audio-overview-voice-${host.toLowerCase()}`}>
+                    Host {host} voice
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      id={`audio-overview-voice-${host.toLowerCase()}`}
+                      aria-label={`Host ${host} voice`}
+                      value={voice}
+                      disabled={previewing !== null}
+                      onChange={(event) => {
+                        setVoice(event.target.value as AudioOverviewVoice);
+                        setPreview(null);
+                      }}
+                      className="min-w-0 flex-1 rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2"
+                    >
+                      {voices.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      aria-label={`Preview Host ${host} voice`}
+                      disabled={previewing !== null || voices.length === 0}
+                      onClick={() => previewVoice(host, voice)}
+                      className="rounded-md border border-[var(--input)] px-3 py-2 hover:bg-[var(--muted)] disabled:opacity-60"
+                    >
+                      {previewing === host
+                        ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                        : 'Preview'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              Each voice pack downloads on first use and uses about 523 KB of model cache.
+            </p>
+            {preview && (
+              <audio
+                controls
+                autoPlay
+                preload="auto"
+                src={preview.url}
+                aria-label={`Host ${preview.host} voice preview`}
+              >
+                Your browser does not support audio playback.
+              </audio>
+            )}
             <label className="flex flex-col gap-1.5 text-sm">
               Focus (optional)
               <textarea
@@ -243,9 +328,32 @@ export default function AudioOverviewDialog({
                 {statusLabel[selected.status]}
               </p>
               {selected.status === 'ready' && audioUrl && (
-                <audio controls preload="metadata" src={audioUrl} aria-label="Audio overview playback">
-                  Your browser does not support audio playback.
-                </audio>
+                <div className="flex flex-wrap items-center gap-3">
+                  <audio
+                    ref={audioRef}
+                    controls
+                    preload="metadata"
+                    src={audioUrl}
+                    aria-label="Audio overview playback"
+                  >
+                    Your browser does not support audio playback.
+                  </audio>
+                  <label className="flex items-center gap-2 text-sm">
+                    Playback speed
+                    <select
+                      aria-label="Playback speed"
+                      value={playbackRate}
+                      onChange={(event) => setPlaybackRate(Number(event.target.value))}
+                      className="rounded-md border border-[var(--input)] bg-[var(--card)] px-2 py-1.5"
+                    >
+                      <option value={0.75}>0.75×</option>
+                      <option value={1}>1×</option>
+                      <option value={1.25}>1.25×</option>
+                      <option value={1.5}>1.5×</option>
+                      <option value={2}>2×</option>
+                    </select>
+                  </label>
+                </div>
               )}
               {selected.status === 'ready' && !audioUrl && (
                 <p role="status" className="text-sm text-[var(--muted-foreground)]">Loading audio…</p>

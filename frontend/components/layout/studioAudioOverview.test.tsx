@@ -22,7 +22,9 @@ const NativeURL = globalThis.URL;
 const readyOverview = (id = 'saved-audio'): AudioOverview => ({
   id,
   status: 'ready',
-  options: { format: 'deep_dive', length: 'default' },
+  options: {
+    format: 'deep_dive', length: 'default', voice_a: 'af_heart', voice_b: 'am_adam',
+  },
   script: [
     { speaker: 'A', text: 'The first host explains the source evidence.' },
     { speaker: 'B', text: 'The second host connects the findings.' },
@@ -69,10 +71,13 @@ describe('Studio audio overview', () => {
       duration_seconds: null,
       completed_at: null,
     };
-    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: true, items: [] });
+    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({
+      enabled: true, items: [], voices: ['af_heart', 'af_sarah', 'am_adam', 'am_eric'],
+    });
     vi.spyOn(api, 'createAudioOverview').mockResolvedValue(queued);
     vi.spyOn(api, 'getAudioOverview').mockResolvedValue(readyOverview('new-audio'));
     vi.spyOn(api, 'fetchAudioOverviewFile').mockResolvedValue(new Blob(['audio']));
+    vi.spyOn(api, 'fetchAudioOverviewVoicePreview').mockResolvedValue(new Blob(['preview']));
     const legacySpeech = vi.spyOn(api, 'fetchProjectSummaryText');
     render(<StudioPanel />);
 
@@ -84,6 +89,11 @@ describe('Studio audio overview', () => {
     await screen.findByRole('dialog', { name: 'Audio summary' });
     const generate = screen.getByRole('button', { name: 'Generate audio summary' });
     await waitFor(() => expect((generate as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText('Host A voice'), { target: { value: 'af_sarah' } });
+    fireEvent.change(screen.getByLabelText('Host B voice'), { target: { value: 'am_eric' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Host A voice' }));
+    expect(await screen.findByLabelText('Host A voice preview')).toBeTruthy();
+    expect(api.fetchAudioOverviewVoicePreview).toHaveBeenCalledWith('af_sarah');
     fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'debate' } });
     fireEvent.click(generate);
 
@@ -92,6 +102,8 @@ describe('Studio audio overview', () => {
       length: 'long',
       focus: 'methods',
       audience: 'beginner',
+      voice_a: 'af_sarah',
+      voice_b: 'am_eric',
       document_ids: ['source-a'],
     }));
     await waitFor(() => expect(api.getAudioOverview).toHaveBeenCalledWith('audio-project', 'new-audio'), {
@@ -100,11 +112,17 @@ describe('Studio audio overview', () => {
     expect(await screen.findByText('The first host explains the source evidence.')).toBeTruthy();
     expect(screen.getByText('The second host connects the findings.')).toBeTruthy();
     expect(await screen.findByLabelText('Audio overview playback')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Playback speed'), { target: { value: '1.5' } });
+    expect((screen.getByLabelText('Audio overview playback') as HTMLAudioElement).playbackRate).toBe(1.5);
     expect(legacySpeech).not.toHaveBeenCalled();
   });
 
   it('loads saved audio and its transcript when the dialog is reopened', async () => {
-    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: true, items: [readyOverview()] });
+    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({
+      enabled: true,
+      items: [readyOverview()],
+      voices: ['af_heart', 'af_sarah', 'am_adam', 'am_eric'],
+    });
     vi.spyOn(api, 'fetchAudioOverviewFile').mockResolvedValue(new Blob(['saved audio']));
     render(<StudioPanel />);
 

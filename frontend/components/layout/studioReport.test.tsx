@@ -156,7 +156,7 @@ describe('Studio report', () => {
   });
 
   it('leaves an output the browser cannot produce disabled', async () => {
-    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: false, items: [] });
+    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: false, items: [], voices: [] });
     render(<StudioPanel />);
 
     const audio = screen.getByRole('button', { name: /^Audio summary/ });

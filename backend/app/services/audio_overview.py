@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +28,7 @@ MAX_TURNS = {"short": 4, "default": 8, "long": 12}
 SAMPLE_RATE = 24_000
 NO_SOURCE_TEXT_MESSAGE = "No source text is available for an audio overview."
 VOICE_BY_SPEAKER = {"A": "af_heart", "B": "am_adam"}
+VOICE_PREVIEW_TEXT = "Hello! This is a sample of the selected host's voice."
 SCRIPT_SYSTEM_PROMPT = (
     "You write a short, source-grounded conversation between two podcast hosts. "
     "Return only a JSON array of objects with speaker A or B and a text string. "
@@ -144,6 +146,7 @@ class KokoroTTS:
         """Prepare an unloaded pipeline and its one-time initialization lock."""
         self._pipeline = None
         self._load_lock = threading.Lock()
+        self._synthesis_lock = threading.Lock()
 
     def _get_pipeline(self):
         """Load Kokoro once, keeping import and model download off API startup.
@@ -168,12 +171,20 @@ class KokoroTTS:
                     self._pipeline = KPipeline(lang_code="a", device=device)
         return self._pipeline
 
-    def synthesize(self, script: List[Dict[str, str]], output_path: Path) -> float:
+    def synthesize(
+        self,
+        script: List[Dict[str, str]],
+        output_path: Path,
+        voice_a: str = VOICE_BY_SPEAKER["A"],
+        voice_b: str = VOICE_BY_SPEAKER["B"],
+    ) -> float:
         """Synthesize turns, add host pauses, and encode one MP3 with ffmpeg.
 
         Args:
             script: Validated host turns.
             output_path: Temporary MP3 path to write.
+            voice_a: Kokoro voice id for host A.
+            voice_b: Kokoro voice id for host B.
 
         Returns:
             Audio duration in seconds.
@@ -182,22 +193,24 @@ class KokoroTTS:
 
         if not script:
             raise ValueError("audio overview script is empty")
-        pipeline = self._get_pipeline()
-        parts = []
-        pause = np.zeros(int(SAMPLE_RATE * 0.3), dtype=np.float32)
-        for index, turn in enumerate(script):
-            chunks = [
-                audio.detach().cpu().numpy().astype(np.float32, copy=False)
-                for _, _, audio in pipeline(
-                    turn["text"],
-                    voice=VOICE_BY_SPEAKER[turn["speaker"]],
-                )
-            ]
-            if not chunks:
-                continue
-            parts.append(np.concatenate(chunks))
-            if index < len(script) - 1:
-                parts.append(pause)
+        voices = {"A": voice_a, "B": voice_b}
+        with self._synthesis_lock:
+            pipeline = self._get_pipeline()
+            parts = []
+            pause = np.zeros(int(SAMPLE_RATE * 0.3), dtype=np.float32)
+            for index, turn in enumerate(script):
+                chunks = [
+                    audio.detach().cpu().numpy().astype(np.float32, copy=False)
+                    for _, _, audio in pipeline(
+                        turn["text"],
+                        voice=voices[turn["speaker"]],
+                    )
+                ]
+                if not chunks:
+                    continue
+                parts.append(np.concatenate(chunks))
+                if index < len(script) - 1:
+                    parts.append(pause)
         if not parts:
             raise RuntimeError("Kokoro returned no speech audio")
 
@@ -217,6 +230,16 @@ class KokoroTTS:
         return len(samples) / SAMPLE_RATE
 
 
+@lru_cache(maxsize=1)
+def get_kokoro_tts() -> KokoroTTS:
+    """Share the lazy model and voice cache between queued audio and previews.
+
+    Returns:
+        The process-wide Kokoro synthesizer.
+    """
+    return KokoroTTS()
+
+
 class AudioOverviewService:
     """Generate a validated host script and durable local audio file."""
 
@@ -231,7 +254,7 @@ class AudioOverviewService:
             None.
         """
         self.llm = llm_service or LLMService()
-        self.tts = tts or KokoroTTS()
+        self.tts = tts or get_kokoro_tts()
 
     def build_script(
         self,
@@ -389,7 +412,12 @@ class AudioOverviewService:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = output_path.with_name(output_path.stem + ".part.mp3")
             output_path.unlink(missing_ok=True)
-            duration = self.tts.synthesize(script, temporary_path)
+            duration = self.tts.synthesize(
+                script,
+                temporary_path,
+                voice_a=options.get("voice_a", VOICE_BY_SPEAKER["A"]),
+                voice_b=options.get("voice_b", VOICE_BY_SPEAKER["B"]),
+            )
             if not temporary_path.is_file() or temporary_path.stat().st_size == 0:
                 raise RuntimeError("TTS did not create an audio file")
             temporary_path.replace(output_path)
