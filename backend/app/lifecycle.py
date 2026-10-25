@@ -77,10 +77,15 @@ async def lifespan(app: FastAPI):
     audio_overview_worker = AudioOverviewWorker(
         session_factory=SessionLocal,
         processor=getattr(app.state, "audio_overview_processor", None),
+        enabled=settings.audio_overview_tts_enabled,
     )
     await audio_overview_worker.start()
     app.state.audio_overview_worker = audio_overview_worker
-    logger.info("Durable audio overview worker started", concurrency=1)
+    logger.info(
+        "Durable audio overview worker configured",
+        concurrency=1,
+        enabled=settings.audio_overview_tts_enabled,
+    )
 
     try:
         yield

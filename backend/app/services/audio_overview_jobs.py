@@ -36,7 +36,7 @@ def recover_abandoned_audio_overviews(session_factory: sessionmaker) -> None:
 
 
 def claim_next_audio_overview(session_factory: sessionmaker) -> Optional[str]:
-    """Atomically claim the oldest queued overview across worker processes.
+    """Atomically claim the oldest queued overview.
 
     Args:
         session_factory: Database session factory.
@@ -80,6 +80,7 @@ class AudioOverviewWorker:
         session_factory: sessionmaker,
         processor: Optional[AudioProcessor] = None,
         poll_interval: float = 0.5,
+        enabled: bool = True,
     ) -> None:
         """Configure a sequential worker for the CPU-heavy speech pipeline.
 
@@ -87,6 +88,7 @@ class AudioOverviewWorker:
             session_factory: Factory for claim and per-job sessions.
             processor: Optional synchronous generation pipeline.
             poll_interval: Maximum seconds between empty-queue checks.
+            enabled: Whether this process may recover and synthesize queued work.
 
         Returns:
             None.
@@ -104,6 +106,7 @@ class AudioOverviewWorker:
             )
         self.processor = processor
         self.poll_interval = poll_interval
+        self.enabled = enabled
         self._task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop_event = asyncio.Event()
@@ -112,12 +115,13 @@ class AudioOverviewWorker:
 
     async def start(self) -> None:
         """Recover interrupted rows and start the retained supervisor task."""
-        if self._task is not None and not self._task.done():
+        if not self.enabled or (self._task is not None and not self._task.done()):
             return
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
         self._claim_stop_event = ThreadEvent()
         self._loop = asyncio.get_running_loop()
+        # shortcut: single backend process only; add leases before scaling replicas.
         await asyncio.to_thread(
             recover_abandoned_audio_overviews,
             self.session_factory,

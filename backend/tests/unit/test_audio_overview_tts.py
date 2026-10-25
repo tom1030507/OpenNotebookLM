@@ -1,9 +1,9 @@
 def test_kokoro_english_phonemizer_loads_and_tokenizes():
-    from misaki.en import G2P
+    from kokoro import KPipeline
 
-    phonemes, tokens = G2P(trf=False, british=False, fallback=None)(
-        "The two hosts discuss their sources."
-    )
+    pipeline = KPipeline(lang_code="a", model=False)
+    assert pipeline.g2p.fallback is not None
 
+    phonemes, tokens = pipeline.g2p("Qrrblax")
     assert phonemes
     assert tokens

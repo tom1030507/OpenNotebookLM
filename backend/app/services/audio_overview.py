@@ -22,6 +22,7 @@ logger = structlog.get_logger()
 MAX_TURN_CHARS = 300
 MAX_TURNS = {"short": 4, "default": 8}
 SAMPLE_RATE = 24_000
+NO_SOURCE_TEXT_MESSAGE = "No source text is available for an audio overview."
 VOICE_BY_SPEAKER = {"A": "af_heart", "B": "am_adam"}
 SCRIPT_SYSTEM_PROMPT = (
     "You write a short, source-grounded conversation between two podcast hosts. "
@@ -245,12 +246,16 @@ class AudioOverviewService:
         Returns:
             Alternating LLM turns, or single-voice extractive turns.
         """
+        documents = [document for document in documents if document_excerpt(document)]
+        if not documents:
+            return []
+
         max_turns = MAX_TURNS.get(options.get("length"), MAX_TURNS["default"])
         sources = "\n\n".join(
             "%d. %s\n%s" % (
                 index,
                 document.title,
-                document_excerpt(document) or "[No extracted text is available yet.]",
+                document_excerpt(document),
             )
             for index, document in enumerate(documents, start=1)
         )
@@ -346,7 +351,7 @@ class AudioOverviewService:
 
             script = self.build_script(project.name, documents, options)
             if not script:
-                raise ValueError("No source text is available for an audio overview")
+                raise ValueError(NO_SOURCE_TEXT_MESSAGE)
             updated = db.execute(
                 update(AudioOverview)
                 .where(
@@ -399,7 +404,11 @@ class AudioOverviewService:
                 )
                 .values(
                     status="failed",
-                    error="Audio overview generation failed.",
+                    error=(
+                        NO_SOURCE_TEXT_MESSAGE
+                        if str(error) == NO_SOURCE_TEXT_MESSAGE
+                        else "Audio overview generation failed."
+                    ),
                     completed_at=ordered_utc_now(),
                     updated_at=ordered_utc_now(),
                 )

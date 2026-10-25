@@ -74,3 +74,27 @@ def test_worker_runs_claimed_work_and_drains_on_stop(tmp_path):
             assert db.get(AudioOverview, "audio-job").status == "ready"
     finally:
         engine.dispose()
+
+
+def test_disabled_worker_leaves_queued_overviews_untouched(tmp_path):
+    engine, sessions = database(tmp_path)
+    processed = []
+
+    async def run():
+        worker = AudioOverviewWorker(
+            sessions,
+            processor=processed.append,
+            poll_interval=0.01,
+            enabled=False,
+        )
+        await worker.start()
+        await asyncio.sleep(0.05)
+        await worker.stop()
+
+    try:
+        asyncio.run(run())
+        with sessions() as db:
+            assert db.get(AudioOverview, "audio-job").status == "queued"
+        assert processed == []
+    finally:
+        engine.dispose()

@@ -79,6 +79,68 @@ def test_unusable_llm_reply_falls_back_to_one_voice_and_respects_short_length():
     assert "Fifth" not in " ".join(turn["text"] for turn in turns)
 
 
+def test_sources_without_extracted_text_are_not_sent_to_the_llm():
+    llm = FixedLLM(
+        '[{"speaker":"A","text":"Ungrounded opening."},'
+        '{"speaker":"B","text":"Ungrounded response."}]'
+    )
+    service = AudioOverviewService(llm_service=llm)
+
+    turns = service.build_script(
+        project_name="Empty source",
+        documents=[doc("Scanned file", "  ")],
+        options={"format": "brief", "length": "short"},
+    )
+
+    assert turns == []
+    assert llm.prompt is None
+
+
+def test_process_fails_with_a_safe_error_when_sources_have_no_text(tmp_path):
+    engine = create_engine("sqlite:///%s" % (tmp_path / "empty-source.db"))
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    llm = FixedLLM(
+        '[{"speaker":"A","text":"Ungrounded opening."},'
+        '{"speaker":"B","text":"Ungrounded response."}]'
+    )
+    try:
+        with sessions() as db:
+            db.add(Project(id="empty-audio-project", name="Empty source"))
+            db.add(Document(
+                id="empty-audio-document",
+                title="Scanned file",
+                source_type="text",
+                content="  ",
+            ))
+            db.flush()
+            db.add(ProjectDocument(
+                project_id="empty-audio-project",
+                document_id="empty-audio-document",
+            ))
+            db.add(AudioOverview(
+                id="empty-audio-overview",
+                project_id="empty-audio-project",
+                status="running",
+                options_json={"document_ids": ["empty-audio-document"]},
+                script_json=[],
+            ))
+            db.commit()
+
+        AudioOverviewService(llm_service=llm).process(
+            sessions,
+            "empty-audio-overview",
+        )
+
+        with sessions() as db:
+            overview = db.get(AudioOverview, "empty-audio-overview")
+            assert overview.status == "failed"
+            assert overview.error == "No source text is available for an audio overview."
+        assert llm.prompt is None
+    finally:
+        engine.dispose()
+
+
 def test_worker_service_persists_script_and_ready_audio_without_loading_models(
     tmp_path,
     monkeypatch,
