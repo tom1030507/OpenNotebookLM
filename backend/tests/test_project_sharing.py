@@ -100,6 +100,45 @@ def test_project_responses_include_effective_owner_and_member_roles(sharing_env)
     assert shared_list["projects"][0]["conversation_count"] == 0
 
 
+def test_source_groups_are_shared_and_editors_can_manage_them(sharing_env):
+    project = make_project(sharing_env.owner, "Shared source groups")
+    sharing_env.session.add(ProjectMember(
+        project_id=project["id"],
+        user_id=sharing_env.alice_user.id,
+        role="viewer",
+    ))
+    sharing_env.session.commit()
+    groups_path = "/api/projects/%s/source-groups" % project["id"]
+
+    created = sharing_env.owner.post(groups_path, json={"name": "References"})
+    shared = sharing_env.alice.get(groups_path)
+    viewer_write = sharing_env.alice.post(groups_path, json={"name": "Private"})
+
+    assert created.status_code == 201, created.text
+    assert shared.status_code == 200, shared.text
+    assert shared.json() == [{
+        "id": created.json()["id"],
+        "name": "References",
+        "document_ids": [],
+    }]
+    assert viewer_write.status_code == 404
+
+    updated = sharing_env.owner.patch(
+        "/api/projects/%s/members/%s" % (
+            project["id"],
+            sharing_env.alice_user.id,
+        ),
+        json={"role": "editor"},
+    )
+    assert updated.status_code == 200, updated.text
+    editor_write = sharing_env.alice.patch(
+        "%s/%s" % (groups_path, created.json()["id"]),
+        json={"name": "Sources"},
+    )
+    assert editor_write.status_code == 200, editor_write.text
+    assert sharing_env.owner.get(groups_path).json()[0]["name"] == "Sources"
+
+
 def test_member_management_adds_by_username_and_email_and_lists_owner(sharing_env):
     project = make_project(sharing_env.owner)
     base = "/api/projects/%s/members" % project["id"]

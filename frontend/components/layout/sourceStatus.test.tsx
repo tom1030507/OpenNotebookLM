@@ -110,7 +110,7 @@ describe('source status', () => {
     });
     renderPanel();
 
-    expect(screen.getByText('1 of 1 selected')).toBeTruthy();
+    expect(screen.getAllByText('1 of 1 selected')).toHaveLength(2);
     expect(screen.getByRole('checkbox', {
       name: 'Use Example ready in answers and Studio',
     })).toHaveProperty('checked', true);

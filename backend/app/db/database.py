@@ -129,6 +129,7 @@ ADDED_COLUMNS = (
     ("messages", "citation_checks_json", "JSON", None),
     ("conversations", "user_id", "VARCHAR", "idx_conversations_user_id"),
     ("project_documents", "shared_by_user_id", "VARCHAR", None),
+    ("project_documents", "source_group_id", "VARCHAR", None),
     ("projects", "overview_json", "JSON", None),
     ("projects", "auto_title", "BOOLEAN", None),
     ("projects", "watched_folder", "TEXT", None),

@@ -16,8 +16,15 @@ export interface Project {
   document_count: number;
   conversation_count: number;
   role: ProjectRole;
+  tags?: string[];
   cover_emoji?: string | null;
   cover_color?: string | null;
+}
+
+export interface ProjectSourceGroup {
+  id: string;
+  name: string;
+  document_ids: string[];
 }
 
 export interface UploadConfig {
@@ -962,8 +969,72 @@ const api = {
   },
 
   async getProjects(): Promise<Project[]> {
-    const response = await requestJson<ProjectListResponse>('/projects');
-    return response.projects;
+    const projects: Project[] = [];
+    let page = 1;
+    let total = 0;
+    let perPage = 100;
+    let pageSize = 0;
+    do {
+      const response = await requestJson<ProjectListResponse>(
+        `/projects?page=${page}&per_page=100`,
+      );
+      projects.push(...response.projects);
+      total = response.total;
+      perPage = response.per_page;
+      pageSize = response.projects.length;
+      page += 1;
+    } while (projects.length < total && pageSize > 0 && perPage > 0);
+    return projects;
+  },
+
+  updateProjectTags(projectId: string, tags: string[]): Promise<string[]> {
+    return requestJson<string[]>(`/projects/${projectId}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    });
+  },
+
+  getProjectSourceGroups(projectId: string): Promise<ProjectSourceGroup[]> {
+    return requestJson<ProjectSourceGroup[]>(`/projects/${projectId}/source-groups`);
+  },
+
+  createProjectSourceGroup(
+    projectId: string,
+    name: string,
+  ): Promise<ProjectSourceGroup> {
+    return requestJson<ProjectSourceGroup>(`/projects/${projectId}/source-groups`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  },
+
+  renameProjectSourceGroup(
+    projectId: string,
+    groupId: string,
+    name: string,
+  ): Promise<ProjectSourceGroup> {
+    return requestJson<ProjectSourceGroup>(
+      `/projects/${projectId}/source-groups/${groupId}`,
+      { method: 'PATCH', body: JSON.stringify({ name }) },
+    );
+  },
+
+  async deleteProjectSourceGroup(projectId: string, groupId: string): Promise<void> {
+    await requestJson(
+      `/projects/${projectId}/source-groups/${groupId}`,
+      { method: 'DELETE' },
+    );
+  },
+
+  setDocumentSourceGroup(
+    projectId: string,
+    documentId: string,
+    groupId: string | null,
+  ): Promise<ProjectSourceGroup[]> {
+    return requestJson<ProjectSourceGroup[]>(
+      `/projects/${projectId}/documents/${documentId}/group`,
+      { method: 'PUT', body: JSON.stringify({ group_id: groupId }) },
+    );
   },
 
   searchProjects(query: string): Promise<ProjectSearchResponse> {
