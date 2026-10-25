@@ -3,6 +3,8 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { Copy, Check } from 'lucide-react';
 import type { Citation, CitationCheck } from '@/lib/api';
 import { citationId, rehypeCitations } from '@/lib/citations';
@@ -49,6 +51,67 @@ interface MarkdownRendererProps {
   citationChecks?: CitationCheck[];
 }
 
+function transformMathText(text: string): string {
+  return text
+    // Preserve prices so a later math delimiter cannot pair with the dollar.
+    .replace(/(^|[\s(])\$(?=\s?\d[\d,]*(?:\.\d+)?(?:[\s),.;:/!?]|$))/g, '$1\\$')
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, formula: string) => (
+      `\n\n$$\n${formula.trim()}\n$$\n\n`
+    ))
+    .replace(/\\\(([^\r\n]*?)\\\)/g, (_match, formula: string) => `$${formula}$`);
+}
+
+function prepareMathMarkdown(markdown: string): string {
+  let result = '';
+  let text = '';
+  let fence: { marker: string; length: number } | null = null;
+  const lines = markdown.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+
+  for (const line of lines) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)?.[1];
+    if (fence) {
+      result += line;
+      if (
+        marker
+        && marker[0] === fence.marker
+        && marker.length >= fence.length
+        && /^ {0,3}(?:`{3,}|~{3,})[ \t]*\r?\n?$/.test(line)
+      ) {
+        fence = null;
+      }
+      continue;
+    }
+
+    if (marker) {
+      result += prepareMathText(text) + line;
+      text = '';
+      fence = { marker: marker[0], length: marker.length };
+    } else if (/^(?: {4}|\t)/.test(line)) {
+      result += prepareMathText(text) + line;
+      text = '';
+    } else {
+      text += line;
+    }
+  }
+
+  return result + prepareMathText(text);
+}
+
+function prepareMathText(text: string): string {
+  // Delimiters inside inline code are literal Markdown content.
+  const codeSpan = /(`+)[\s\S]*?\1/g;
+  let result = '';
+  let offset = 0;
+
+  for (const match of text.matchAll(codeSpan)) {
+    const start = match.index ?? 0;
+    result += transformMathText(text.slice(offset, start)) + match[0];
+    offset = start + match[0].length;
+  }
+
+  return result + transformMathText(text.slice(offset));
+}
+
 export default function MarkdownRenderer({
   content,
   className = '',
@@ -75,12 +138,12 @@ export default function MarkdownRenderer({
   return (
     <div className={`prose prose-sm max-w-none ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeCitations, {
           ids: new Set(citationsById.keys()),
           citationLabels,
           citationChecks,
-        }]]}
+        }], rehypeKatex]}
         components={{
         // A language block renders its own fallback/highlighter container.
         // Keep ReactMarkdown's pre for ordinary fenced code, but unwrap this
@@ -228,7 +291,7 @@ export default function MarkdownRenderer({
         },
         }}
       >
-        {content}
+        {prepareMathMarkdown(content)}
       </ReactMarkdown>
     </div>
   );

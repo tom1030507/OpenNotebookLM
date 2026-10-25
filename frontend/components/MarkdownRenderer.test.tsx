@@ -35,4 +35,36 @@ describe('MarkdownRenderer', () => {
     expect(container.querySelectorAll('pre')).toHaveLength(1);
     expect(fencedCode?.textContent).toBe('plain fallback\n');
   });
+
+  it('renders dollar and TeX inline and display math', () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={'$x^2$\n\n$$\n\\frac{1}{2}\n$$\n\n\\(a+b\\)\n\n\\[c=d\\]'}
+      />,
+    );
+
+    expect(container.querySelectorAll('.katex')).toHaveLength(4);
+    expect(container.querySelectorAll('.katex-display')).toHaveLength(2);
+  });
+
+  it('keeps citations next to math as citation controls', () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={'For \\(x^2\\), see [Source 1].'}
+        citations={[{ id: 1, source: 'Math paper.pdf', text: 'A cited equation.' }]}
+      />,
+    );
+    expect(container.querySelector('.katex')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Preview source 1"]')).not.toBeNull();
+  });
+
+  it('keeps currency dollars literal and renders a later inline formula', () => {
+    const { container } = render(
+      <MarkdownRenderer content="The $5 plan includes $x^2$. An unmatched price is $10." />,
+    );
+
+    expect(container.querySelector('p')?.textContent).toContain('The $5 plan includes ');
+    expect(container.querySelector('p')?.textContent).toContain('An unmatched price is $10.');
+    expect(container.querySelectorAll('.katex')).toHaveLength(1);
+  });
 });

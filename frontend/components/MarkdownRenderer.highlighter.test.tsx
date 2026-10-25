@@ -35,4 +35,17 @@ describe('MarkdownRenderer highlighter', () => {
     expect(code?.textContent).toContain('const answer = 42;');
     expect(code?.parentElement?.tagName).toBe('DIV');
   });
+
+  it('keeps fenced math-looking code literal beside rendered math', async () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={'Math $x^2$.\n\n```ts\nconst formula = "$y$ and \\(z\\)";\n```'}
+      />,
+    );
+
+    await waitFor(() => expect(container.querySelectorAll('pre')).toHaveLength(0));
+    expect(container.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container.querySelector('code')?.textContent)
+      .toBe('const formula = "$y$ and \\(z\\)";');
+  });
 });
