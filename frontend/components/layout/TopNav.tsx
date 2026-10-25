@@ -82,11 +82,11 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
       const raw = window.localStorage.getItem('user');
       const parsed = raw ? JSON.parse(raw) as { username?: string; email?: string } : null;
       return {
-        username: parsed?.username || 'Demo user',
-        email: parsed?.email || 'demo@example.com',
+        username: parsed?.username || 'Signed-in account',
+        email: parsed?.email || '—',
       };
     } catch {
-      return { username: 'Demo user', email: 'demo@example.com' };
+      return { username: 'Signed-in account', email: '—' };
     }
   };
 
@@ -187,16 +187,16 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
 
   return (
     <>
-      <header className="h-14 border-b border-[var(--border)] bg-[var(--card)] flex items-center px-4 gap-4">
+      <header className="h-12 border-b border-[var(--border)] bg-[var(--background)] flex items-center px-4 gap-4">
         {/* Logo */}
         <BrandLogo
           label={displayedTitle === 'OpenNotebookLM' ? undefined : 'OpenNotebookLM logo'}
-          className="w-8 h-8 shrink-0"
+          className="w-6 h-6 shrink-0"
         />
 
         {/* Notebook Title — truncates so the controls keep their tap targets */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <h1 className="text-base font-medium text-[var(--foreground)] truncate">
+          <h1 className="text-[15px] font-semibold text-[var(--foreground)] truncate">
             {displayedTitle}
           </h1>
           {currentConversation && (
@@ -286,9 +286,9 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
               title={'User menu'}
               aria-haspopup="menu"
               aria-expanded={showUserMenu}
-              className={`${isCompact ? 'h-11 w-11' : 'w-8 h-8'} rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base`}
+              className={`${isCompact ? 'h-11 w-11' : 'w-8 h-8'} rounded-full border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] flex items-center justify-center text-sm font-medium hover:bg-[var(--muted)] transition-base`}
             >
-              <User className="w-5 h-5" />
+              <User className="w-4 h-4" />
             </button>
 
             {showUserMenu && (
@@ -367,7 +367,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             href="https://github.com/tom1030507/OpenNotebookLM"
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-4 inline-block text-sm text-[var(--primary)] hover:underline"
+            className="mt-4 inline-block text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
           >
             Documentation on GitHub
           </a>

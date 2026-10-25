@@ -205,51 +205,56 @@ export default function FileUpload({
 
   return (
     <div className="w-full p-4">
-      {/* Upload Type Selector */}
-      <div className="flex gap-2 mb-4">
+      {/* Upload Type Selector — a segmented control: the chosen kind is the
+          white pill on the muted track, so it reads at a glance. */}
+      <div className="inline-flex flex-wrap gap-1 mb-4 p-1 rounded-lg bg-[var(--muted)]">
         <button
           onClick={() => setUploadType('file')}
-          className={`px-4 py-2 rounded-lg transition-colors ${
+          aria-pressed={uploadType === 'file'}
+          className={`h-8 px-3 text-sm rounded-md transition-colors ${
             uploadType === 'file'
-              ? 'bg-purple-100 text-purple-700'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-[var(--card)] text-[var(--foreground)] font-medium ring-1 ring-[var(--border)]'
+              : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
           }`}
         >
-          <File className="inline w-4 h-4 mr-2" />
+          <File className="inline w-4 h-4 mr-1.5 -mt-0.5" />
           File
         </button>
         <button
           onClick={() => setUploadType('url')}
-          className={`px-4 py-2 rounded-lg transition-colors ${
+          aria-pressed={uploadType === 'url'}
+          className={`h-8 px-3 text-sm rounded-md transition-colors ${
             uploadType === 'url'
-              ? 'bg-purple-100 text-purple-700'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-[var(--card)] text-[var(--foreground)] font-medium ring-1 ring-[var(--border)]'
+              : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
           }`}
         >
-          <Link className="inline w-4 h-4 mr-2" />
+          <Link className="inline w-4 h-4 mr-1.5 -mt-0.5" />
           URL
         </button>
         <button
           onClick={() => setUploadType('youtube')}
-          className={`px-4 py-2 rounded-lg transition-colors ${
+          aria-pressed={uploadType === 'youtube'}
+          className={`h-8 px-3 text-sm rounded-md transition-colors ${
             uploadType === 'youtube'
-              ? 'bg-purple-100 text-purple-700'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-[var(--card)] text-[var(--foreground)] font-medium ring-1 ring-[var(--border)]'
+              : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
           }`}
         >
-          <Youtube className="inline w-4 h-4 mr-2" />
+          <Youtube className="inline w-4 h-4 mr-1.5 -mt-0.5" />
           YouTube
         </button>
         {onAddText && (
           <button
             onClick={() => setUploadType('text')}
-            className={`px-4 py-2 rounded-lg transition-colors ${
+            aria-pressed={uploadType === 'text'}
+            className={`h-8 px-3 text-sm rounded-md transition-colors ${
               uploadType === 'text'
-                ? 'bg-purple-100 text-purple-700'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ? 'bg-[var(--card)] text-[var(--foreground)] font-medium ring-1 ring-[var(--border)]'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
             }`}
           >
-            <FileText className="inline w-4 h-4 mr-2" />
+            <FileText className="inline w-4 h-4 mr-1.5 -mt-0.5" />
             Text
           </button>
         )}
@@ -257,7 +262,7 @@ export default function FileUpload({
 
       {/* Pasted Text Area */}
       {uploadType === 'text' && (
-        <div className="border border-gray-300 rounded-lg p-4 space-y-2">
+        <div className="border border-[var(--input)] rounded-lg p-4 space-y-2">
           <input
             type="text"
             aria-label="Source title"
@@ -265,7 +270,7 @@ export default function FileUpload({
             onChange={(e) => setTextTitle(e.target.value)}
             placeholder="Title"
             maxLength={200}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+            className="w-full px-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:border-[var(--ring)]"
           />
           <textarea
             aria-label="Source text"
@@ -273,12 +278,12 @@ export default function FileUpload({
             onChange={(e) => setTextInput(e.target.value)}
             placeholder="Paste text here..."
             rows={8}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+            className="w-full px-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:border-[var(--ring)]"
           />
           <button
             onClick={() => void handleTextSubmit()}
             disabled={!textTitle.trim() || !textInput.trim() || isUploading}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Add text
           </button>
@@ -293,14 +298,14 @@ export default function FileUpload({
           onDrop={handleDrop}
           className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
             isDragging
-              ? 'border-purple-500 bg-purple-50'
-              : 'border-gray-300 hover:border-gray-400'
+              ? 'border-[var(--ring)] bg-[var(--muted)]'
+              : 'border-[var(--input)] hover:border-[var(--muted-foreground)]'
           }`}
         >
-          <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-          <p className="text-gray-600 mb-2">
+          <Upload className="w-12 h-12 mx-auto mb-4 text-[var(--muted-foreground)]" />
+          <p className="text-[var(--muted-foreground)] mb-2">
             Drag and drop files here, or{' '}
-            <label className="text-purple-600 hover:text-purple-700 cursor-pointer">
+            <label className="text-[var(--foreground)] hover:text-[var(--foreground)] cursor-pointer">
               browse
               <input
                 type="file"
@@ -311,7 +316,7 @@ export default function FileUpload({
               />
             </label>
           </p>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-[var(--muted-foreground)]">
             PDF, TXT, Markdown, Word, PowerPoint, Excel, EPUB, images, or audio · Maximum file size: {maxSize}MB
           </p>
         </div>
@@ -319,7 +324,7 @@ export default function FileUpload({
 
       {/* URL Input Area */}
       {(uploadType === 'url' || uploadType === 'youtube') && (
-        <div className="border border-gray-300 rounded-lg p-4">
+        <div className="border border-[var(--input)] rounded-lg p-4">
           <div className="flex gap-2">
             <input
               type="text"
@@ -330,7 +335,7 @@ export default function FileUpload({
                   ? 'Enter YouTube URL...'
                   : 'Enter website URL...'
               }
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+              className="flex-1 px-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:border-[var(--ring)]"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -341,7 +346,7 @@ export default function FileUpload({
             <button
               onClick={() => void handleUrlSubmit()}
               disabled={!urlInput.trim() || isUploading}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add
             </button>
@@ -351,9 +356,9 @@ export default function FileUpload({
 
       {/* Error Messages */}
       {errors.length > 0 && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+        <div className="mt-4 p-3 bg-[var(--error-bg)] border border-[var(--error)] rounded-lg">
           {errors.map((error, index) => (
-            <p key={index} className="text-sm text-red-600">
+            <p key={index} className="text-sm text-[var(--error)]">
               {error}
             </p>
           ))}
@@ -363,16 +368,16 @@ export default function FileUpload({
       {/* File List */}
       {files.length > 0 && (
         <div className="mt-4 space-y-2">
-          <h4 className="text-sm font-medium text-gray-700">Selected Files:</h4>
+          <h4 className="text-sm font-medium text-[var(--muted-foreground)]">Selected Files:</h4>
           {files.map((file, index) => (
             <div
               key={index}
-              className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+              className="flex items-center justify-between p-3 bg-[var(--muted)] rounded-lg"
             >
               <div className="flex items-center gap-2">
                 {getFileIcon(file.name)}
-                <span className="text-sm text-gray-700">{file.name}</span>
-                <span className="text-xs text-gray-500">
+                <span className="text-sm text-[var(--muted-foreground)]">{file.name}</span>
+                <span className="text-xs text-[var(--muted-foreground)]">
                   ({(file.size / 1024 / 1024).toFixed(2)} MB)
                 </span>
               </div>
@@ -380,7 +385,7 @@ export default function FileUpload({
                 onClick={() => removeFile(index)}
                 aria-label={'Remove file'}
                 title={'Remove file'}
-                className="text-gray-400 hover:text-red-500"
+                className="text-[var(--muted-foreground)] hover:text-[var(--error)]"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -394,7 +399,7 @@ export default function FileUpload({
         <button
           onClick={handleUploadFiles}
           disabled={isUploading}
-          className="mt-4 w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="mt-4 w-full px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isUploading ? (
             <>

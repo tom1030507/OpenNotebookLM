@@ -88,7 +88,7 @@ export default function InlineCitation({ id, citation }: { id: number; citation:
         onFocus={show}
         onBlur={() => { if (!hovered.current) setOpen(false); }}
         onClick={show}
-        className="inline rounded px-0.5 font-medium text-[var(--primary)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+        className="inline rounded px-0.5 font-medium text-[var(--accent)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
       >
         [{id}]
       </button>

@@ -41,6 +41,17 @@ interface PendingQuery {
   retryMode: 'query' | 'refresh';
 }
 
+/** The signed-in account's initial, so the asker's mark is theirs rather than a generic "U". */
+function accountInitial(): string {
+  try {
+    const raw = typeof window === 'undefined' ? null : window.localStorage.getItem('user');
+    const username = raw ? (JSON.parse(raw) as { username?: string }).username : undefined;
+    return username?.trim().charAt(0).toUpperCase() || 'U';
+  } catch {
+    return 'U';
+  }
+}
+
 function AnswerRating({ message }: { message: Message }) {
   const rateMessage = useStore((state) => state.rateMessage);
   const rate = (rating: 'up' | 'down') => {
@@ -104,7 +115,9 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
       <div
         className={`${
           message.role === 'user'
-            ? 'max-w-[85%] bg-[var(--primary)] text-[var(--primary-foreground)]'
+            // The question sits on the neutral selection tone: a near-black
+            // block would outweigh the answer, which is what the reader came for.
+            ? 'max-w-[85%] bg-[var(--accent-bg)] text-[var(--foreground)]'
             // An answer fills the column rather than 70% of it. The cap left a
             // gutter as wide as the composer's right third, and on a 1024px
             // screen with the side panels open it squeezed the prose to about
@@ -125,7 +138,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
               const key = id === null ? `legacy-${index}` : `source-${id}`;
               const label = (
                 <>
-                  {id !== null && <span className="font-medium mr-2">[{id}]</span>}
+                  {id !== null && <span className="font-medium mr-2 text-[var(--accent)]">[{id}]</span>}
                   <span className="font-medium">{citation.source}</span>
                   {citation.page != null && <span className="opacity-70"> - page {citation.page}</span>}
                 </>
@@ -154,8 +167,11 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         )}
       </div>
       {message.role === 'user' && (
-        <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center flex-shrink-0">
-          U
+        <div
+          aria-hidden="true"
+          className="w-8 h-8 rounded-full bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)] text-sm font-medium flex items-center justify-center flex-shrink-0"
+        >
+          {accountInitial()}
         </div>
       )}
     </div>
@@ -389,7 +405,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               </div>
               
               <h2
-                className="leading-tight font-normal mb-4"
+                className="leading-tight font-semibold tracking-tight mb-3"
                 style={welcomeHeroStyles.title}
               >
                 {!currentProject
@@ -399,7 +415,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     : 'Add a source to get started'}
               </h2>
 
-              <p className="max-w-2xl mx-auto text-base text-[var(--muted-foreground)] mb-8">
+              <p className="max-w-2xl mx-auto text-sm text-[var(--muted-foreground)] mb-6">
                 {!currentProject
                   ? 'Projects keep your sources and conversations organized.'
                   : hasDocuments
@@ -423,7 +439,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                     ? () => composerRef.current?.focus()
                     : handleRequestAddSources}
                 disabled={!currentProject && !projectDialog}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
+                className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
               >
                 {!currentProject ? (
                   <>
@@ -449,24 +465,30 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   className="grid text-left"
                   style={welcomeHeroStyles.actions}
                 >
-                  <div
-                    className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
+                  {/* These two looked clickable and did nothing; they are now
+                      the two things a reader actually does from here. */}
+                  <button
+                    type="button"
+                    onClick={handleRequestAddSources}
+                    className="text-left bg-[var(--card)] rounded-lg border border-[var(--border)] hover:border-[var(--input)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] transition-base"
                     style={welcomeHeroStyles.card}
                   >
-                    <h3 className="font-medium text-base mb-1.5">Quick start</h3>
-                    <p className="text-sm text-[var(--muted-foreground)]">
-                      Upload files, web pages, or YouTube videos
-                    </p>
-                  </div>
-                  <div
-                    className="bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer"
+                    <span className="block font-medium text-sm mb-1">Add more sources</span>
+                    <span className="block text-sm text-[var(--muted-foreground)]">
+                      Files, web pages, YouTube videos or pasted text
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowChatSettings(true)}
+                    className="text-left bg-[var(--card)] rounded-lg border border-[var(--border)] hover:border-[var(--input)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] transition-base"
                     style={welcomeHeroStyles.card}
                   >
-                    <h3 className="font-medium text-base mb-1.5">Smart answers</h3>
-                    <p className="text-sm text-[var(--muted-foreground)]">
-                      Answers based on your documents
-                    </p>
-                  </div>
+                    <span className="block font-medium text-sm mb-1">Choose how answers read</span>
+                    <span className="block text-sm text-[var(--muted-foreground)]">
+                      Role and length; every answer still cites its sources
+                    </span>
+                  </button>
                 </div>
               )}
             </div>
@@ -507,7 +529,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                   <button
                     type="button"
                     onClick={retryPendingQuery}
-                    className="text-[var(--primary)] hover:underline"
+                    className="text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
                   >
                     {pendingQuery.retryMode === 'refresh' ? 'Refresh response' : 'Retry question'}
                   </button>
@@ -585,7 +607,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               aria-label={'Send message'}
               title={'Send message'}
               disabled={!inputValue.trim() || !canChat || isStreaming || noSourcesSelected}
-              className={`flex-shrink-0 bg-[var(--accent)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-base ${currentProject ? 'p-3' : 'p-2.5'}`}>
+              className={`flex-shrink-0 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base ${currentProject ? 'p-3' : 'p-2.5'}`}>
               {isStreaming ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
@@ -598,7 +620,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
           {messages.length > 0 && (
             <button 
               onClick={handleNewConversation}
-              className="mt-3 flex items-center gap-1 text-xs text-[var(--primary)] hover:underline">
+              className="mt-3 flex items-center gap-1 text-xs text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current">
               <span>New Conversation</span>
               <ChevronRight className="w-3 h-3" />
             </button>

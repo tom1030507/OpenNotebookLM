@@ -108,7 +108,7 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
   return createPortal(
     <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 ${fullScreen ? '' : 'p-2 sm:p-5'}`}>
       <div ref={dialogRef} role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId}
-        className={`flex w-full min-w-0 flex-col overflow-hidden bg-[var(--background)] shadow-2xl ${
+        className={`flex w-full min-w-0 flex-col overflow-hidden bg-[var(--card)] shadow-xl ${
           fullScreen ? 'h-dvh' : 'h-[92dvh] max-w-[1440px] rounded-2xl border border-[var(--border)]'
         }`}>
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3 sm:px-6">
@@ -161,7 +161,7 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
 
         <div ref={scrollRef} role="region" aria-label="Mind map canvas" aria-describedby={instructionsId} tabIndex={0}
           className={`min-h-0 flex-1 overflow-auto overscroll-contain ${dragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
-          style={{ backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '24px 24px' }}
+          style={{ /* taste-skill-ignore: the dot grid is the canvas's pan affordance, not decoration */ backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '24px 24px' }}
           onPointerDown={(event) => {
             if (event.pointerType === 'touch' || event.button !== 0 || (event.target as HTMLElement).closest('button')) return;
             const viewport = event.currentTarget;
@@ -199,7 +199,7 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
                       <div key={node.id} className="absolute" style={{ left: node.x, top: node.y, width: NODE_WIDTH, height: NODE_HEIGHT }}>
                         <button type="button" aria-label={`Explore ${node.label}`} aria-pressed={isSelected}
                           title={node.label} onClick={() => setSelectedId(node.id)}
-                          className="flex h-full w-full cursor-pointer items-center justify-center rounded-full border px-6 text-center text-base font-medium shadow-sm transition-shadow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--ring)]"
+                          className="flex h-full w-full cursor-pointer items-center justify-center rounded-full border px-6 text-center text-base font-medium transition-colors hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--ring)]"
                           style={{
                             color: root ? 'white' : 'var(--foreground)',
                             background: root ? '#4057a4' : `color-mix(in srgb, ${color} 10%, var(--card))`,
@@ -210,7 +210,7 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
                           <button type="button" aria-label={`${node.isCollapsed ? 'Expand' : 'Collapse'} ${node.label}`} aria-expanded={!node.isCollapsed}
                             title={node.isCollapsed ? `Show ${node.childCount} branches` : 'Collapse branch'}
                             onClick={() => setCollapsed((current) => toggleCollapsed(current, node.id))}
-                            className="absolute -right-4 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-[var(--card)] text-xs shadow-sm focus-visible:outline-2 focus-visible:outline-[var(--ring)]"
+                            className="absolute -right-4 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-[var(--card)] text-xs focus-visible:outline-2 focus-visible:outline-[var(--ring)]"
                             style={{ borderColor: color, color: 'var(--foreground)' }}>
                             {node.isCollapsed ? <span>{node.childCount}</span> : <ChevronDown className="h-4 w-4" />}
                           </button>

@@ -1,64 +1,90 @@
 @import "tailwindcss";
 
+/* Achromatic ledger (taste-skill app style, seed 1316639960). The chrome holds
+   no colour: actions are near-black, surfaces are separated by one hairline or
+   one tone step, and the single hue (--accent) is spent only on the data a
+   reader is checking — citations and the passages they point at. A second hue
+   on buttons or tabs would compete with the citation marks for attention. */
 :root,
 [data-theme='light'] {
-  /* Google NotebookLM Colors */
-  --background: #f8f9fa;
-  --foreground: #202124;
+  /* The ground is a low-chroma stone rather than a stock #f8f8f8: this is a
+     notebook, read for hours, and a warmer cream read as yellow. Cards stay
+     white on it. */
+  --background: #f4f4f2;
+  --foreground: #0a0a0a;
   --card: #ffffff;
-  --card-foreground: #202124;
-  --primary: #1a73e8;
-  --primary-hover: #1557b0;
-  /* Text and icons drawn on --primary. It is a token rather than a literal
-     white because dark mode flips --primary to a light blue: white on that is
-     2.1:1, well under the 4.5:1 AA floor. */
+  --card-foreground: #0a0a0a;
+  --primary: #141414;
+  --primary-hover: #2e2e2e;
+  /* Text and icons drawn on --primary; dark mode inverts --primary to white,
+     so this cannot be a literal. */
   --primary-foreground: #ffffff;
-  --secondary: #f0f3ff;
-  --secondary-foreground: #202124;
-  --muted: #f1f3f4;
-  --muted-foreground: #5f6368;
-  --accent: #9b51e0;
+  --secondary: #ededeb;
+  --secondary-foreground: #0a0a0a;
+  --muted: #ededeb;
+  /* The lightest grey that still clears 4.5:1 on both white and the ground. */
+  --muted-foreground: #63635e;
+  --accent: #1d5fbf;
   --accent-foreground: #ffffff;
-  /* Fill for a selected row. Without it `bg-[var(--accent-bg)]` in
-     ConversationList resolved to an invalid colour, the declaration was
-     dropped, and the open conversation looked identical to the closed ones. */
-  --accent-bg: #e8f0fe;
-  --border: #dadce0;
-  --input: #dadce0;
-  --ring: #1a73e8;
+  /* Fill for a selected row: the neutral pill the sidebar's active item uses,
+     so a selection is never mistaken for a hover or a focus ring. */
+  --accent-bg: #e6e6e3;
+  --border: #e4e4e0;
+  --input: #d3d3cf;
+  --ring: #1d5fbf;
   --radius: 8px;
-  
-  /* Sidebar */
-  --sidebar-bg: #f0f3ff;
-  --sidebar-border: #e8eaed;
-  
-  /* Status colors */
-  --success: #34a853;
-  --warning: #fbbc04;
-  --error: #ea4335;
+
+  --sidebar-bg: #f4f4f2;
+  --sidebar-border: #e4e4e0;
+
+  /* The brand mark keeps its own colours (#73); it must not follow --primary
+     into black. */
+  --brand-from: #1a73e8;
+  --brand-to: #9b51e0;
+
+  --success: #2e7d32;
+  --warning: #92400e;
+  --error: #c4242a;
+  /* Pale notice grounds; the ink on them is the matching status colour. */
+  --success-bg: #dcfae5;
+  --warning-bg: #fffbeb;
+  --error-bg: #ffedea;
+
+  --font-ui: var(--font-geist), "Noto Sans TC", "PingFang TC", "Microsoft JhengHei",
+    "Hiragino Sans", system-ui, sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
+/* True neutral dark, no navy: elevation by lightness, the hue lifted until it
+   clears 4.5:1 on the surfaces it sits on. */
 [data-theme='dark'] {
-  --background: #202124;
-  --foreground: #e8eaed;
-  --card: #292a2d;
-  --card-foreground: #e8eaed;
-  --primary: #8ab4f8;
-  --primary-hover: #aecbfa;
-  --primary-foreground: #202124;
-  --secondary: #292a2d;
-  --secondary-foreground: #e8eaed;
-  --muted: #3c4043;
-  --muted-foreground: #9aa0a6;
-  --accent: #bb86fc;
-  --accent-foreground: #202124;
-  /* Dark enough that --muted-foreground, which the row's timestamp uses,
-     still clears 4.5:1 on top of it. */
-  --accent-bg: #2b3446;
-  --border: #3c4043;
-  --input: #3c4043;
-  --sidebar-bg: #292a2d;
-  --sidebar-border: #3c4043;
+  --background: #111111;
+  --foreground: #ededed;
+  --card: #191919;
+  --card-foreground: #ededed;
+  --primary: #f2f2f2;
+  --primary-hover: #d9d9d9;
+  --primary-foreground: #111111;
+  --secondary: #222222;
+  --secondary-foreground: #ededed;
+  --muted: #222222;
+  --muted-foreground: #b4b4b4;
+  --accent: #79aefc;
+  --accent-foreground: #111111;
+  --accent-bg: #2a2a2a;
+  --border: #2e2e2e;
+  --input: #444444;
+  --ring: #79aefc;
+  --sidebar-bg: #111111;
+  --sidebar-border: #2e2e2e;
+  --brand-from: #8ab4f8;
+  --brand-to: #bb86fc;
+  --success: #3fc07a;
+  --warning: #e0a84f;
+  --error: #ef6b7f;
+  --success-bg: #172a1d;
+  --warning-bg: #2b2414;
+  --error-bg: #2c1a20;
 }
 
 .theme-icon--sun {
@@ -87,20 +113,29 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Oxygen, Ubuntu, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom utility classes */
-.glass-morphism {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-code);
+}
+
+/* Counts, timestamps and sizes update in place; proportional digits make them
+   jitter as they change. */
+.tabular-nums,
+time {
+  font-variant-numeric: tabular-nums;
 }
 
 .transition-base {
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
 
 /* Custom scrollbar */
@@ -110,7 +145,7 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--muted);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -119,7 +154,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-foreground);
+  background: var(--input);
 }
 
 /* Studio's video summary fades each scene in as it starts.

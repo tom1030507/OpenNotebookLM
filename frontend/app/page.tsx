@@ -16,6 +16,8 @@ import {
 } from '@/components/desktopLayout';
 import useStore from '@/store/useStore';
 import useDocumentStatusWatch from '@/hooks/useDocumentStatusWatch';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { DESKTOP_MEDIA_QUERY } from '@/components/responsiveLayoutContract';
 
 export default function Home() {
   const currentProject = useStore((state) => state.currentProject);
@@ -28,6 +30,22 @@ export default function Home() {
     },
   );
   const [isAddSourcesOpen, setIsAddSourcesOpen] = useState(false);
+  // On desktop, conversations share the left column with Sources instead of
+  // taking a fourth track: four columns left the answer about 690px wide at
+  // 1440px and every panel cramped. Below `xl` they keep their own drawer.
+  // Exactly one ConversationList is mounted either way.
+  const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY);
+  const sourcesPanel = (
+    <SourcesPanel
+      isCollapsed={layoutState.sources}
+      onCollapsedChange={() => {
+        dispatchLayout({ type: 'toggle-panel', panel: 'sources' });
+      }}
+      isAddSourcesOpen={isAddSourcesOpen}
+      onAddSourcesOpenChange={setIsAddSourcesOpen}
+    />
+  );
+  const showConversationsInSidebar = isDesktop && hasProject && !layoutState.sources;
 
   useEffect(() => {
     dispatchLayout({
@@ -49,18 +67,18 @@ export default function Home() {
 
         {/* Main Content Area — drawers below `lg`, bounded grid tracks at `lg` and up */}
         <ResponsiveLayout
-          desktopStyle={getDesktopWorkspaceStyle(layoutState, hasProject)}
+          desktopStyle={getDesktopWorkspaceStyle(layoutState, hasProject && !isDesktop)}
           sidebar={
-            <SourcesPanel
-              isCollapsed={layoutState.sources}
-              onCollapsedChange={() => {
-                dispatchLayout({ type: 'toggle-panel', panel: 'sources' });
-              }}
-              isAddSourcesOpen={isAddSourcesOpen}
-              onAddSourcesOpenChange={setIsAddSourcesOpen}
-            />
+            showConversationsInSidebar ? (
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="min-h-0 flex-1">{sourcesPanel}</div>
+                <div className="flex min-h-0 max-h-[38%] flex-col border-r border-t border-[var(--border)]">
+                  <ConversationList embedded />
+                </div>
+              </div>
+            ) : sourcesPanel
           }
-          conversationPanel={<ConversationList />}
+          conversationPanel={isDesktop ? undefined : <ConversationList />}
           rightPanel={(isDrawer) => (
             <StudioPanel
               isCollapsed={isDrawer ? false : layoutState.studio}

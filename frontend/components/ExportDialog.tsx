@@ -100,14 +100,14 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--background)] rounded-lg w-full max-w-md"
+        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md"
       >
         {/* Header */}
         <div className="p-6 border-b border-[var(--border)]">
@@ -137,7 +137,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
             {formats.map((fmt) => (
               <label
                 key={fmt}
-                className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-all ${
+                className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
                   format === fmt
                     ? 'border-[var(--primary)] bg-[var(--primary)]/5'
                     : 'border-[var(--border)] hover:bg-[var(--muted)]'

@@ -265,11 +265,12 @@ export default function SourcesPanel({
         className="min-h-0 flex-1 flex flex-col"
       >
       {/* Header */}
-      <div className="p-4 border-b border-[var(--sidebar-border)]">
-        <h2 className="pr-10 text-base font-medium mb-3">Sources</h2>
+      <div className="px-4 pt-4 pb-3 border-b border-[var(--sidebar-border)]">
+        <h2 className="pr-10 text-sm font-semibold mb-3">Sources</h2>
         
-        {/* Project Selector */}
-        <div className="space-y-2 mb-3">
+        {/* Project selector and New Project share one row: stacked, the two
+            took 90px of a column that also has to hold the source list. */}
+        <div className="flex items-center gap-2 mb-2">
           <select
             aria-label={'Select a project'}
             value={currentProject?.id || ''}
@@ -277,7 +278,7 @@ export default function SourcesPanel({
               const project = projects.find(p => p.id === e.target.value);
               if (project) selectProject(project);
             }}
-            className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+            className="min-w-0 flex-1 h-9 px-2.5 bg-[var(--card)] border border-[var(--input)] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
           >
             <option value="">Select a project</option>
             {projects.map((project) => (
@@ -289,10 +290,11 @@ export default function SourcesPanel({
           
           <button
             onClick={openProjectDialog}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
+            aria-label="New Project"
+            title="New Project"
+            className="shrink-0 h-9 w-9 flex items-center justify-center border border-[var(--input)] bg-[var(--card)] rounded-md hover:bg-[var(--muted)] transition-base disabled:opacity-50"
           >
             <FolderOpen className="w-4 h-4" />
-            <span className="text-sm">New Project</span>
           </button>
         </div>
         
@@ -300,24 +302,24 @@ export default function SourcesPanel({
         {currentProject && (
           <button 
             onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base"
+            className="w-full h-9 flex items-center justify-center gap-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)] transition-base"
           >
             <Plus className="w-4 h-4" />
-            <span className="text-sm">Add Source</span>
+            <span className="text-sm font-medium">Add Source</span>
           </button>
         )}
 
         {/* Search */}
         {currentProject && documents.length > 0 && (
-          <div className="mt-3 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
+          <div className="mt-2 relative">
+            <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
             <input
               type="text"
               aria-label="Search sources"
               placeholder="Search sources"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+              className="w-full h-9 pl-9 pr-3 bg-[var(--card)] border border-[var(--input)] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
             />
           </div>
         )}
@@ -325,7 +327,7 @@ export default function SourcesPanel({
 
       {/* Sources List */}
       {currentProject && (
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto px-2 py-3">
           {loadingDocuments ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
@@ -345,8 +347,8 @@ export default function SourcesPanel({
               )}
             </div>
           ) : (
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 px-1 text-xs text-[var(--muted-foreground)] cursor-pointer">
+            <div className="space-y-0.5">
+              <label className="flex items-center gap-2 px-2 pb-2 text-xs text-[var(--muted-foreground)] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -362,26 +364,28 @@ export default function SourcesPanel({
               {filteredDocuments.map((doc) => (
                 <div
                   key={doc.id}
-                  className="relative p-3 bg-[var(--card)] rounded-lg border border-[var(--border)] hover:shadow-sm transition-base cursor-pointer group"
+                  // Rows, not bordered cards: a list of peers read as a stack of
+                  // boxes, and each border cost the name a few characters.
+                  className="relative px-2 py-2 rounded-md hover:bg-[var(--muted)] transition-base cursor-pointer group"
                   onClick={() => setPreviewDocument(doc)}
                 >
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-2.5">
                     <input
                       type="checkbox"
                       checked={!deselected.includes(doc.id)}
                       onChange={() => toggleSourceSelected(currentProject.id, doc.id)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`Use ${doc.name} in answers and Studio`}
-                      className="mt-2.5 h-4 w-4 shrink-0 accent-[var(--primary)] cursor-pointer"
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)] cursor-pointer"
                     />
-                    <div className="p-2 bg-[var(--muted)] rounded">
+                    <span className="mt-0.5 shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
                       {getSourceIcon(doc.type)}
-                    </div>
+                    </span>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-medium truncate" title={doc.name}>
                         {doc.name}
                       </h3>
-                      <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                      <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
                         {STATUS_LABELS[doc.status] ?? doc.status}
                       </p>
                       {doc.status === 'error' && doc.error_message && (
@@ -396,13 +400,13 @@ export default function SourcesPanel({
                       what cut a filename down to a handful of characters.
                       Overlaying it spends that width only while it is on screen,
                       and focus-within keeps it reachable by keyboard. */}
-                  <div className="absolute right-2 top-2 flex items-center gap-1 rounded bg-[var(--card)] pl-1 opacity-0 transition-all group-hover:opacity-100 group-focus-within:opacity-100">
+                  <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-[var(--muted)] pl-1 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setPreviewDocument(doc);
                       }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      className="p-1 hover:bg-[var(--card)] rounded"
                       aria-label={'Preview document'}
                       title={'Preview document'}
                     >
@@ -413,7 +417,7 @@ export default function SourcesPanel({
                         e.stopPropagation();
                         void handleRenameDocument(doc);
                       }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      className="p-1 hover:bg-[var(--card)] rounded"
                       aria-label={'Rename document'}
                       title={'Rename document'}
                     >
@@ -424,7 +428,7 @@ export default function SourcesPanel({
                         e.stopPropagation();
                         handleDeleteDocument(doc.id);
                       }}
-                      className="p-1 hover:bg-[var(--muted)] rounded"
+                      className="p-1 hover:bg-[var(--card)] rounded"
                       aria-label={'Delete document'}
                       title={'Delete document'}
                     >
@@ -441,7 +445,7 @@ export default function SourcesPanel({
 
       {/* Upload Modal */}
       {isAddSourcesOpen && currentProject && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div
             ref={uploadDialogRef}
             role="dialog"
@@ -449,7 +453,7 @@ export default function SourcesPanel({
             aria-modal="true"
             aria-labelledby={uploadTitleId}
             aria-busy={isUploading}
-            className="bg-[var(--background)] rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+            className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
           >
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
               <h3 id={uploadTitleId} className="text-lg font-semibold">Add Source</h3>

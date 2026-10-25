@@ -156,14 +156,14 @@ export default function VideoSummaryDialog({
   // the containing block for `position: fixed` — which would pin this dialog to
   // the drawer's 320px width instead of the screen.
   return createPortal(
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--background)] rounded-lg w-full max-w-3xl max-h-[85vh] flex flex-col"
+        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-3xl max-h-[85vh] flex flex-col"
       >
         <div className="flex items-start justify-between gap-3 p-4 border-b border-[var(--border)]">
           <div className="min-w-0">
@@ -214,7 +214,7 @@ export default function VideoSummaryDialog({
               className="flex-1 min-h-0 overflow-y-auto p-6"
             >
               <div key={scene.id} className="scene-in">
-                <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                <p className="text-xs text-[var(--muted-foreground)] tabular-nums">
                   {`Scene ${index + 1} of ${scenes.length}`}
                 </p>
                 <h3 className="mt-2 text-2xl font-semibold leading-snug">

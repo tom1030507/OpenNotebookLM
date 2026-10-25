@@ -28,14 +28,14 @@ export default function TopNavInfoDialog({ title, onClose, children }: TopNavInf
   });
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--background)] rounded-lg w-full max-w-md max-h-[80vh] overflow-y-auto"
+        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md max-h-[80vh] overflow-y-auto"
       >
         <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
           <h2 id={titleId} className="text-lg font-semibold">{title}</h2>

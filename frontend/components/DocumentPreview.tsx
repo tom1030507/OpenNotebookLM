@@ -223,7 +223,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
                   href={document.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-[var(--primary)] hover:underline truncate"
+                  className="text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current truncate"
                 >
                   {document.url}
                 </a>
@@ -250,12 +250,12 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             return (
               <div className="h-full flex flex-col">
                 <div className="p-4 bg-[var(--card)] border-b border-[var(--border)] flex items-center gap-2">
-                  <Youtube className="w-4 h-4 text-red-600" />
+                  <Youtube className="w-4 h-4 text-[var(--error)]" />
                   <a
                     href={document.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-[var(--primary)] hover:underline truncate"
+                    className="text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current truncate"
                   >
                     {document.name}
                   </a>
@@ -317,7 +317,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               </p>
               <button
                 type="button"
-                className="mt-3 text-sm text-[var(--primary)] hover:underline"
+                className="mt-3 text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
                 onClick={() => setContentRefreshCount((count) => count + 1)}
               >
                 Check for extracted text
@@ -348,8 +348,10 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
 
   return (
     <div 
-      className={`fixed bg-black bg-opacity-50 flex items-center justify-center z-50 ${
-        isFullscreen ? 'inset-0' : 'inset-4'
+      // The backdrop always covers the window; only the panel insets. An inset
+      // backdrop left a strip of the live workspace showing around the edge.
+      className={`fixed inset-0 bg-black/40 flex items-center justify-center z-50 ${
+        isFullscreen ? '' : 'p-4'
       }`}
     >
       <div 
@@ -358,7 +360,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`bg-[var(--background)] rounded-lg flex flex-col ${
+        className={`bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg flex flex-col ${
           isFullscreen ? 'w-full h-full' : 'w-full max-w-5xl h-[90vh]'
         }`}
       >
@@ -385,7 +387,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
                 title={'Copy content'}
               >
                 {copied ? (
-                  <Check className="w-4 h-4 text-green-600" />
+                  <Check className="w-4 h-4 text-[var(--success)]" />
                 ) : (
                   <Copy className="w-4 h-4" />
                 )}
@@ -447,8 +449,8 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
 
         {/* Footer */}
         {['processing', 'transcribing'].includes(document.status) && (
-          <div className="p-4 border-t border-[var(--border)] bg-yellow-50 dark:bg-yellow-900/20">
-            <p className="text-sm text-yellow-800 dark:text-yellow-200">
+          <div className="p-4 border-t border-[var(--border)] bg-[var(--warning-bg)]">
+            <p className="text-sm text-[var(--warning)]">
               This document is still being processed. Some features may not be available yet.
             </p>
           </div>

@@ -116,29 +116,28 @@ afterEach(() => {
 });
 
 describe('desktop workspace layout', () => {
+  // From the `xl` breakpoint up, conversations live in the left column with
+  // Sources, so the grid has three tracks and the answer gets the rest.
   test.each([
-    [1024, 192, 456, 184, 192],
-    [1440, 216, 820.8, 187.2, 216],
-    [1920, 272, 1152, 224, 272],
+    [1280, 240, 820, 220],
+    [1440, 259.2, 950.4, 230.4],
+    [1920, 288, 1360, 272],
   ])(
-    'keeps a usable dominant center and bounded conversation track at %ipx',
-    (viewportWidth, sources, center, conversations, studio) => {
+    'keeps a dominant center between the sidebar and Studio at %ipx',
+    (viewportWidth, sources, center, studio) => {
       const metrics = resolveDesktopWorkspaceMetrics(
         viewportWidth,
         initialDesktopWorkspaceState,
+        false,
       );
 
       expect(metrics.sources).toBeCloseTo(sources);
       expect(metrics.center).toBeCloseTo(center);
-      expect(metrics.conversations).toBeCloseTo(conversations);
+      expect(metrics.conversations).toBe(0);
       expect(metrics.studio).toBeCloseTo(studio);
       expect(metrics.total).toBeCloseTo(viewportWidth);
-      expect(metrics.center).toBeGreaterThan(
-        Math.max(metrics.sources, metrics.conversations, metrics.studio),
-      );
-      expect(metrics.center).toBeGreaterThanOrEqual(448);
-      expect(metrics.conversations).toBeGreaterThanOrEqual(184);
-      expect(metrics.conversations).toBeLessThanOrEqual(224);
+      expect(metrics.center).toBeGreaterThanOrEqual(800);
+      expect(metrics.center).toBeGreaterThan(metrics.sources + metrics.studio);
     },
   );
 
@@ -213,7 +212,7 @@ describe('desktop workspace layout', () => {
 
     expect(workspace?.style.gridTemplateColumns).toBe(noProjectColumns);
     expect(noProjectColumns).toBe(
-      'clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 3rem',
+      'clamp(15rem, 18vw, 18rem) minmax(0, 1fr) 0 3rem',
     );
     expect(
       resolveDesktopWorkspaceMetrics(
@@ -221,7 +220,7 @@ describe('desktop workspace layout', () => {
         focusedState,
         false,
       ).center,
-    ).toBe(784);
+    ).toBe(736);
     expect(studio.getAttribute('data-panel-state')).toBe('collapsed');
     expect(screen.queryByRole('heading', { name: 'Conversations' })).toBeNull();
     expect(screen.queryByText('Select or create a project to get started')).toBeNull();
@@ -246,7 +245,7 @@ describe('desktop workspace layout', () => {
 
     expect(firstMarkup).toBe(secondMarkup);
     expect(firstMarkup).toContain(
-      'grid-template-columns:clamp(12rem, 15vw, 17rem) minmax(0, 1fr) 0 3rem',
+      'grid-template-columns:clamp(15rem, 18vw, 18rem) minmax(0, 1fr) 0 3rem',
     );
   });
 

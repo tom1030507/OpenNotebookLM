@@ -107,14 +107,14 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--background)] rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"
+        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"
       >
         {/* Sidebar */}
         <div className="w-64 border-r border-[var(--border)] bg-[var(--sidebar-bg)]">
@@ -130,7 +130,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                   onClick={() => setActiveTab(tab.id as SettingsTab)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-base ${
                     activeTab === tab.id
-                      ? 'bg-[var(--primary)] bg-opacity-10 text-[var(--primary)]'
+                      ? 'bg-[var(--accent-bg)] text-[var(--foreground)] font-medium'
                       : 'hover:bg-[var(--muted)]'
                   }`}
                 >
@@ -190,7 +190,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                               onClick={() => setTheme(option.value as ThemePreference)}
                               className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-base ${
                                 isSelected
-                                  ? 'border-[var(--primary)] bg-[var(--primary)] bg-opacity-10'
+                                  ? 'border-[var(--primary)] bg-[var(--accent-bg)]'
                                   : 'border-[var(--border)] hover:bg-[var(--muted)]'
                               }`}
                             >
@@ -418,7 +418,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         href={`${REPOSITORY_URL}#readme`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block text-sm text-[var(--primary)] hover:underline"
+                        className="block text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
                       >
                         Documentation
                       </a>
@@ -426,7 +426,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         href={REPOSITORY_URL}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block text-sm text-[var(--primary)] hover:underline"
+                        className="block text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
                       >
                         GitHub Repository
                       </a>
@@ -434,7 +434,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         href={`${REPOSITORY_URL}/issues/new`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block text-sm text-[var(--primary)] hover:underline"
+                        className="block text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
                       >
                         Report an Issue
                       </a>

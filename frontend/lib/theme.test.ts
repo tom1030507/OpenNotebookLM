@@ -13,6 +13,13 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {} }),
 }));
 
+// next/font is resolved by Next's compiler; outside it the loaders do not
+// exist, so the layout gets the CSS-variable class names it would receive.
+vi.mock('next/font/google', () => ({
+  Geist: () => ({ variable: 'font-geist' }),
+  Geist_Mono: () => ({ variable: 'font-geist-mono' }),
+}));
+
 import {
   applyTheme,
   initializeTheme,

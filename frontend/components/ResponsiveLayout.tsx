@@ -146,7 +146,7 @@ export default function ResponsiveLayout({
               }}
               aria-pressed={isOpen}
               aria-label={isOpen ? `${label} panel is open` : `Open ${label} panel`}
-              className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
+              className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
             >
               {label}
             </button>
@@ -218,7 +218,7 @@ export default function ResponsiveLayout({
                     type="button"
                     aria-label={`Close ${activePanelLabel} panel`}
                     onClick={dismissDrawer}
-                    className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm shadow-sm"
+                    className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   >
                     Close
                   </button>

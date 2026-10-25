@@ -62,21 +62,19 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--background)] rounded-lg w-full max-w-md"
+        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md"
       >
         <div className="flex items-center justify-between p-6 border-b border-[var(--border)]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-[var(--primary)] bg-opacity-10 flex items-center justify-center">
-              <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
-            </div>
-            <h2 id={titleId} className="text-lg font-semibold">
+          <div className="flex items-center gap-2">
+            <FolderPlus className="w-4 h-4 text-[var(--muted-foreground)]" aria-hidden="true" />
+            <h2 id={titleId} className="text-base font-semibold">
               {'Create New Project'}
             </h2>
           </div>
@@ -94,9 +92,9 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-              <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+            <div className="p-4 bg-[var(--error-bg)] border border-[var(--error)] rounded-lg flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-[var(--error)]" />
+              <p className="text-sm text-[var(--error)]">{error}</p>
             </div>
           )}
 
