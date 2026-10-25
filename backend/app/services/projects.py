@@ -148,16 +148,32 @@ class ProjectService:
         return duplicate
     
     @staticmethod
-    def get_project(db: Session, project_id: str) -> Optional[Project]:
-        """Get a project by ID."""
+    def get_project(db: Session, project_id: str, user_id: str) -> Optional[Project]:
+        """Get a project with counts scoped to the caller's conversations.
+
+        Args:
+            db: Database session.
+            project_id: Project to load.
+            user_id: Account whose private conversations are counted.
+
+        Returns:
+            The project, or None when it does not exist.
+        """
         project = db.query(Project).filter(Project.id == project_id).first()
         
         if project:
             # Add counts
             project.document_count = db.query(func.count(ProjectDocument.document_id))\
                 .filter(ProjectDocument.project_id == project_id).scalar() or 0
-            project.conversation_count = db.query(func.count(Conversation.id))\
-                .filter(Conversation.project_id == project_id).scalar() or 0
+            conversations = db.query(func.count(Conversation.id)).filter(
+                Conversation.project_id == project_id,
+            )
+            conversations = conversations.filter(
+                or_(Conversation.user_id == user_id, Conversation.user_id.is_(None))
+                if project.user_id == user_id
+                else Conversation.user_id == user_id
+            )
+            project.conversation_count = conversations.scalar() or 0
         
         return project
     

@@ -22,7 +22,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import get_db
-from app.db.models import AudioOverview, Base, Document, Project, ProjectMember, User
+from app.db.models import (
+    AudioOverview,
+    Base,
+    Conversation,
+    Document,
+    Message,
+    Project,
+    ProjectMember,
+    User,
+)
 
 # Retrieval and model inference are not what these tests exercise. Replacing the
 # RAG service before the app is imported keeps them in the minimal environment;
@@ -620,6 +629,64 @@ class TestConversationIsolation:
         assert env.alice.get("/api/conversations/%s" % conversation_id).status_code == 200
         assert env.alice.get("/api/projects/%s/conversations" % project_id).status_code == 200
 
+    def test_shared_project_conversations_belong_to_the_creator(self, env):
+        project_id = make_project(env.alice)
+        alice_conversation = make_conversation(env.alice, project_id, "Alice private")
+        grant_project_role(env, project_id, "viewer")
+
+        bob_created = env.bob.post(
+            "/api/projects/%s/conversations" % project_id,
+            json={"title": "Bob private"},
+        )
+        assert bob_created.status_code == 200, bob_created.text
+        bob_conversation = bob_created.json()["id"]
+        stored = env.session.query(Conversation).filter_by(id=bob_conversation).first()
+        assert stored.user_id == env.bob_user.id
+
+        message = Message(
+            id=str(uuid.uuid4()),
+            conversation_id=bob_conversation,
+            role="assistant",
+            text="Bob's answer",
+        )
+        env.session.add(message)
+        env.session.commit()
+
+        assert env.bob.get("/api/conversations/%s" % bob_conversation).status_code == 200
+        assert env.alice.get("/api/conversations/%s" % bob_conversation).status_code == 404
+        assert env.bob.get("/api/conversations/%s" % alice_conversation).status_code == 404
+        bob_list = env.bob.get("/api/projects/%s/conversations" % project_id)
+        alice_list = env.alice.get("/api/projects/%s/conversations" % project_id)
+        assert [row["id"] for row in bob_list.json()] == [bob_conversation]
+        assert [row["id"] for row in alice_list.json()] == [alice_conversation]
+        assert env.alice.put(
+            "/api/conversations/%s/messages/%s/rating" % (bob_conversation, message.id),
+            json={"rating": "up"},
+        ).status_code == 404
+        assert env.bob.put(
+            "/api/conversations/%s/messages/%s/rating" % (bob_conversation, message.id),
+            json={"rating": "up"},
+        ).status_code == 200
+        assert env.alice.get(
+            "/api/export/conversation/%s" % bob_conversation
+        ).status_code == 404
+        assert env.bob.get(
+            "/api/export/conversation/%s" % bob_conversation
+        ).status_code == 200
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).delete()
+        env.session.commit()
+        assert env.bob.get("/api/conversations/%s" % bob_conversation).status_code == 200
+        assert env.bob.get(
+            "/api/projects/%s/conversations" % project_id
+        ).status_code == 404
+        assert env.bob.post("/api/query", json={
+            "query": "Try the revoked project again",
+            "conversation_id": bob_conversation,
+        }).status_code == 404
+
 
 class TestQueryIsolation:
     """Asking a question about someone else's project is not found."""
@@ -633,6 +700,65 @@ class TestQueryIsolation:
             "query": "what is in here?", "project_id": project_id})
 
         assert response.status_code == 404
+
+    def test_shared_query_uses_only_project_sources_and_keeps_no_project_scope_owned(
+        self, env
+    ):
+        from app.routers.query import get_rag_service
+
+        class RecordingRAG:
+            def __init__(self):
+                self.project_documents = None
+                self.owned_documents = None
+
+            def query_with_conversation(self, **kwargs):
+                self.project_documents = kwargs["allowed_document_ids"]
+                return {
+                    "answer": "shared answer", "sources": [], "chunks_used": 0,
+                    "model_used": "test", "usage": {},
+                }
+
+            def query(self, **kwargs):
+                self.owned_documents = kwargs["allowed_document_ids"]
+                return {
+                    "answer": "private answer", "sources": [], "chunks_used": 0,
+                    "model_used": "test", "usage": {},
+                }
+
+        project_id = make_project(env.alice)
+        linked = make_document(env.session, env.alice_user, "Linked source")
+        unlinked = make_document(env.session, env.alice_user, "Unlinked source")
+        bob_owned = make_document(env.session, env.bob_user, "Bob private source")
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        rag = RecordingRAG()
+        production_app.dependency_overrides[get_rag_service] = lambda: rag
+
+        response = env.bob.post(
+            "/api/query",
+            json={
+                "query": "Ask about the shared source",
+                "project_id": project_id,
+                "document_ids": [linked],
+            },
+        )
+        rejected = env.bob.post(
+            "/api/query",
+            json={
+                "query": "Try an unlinked source",
+                "project_id": project_id,
+                "document_ids": [unlinked],
+            },
+        )
+        private = env.bob.post("/api/query", json={"query": "My own source"})
+
+        assert response.status_code == 200, response.text
+        assert rag.project_documents == [linked]
+        assert rejected.status_code == 404
+        assert private.status_code == 200, private.text
+        assert rag.owned_documents == [bob_owned]
 
 
 class TestExportIsolation:
@@ -660,6 +786,72 @@ class TestExportIsolation:
             "/api/export/batch", json=[bob_conversation, alice_conversation])
 
         assert response.status_code == 404
+
+    def test_shared_project_exports_sources_and_only_the_callers_chats(self, env):
+        project_id = make_project(env.alice)
+        linked = make_document(env.session, env.alice_user, "Shared export source")
+        unlinked = make_document(env.session, env.alice_user, "Unlinked export source")
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        alice_conversation = make_conversation(env.alice, project_id, "Alice private")
+        env.session.add(Conversation(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            title="Legacy owner conversation",
+        ))
+        env.session.commit()
+        grant_project_role(env, project_id, "viewer")
+        bob_created = env.bob.post(
+            "/api/projects/%s/conversations" % project_id,
+            json={"title": "Bob private"},
+        )
+        assert bob_created.status_code == 200, bob_created.text
+        bob_conversation = bob_created.json()["id"]
+
+        bob_export = env.bob.get(
+            "/api/export/project/%s?format=json" % project_id
+        )
+        bob_summary = env.bob.post("/api/export/project/%s/summary" % project_id)
+        bob_selected_summary = env.bob.post(
+            "/api/export/project/%s/summary" % project_id,
+            json={"document_ids": [linked]},
+        )
+        rejected_selection = env.bob.post(
+            "/api/export/project/%s/summary" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+        alice_export = env.alice.get(
+            "/api/export/project/%s?format=json" % project_id
+        )
+
+        assert bob_export.status_code == 200, bob_export.text
+        bob_data = bob_export.json()
+        assert [doc["id"] for doc in bob_data["documents"]] == [linked]
+        assert [row["id"] for row in bob_data["conversations"]] == [bob_conversation]
+        assert bob_summary.status_code == 200
+        assert "**Conversations**: 1" in bob_summary.text
+        assert "Bob private" in bob_summary.text
+        assert "Alice private" not in bob_summary.text
+        assert bob_selected_summary.status_code == 200
+        assert "Shared export source" in bob_selected_summary.text
+        assert rejected_selection.status_code == 404
+
+        assert alice_export.status_code == 200
+        alice_data = alice_export.json()
+        assert {row["title"] for row in alice_data["conversations"]} == {
+            "Alice private",
+            "Legacy owner conversation",
+        }
+        assert any(
+            row["id"] == alice_conversation for row in alice_data["conversations"]
+        )
+        assert env.alice.get(
+            "/api/projects/%s" % project_id
+        ).json()["conversation_count"] == 2
+        assert env.bob.get(
+            "/api/projects/%s" % project_id
+        ).json()["conversation_count"] == 1
 
 
 class TestMindMapIsolation:
@@ -929,6 +1121,48 @@ class TestProjectOverviewIsolation:
         assert env.alice.get("/api/projects/%s/overview" % project_id).status_code == 200
         assert env.alice.post(
             "/api/conversations/%s/follow-ups" % conversation_id).status_code == 200
+
+    def test_shared_overview_includes_sources_uploaded_by_an_editor(self, env):
+        import json
+
+        from app.routers.project_overview import get_project_overview_service
+        from app.services.project_overview import ProjectOverviewService
+
+        class RecordingLLM:
+            prompts = []
+
+            def generate(self, prompt, **kwargs):
+                self.prompts.append(prompt)
+                return {
+                    "text": json.dumps({
+                        "overview": "The shared source covers a unique subject.",
+                        "questions": ["What does the source explain?"],
+                    }),
+                    "model": "test",
+                    "usage": {},
+                }
+
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session,
+            env.bob_user,
+            title="Bob source",
+            source_type="txt",
+            content="Exclusive member source text",
+        )
+        grant_project_role(env, project_id, "editor")
+        assert env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        llm = RecordingLLM()
+        service = ProjectOverviewService(llm_service=llm)
+        production_app.dependency_overrides[get_project_overview_service] = lambda: service
+
+        response = env.bob.get("/api/projects/%s/overview" % project_id)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["overview"] == "The shared source covers a unique subject."
+        assert "Exclusive member source text" in llm.prompts[0]
 
 
 class TestProjectDuplicateIsolation:

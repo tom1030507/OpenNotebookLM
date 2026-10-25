@@ -99,7 +99,7 @@ async def get_project(
 ):
     """Get one of the caller's projects by ID."""
     require_project(db, project_id, current_user, min_role="viewer")
-    project = ProjectService.get_project(db, project_id)
+    project = ProjectService.get_project(db, project_id, current_user.id)
     
     return ProjectResponse(
         id=project.id,
@@ -279,7 +279,7 @@ async def duplicate_project(
         logger.error("Failed to duplicate project", project_id=project_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to duplicate project")
 
-    duplicate = ProjectService.get_project(db, duplicate.id)
+    duplicate = ProjectService.get_project(db, duplicate.id, current_user.id)
     return ProjectResponse(
         id=duplicate.id,
         name=duplicate.name,

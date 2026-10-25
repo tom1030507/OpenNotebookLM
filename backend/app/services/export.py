@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import zipfile
 from typing import Tuple, Any, Dict, List, Optional
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 import structlog
 
@@ -149,18 +150,31 @@ class ExportService:
         self,
         db: Session,
         project: Project,
+        user_id: str,
         format: str = "json",
         include_documents: bool = True,
         include_conversations: bool = True
     ) -> Tuple[str, str, str]:
-        """Export an entire project."""
+        """Export project metadata and the caller's private conversations.
+
+        Args:
+            db: Database session.
+            project: Project to export.
+            user_id: Account whose conversations may be included.
+            format: Output format.
+            include_documents: Include linked source metadata.
+            include_conversations: Include the caller's conversations.
+
+        Returns:
+            Content, media type, and download filename.
+        """
         if format == "json":
             return self._export_project_json(
-                db, project, include_documents, include_conversations
+                db, project, user_id, include_documents, include_conversations
             )
         elif format == "markdown":
             return self._export_project_markdown(
-                db, project, include_documents, include_conversations
+                db, project, user_id, include_documents, include_conversations
             )
         else:
             raise ValueError(f"Unsupported format: {format}")
@@ -178,10 +192,27 @@ class ExportService:
             ProjectDocument.project_id == project.id
         ).all()
 
+    def _get_project_conversations(
+        self,
+        db: Session,
+        project: Project,
+        user_id: str,
+    ):
+        """Return the caller's chats, including legacy chats for the owner."""
+        query = db.query(Conversation).filter(
+            Conversation.project_id == project.id
+        )
+        return query.filter(
+            or_(Conversation.user_id == user_id, Conversation.user_id.is_(None))
+            if project.user_id == user_id
+            else Conversation.user_id == user_id
+        )
+
     def _export_project_json(
         self,
         db: Session,
         project: Project,
+        user_id: str,
         include_documents: bool,
         include_conversations: bool
     ) -> Tuple[str, str, str]:
@@ -212,8 +243,8 @@ class ExportService:
         
         if include_conversations:
             data["conversations"] = []
-            conversations = db.query(Conversation).filter(
-                Conversation.project_id == project.id
+            conversations = self._get_project_conversations(
+                db, project, user_id
             ).all()
             
             for conv in conversations:
@@ -233,6 +264,7 @@ class ExportService:
         self,
         db: Session,
         project: Project,
+        user_id: str,
         include_documents: bool,
         include_conversations: bool
     ) -> Tuple[str, str, str]:
@@ -259,8 +291,8 @@ class ExportService:
         
         if include_conversations:
             content += "## Conversations\n\n"
-            conversations = db.query(Conversation).filter(
-                Conversation.project_id == project.id
+            conversations = self._get_project_conversations(
+                db, project, user_id
             ).all()
             
             for conv in conversations:
@@ -275,6 +307,7 @@ class ExportService:
         self,
         db: Session,
         project: Project,
+        user_id: str,
         document_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Generate a summary of the project.
@@ -282,6 +315,7 @@ class ExportService:
         Args:
             db: Database session.
             project: The project to summarise.
+            user_id: Account whose private conversations are included.
             document_ids: Optional subset of the project's sources to report
                 on; `None` reports on all of them.
 
@@ -311,8 +345,8 @@ class ExportService:
             })
         
         # Get conversation statistics
-        conversations = db.query(Conversation).filter(
-            Conversation.project_id == project.id
+        conversations = self._get_project_conversations(
+            db, project, user_id
         ).order_by(Conversation.updated_at.desc()).limit(5).all()
         
         recent_conversations = []
@@ -331,8 +365,8 @@ class ExportService:
             })
         
         # Get total conversation count
-        conversation_count = db.query(Conversation).filter(
-            Conversation.project_id == project.id
+        conversation_count = self._get_project_conversations(
+            db, project, user_id
         ).count()
         
         return {
