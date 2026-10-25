@@ -99,13 +99,14 @@ describe('ChatArea', () => {
   });
 
   it('disables starter questions when every source is deselected', async () => {
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: 'conversation-2',
+      message_id: 'message-1',
     });
     const createConversation = vi.spyOn(api, 'createConversation')
       .mockResolvedValue(conversation('conversation-2', project.id));
@@ -208,7 +209,7 @@ describe('ChatArea', () => {
     });
 
     it('prefills once and focuses after dialog cleanup without sending a question', async () => {
-      const query = vi.spyOn(api, 'query');
+      const query = vi.spyOn(api, 'streamQuery');
       const createConversation = vi.spyOn(api, 'createConversation');
       const { unmount } = render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
       const previousTrigger = document.createElement('button');
@@ -295,8 +296,8 @@ describe('ChatArea', () => {
     });
 
     it('waits for the current send to finish before consuming the topic question', async () => {
-      const request = deferred<Awaited<ReturnType<typeof api.query>>>();
-      const query = vi.spyOn(api, 'query').mockReturnValue(request.promise);
+      const request = deferred<Awaited<ReturnType<typeof api.streamQuery>>>();
+      const query = vi.spyOn(api, 'streamQuery').mockReturnValue(request.promise);
       vi.spyOn(api, 'getMessages').mockResolvedValue([]);
       render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
       const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -308,7 +309,7 @@ describe('ChatArea', () => {
       expect(composer.disabled).toBe(true);
       expect(query).toHaveBeenCalledTimes(1);
       await act(async () => {
-        request.resolve({ answer: '', sources: [], chunks_used: 0, model_used: null, usage: {}, conversation_id: 'conversation-1' });
+        request.resolve({ answer: '', sources: [], chunks_used: 0, model_used: null, usage: {}, conversation_id: 'conversation-1', message_id: 'message-1' });
       });
 
       await waitFor(() => expect(composer.value).toBe('Explain attention.'));
@@ -318,8 +319,8 @@ describe('ChatArea', () => {
     });
 
     it('does not restore a submitted topic after a late failure across project changes', async () => {
-      const request = deferred<Awaited<ReturnType<typeof api.query>>>();
-      vi.spyOn(api, 'query').mockReturnValue(request.promise);
+      const request = deferred<Awaited<ReturnType<typeof api.streamQuery>>>();
+      vi.spyOn(api, 'streamQuery').mockReturnValue(request.promise);
       vi.spyOn(api, 'getDocuments').mockResolvedValue([readyDocument]);
       vi.spyOn(api, 'getConversations').mockResolvedValue([]);
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -553,7 +554,7 @@ describe('ChatArea', () => {
 
   it('keeps a failed question visible and retries it without duplicate messages', async () => {
     const question = 'What does this source say?';
-    vi.spyOn(api, 'query')
+    vi.spyOn(api, 'streamQuery')
       .mockRejectedValueOnce(new Error('Request failed'))
       .mockResolvedValueOnce({
         answer: '',
@@ -562,6 +563,7 @@ describe('ChatArea', () => {
         model_used: null,
         usage: {},
         conversation_id: 'conversation-1',
+        message_id: 'message-1',
       });
     vi.spyOn(api, 'getMessages').mockResolvedValue([
       {
@@ -608,7 +610,7 @@ describe('ChatArea', () => {
 
   it('does not retry a pending question after every source is deselected', async () => {
     const question = 'What does this source say?';
-    const query = vi.spyOn(api, 'query').mockRejectedValue(new Error('Request failed'));
+    const query = vi.spyOn(api, 'streamQuery').mockRejectedValue(new Error('Request failed'));
     vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
       project_name: project.name,
       overview: null,
@@ -637,13 +639,14 @@ describe('ChatArea', () => {
   it('refreshes persisted messages without resending a question after its query succeeds', async () => {
     const question = 'What does this source say?';
     const refreshedMessages = deferred<Message[]>();
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'It explains the source.',
       sources: [],
       chunks_used: 1,
       model_used: 'test-model',
       usage: {},
       conversation_id: 'conversation-1',
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockRejectedValueOnce(new Error('Message refresh failed'))
@@ -705,13 +708,14 @@ describe('ChatArea', () => {
     const retryRefresh = deferred<Message[]>();
     const successorRefresh = deferred<Message[]>();
     const currentConversation = conversation('conversation-1', project.id);
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: currentConversation.id,
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockRejectedValueOnce(new Error('Initial refresh failed'))
@@ -760,13 +764,14 @@ describe('ChatArea', () => {
     const retryRefresh = deferred<Message[]>();
     const successorRefresh = deferred<Message[]>();
     const currentConversation = conversation('conversation-1', project.id);
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: currentConversation.id,
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockRejectedValueOnce(new Error('Initial refresh failed'))
@@ -833,13 +838,14 @@ describe('ChatArea', () => {
     const secondRefresh = deferred<Message[]>();
     const thirdRefresh = deferred<Message[]>();
     const currentConversation = conversation('conversation-1', project.id);
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: currentConversation.id,
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockRejectedValueOnce(new Error('Initial refresh failed'))
@@ -907,13 +913,14 @@ describe('ChatArea', () => {
     const secondRefresh = deferred<Message[]>();
     const thirdRefresh = deferred<Message[]>();
     const currentConversation = conversation('conversation-1', project.id);
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: currentConversation.id,
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockRejectedValueOnce(new Error('Initial refresh failed'))
@@ -962,13 +969,14 @@ describe('ChatArea', () => {
     const retryRefresh = deferred<Message[]>();
     const currentConversation = conversation('conversation-1', project.id);
     const otherConversation = conversation('conversation-2', project.id);
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: currentConversation.id,
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockRejectedValueOnce(new Error('Initial refresh failed'))
@@ -1007,13 +1015,14 @@ describe('ChatArea', () => {
     const question = 'Should logout surface an old refresh error?';
     const retryRefresh = deferred<Message[]>();
     const currentConversation = conversation('conversation-1', project.id);
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: currentConversation.id,
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockRejectedValueOnce(new Error('Initial refresh failed'))
@@ -1054,13 +1063,14 @@ describe('ChatArea', () => {
     const queryRefresh = deferred<Message[]>();
     const newerRefresh = deferred<Message[]>();
     const currentConversation = conversation('conversation-1', project.id);
-    const query = vi.spyOn(api, 'query').mockResolvedValue({
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
       answer: 'Answer',
       sources: [],
       chunks_used: 0,
       model_used: null,
       usage: {},
       conversation_id: currentConversation.id,
+      message_id: 'message-1',
     });
     const getMessages = vi.spyOn(api, 'getMessages')
       .mockReturnValueOnce(queryRefresh.promise)
@@ -1128,6 +1138,92 @@ describe('ChatArea', () => {
     await act(async () => {
       queryRequest.resolve();
       await queryRequest.promise;
+    });
+  });
+
+  it('shows streamed text and restores the question when generation is stopped', async () => {
+    let signal: AbortSignal | undefined;
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation: conversation('conversation-1', project.id),
+      messages: [],
+      sendQuery: async (_query, _stream, _onReady, options) => {
+        signal = options?.signal;
+        options?.onToken?.('Partial ');
+        options?.onToken?.('answer');
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        });
+      },
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'My question' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    expect(await screen.findByText('Partial answer')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop generating answer' }));
+
+    expect(signal?.aborted).toBe(true);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('My question');
+    expect(screen.queryByText('Partial answer')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('replaces partial text with the completed answer and hides Stop while messages refresh', async () => {
+    const refresh = deferred<void>();
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation: conversation('conversation-1', project.id),
+      messages: [],
+      sendQuery: async (_query, _stream, _onReady, options) => {
+        options?.onToken?.('Partial');
+        options?.onComplete?.({
+          answer: 'Final answer',
+          sources: [],
+          chunks_used: 1,
+          model_used: 'test',
+          usage: {},
+          conversation_id: 'conversation-1',
+          message_id: 'message-1',
+        });
+        return refresh.promise;
+      },
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Question' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    expect(await screen.findByText('Final answer')).not.toBeNull();
+    expect(screen.queryByText('Partial')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop generating answer' })).toBeNull();
+    act(() => useStore.setState({ messages: [
+      {
+        id: 'message-user',
+        conversation_id: 'conversation-1',
+        role: 'user',
+        content: 'Question',
+        created_at: '2026-08-21T00:00:00Z',
+      },
+      {
+        id: 'message-1',
+        conversation_id: 'conversation-1',
+        role: 'assistant',
+        content: 'Final answer',
+        citations: [],
+        created_at: '2026-08-21T00:00:01Z',
+      },
+    ] }));
+    expect(screen.getAllByText('Final answer')).toHaveLength(1);
+
+    await act(async () => {
+      refresh.resolve();
+      await refresh.promise;
     });
   });
 

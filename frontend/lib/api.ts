@@ -242,6 +242,10 @@ export interface QueryResponse {
   citation_checks?: CitationCheck[];
 }
 
+export interface StreamQueryResponse extends QueryResponse {
+  message_id: string | null;
+}
+
 /** Generated once a project's sources are ready; empty without a model. */
 export interface ProjectOverview {
   project_name: string;
@@ -1143,6 +1147,67 @@ const api = {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  },
+
+  async streamQuery(
+    data: QueryRequest,
+    signal?: AbortSignal,
+    onToken?: (token: string) => void,
+  ): Promise<StreamQueryResponse> {
+    const init = { method: 'POST', body: JSON.stringify(data), signal };
+    const headers = requestHeaders('text/event-stream', init, true);
+    const snapshot = snapshotSessionCredential(headers.get('Authorization'));
+    const response = await fetch(apiUrl('/query/stream'), { ...init, headers });
+    await guard('/query/stream', response, snapshot);
+    if (!response.body) throw new Error('Streaming query returned no response body.');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: StreamQueryResponse | null = null;
+    const dispatch = (block: string) => {
+      let event = 'message';
+      const lines: string[] = [];
+      for (const line of block.split(/\r\n|\r|\n/)) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        if (line.startsWith('data:')) lines.push(line.slice(5).replace(/^ /, ''));
+      }
+      if (!lines.length) return;
+
+      const payload = JSON.parse(lines.join('\n')) as Record<string, unknown>;
+      if (event === 'token') {
+        if (typeof payload.text !== 'string') throw new Error('Invalid streaming token.');
+        onToken?.(payload.text);
+      } else if (event === 'error') {
+        throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Streaming query failed.');
+      } else if (event === 'complete') {
+        result = payload as unknown as StreamQueryResponse;
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        let boundary: RegExpExecArray | null;
+        while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+          dispatch(buffer.slice(0, boundary.index));
+          buffer = buffer.slice(boundary.index + boundary[0].length);
+        }
+        if (done) {
+          if (buffer.trim()) dispatch(buffer);
+          break;
+        }
+      }
+    } catch (error) {
+      await reader.cancel(error).catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (!result) throw new Error('Streaming query ended before completion.');
+    return result;
   },
 
   exportConversation(

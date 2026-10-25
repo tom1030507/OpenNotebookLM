@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import api from '@/lib/api';
-import type { Conversation, Document, Message, MessageRating, Project } from '@/lib/api';
+import type {
+  Conversation,
+  Document,
+  Message,
+  MessageRating,
+  Project,
+  StreamQueryResponse,
+} from '@/lib/api';
 import { registerAccountStateRetirer } from '@/lib/sessionBoundary';
 
 interface AppState {
@@ -94,6 +101,11 @@ interface AppState {
     query: string,
     stream?: boolean,
     onConversationReady?: (conversationId: string) => void,
+    options?: {
+      signal?: AbortSignal;
+      onToken?: (token: string) => void;
+      onComplete?: (response: StreamQueryResponse) => void;
+    },
   ) => Promise<void>;
   
   // Actions - UI
@@ -909,8 +921,7 @@ const useStore = create<AppState>()(
         },
         
         // Query
-        sendQuery: async (query, stream = false, onConversationReady) => {
-          void stream;
+        sendQuery: async (query, stream = false, onConversationReady, options) => {
           const epoch = accountEpoch;
           const isCurrentAccount = () => accountEpoch === epoch;
           const state = get();
@@ -967,12 +978,18 @@ const useStore = create<AppState>()(
           );
           
           try {
-            await api.query({
+            const request = {
               project_id: projectId,
               query,
               conversation_id: conversationId,
               document_ids: selectedSourceIds(get()),
-            });
+            };
+            if (stream) {
+              const response = await api.streamQuery(request, options?.signal, options?.onToken);
+              options?.onComplete?.(response);
+            } else {
+              await api.query(request);
+            }
             if (!isCurrentAccount()) return;
             const refreshed = await get().fetchMessages(conversationId);
             if (!isCurrentAccount()) return;
@@ -983,7 +1000,9 @@ const useStore = create<AppState>()(
               throw new QueryMessageRefreshError(conversationId);
             }
           } catch (error) {
-            if (isCurrentAccount()) console.error('Query failed:', error);
+            if (isCurrentAccount() && !(error instanceof Error && error.name === 'AbortError')) {
+              console.error('Query failed:', error);
+            }
             throw error;
           }
         },

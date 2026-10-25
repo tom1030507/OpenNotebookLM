@@ -986,6 +986,17 @@ class TestQueryIsolation:
 
         assert response.status_code == 404
 
+    def test_stream_query_cannot_read_someone_elses_conversation(self, env):
+        project_id = make_project(env.alice)
+        conversation_id = make_conversation(env.alice, project_id)
+
+        response = env.bob.post("/api/query/stream", json={
+            "query": "what is in here?", "conversation_id": conversation_id,
+        })
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Conversation not found"
+
     def test_shared_query_uses_only_project_sources_and_keeps_no_project_scope_owned(
         self, env
     ):
@@ -1669,18 +1680,21 @@ class TestSourceSelectionIsolation:
         assert foreign.status_code == 404
         assert foreign.json() == missing.json()
 
-    def test_query_selecting_someone_elses_source_is_not_found(self, env):
+    @pytest.mark.parametrize("route", ["/api/query", "/api/query/stream"])
+    def test_query_selecting_someone_elses_source_is_not_found(self, env, route):
         alice_document = make_document(env.session, env.alice_user)
 
-        foreign = env.bob.post("/api/query", json={
+        foreign = env.bob.post(route, json={
             "query": "what is in here?", "document_ids": [alice_document]})
-        missing = env.bob.post("/api/query", json={
+        missing = env.bob.post(route, json={
             "query": "what is in here?", "document_ids": [MISSING_ID]})
 
         assert foreign.status_code == 404
         assert foreign.json() == missing.json()
 
-    @pytest.mark.parametrize("route", SELECTION_ROUTES + ["/api/query"])
+    @pytest.mark.parametrize(
+        "route", SELECTION_ROUTES + ["/api/query", "/api/query/stream"]
+    )
     def test_an_empty_selection_is_refused(self, env, route):
         project_id = make_project(env.alice)
 

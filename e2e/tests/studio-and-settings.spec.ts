@@ -87,7 +87,7 @@ test('renders a fallback mind map from ready source structure', async ({ api, pa
 test('explores a mind map and brings a question back to mobile chat', async ({ api, page }, testInfo) => {
   const queryRequests: string[] = [];
   page.on('request', (request) => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/query')) {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/query/stream')) {
       queryRequests.push(request.url());
     }
   });

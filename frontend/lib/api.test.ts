@@ -822,6 +822,45 @@ describe('API client', () => {
     });
   });
 
+  it('parses split SSE query events and returns the completed answer', async () => {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode([
+      'event: token\r\ndata: {"text":"你"}\r\n\r\n',
+      'event: token\r\ndata: {"text":"好"}\r\n\r\n',
+      'event: complete\r\ndata: {"answer":"你好","sources":[],"chunks_used":0,"model_used":"test","usage":{},"conversation_id":"conversation-1","message_id":"message-1"}\r\n\r\n',
+    ].join(''));
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body));
+    vi.stubGlobal('fetch', fetchMock);
+    const signal = new AbortController().signal;
+    const tokens: string[] = [];
+
+    await expect(api.streamQuery({
+      project_id: 'project-1',
+      query: 'Question',
+      conversation_id: 'conversation-1',
+    }, signal, (token) => tokens.push(token))).resolves.toMatchObject({
+      answer: '你好',
+      conversation_id: 'conversation-1',
+      message_id: 'message-1',
+    });
+
+    expect(tokens).toEqual(['你', '好']);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/query/stream');
+    expect(fetchMock.mock.calls[0][1].signal).toBe(signal);
+    expect(fetchMock.mock.calls[0][1].headers.get('Accept')).toBe('text/event-stream');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+      project_id: 'project-1',
+      query: 'Question',
+      conversation_id: 'conversation-1',
+    });
+  });
+
   it('surfaces FastAPI detail messages for failed requests', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       detail: 'Project not found',

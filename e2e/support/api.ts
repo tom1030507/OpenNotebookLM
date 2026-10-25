@@ -65,6 +65,23 @@ export interface QueryResult {
   conversation_id: string | null;
 }
 
+export interface StreamQueryResult extends QueryResult {
+  message_id: string | null;
+}
+
+export function completeStreamQuery(body: string): StreamQueryResult {
+  const frame = body.split(/\r?\n\r?\n/).find((value) => (
+    value.split(/\r?\n/, 1)[0] === 'event: complete'
+  ));
+  if (!frame) throw new Error('The stream did not include a complete event.');
+
+  const data = frame.split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).replace(/^ /, ''))
+    .join('\n');
+  return JSON.parse(data) as StreamQueryResult;
+}
+
 export class E2EApi {
   private token: string | undefined;
 
@@ -193,6 +210,7 @@ export class E2EApi {
   }
 
   async query(projectId: string, conversationId: string, query: string): Promise<QueryResult> {
+    // Keep this helper on the JSON route to cover its backwards-compatible contract.
     return this.json(await this.request.post(`${runtime.apiUrl}/query`, {
       headers: this.authorization(),
       data: { project_id: projectId, conversation_id: conversationId, query },
