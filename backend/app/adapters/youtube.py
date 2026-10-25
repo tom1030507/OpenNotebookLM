@@ -4,14 +4,23 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs
 import structlog
 
+
+class CaptionsUnavailableError(Exception):
+    """Raised when YouTube does not return usable captions for a video."""
+
+
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
     from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
     HAS_YOUTUBE_API = True
-    CAPTION_UNAVAILABLE_ERRORS = (NoTranscriptFound, TranscriptsDisabled)
+    CAPTION_UNAVAILABLE_ERRORS = (
+        NoTranscriptFound,
+        TranscriptsDisabled,
+        CaptionsUnavailableError,
+    )
 except ImportError:
     HAS_YOUTUBE_API = False
-    CAPTION_UNAVAILABLE_ERRORS = ()
+    CAPTION_UNAVAILABLE_ERRORS = (CaptionsUnavailableError,)
 
 logger = structlog.get_logger()
 
@@ -115,10 +124,17 @@ class YouTubeAdapter:
                         break
             
             if not transcript:
-                raise ValueError("No transcript available for this video")
+                raise CaptionsUnavailableError(
+                    "YouTube did not return captions for this video"
+                )
             
             # Fetch the transcript
-            transcript_data = transcript.fetch()
+            try:
+                transcript_data = transcript.fetch()
+            except Exception as exc:
+                raise CaptionsUnavailableError(
+                    "YouTube did not return captions for this video"
+                ) from exc
             
             # Process transcript
             processed = self._process_transcript(transcript_data)

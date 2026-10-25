@@ -7,16 +7,19 @@ the pinned library version does not expose.
 """
 import importlib
 from types import SimpleNamespace
+from xml.etree.ElementTree import ParseError
 
 import pytest
 
-from app.adapters.youtube import YouTubeAdapter
-from youtube_transcript_api._errors import (
-    NoTranscriptFound,
-    TooManyRequests,
-    TranscriptsDisabled,
-    VideoUnavailable,
-)
+from app.adapters.youtube import CaptionsUnavailableError, YouTubeAdapter
+from youtube_transcript_api import _errors
+
+NoTranscriptFound = _errors.NoTranscriptFound
+TranscriptsDisabled = _errors.TranscriptsDisabled
+VideoUnavailable = _errors.VideoUnavailable
+TooManyRequests = getattr(_errors, "TooManyRequests", None)
+if TooManyRequests is None:
+    TooManyRequests = _errors.RequestBlocked
 
 youtube_transcript_api = pytest.importorskip("youtube_transcript_api")
 _api = importlib.import_module("youtube_transcript_api._api")
@@ -195,6 +198,28 @@ class FakeAudioTranscriber:
         }
 
 
+def _transcript_list_with_fetch_error(error):
+    """Return a transcript list whose chosen transcript fails on fetch."""
+    class BrokenTranscript:
+        language = "en"
+        is_generated = True
+
+        def fetch(self):
+            raise error
+
+    class TranscriptList:
+        def find_manually_created_transcript(self, languages):
+            raise LookupError("not manually created")
+
+        def find_generated_transcript(self, languages):
+            raise LookupError("not generated")
+
+        def find_transcript(self, languages):
+            return BrokenTranscript()
+
+    return TranscriptList()
+
+
 class TestYouTubeAdapterAudioFallback:
     """Use local audio only for explicit caption-unavailable responses."""
 
@@ -248,3 +273,39 @@ class TestYouTubeAdapterAudioFallback:
             )
 
         assert fallback.calls == []
+
+    def test_empty_caption_response_uses_audio_transcriber(self, monkeypatch):
+        """An empty timed-text response should use the configured fallback."""
+        fallback = FakeAudioTranscriber()
+        adapter = YouTubeAdapter(audio_transcriber=fallback)
+        monkeypatch.setattr(
+            adapter,
+            "_list_transcripts",
+            lambda video_id: _transcript_list_with_fetch_error(
+                ParseError("no element found: line 1, column 0")
+            ),
+        )
+
+        url = "https://www.youtube.com/watch?v={id}".format(id=VIDEO_ID)
+        result = adapter.extract_transcript(url)
+
+        assert result["transcription_source"] == "whisper"
+        assert fallback.calls == [url]
+
+    def test_empty_caption_response_has_friendly_error_without_fallback(self, monkeypatch):
+        """A parse failure without audio fallback should be human readable."""
+        adapter = YouTubeAdapter()
+        monkeypatch.setattr(
+            adapter,
+            "_list_transcripts",
+            lambda video_id: _transcript_list_with_fetch_error(
+                ParseError("no element found: line 1, column 0")
+            ),
+        )
+
+        with pytest.raises(CaptionsUnavailableError) as exc_info:
+            adapter.extract_transcript(
+                "https://www.youtube.com/watch?v={id}".format(id=VIDEO_ID)
+            )
+
+        assert str(exc_info.value) == "YouTube did not return captions for this video"
