@@ -479,6 +479,46 @@ class SourceSelection(BaseModel):
         return unique_ids
 
 
+class ReportRequest(SourceSelection):
+    """Options for one source-grounded project report."""
+    model_config = {"extra": "forbid"}
+
+    format: Literal["briefing", "study_guide", "faq", "timeline", "custom"]
+    instruction: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_custom_instruction(self):
+        """Require nonblank custom guidance and reject it for fixed formats.
+
+        Returns:
+            This request after its format and instruction are checked.
+        """
+        if self.format == "custom":
+            if not self.instruction or not self.instruction.strip():
+                raise ValueError("custom reports require a nonblank instruction")
+        elif self.instruction is not None:
+            raise ValueError("instruction is only accepted for custom reports")
+        return self
+
+
+class ReportCitation(BaseModel):
+    """One source citation rendered alongside a report."""
+    model_config = {"extra": "forbid"}
+
+    id: int
+    document_id: str
+    source: str
+    text: str
+
+
+class ReportResponse(BaseModel):
+    """Generated Markdown and its cited source passages."""
+    model_config = {"extra": "forbid"}
+
+    markdown: str
+    citations: List[ReportCitation] = Field(default_factory=list)
+
+
 class StudyRequest(SourceSelection):
     """Options for one temporary flashcard or quiz generation request."""
 

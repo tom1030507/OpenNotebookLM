@@ -53,6 +53,7 @@ from app.main import app as production_app  # noqa: E402
 from app.routers.mindmap import get_mindmap_service  # noqa: E402
 from app.routers.video import get_video_summary_service  # noqa: E402
 from app.routers.study import get_study_service  # noqa: E402
+from app.routers.report import get_report_service  # noqa: E402
 from app.routers.project_overview import get_project_overview_service  # noqa: E402
 from app.routers.audio_overview import get_audio_overview_worker  # noqa: E402
 from app.services.project_overview import ProjectOverviewService  # noqa: E402
@@ -1359,11 +1360,68 @@ class TestNoteIsolation:
         assert env.bob.delete("%s/%s" % (base, note_id)).status_code == 200
 
 
+class TestReportIsolation:
+    """Generated reports only receive sources authorized for the project."""
+
+    def _install_report_stub(self, monkeypatch):
+        class StubReportService:
+            def __init__(self):
+                self.calls = []
+
+            def generate(self, db, project_id, report_format, instruction, document_ids):
+                self.calls.append((project_id, report_format, instruction, document_ids))
+                return {"markdown": "Report [Source 1].", "citations": []}
+
+        service = StubReportService()
+        monkeypatch.setitem(
+            production_app.dependency_overrides,
+            get_report_service,
+            lambda: service,
+        )
+        return service
+
+    def test_generating_for_someone_elses_project_is_not_found(self, env, monkeypatch):
+        service = self._install_report_stub(monkeypatch)
+        project_id = make_project(env.alice)
+
+        foreign = env.bob.post(
+            "/api/projects/%s/report" % project_id,
+            json={"format": "briefing"},
+        )
+        missing = env.bob.post(
+            "/api/projects/%s/report" % MISSING_ID,
+            json={"format": "briefing"},
+        )
+
+        assert foreign.status_code == 404
+        assert foreign.json() == missing.json()
+        assert service.calls == []
+
+    def test_report_service_receives_only_the_selected_linked_sources(self, env, monkeypatch):
+        service = self._install_report_stub(monkeypatch)
+        project_id = make_project(env.alice)
+        kept = make_document(env.session, env.alice_user, "Kept report source")
+        dropped = make_document(env.session, env.alice_user, "Dropped report source")
+        for document_id in (kept, dropped):
+            assert env.alice.post(
+                "/api/projects/%s/documents/%s" % (project_id, document_id)
+            ).status_code == 200
+
+        response = env.alice.post(
+            "/api/projects/%s/report" % project_id,
+            json={"format": "briefing", "document_ids": [kept]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert service.calls == [(project_id, "briefing", None, [kept])]
+
+
 SELECTION_ROUTES = [
     "/api/projects/%s/mindmap",
     "/api/projects/%s/video-summary",
     "/api/projects/%s/flashcards",
     "/api/projects/%s/quiz",
+    "/api/projects/%s/report",
     "/api/export/project/%s/summary",
 ]
 
@@ -1407,9 +1465,14 @@ class TestSourceSelectionIsolation:
         project_id = make_project(env.bob, BOB_PROJECT)
         alice_document = make_document(env.session, env.alice_user)
 
-        foreign = env.bob.post(
-            route % project_id, json={"document_ids": [alice_document]})
-        missing = env.bob.post(route % project_id, json={"document_ids": [MISSING_ID]})
+        if route.endswith("/report"):
+            foreign_body = {"format": "briefing", "document_ids": [alice_document]}
+            missing_body = {"format": "briefing", "document_ids": [MISSING_ID]}
+        else:
+            foreign_body = {"document_ids": [alice_document]}
+            missing_body = {"document_ids": [MISSING_ID]}
+        foreign = env.bob.post(route % project_id, json=foreign_body)
+        missing = env.bob.post(route % project_id, json=missing_body)
 
         assert foreign.status_code == 404
         assert foreign.json() == missing.json()
@@ -1429,9 +1492,12 @@ class TestSourceSelectionIsolation:
     def test_an_empty_selection_is_refused(self, env, route):
         project_id = make_project(env.alice)
 
+        payload = {"format": "briefing", "document_ids": []} if route.endswith(
+            "/report"
+        ) else {"query": "anything", "document_ids": []}
         response = env.alice.post(
             route % project_id if "%s" in route else route,
-            json={"query": "anything", "document_ids": []},
+            json=payload,
         )
 
         assert response.status_code == 422
