@@ -323,6 +323,58 @@ def test_file_job_extracts_using_the_persisted_extension_and_indexes_text(lifecy
     assert document.meta_json["metadata"] == {"format": "docx"}
 
 
+def test_pdf_url_job_preserves_page_boundaries(lifecycle_db):
+    url = "https://example.com/report.pdf"
+    document = Document(
+        id="pdf-url-document",
+        title=url,
+        source_type="url",
+        source_url=url,
+        status="queued",
+    )
+    lifecycle_db.add(document)
+    lifecycle_db.commit()
+
+    class PDFURLExtractor:
+        def extract_content(self, source_url):
+            assert source_url == url
+            return {
+                "text": "Remote report text",
+                "title": "Remote report",
+                "metadata": {"author": "Researcher"},
+                "headings": [],
+                "links": [],
+                "pages": [{"page_num": 1, "text": "Remote report text"}],
+                "num_pages": 1,
+            }
+
+    service = DocumentService(
+        chunking_service=SimpleNamespace(
+            chunk_document=lambda *_args, **_kwargs: [object()],
+        ),
+        embedding_service=SimpleNamespace(
+            embed_chunks=lambda *_args, **_kwargs: [object()],
+        ),
+        pdf_adapter=object(),
+        url_adapter=PDFURLExtractor(),
+    )
+    service._publish_document_index = lambda *_args, **_kwargs: None
+
+    assert service.process_ingestion_job(
+        lifecycle_db,
+        document_id=document.id,
+        job_type="url",
+        payload={"url": url},
+    ) == "ready"
+
+    assert document.title == "Remote report"
+    assert document.content == "Remote report text"
+    assert document.meta_json["num_pages"] == 1
+    assert document.meta_json["pages"] == [
+        {"page_num": 1, "text": "Remote report text"}
+    ]
+
+
 def test_non_pdf_upload_persists_its_extension_and_a_file_job(
     lifecycle_db,
     tmp_path,

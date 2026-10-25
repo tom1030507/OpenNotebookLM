@@ -10,16 +10,19 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import fitz
 import pytest
 import requests
 import urllib3.connection
 from bs4 import BeautifulSoup
 
 from app.adapters import url as url_module
+from app.adapters.pdf import PDFAdapter
 from app.adapters.url import URLAdapter
 from app.utils.network import (
     UnsafeURLError,
     resolve_public_http_url,
+    validate_http_url_syntax,
     validate_public_http_url,
 )
 
@@ -132,6 +135,16 @@ class SequenceClock:
 
 class TestPublicURLPolicy:
     """Only globally routable credential-free HTTP(S) targets are fetchable."""
+
+    def test_syntax_preflight_does_not_resolve_public_hostnames(self, monkeypatch):
+        def fail_resolution(*_args, **_kwargs):
+            raise AssertionError("request preflight must not perform DNS")
+
+        monkeypatch.setattr(socket, "getaddrinfo", fail_resolution)
+
+        assert validate_http_url_syntax(
+            "HTTPS://example.com/article?q=1#fragment"
+        ) == "https://example.com/article?q=1"
 
     @pytest.mark.parametrize(
         "url,addresses",
@@ -307,6 +320,65 @@ class TestPublicURLPolicy:
 
 class TestSafeURLDownload:
     """Every response hop is manually validated and streamed into a hard cap."""
+
+    def test_pdf_response_uses_the_existing_pdf_adapter(self):
+        pdf_document = fitz.open()
+        pdf_document.new_page().insert_text((72, 72), "PDF report text")
+        pdf_document.set_metadata({"title": "Remote report"})
+        pdf_bytes = pdf_document.tobytes()
+        pdf_document.close()
+        response = FakeResponse(
+            headers={"Content-Type": "application/pdf"},
+            chunks=[pdf_bytes],
+        )
+        adapter = URLAdapter(
+            resolver=resolver_for("93.184.216.34"),
+            session=FakeSession([response]),
+            pdf_adapter=PDFAdapter(ocr_enabled=False),
+        )
+
+        result = adapter.extract_content("https://example.com/report.pdf")
+
+        assert result["text"] == "PDF report text"
+        assert result["title"] == "Remote report"
+        assert result["num_pages"] == 1
+        assert result["pages"][0]["text"] == "PDF report text"
+        assert response.closed is True
+
+    def test_pdf_response_uses_the_same_download_limit(self):
+        response = FakeResponse(
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Length": str(10 * 1024 * 1024 + 1),
+            },
+        )
+        adapter = URLAdapter(
+            resolver=resolver_for("93.184.216.34"),
+            session=FakeSession([response]),
+            pdf_adapter=object(),
+        )
+
+        with pytest.raises(UnsafeURLError, match="10MB"):
+            adapter.extract_content("https://example.com/large.pdf")
+
+        assert response.chunks_read == 0
+        assert response.closed is True
+
+    def test_unsupported_response_names_its_content_type(self):
+        response = FakeResponse(
+            headers={"Content-Type": "application/json"},
+            chunks=[b"{}"],
+        )
+        adapter = URLAdapter(
+            resolver=resolver_for("93.184.216.34"),
+            session=FakeSession([response]),
+        )
+
+        with pytest.raises(UnsafeURLError, match="application/json"):
+            adapter.extract_content("https://example.com/data")
+
+        assert response.chunks_read == 0
+        assert response.closed is True
 
     def test_safe_html_is_streamed_with_redirects_disabled(self):
         response = FakeResponse(chunks=[b"<html><main><p>Safe page</p></main></html>"])

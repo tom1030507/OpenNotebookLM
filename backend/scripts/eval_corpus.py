@@ -93,7 +93,7 @@ def serve_from_cache(entries: Iterable[Dict]):
         doc_id = by_url.get(url)
         if doc_id is None:
             raise requests.RequestException(f"{url} is not part of the eval corpus")
-        return url, cache_path(doc_id).read_bytes()
+        return url, cache_path(doc_id).read_bytes(), "text/html"
 
     with mock.patch.object(URLAdapter, "_download", cached_download):
         yield

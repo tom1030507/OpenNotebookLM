@@ -29,7 +29,7 @@ from app.services.rate_limit import (
     SlidingWindowRateLimiter,
     UnlimitedConcurrencyLease,
 )
-from app.utils.network import UnsafeURLError
+from app.utils.network import UnsafeURLError, validate_http_url_syntax
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -267,6 +267,11 @@ async def upload_url(
         Created document identifier and queued status.
     """
     require_project(db, project_id, current_user, min_role="editor")
+
+    try:
+        validate_http_url_syntax(request.url)
+    except UnsafeURLError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     
     lease = _begin_ingestion(
         current_user.id,
