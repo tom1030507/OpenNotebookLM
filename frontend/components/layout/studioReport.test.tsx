@@ -127,15 +127,13 @@ describe('Studio report', () => {
     ).toBe(false));
   });
 
-  it('leaves an output the browser cannot produce disabled', () => {
+  it('leaves an output the browser cannot produce disabled', async () => {
+    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: false, items: [] });
     render(<StudioPanel />);
 
-    // Audio has an endpoint but needs the Web Speech API, which jsdom has not.
-    // Every other output is produced by the backend, so every other output is
-    // usable here.
-    expect((screen.getByRole('button', {
-      name: /^Audio summary/,
-    }) as HTMLButtonElement).disabled).toBe(true);
+    const audio = screen.getByRole('button', { name: /^Audio summary/ });
+    fireEvent.click(audio);
+    await waitFor(() => expect((audio as HTMLButtonElement).disabled).toBe(true));
 
     for (const name of ['Video summary', 'Mind map', 'Report']) {
       const button = screen.getByRole('button', { name: new RegExp(`^${name}`) });

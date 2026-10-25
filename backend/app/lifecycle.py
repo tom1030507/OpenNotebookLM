@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.db.database import SessionLocal, init_db
 from app.services.auth import get_auth_service
 from app.services.bootstrap import ensure_demo_account
+from app.services.audio_overview_jobs import AudioOverviewWorker
 from app.services.ingestion_jobs import IngestionJobWorker
 
 logger = structlog.get_logger()
@@ -73,8 +74,17 @@ async def lifespan(app: FastAPI):
         concurrency=settings.ingestion_worker_concurrency,
     )
 
+    audio_overview_worker = AudioOverviewWorker(
+        session_factory=SessionLocal,
+        processor=getattr(app.state, "audio_overview_processor", None),
+    )
+    await audio_overview_worker.start()
+    app.state.audio_overview_worker = audio_overview_worker
+    logger.info("Durable audio overview worker started", concurrency=1)
+
     try:
         yield
     finally:
+        await audio_overview_worker.stop()
         await ingestion_worker.stop()
         logger.info("Shutting down OpenNotebookLM")

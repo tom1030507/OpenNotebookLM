@@ -239,3 +239,13 @@ def test_youtube_whisper_environment_overrides(monkeypatch):
     assert settings.yt_whisper_model == "small"
     assert settings.yt_max_duration_seconds == 900
     assert settings.yt_whisper_cache_dir == "./cache/whisper"
+
+
+def test_audio_overview_synthesis_defaults_on_and_can_be_disabled(monkeypatch):
+    """The documented switch controls only the generated local audio path."""
+    for variable in ("AUDIO_OVERVIEW_TTS_ENABLED",):
+        monkeypatch.delenv(variable, raising=False)
+
+    assert Settings(_env_file=None).audio_overview_tts_enabled is True
+    monkeypatch.setenv("AUDIO_OVERVIEW_TTS_ENABLED", "false")
+    assert Settings(_env_file=None).audio_overview_tts_enabled is False
