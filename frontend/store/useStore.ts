@@ -78,6 +78,7 @@ interface AppState {
   // Actions - Conversations
   fetchConversations: (projectId: string) => Promise<void>;
   selectConversation: (conversation: Conversation) => Promise<void>;
+  beginNewConversation: () => void;
   createConversation: (
     projectId: string,
     title?: string,
@@ -723,6 +724,15 @@ const useStore = create<AppState>()(
           if (!isCurrentAccount()) return;
           await get().fetchMessages(conversation.id);
         },
+
+        beginNewConversation: () => {
+          advanceReadGeneration('messages');
+          set({
+            currentConversation: null,
+            messages: [],
+            loadingMessages: false,
+          });
+        },
         
         createConversation: async (projectId, title, select = true) => {
           const epoch = accountEpoch;
@@ -735,7 +745,7 @@ const useStore = create<AppState>()(
                 advanceReadGeneration('messages');
               }
               set((state) => ({
-                conversations: [...state.conversations, conversation],
+                conversations: [conversation, ...state.conversations],
                 loadingConversations: false,
                 ...(select ? {
                   currentConversation: conversation,
@@ -909,6 +919,7 @@ const useStore = create<AppState>()(
           }
 
           const projectId = state.currentProject.id;
+          const startingMessagesGeneration = readGenerations.messages;
           const startingConversationId = state.currentConversation?.project_id
             === projectId
             ? state.currentConversation.id
@@ -919,7 +930,7 @@ const useStore = create<AppState>()(
           if (!conversationId) {
             const conversation = await state.createConversation(
               projectId,
-              query.substring(0, 50) + '...',
+              Array.from(query).slice(0, 100).join(''),
               false,
             );
             conversationId = conversation.id;
@@ -935,6 +946,8 @@ const useStore = create<AppState>()(
               &&
               activeState.currentProject?.id === projectId
               && activeConversationId === startingConversationId
+              // A second new-chat action also leaves the conversation id null.
+              && readGenerations.messages === startingMessagesGeneration
             ) {
               advanceReadGeneration('messages');
               set({

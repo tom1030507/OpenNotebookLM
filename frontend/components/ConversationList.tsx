@@ -30,7 +30,7 @@ export default function ConversationList({ embedded = false }: ConversationListP
     currentConversation,
     currentProject,
     selectConversation,
-    createConversation,
+    beginNewConversation,
     updateConversation,
     deleteConversation,
   } = useStore();
@@ -67,17 +67,13 @@ export default function ConversationList({ embedded = false }: ConversationListP
     }
   };
 
-  const handleNewConversation = async () => {
+  const handleNewConversation = () => {
     if (!currentProject) {
       alert('Please select a project first');
       return;
     }
-    
-    try {
-      await createConversation(currentProject.id, 'New Conversation');
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
-    }
+
+    beginNewConversation();
   };
 
   // Group conversations by date

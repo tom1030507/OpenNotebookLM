@@ -72,6 +72,32 @@ afterEach(() => {
 
 
 describe('ChatArea', () => {
+  it('starts a new conversation without creating an empty record', () => {
+    const existingConversation = conversation('conversation-1', project.id);
+    useStore.setState({
+      currentProject: project,
+      projects: [project],
+      documents: [readyDocument],
+      currentConversation: existingConversation,
+      messages: [{
+        id: 'message-1',
+        conversation_id: existingConversation.id,
+        role: 'user',
+        content: 'First question',
+        created_at: '2026-08-21T00:00:00Z',
+      }],
+    });
+    const createConversation = vi.spyOn(api, 'createConversation')
+      .mockResolvedValue(conversation('conversation-2', project.id));
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Conversation' }));
+
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(useStore.getState().currentConversation).toBeNull();
+    expect(useStore.getState().messages).toEqual([]);
+  });
+
   describe('mind map question handoff', () => {
     beforeEach(() => {
       useStore.setState({

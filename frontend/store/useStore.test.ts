@@ -959,12 +959,75 @@ describe('application store', () => {
 
     expect(apiMock.createConversation).toHaveBeenCalledWith(
       'project-2',
-      'Question...',
+      'Question',
     );
     expect(apiMock.query).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'project-2',
       conversation_id: 'conversation-2',
     }));
+  });
+
+  it('creates a new conversation only on the first question and puts it first', async () => {
+    const existingConversation = {
+      ...conversation('conversation-1', 'project-1'),
+      message_count: 1,
+    };
+    const createdConversation = conversation('conversation-2', 'project-1');
+    useStore.setState({
+      currentProject: project('project-1'),
+      conversations: [existingConversation],
+      currentConversation: existingConversation,
+      messages: [message('message-1', existingConversation.id)],
+    });
+    apiMock.createConversation.mockResolvedValue(createdConversation);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: createdConversation.id,
+    });
+    apiMock.getMessages.mockResolvedValue([]);
+
+    useStore.getState().beginNewConversation();
+    useStore.getState().beginNewConversation();
+
+    expect(apiMock.createConversation).not.toHaveBeenCalled();
+    expect(useStore.getState().currentConversation).toBeNull();
+    expect(useStore.getState().messages).toEqual([]);
+
+    await useStore.getState().sendQuery('Question');
+
+    expect(apiMock.createConversation).toHaveBeenCalledTimes(1);
+    expect(apiMock.createConversation).toHaveBeenCalledWith('project-1', 'Question');
+    expect(useStore.getState().conversations).toEqual([
+      createdConversation,
+      existingConversation,
+    ]);
+  });
+
+  it('limits a new conversation title to the first 100 Unicode characters', async () => {
+    const createdConversation = conversation('conversation-1', 'project-1');
+    const question = '😀'.repeat(101);
+    useStore.setState({ currentProject: project('project-1') });
+    apiMock.createConversation.mockResolvedValue(createdConversation);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: createdConversation.id,
+    });
+    apiMock.getMessages.mockResolvedValue([]);
+
+    await useStore.getState().sendQuery(question);
+
+    expect(apiMock.createConversation).toHaveBeenCalledWith(
+      'project-1',
+      '😀'.repeat(100),
+    );
   });
 
   it('does not replace a conversation selected while a query conversation is being created', async () => {
@@ -1000,9 +1063,56 @@ describe('application store', () => {
     expect(onConversationReady).toHaveBeenCalledWith('conversation-2');
     expect(useStore.getState().currentConversation).toEqual(existingConversation);
     expect(useStore.getState().conversations).toEqual([
-      existingConversation,
       createdConversation,
+      existingConversation,
     ]);
+  });
+
+  it('keeps a new chat unselected if another starts while creation is pending', async () => {
+    const creation = deferred<Conversation>();
+    const createdConversation = conversation('conversation-2', 'project-1');
+    useStore.setState({
+      currentProject: project('project-1'),
+      currentConversation: null,
+    });
+    apiMock.createConversation.mockReturnValue(creation.promise);
+    apiMock.query.mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: createdConversation.id,
+    });
+    apiMock.getMessages.mockResolvedValue([]);
+
+    const pendingQuery = useStore.getState().sendQuery('Question');
+    await settle();
+    useStore.getState().beginNewConversation();
+    creation.resolve(createdConversation);
+    await pendingQuery;
+
+    expect(useStore.getState().currentConversation).toBeNull();
+    expect(useStore.getState().messages).toEqual([]);
+  });
+
+  it('does not restore an old message read after starting a new conversation', async () => {
+    const messagesRequest = deferred<Message[]>();
+    const existingConversation = conversation('conversation-1', 'project-1');
+    useStore.setState({
+      currentProject: project('project-1'),
+      currentConversation: existingConversation,
+      messages: [message('message-current', existingConversation.id)],
+    });
+    apiMock.getMessages.mockReturnValue(messagesRequest.promise);
+
+    const pendingRead = useStore.getState().fetchMessages(existingConversation.id);
+    useStore.getState().beginNewConversation();
+    messagesRequest.resolve([message('message-stale', existingConversation.id)]);
+
+    await expect(pendingRead).resolves.toMatchObject({ status: 'stale' });
+    expect(useStore.getState().currentConversation).toBeNull();
+    expect(useStore.getState().messages).toEqual([]);
   });
 
   it('ignores stale messages after selecting another conversation', async () => {
