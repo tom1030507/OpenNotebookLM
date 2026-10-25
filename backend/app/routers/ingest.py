@@ -10,7 +10,7 @@ from app.db.database import get_db
 from app.schemas import (
     FileUploadResponse, UploadConfigResponse, URLUploadRequest, YouTubeUploadRequest,
     DocumentResponse, DocumentContentResponse, DocumentStatusResponse, TextUploadRequest,
-    DocumentUpdateRequest,
+    DocumentUpdateRequest, SourceGuideResponse,
 )
 from app.db.models import User
 from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
@@ -97,6 +97,18 @@ def get_document_service() -> Any:
     from app.services.documents import DocumentService
 
     return DocumentService()
+
+
+@lru_cache
+def get_source_guide_service() -> Any:
+    """Return the shared lazy source-guide service.
+
+    Returns:
+        The production source-guide service.
+    """
+    from app.services.source_guide import SourceGuideService
+
+    return SourceGuideService()
 
 
 def _begin_ingestion(
@@ -495,6 +507,33 @@ async def get_document_content(
     """
     document = require_document(db, doc_id, current_user)
     return DocumentContentResponse(content=document.content or "")
+
+
+@router.get("/docs/{doc_id}/guide", response_model=SourceGuideResponse)
+def get_document_guide(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    guide_service: Any = Depends(get_source_guide_service),
+) -> SourceGuideResponse:
+    """Return or lazily generate a guide for a ready source.
+
+    Args:
+        doc_id: Source to summarize.
+        db: Database session.
+        current_user: Authenticated caller.
+        guide_service: Shared guide generator and cache.
+
+    Returns:
+        The source summary and topic labels.
+
+    Raises:
+        HTTPException: 404 for an inaccessible source; 409 before it is ready.
+    """
+    document = require_document(db, doc_id, current_user)
+    if document.status != "ready":
+        raise HTTPException(status_code=409, detail="Source is not ready")
+    return guide_service.guide(db, document)
 
 
 @router.put("/docs/{doc_id}", response_model=DocumentResponse)

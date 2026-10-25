@@ -110,6 +110,53 @@ test('previews the indexed text for a controlled URL source', async ({ api, page
   await preview.getByRole('button', { name: 'Close document preview dialog' }).click();
 });
 
+test('drafts a source-guide topic question with only that source selected', async ({ api, page }, testInfo) => {
+  const { project, documentId } = await setupReadyUrlWorkspace(api, page, testInfo, 'source-guide');
+  const otherDocumentId = await api.uploadText(
+    project.id,
+    'Secondary observatory notes',
+    'These notes are unrelated to the source being previewed.',
+  );
+  await api.waitForDocumentReady(otherDocumentId);
+  const documents = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/projects/${project.id}/documents`)
+      && response.request().method() === 'GET',
+  );
+  await page.reload();
+  expect((await documents).status()).toBe(200);
+
+  const row = sourceRow(page, 'E2E Observatory Field Notes');
+  const guideResponse = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/docs/${documentId}/guide`)
+      && response.request().method() === 'GET',
+  );
+  await row.hover();
+  await row.getByRole('button', { name: 'Preview document' }).click();
+  const preview = page.getByRole('dialog', { name: 'E2E Observatory Field Notes' });
+  const guide = await (await guideResponse).json() as { summary: string; topics: string[] };
+  const topic = guide.topics[0];
+  await expect(preview.getByLabel('Source guide')).toContainText(guide.summary);
+
+  const queryRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/query')) {
+      queryRequests.push(request.url());
+    }
+  });
+  await preview.getByRole('button', { name: topic, exact: true }).click();
+  await expect(preview).toBeHidden();
+  const composer = page.getByRole('textbox', { name: 'Ask anything about your sources...' });
+  await expect(composer).toHaveValue(`What does this source say about ${topic}?`);
+  expect(queryRequests).toEqual([]);
+
+  const queryRequest = page.waitForRequest(
+    (request) => request.method() === 'POST'
+      && new URL(request.url()).pathname.endsWith('/query'),
+  );
+  await composer.press('Enter');
+  expect((await queryRequest).postDataJSON().document_ids).toEqual([documentId]);
+});
+
 test('imports a controlled YouTube transcript and reaches ready', async ({ api, page }, testInfo) => {
   const { project } = await setupWorkspace(api, page, testInfo, 'youtube-source');
   const dialog = await openAddSourceDialog(page);

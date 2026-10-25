@@ -91,6 +91,11 @@ export interface Document {
   chunk_count: number;
 }
 
+export interface SourceGuide {
+  summary: string;
+  topics: string[];
+}
+
 export interface Conversation {
   id: string;
   project_id: string;
@@ -913,6 +918,10 @@ const api = {
       `/docs/${encodeURIComponent(documentId)}/content`,
     );
     return response.content;
+  },
+
+  fetchDocumentGuide(documentId: string): Promise<SourceGuide> {
+    return requestJson<SourceGuide>(`/docs/${encodeURIComponent(documentId)}/guide`);
   },
 
   async getDocuments(projectId: string, signal?: AbortSignal): Promise<Document[]> {

@@ -189,6 +189,7 @@ class TestRename:
         session.add(Document(
             id="doc-1", user_id=owner_id(session), title="Old name",
             source_type="text", status="ready",
+            meta_json={"keep": True, "guide": {"summary": "Old", "topics": ["Old"]}},
         ))
         session.add(ProjectDocument(project_id="project-1", document_id="doc-1"))
         session.commit()
@@ -228,6 +229,10 @@ class TestRename:
 
         assert response.status_code == 200, response.text
         assert response.json()["title"] == "New name"
+        assert session.get(Document, "doc-1").meta_json == {
+            "keep": True,
+            "source_guide_revision": 1,
+        }
         job = session.query(IngestionJob).one()
         assert (job.document_id, job.job_type, job.payload_json) == (
             "doc-1", "reindex", {"requested_title": "New name"},

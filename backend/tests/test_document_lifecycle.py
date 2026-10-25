@@ -176,6 +176,7 @@ def test_reindex_uses_saved_chunks_and_the_current_title(lifecycle_db):
         source_type="url",
         status="ready",
         content="Previously extracted content",
+        meta_json={"keep": True, "guide": {"summary": "Old", "topics": ["Old"]}},
     )
     lifecycle_db.add(document)
     lifecycle_db.add(Chunk(
@@ -199,6 +200,7 @@ def test_reindex_uses_saved_chunks_and_the_current_title(lifecycle_db):
 
     assert status == "ready"
     assert document.status == "ready"
+    assert document.meta_json == {"keep": True, "source_guide_revision": 1}
     assert embeddings.titles == ["Renamed source"]
     assert embeddings.published == [document.id]
 
