@@ -30,7 +30,12 @@ from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.services.projects import ProjectService
 from app.db.models import Conversation, Message, User
-from app.schemas import ConversationResponse, MAX_DOCUMENT_SELECTION
+from app.schemas import (
+    ConversationResponse,
+    MAX_DOCUMENT_SELECTION,
+    ProjectSearchRequest,
+    ProjectSearchResponse,
+)
 from app.routers.auth import get_current_user
 from app.routers.ownership import (
     owned_document_ids,
@@ -49,6 +54,7 @@ from app.services.rate_limit import (
     SlidingWindowRateLimiter,
     UnlimitedConcurrencyLease,
 )
+from app.services.global_search import search_visible_projects
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -229,6 +235,45 @@ def _acquire_query_lease(settings, request_limiter, concurrency_limiter, user_id
         )
         lease = acquire_account_lease(concurrency_limiter, "query", user_id)
     return lease
+
+
+@router.post("/search", response_model=ProjectSearchResponse)
+def search_projects(
+    request: ProjectSearchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    rag_service: Any = Depends(get_rag_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
+    settings: Settings = Depends(get_settings),
+):
+    """Return hybrid-ranked source passages across visible projects.
+
+    Args:
+        request: Search text.
+        db: Database session.
+        current_user: Signed-in account whose project access defines scope.
+        rag_service: Existing dense and lexical retrieval service.
+        request_limiter: Per-account query request limiter.
+        concurrency_limiter: Per-account active-operation limiter.
+        settings: Current rate and concurrency settings.
+
+    Returns:
+        Ranked passages grouped by project and source document.
+    """
+    lease = _acquire_query_lease(
+        settings,
+        request_limiter,
+        concurrency_limiter,
+        current_user.id,
+    )
+    try:
+        return search_visible_projects(db, current_user, rag_service, request.query)
+    except Exception as error:
+        logger.error("Cross-project search failed", error=str(error))
+        raise HTTPException(status_code=500, detail="Search failed") from error
+    finally:
+        lease.release()
 
 
 @router.post(

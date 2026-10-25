@@ -2010,3 +2010,93 @@ class TestTextRenameAndRatingIsolation:
         assert env.alice.put(url, json={"rating": "up"}).status_code == 200
         env.session.refresh(message)
         assert message.rating == "up"
+
+
+def test_global_search_is_limited_to_owned_and_shared_projects(env):
+    """Search may include shared sources but cannot reveal private projects."""
+    from app.routers.query import get_rag_service
+
+    owned_project_id = make_project(env.alice, "Alice project")
+    shared_project_id = make_project(env.bob, "Shared project")
+    private_project_id = make_project(env.bob, "Private project")
+    owned_document_id = make_document(env.session, env.alice_user, "Owned source")
+    shared_document_id = make_document(env.session, env.bob_user, "Shared source")
+    private_document_id = make_document(env.session, env.bob_user, "Private source")
+    env.session.add_all([
+        ProjectDocument(
+            project_id=owned_project_id,
+            document_id=owned_document_id,
+            shared_by_user_id=env.alice_user.id,
+        ),
+        ProjectDocument(
+            project_id=shared_project_id,
+            document_id=shared_document_id,
+            shared_by_user_id=env.bob_user.id,
+        ),
+        ProjectDocument(
+            project_id=private_project_id,
+            document_id=private_document_id,
+            shared_by_user_id=env.bob_user.id,
+        ),
+        ProjectMember(
+            project_id=shared_project_id,
+            user_id=env.alice_user.id,
+            role="viewer",
+        ),
+    ])
+    env.session.commit()
+
+    class FakeRAGService:
+        allowed_document_ids = None
+
+        def retrieve_with_diagnostics(self, **kwargs):
+            self.allowed_document_ids = kwargs["allowed_document_ids"]
+            return ([
+                {
+                    "chunk_id": "owned-hit",
+                    "document_id": owned_document_id,
+                    "document_title": "Owned source",
+                    "text": "Owned passage",
+                    "metadata": {"page_num": 1, "section": "Owned section"},
+                    "score": 0.9,
+                },
+                {
+                    "chunk_id": "shared-hit",
+                    "document_id": shared_document_id,
+                    "document_title": "Shared source",
+                    "text": "Shared passage",
+                    "metadata": {"page_num": 2, "section": "Shared section"},
+                    "score": 0.8,
+                },
+                {
+                    "chunk_id": "private-hit",
+                    "document_id": private_document_id,
+                    "document_title": "Private source",
+                    "text": "Private passage",
+                    "metadata": {"page_num": 3, "section": "Private section"},
+                    "score": 0.7,
+                },
+            ], {"latency_ms": 1.0})
+
+    rag_service = FakeRAGService()
+    production_app.dependency_overrides[get_rag_service] = lambda: rag_service
+
+    response = env.alice.post("/api/search", json={"query": "important finding"})
+
+    assert response.status_code == 200, response.text
+    assert set(rag_service.allowed_document_ids) == {
+        owned_document_id,
+        shared_document_id,
+    }
+    projects = {
+        project["project_id"]: project
+        for project in response.json()["projects"]
+    }
+    assert set(projects) == {owned_project_id, shared_project_id}
+    assert projects[owned_project_id]["documents"][0]["passages"][0]["text"] == (
+        "Owned passage"
+    )
+    assert projects[shared_project_id]["documents"][0]["passages"][0]["text"] == (
+        "Shared passage"
+    )
+    assert "Private passage" not in response.text

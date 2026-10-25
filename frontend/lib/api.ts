@@ -45,6 +45,31 @@ export interface ProjectAnalytics {
   uncited_sources: { document_id: string; title: string }[];
 }
 
+export interface ProjectSearchPassage {
+  chunk_id: string;
+  text: string;
+  score: number;
+  page_num: number | null;
+  section: string | null;
+}
+
+export interface ProjectSearchDocument {
+  document_id: string;
+  title: string;
+  source_type: string;
+  passages: ProjectSearchPassage[];
+}
+
+export interface ProjectSearchProject {
+  project_id: string;
+  project_name: string;
+  documents: ProjectSearchDocument[];
+}
+
+export interface ProjectSearchResponse {
+  projects: ProjectSearchProject[];
+}
+
 export type ProjectRole = 'owner' | 'editor' | 'viewer';
 
 export interface ProjectMember {
@@ -911,6 +936,13 @@ const api = {
   async getProjects(): Promise<Project[]> {
     const response = await requestJson<ProjectListResponse>('/projects');
     return response.projects;
+  },
+
+  searchProjects(query: string): Promise<ProjectSearchResponse> {
+    return requestJson<ProjectSearchResponse>('/search', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    });
   },
 
   getProjectMembers(projectId: string): Promise<ProjectMember[]> {

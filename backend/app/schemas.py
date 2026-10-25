@@ -435,6 +435,46 @@ class QueryResponse(BaseModel):
     token_cost: Optional[Dict[str, Any]] = None
 
 
+class ProjectSearchRequest(BaseModel):
+    """Search text across sources in projects visible to the caller."""
+    query: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def strip_search_query(cls, query: Any) -> Any:
+        """Reject blank searches after trimming surrounding whitespace."""
+        return query.strip() if isinstance(query, str) else query
+
+
+class ProjectSearchPassage(BaseModel):
+    """One ranked source passage returned by project search."""
+    chunk_id: str
+    text: str
+    score: float
+    page_num: Optional[int] = None
+    section: Optional[str] = None
+
+
+class ProjectSearchDocument(BaseModel):
+    """Ranked passages grouped under one source document."""
+    document_id: str
+    title: str
+    source_type: str
+    passages: List[ProjectSearchPassage]
+
+
+class ProjectSearchProject(BaseModel):
+    """Search results associated with one visible project."""
+    project_id: str
+    project_name: str
+    documents: List[ProjectSearchDocument]
+
+
+class ProjectSearchResponse(BaseModel):
+    """Ranked passages grouped by visible project and source."""
+    projects: List[ProjectSearchProject]
+
+
 # Export schemas
 class ExportRequest(BaseModel):
     """Schema for export request."""

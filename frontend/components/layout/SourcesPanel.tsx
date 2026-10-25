@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
+import ProjectSearch from '../ProjectSearch';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
 import api, { Document, DocumentStatus } from '@/lib/api';
@@ -72,6 +73,10 @@ export default function SourcesPanel({
   const [watchedFolderSaving, setWatchedFolderSaving] = useState(false);
   const [watchedFolderError, setWatchedFolderError] = useState('');
   const [resyncingDocumentId, setResyncingDocumentId] = useState<string | null>(null);
+  const [pendingSearchPreview, setPendingSearchPreview] = useState<{
+    projectId: string;
+    documentId: string;
+  } | null>(null);
   const [modalSession, setModalSession] = useState(0);
   const uploadCloseRef = useRef<HTMLButtonElement>(null);
   const uploadDialogRef = useRef<HTMLDivElement>(null);
@@ -186,6 +191,21 @@ export default function SourcesPanel({
     }, 60_000);
     return () => clearInterval(interval);
   }, [canManageProject, currentProjectId, refreshDocuments, watchedFolderPath]);
+
+  useEffect(() => {
+    if (!pendingSearchPreview) return;
+    if (currentProjectId !== pendingSearchPreview.projectId) {
+      setPendingSearchPreview(null);
+      return;
+    }
+    const document = documents.find((item) => item.id === pendingSearchPreview.documentId);
+    if (document) {
+      setPreviewDocument(document);
+      setPendingSearchPreview(null);
+    } else if (!loadingDocuments) {
+      setPendingSearchPreview(null);
+    }
+  }, [currentProjectId, documents, loadingDocuments, pendingSearchPreview]);
 
   // Session counter so a stale upload can never close a dialog reopened after it.
   useEffect(() => {
@@ -317,6 +337,13 @@ export default function SourcesPanel({
     }
   };
 
+  const openSearchResult = (projectId: string, documentId: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    if (currentProject?.id !== projectId) selectProject(project);
+    setPendingSearchPreview({ projectId, documentId });
+  };
+
   const getSourceIcon = (type: string) => {
     switch (type) {
       case 'pdf':
@@ -426,6 +453,7 @@ export default function SourcesPanel({
               <FolderOpen className="w-4 h-4" />
             </button>
           </div>
+          <ProjectSearch onOpenResult={openSearchResult} />
           {canManageProject && currentProject && (
             <div className="flex flex-wrap items-center gap-1">
               <button

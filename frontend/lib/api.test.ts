@@ -19,6 +19,34 @@ afterEach(() => {
 
 
 describe('API client', () => {
+  it('searches sources across visible projects', async () => {
+    const response = {
+      projects: [{
+        project_id: 'project-1',
+        project_name: 'Research',
+        documents: [{
+          document_id: 'document-1',
+          title: 'Paper',
+          source_type: 'pdf',
+          passages: [{
+            chunk_id: 'chunk-1',
+            text: 'A useful passage',
+            score: 0.8,
+            page_num: 3,
+            section: 'Methods',
+          }],
+        }],
+      }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.searchProjects('enzyme')).resolves.toEqual(response);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/search');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ query: 'enzyme' });
+  });
+
   it('converts one note or a batch of notes into sources', async () => {
     const source = { note_id: 'note-1', doc_id: 'doc-1', status: 'queued' };
     const fetchMock = vi.fn()
