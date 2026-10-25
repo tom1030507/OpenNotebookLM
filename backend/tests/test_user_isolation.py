@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.db.models import (
     AudioOverview,
@@ -457,6 +458,65 @@ class TestAudioOverviewIsolation:
         assert [env.bob.get(path).status_code for path in paths] == [404, 404, 404]
         assert env.bob.delete(paths[1]).status_code == 404
 
+    def test_members_can_create_and_read_but_only_editors_can_delete(
+        self, env, monkeypatch, tmp_path
+    ):
+        from app.routers import audio_overview
+
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.alice_user, title="Shared audio source", content="Climate evidence."
+        )
+        unlinked = make_document(env.session, env.bob_user, title="Unlinked source")
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        production_app.dependency_overrides[get_settings] = lambda: Settings(
+            audio_overview_tts_enabled=True
+        )
+        audio_file = tmp_path / "shared.mp3"
+        audio_file.write_bytes(b"ID3 shared audio")
+        monkeypatch.setattr(audio_overview, "resolve_audio_file", lambda _key: audio_file)
+
+        created = env.bob.post(
+            "/api/projects/%s/audio-overviews" % project_id,
+            json={"document_ids": [document_id]},
+        )
+        assert created.status_code == 202, created.text
+        rejected = env.bob.post(
+            "/api/projects/%s/audio-overviews" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+        assert rejected.status_code == 404
+        overview_id = created.json()["id"]
+        overview = env.session.query(AudioOverview).filter_by(id=overview_id).first()
+        overview.status = "ready"
+        overview.file_path = "uploads/audio_overviews/shared.mp3"
+        overview.script_json = [{"speaker": "A", "text": "Shared transcript."}]
+        env.session.commit()
+
+        assert env.bob.get(
+            "/api/projects/%s/audio-overviews" % project_id
+        ).status_code == 200
+        assert env.bob.get(
+            "/api/projects/%s/audio-overviews/%s" % (project_id, overview_id)
+        ).status_code == 200
+        assert env.bob.get(
+            "/api/projects/%s/audio-overviews/%s/file" % (project_id, overview_id)
+        ).content == b"ID3 shared audio"
+        assert env.bob.delete(
+            "/api/projects/%s/audio-overviews/%s" % (project_id, overview_id)
+        ).status_code == 404
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "editor"})
+        env.session.commit()
+        assert env.bob.delete(
+            "/api/projects/%s/audio-overviews/%s" % (project_id, overview_id)
+        ).status_code == 204
+
 
 class TestRefusalLeaksNothing:
     """Not yours and not found have to be the same answer."""
@@ -870,6 +930,81 @@ class TestMindMapIsolation:
         assert response.status_code == 200
         assert response.json()["root"]["label"] == ALICE_PROJECT
 
+    def test_members_can_map_linked_sources_and_cannot_select_unlinked_sources(self, env):
+        project_id = make_project(env.alice)
+        linked = make_document(
+            env.session, env.bob_user, "Member source", "txt", "Exclusive study material."
+        )
+        unlinked = make_document(env.session, env.bob_user, "Private source")
+        grant_project_role(env, project_id, "editor")
+        assert env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "viewer"})
+        env.session.commit()
+
+        response = env.bob.post(
+            "/api/projects/%s/mindmap" % project_id,
+            json={"document_ids": [linked]},
+        )
+        rejected = env.bob.post(
+            "/api/projects/%s/mindmap" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["total_source_count"] == 1
+        assert rejected.status_code == 404
+
+
+class TestSharedStudioIsolation:
+    """Studio readers can use linked sources and keep selections project-bound."""
+
+    def test_video_summary_and_pptx_are_available_to_viewers(self, env):
+        project_id = make_project(env.alice)
+        linked = make_document(
+            env.session, env.bob_user, "Member source", "txt", "Shared material is useful."
+        )
+        unlinked = make_document(env.session, env.bob_user, "Private source")
+        grant_project_role(env, project_id, "editor")
+        assert env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, linked)
+        ).status_code == 200
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "viewer"})
+        env.session.commit()
+
+        summary = env.bob.post(
+            "/api/projects/%s/video-summary" % project_id,
+            json={"document_ids": [linked]},
+        )
+        rejected_summary = env.bob.post(
+            "/api/projects/%s/video-summary" % project_id,
+            json={"document_ids": [unlinked]},
+        )
+        assert summary.status_code == 200, summary.text
+        assert rejected_summary.status_code == 404
+        assert [scene["document_id"] for scene in summary.json()["scenes"]
+                if scene["kind"] == "source"] == [linked]
+        exported = env.bob.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": summary.json()["scenes"]},
+        )
+        assert exported.status_code == 200, exported.text
+
+        private_scenes = [dict(scene) for scene in summary.json()["scenes"]]
+        next(scene for scene in private_scenes if scene["kind"] == "source")[
+            "document_id"
+        ] = unlinked
+        rejected = env.bob.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": private_scenes},
+        )
+        assert rejected.status_code == 404
+
 
 class TestVideoSummaryIsolation:
     """A video summary narrates every source in a project, so it is scoped too."""
@@ -1003,6 +1138,43 @@ class TestNoteIsolation:
         assert env.alice.put(
             "%s/%s" % (base, note_id), json={"content": "edited"}).status_code == 200
         assert env.alice.delete("%s/%s" % (base, note_id)).status_code == 200
+
+    def test_shared_notes_are_readable_but_writable_by_editors(self, env):
+        project_id = make_project(env.alice)
+        base = "/api/projects/%s/notes" % project_id
+        note_id = env.alice.post(base, json={"title": "Owner note"}).json()["id"]
+        conversation_id = make_conversation(env.alice, project_id)
+        message = Message(
+            id=str(uuid.uuid4()), conversation_id=conversation_id,
+            role="assistant", text="Alice's private answer",
+        )
+        env.session.add(message)
+        env.session.commit()
+        grant_project_role(env, project_id, "viewer")
+
+        readable = env.bob.get(base)
+        assert readable.status_code == 200, readable.text
+        assert [note["id"] for note in readable.json()] == [note_id]
+        assert env.bob.post(base, json={"title": "Viewer note"}).status_code == 404
+        assert env.bob.put(
+            "%s/%s" % (base, note_id), json={"title": "Changed by viewer"}
+        ).status_code == 404
+        assert env.bob.delete("%s/%s" % (base, note_id)).status_code == 404
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id, user_id=env.bob_user.id
+        ).update({"role": "editor"})
+        env.session.commit()
+        private_answer = env.bob.post(base, json={
+            "title": "Copied private answer", "source_message_id": message.id,
+        })
+        assert private_answer.status_code == 404
+        created = env.bob.post(base, json={"title": "Editor note", "content": "Shared."})
+        assert created.status_code == 200, created.text
+        assert env.bob.put(
+            "%s/%s" % (base, note_id), json={"title": "Edited by editor"}
+        ).status_code == 200
+        assert env.bob.delete("%s/%s" % (base, note_id)).status_code == 200
 
 
 SELECTION_ROUTES = [

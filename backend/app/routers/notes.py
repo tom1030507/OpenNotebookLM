@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import User
+from app.db.models import Message, User
 from app.routers.auth import get_current_user
-from app.routers.ownership import require_project
+from app.routers.ownership import require_conversation, require_project
 from app.schemas import NoteCreate, NoteResponse, NoteUpdate
 from app.services import notes as note_service
 
@@ -34,7 +34,7 @@ def list_notes(
     Returns:
         The notes, newest first.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     return note_service.list_notes(db, project)
 
 
@@ -56,7 +56,13 @@ def create_note(
     Returns:
         The created note.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="editor")
+    if data.source_message_id:
+        conversation_id = db.query(Message.conversation_id).filter(
+            Message.id == data.source_message_id
+        ).scalar()
+        if conversation_id:
+            require_conversation(db, conversation_id, current_user)
     return note_service.create_note(db, project, data)
 
 
@@ -80,7 +86,7 @@ def update_note(
     Returns:
         The updated note.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="editor")
     note = note_service.get_note(db, project, note_id)
     return note_service.update_note(db, note, data)
 
@@ -103,6 +109,6 @@ def delete_note(
     Returns:
         A confirmation.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="editor")
     note_service.delete_note(db, note_service.get_note(db, project, note_id))
     return {"status": "success", "message": "Note deleted"}

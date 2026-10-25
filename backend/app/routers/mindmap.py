@@ -75,9 +75,11 @@ def project_mindmap(
     Returns:
         The recursive tree and generation metadata.
     """
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     document_ids = None
     if selection and selection.document_ids is not None:
-        document_ids = require_documents(db, selection.document_ids, current_user)
+        document_ids = require_documents(
+            db, selection.document_ids, current_user, project_id=project_id
+        )
 
     return service.generate(db, project, document_ids)

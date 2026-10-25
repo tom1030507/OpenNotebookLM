@@ -107,13 +107,14 @@ def create_audio_overview(
             status_code=status.HTTP_409_CONFLICT,
             detail="Audio overview TTS is disabled",
         )
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     document_ids: Optional[list[str]] = None
     if request_data.document_ids is not None:
         document_ids = require_documents(
             db,
             request_data.document_ids,
             current_user,
+            project_id=project_id,
         )
     documents = project_documents(db, project, document_ids)
     if document_ids is not None and len(documents) != len(document_ids):
@@ -159,7 +160,7 @@ def list_audio_overviews(
     Returns:
         The saved overviews and TTS capability flag.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="viewer")
     rows = db.query(AudioOverview).filter(
         AudioOverview.project_id == project_id,
     ).order_by(
@@ -193,7 +194,7 @@ def get_audio_overview(
     Returns:
         Current status, options, and transcript.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="viewer")
     return _response(_owned_overview(db, project_id, overview_id))
 
 
@@ -215,7 +216,7 @@ def get_audio_overview_file(
     Returns:
         The audio file response.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="viewer")
     overview = _owned_overview(db, project_id, overview_id)
     if overview.status != "ready" or not overview.file_path:
         raise HTTPException(status_code=409, detail="Audio overview is not ready")
@@ -249,7 +250,7 @@ def delete_audio_overview(
     Returns:
         An empty 204 response.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
     overview = _owned_overview(db, project_id, overview_id)
     file_path = overview.file_path
     db.delete(overview)
