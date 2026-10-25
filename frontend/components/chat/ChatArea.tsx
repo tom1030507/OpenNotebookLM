@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { 
   Send,
   Paperclip,
@@ -40,6 +40,8 @@ interface PendingQuery {
   error: string | null;
   retryMode: 'query' | 'refresh';
 }
+
+const COMPOSER_MAX_HEIGHT = 160;
 
 /** The signed-in account's initial, so the asker's mark is theirs rather than a generic "U". */
 function accountInitial(): string {
@@ -197,6 +199,14 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const composerGenerationRef = useRef(0);
+  const resizeComposer = useCallback(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.style.height = 'auto';
+    const height = composer.scrollHeight;
+    composer.style.height = `${Math.min(height, COMPOSER_MAX_HEIGHT)}px`;
+    composer.style.overflowY = height > COMPOSER_MAX_HEIGHT ? 'auto' : 'hidden';
+  }, []);
   const projectDialog = useOptionalProjectDialog();
   
   const currentProject = useStore((state) => state.currentProject);
@@ -222,6 +232,15 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const followMessageRead = useStore((state) => state.followMessageRead);
   const pendingMindMapQuestion = useStore((state) => state.pendingMindMapQuestion);
   const consumeMindMapQuestion = useStore((state) => state.consumeMindMapQuestion);
+
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [inputValue, resizeComposer]);
+
+  useEffect(() => {
+    window.addEventListener('resize', resizeComposer);
+    return () => window.removeEventListener('resize', resizeComposer);
+  }, [resizeComposer]);
 
   useEffect(() => useStore.subscribe((state, previous) => {
     // Observe each transition so even a batched A → B → A cannot retain a
@@ -622,7 +641,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                         ? 'Select a source to start chatting'
                         : 'Ask anything about your sources...'
                 }
-                className="w-full px-4 py-3 bg-[var(--card)] border border-[var(--input)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
+                className={`w-full px-4 py-3 ${inputValue && hasDocuments ? 'pr-20' : ''} min-h-[4.5rem] sm:min-h-[2.75rem] max-h-40 overflow-y-hidden bg-[var(--card)] border border-[var(--input)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm`}
                 rows={1}
                 disabled={!canChat || isStreaming}
               />
