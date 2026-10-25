@@ -416,11 +416,18 @@ export type QuizResponse = StudyResponse<QuizQuestion>;
 
 export type AudioOverviewFormat = 'deep_dive' | 'brief' | 'critique' | 'debate';
 export type AudioOverviewLength = StudioOutputLength;
+export type AudioOverviewVoice =
+  | 'af_alloy' | 'af_aoede' | 'af_bella' | 'af_heart' | 'af_jessica'
+  | 'af_kore' | 'af_nicole' | 'af_nova' | 'af_river' | 'af_sarah' | 'af_sky'
+  | 'am_adam' | 'am_echo' | 'am_eric' | 'am_fenrir' | 'am_liam'
+  | 'am_michael' | 'am_onyx' | 'am_puck' | 'am_santa';
 
 export interface AudioOverviewOptions extends StudioOutputOptions {
   document_ids?: string[];
   format: AudioOverviewFormat;
   length: AudioOverviewLength;
+  voice_a: AudioOverviewVoice;
+  voice_b: AudioOverviewVoice;
 }
 
 export interface AudioOverviewTurn {
@@ -443,6 +450,7 @@ export interface AudioOverview {
 
 export interface AudioOverviewList {
   enabled: boolean;
+  voices: AudioOverviewVoice[];
   items: AudioOverview[];
 }
 
@@ -769,8 +777,8 @@ const fetchBlobResponse = async (
   return response;
 };
 
-const requestBlob = async (path: string): Promise<Blob> => {
-  return (await fetchBlobResponse(path)).blob();
+const requestBlob = async (path: string, init: RequestInit = {}): Promise<Blob> => {
+  return (await fetchBlobResponse(path, init)).blob();
 };
 
 const requestDetachedExportBlob = async (
@@ -1471,6 +1479,12 @@ const api = {
     return requestBlob(
       `/projects/${projectId}/audio-overviews/${overviewId}/file`,
     );
+  },
+
+  fetchAudioOverviewVoicePreview(voice: AudioOverviewVoice): Promise<Blob> {
+    return requestBlob(`/audio-overview-voices/${encodeURIComponent(voice)}/preview`, {
+      method: 'POST',
+    });
   },
 
   async deleteAudioOverview(projectId: string, overviewId: string): Promise<void> {

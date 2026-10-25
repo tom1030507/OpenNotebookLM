@@ -12,6 +12,8 @@ from app.db.database import get_db
 from app.db.models import AudioOverview, Base, Document, Project, ProjectDocument
 from app.routers import audio_overview, projects
 from app.routers.audio_overview import get_audio_overview_worker
+from app.routers.rate_limit import get_rate_limiter
+from app.services.rate_limit import SlidingWindowRateLimiter
 import app.services.audio_overview as audio_overview_service
 from app.services.audio_overview import audio_overview_file_key
 from app.services.projects import ProjectService
@@ -115,12 +117,108 @@ def test_create_persists_options_and_notifies_worker(audio_api):
         "length": "short",
         "focus": "methods",
         "audience": "general",
+        "voice_a": "af_heart",
+        "voice_b": "am_adam",
     }
     assert worker.notifications == 1
     with sessions() as db:
         saved = db.get(AudioOverview, body["id"])
         assert saved.project_id == "project-audio-a"
         assert saved.file_path == audio_overview_file_key(body["id"])
+
+
+def test_create_persists_selected_host_voices(audio_api):
+    client, _, _, _ = audio_api
+
+    response = client.post(
+        "/api/projects/project-audio-a/audio-overviews",
+        json={"voice_a": "af_sarah", "voice_b": "am_eric"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["options"]["voice_a"] == "af_sarah"
+    assert response.json()["options"]["voice_b"] == "am_eric"
+
+
+def test_create_rejects_unlisted_host_voice(audio_api):
+    client, _, worker, _ = audio_api
+
+    response = client.post(
+        "/api/projects/project-audio-a/audio-overviews",
+        json={"voice_a": "not-a-kokoro-voice"},
+    )
+
+    assert response.status_code == 422
+    assert worker.notifications == 0
+
+
+def test_voice_preview_returns_audio_from_the_selected_voice(audio_api, monkeypatch):
+    client, _, _, _ = audio_api
+    calls = []
+
+    class FakeTTS:
+        def synthesize(self, script, output_path, voice_a, voice_b="am_adam"):
+            calls.append((script, voice_a, voice_b))
+            output_path.write_bytes(b"preview mp3")
+
+    monkeypatch.setattr(audio_overview, "get_kokoro_tts", lambda: FakeTTS())
+
+    response = client.post("/api/audio-overview-voices/af_sarah/preview")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.content == b"preview mp3"
+    assert calls == [(
+        [{"speaker": "A", "text": audio_overview_service.VOICE_PREVIEW_TEXT}],
+        "af_sarah",
+        "am_adam",
+    )]
+
+
+def test_voice_preview_rejects_unlisted_voice_without_synthesis(audio_api, monkeypatch):
+    client, _, _, _ = audio_api
+    monkeypatch.setattr(
+        audio_overview,
+        "get_kokoro_tts",
+        lambda: pytest.fail("invalid voice must not load Kokoro"),
+    )
+
+    response = client.post("/api/audio-overview-voices/not-a-kokoro-voice/preview")
+
+    assert response.status_code == 422
+
+
+def test_voice_preview_respects_disabled_tts(audio_api, monkeypatch):
+    client, _, _, settings = audio_api
+    settings.audio_overview_tts_enabled = False
+    monkeypatch.setattr(
+        audio_overview,
+        "get_kokoro_tts",
+        lambda: pytest.fail("disabled TTS must not load Kokoro"),
+    )
+
+    response = client.post("/api/audio-overview-voices/af_sarah/preview")
+
+    assert response.status_code == 409
+
+
+def test_voice_preview_is_rate_limited_per_account(audio_api, monkeypatch):
+    client, _, _, _ = audio_api
+    limiter = SlidingWindowRateLimiter()
+    client.app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
+    class FakeTTS:
+        def synthesize(self, _script, output_path, voice_a, voice_b="am_adam"):
+            output_path.write_bytes(b"preview mp3")
+
+    monkeypatch.setattr(audio_overview, "get_kokoro_tts", lambda: FakeTTS())
+
+    for _ in range(20):
+        assert client.post("/api/audio-overview-voices/af_sarah/preview").status_code == 200
+
+    response = client.post("/api/audio-overview-voices/af_sarah/preview")
+
+    assert response.status_code == 429
 
 
 def test_create_rejects_an_owned_document_not_attached_to_this_project(audio_api):
@@ -174,6 +272,9 @@ def test_list_status_file_and_delete_survive_a_reload(audio_api, audio_file_root
     listing = client.get("/api/projects/project-audio-a/audio-overviews")
     assert listing.status_code == 200
     assert listing.json()["enabled"] is True
+    assert {"af_heart", "am_adam"}.issubset(set(listing.json()["voices"]))
+    assert listing.json()["items"][0]["options"]["voice_a"] == "af_heart"
+    assert listing.json()["items"][0]["options"]["voice_b"] == "am_adam"
     assert listing.json()["items"][0]["script"][1]["speaker"] == "B"
     assert client.get(
         f"/api/projects/project-audio-a/audio-overviews/{overview_id}"

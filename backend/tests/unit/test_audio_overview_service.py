@@ -7,7 +7,11 @@ from sqlalchemy.orm import sessionmaker
 import app.services.audio_overview as audio_overview_module
 from app.db.models import AudioOverview, Base, Document, Project, ProjectDocument, User
 from app.services.admin_usage import record_llm_usage
-from app.services.audio_overview import AudioOverviewService, parse_dialogue_script
+from app.services.audio_overview import (
+    AudioOverviewService,
+    KokoroTTS,
+    parse_dialogue_script,
+)
 
 
 class FixedLLM:
@@ -116,6 +120,44 @@ def test_unusable_llm_reply_falls_back_to_one_voice_and_respects_short_length():
     assert "Fifth" not in " ".join(turn["text"] for turn in turns)
 
 
+def test_kokoro_synthesis_uses_the_selected_voice_for_each_host(tmp_path, monkeypatch):
+    import numpy as np
+
+    calls = []
+
+    class FakeAudio:
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return np.ones(4, dtype=np.float32)
+
+    class FakePipeline:
+        def __call__(self, text, voice):
+            calls.append((text, voice))
+            return iter([(text, text, FakeAudio())])
+
+    tts = KokoroTTS()
+    monkeypatch.setattr(tts, "_get_pipeline", lambda: FakePipeline())
+    monkeypatch.setattr(audio_overview_module.subprocess, "run", lambda *args, **kwargs: None)
+
+    duration = tts.synthesize(
+        [
+            {"speaker": "A", "text": "Host A sample."},
+            {"speaker": "B", "text": "Host B sample."},
+        ],
+        tmp_path / "sample.mp3",
+        voice_a="af_sarah",
+        voice_b="am_eric",
+    )
+
+    assert calls == [("Host A sample.", "af_sarah"), ("Host B sample.", "am_eric")]
+    assert duration > 0
+
+
 def test_sources_without_extracted_text_are_not_sent_to_the_llm():
     llm = FixedLLM(
         '[{"speaker":"A","text":"Ungrounded opening."},'
@@ -203,8 +245,9 @@ def test_worker_service_persists_script_and_ready_audio_without_loading_models(
     )
 
     class FakeTTS:
-        def synthesize(self, script, path):
+        def synthesize(self, script, path, voice_a, voice_b="am_adam"):
             assert [turn["speaker"] for turn in script] == ["A", "B"]
+            assert (voice_a, voice_b) == ("af_sarah", "am_eric")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"fake mp3")
             return 2.5
@@ -250,6 +293,8 @@ def test_worker_service_persists_script_and_ready_audio_without_loading_models(
                     "format": "brief",
                     "length": "short",
                     "document_ids": ["audio-document"],
+                    "voice_a": "af_sarah",
+                    "voice_b": "am_eric",
                 },
                 script_json=[],
                 file_path="uploads/audio_overviews/overview-1.mp3",

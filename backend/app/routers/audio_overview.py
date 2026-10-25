@@ -1,6 +1,8 @@
 """Create and serve durable, project-scoped audio overviews."""
+import structlog
 import uuid
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -12,20 +14,26 @@ from app.db.database import get_db
 from app.db.models import AudioOverview, User
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_documents, require_project
+from app.routers.rate_limit import enforce_account_rate_limit, get_rate_limiter
 from app.schemas import (
     AudioOverviewCreate,
     AudioOverviewListResponse,
     AudioOverviewResponse,
+    AudioOverviewVoice,
 )
 from app.services.audio_overview import (
+    VOICE_PREVIEW_TEXT,
     audio_overview_file_key,
+    get_kokoro_tts,
     remove_audio_file,
     resolve_audio_file,
 )
 from app.services.audio_overview_jobs import AudioOverviewWorker
+from app.services.rate_limit import SlidingWindowRateLimiter
 from app.services.source_digest import project_documents
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+logger = structlog.get_logger(__name__)
 
 
 def get_audio_overview_worker(request: Request) -> AudioOverviewWorker:
@@ -170,8 +178,60 @@ def list_audio_overviews(
     ).all()
     return {
         "enabled": settings.audio_overview_tts_enabled,
+        "voices": list(AudioOverviewVoice),
         "items": [_response(row) for row in rows],
     }
+
+
+@router.post("/audio-overview-voices/{voice}/preview")
+def preview_audio_overview_voice(
+    voice: AudioOverviewVoice,
+    current_user: User = Depends(get_current_user),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    settings: Settings = Depends(get_settings),
+):
+    """Return a short sample synthesized with one allowlisted Kokoro voice.
+
+    Args:
+        voice: Supported American English Kokoro voice.
+        current_user: Signed-in account to rate-limit.
+        request_limiter: Process-wide request limiter.
+        settings: Current audio synthesis setting.
+
+    Returns:
+        A short MP3 preview.
+    """
+    if not settings.audio_overview_tts_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Audio overview TTS is disabled",
+        )
+    enforce_account_rate_limit(
+        request_limiter,
+        "audio-overview-voice-preview",
+        current_user.id,
+        limit=20,
+        window_seconds=60,
+    )
+    try:
+        with TemporaryDirectory() as temporary_directory:
+            output_path = Path(temporary_directory) / "voice-preview.mp3"
+            get_kokoro_tts().synthesize(
+                [{"speaker": "A", "text": VOICE_PREVIEW_TEXT}],
+                output_path,
+                voice_a=voice.value,
+            )
+            return Response(output_path.read_bytes(), media_type="audio/mpeg")
+    except Exception as error:
+        logger.warning(
+            "Audio overview voice preview failed",
+            voice=voice.value,
+            error_type=type(error).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Voice preview is unavailable",
+        ) from error
 
 
 @router.get(

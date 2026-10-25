@@ -135,6 +135,8 @@ describe('API client', () => {
         format: 'debate',
         length: 'short',
         focus: 'methods',
+        voice_a: 'af_sarah',
+        voice_b: 'am_eric',
       },
       script: [],
       duration_seconds: null,
@@ -145,23 +147,33 @@ describe('API client', () => {
       completed_at: null,
     };
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ enabled: true, items: [audio] }))
+      .mockResolvedValueOnce(jsonResponse({
+        enabled: true,
+        items: [audio],
+        voices: ['af_heart', 'af_sarah', 'am_adam', 'am_eric'],
+      }))
       .mockResolvedValueOnce(jsonResponse(audio, 202))
       .mockResolvedValueOnce(new Response('mp3 audio'))
+      .mockResolvedValueOnce(new Response('preview mp3'))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.listAudioOverviews('project-1')).resolves.toEqual({
       enabled: true,
       items: [audio],
+      voices: ['af_heart', 'af_sarah', 'am_adam', 'am_eric'],
     });
     await api.createAudioOverview('project-1', {
       document_ids: ['doc-1'],
       format: 'debate',
       length: 'short',
       focus: 'methods',
+      voice_a: 'af_sarah',
+      voice_b: 'am_eric',
     });
     await expect(api.fetchAudioOverviewFile('project-1', 'overview-1'))
+      .resolves.toBeInstanceOf(Blob);
+    await expect(api.fetchAudioOverviewVoicePreview('af_sarah'))
       .resolves.toBeInstanceOf(Blob);
     await expect(api.deleteAudioOverview('project-1', 'overview-1'))
       .resolves.toBeUndefined();
@@ -170,10 +182,12 @@ describe('API client', () => {
       '/api/projects/project-1/audio-overviews',
       '/api/projects/project-1/audio-overviews',
       '/api/projects/project-1/audio-overviews/overview-1/file',
+      '/api/audio-overview-voices/af_sarah/preview',
       '/api/projects/project-1/audio-overviews/overview-1',
     ]);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual(audio.options);
-    expect(fetchMock.mock.calls[3][1].method).toBe('DELETE');
+    expect(fetchMock.mock.calls[3][1].method).toBe('POST');
+    expect(fetchMock.mock.calls[4][1].method).toBe('DELETE');
   });
 
   it('unwraps the paginated project response', async () => {

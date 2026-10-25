@@ -34,7 +34,20 @@ def test_studio_options_are_flat_and_keep_audio_defaults_compatible():
     assert report.focus == audio.focus == "methods"
     assert report.audience == "expert"
     assert audio.audience == "general"
+    assert (audio.voice_a, audio.voice_b) == ("af_heart", "am_adam")
     assert "options" not in audio.model_dump()
+
+
+@pytest.mark.parametrize("field", ["voice_a", "voice_b"])
+def test_audio_overview_rejects_unlisted_voices(field):
+    with pytest.raises(ValidationError):
+        AudioOverviewCreate(**{field: "not-a-kokoro-voice"})
+
+
+def test_audio_overview_accepts_selected_kokoro_voices():
+    audio = AudioOverviewCreate(voice_a="af_sarah", voice_b="am_eric")
+
+    assert (audio.voice_a, audio.voice_b) == ("af_sarah", "am_eric")
 
 
 def test_default_options_leave_prompt_unchanged():

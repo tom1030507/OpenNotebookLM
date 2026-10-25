@@ -62,7 +62,7 @@ const summary = '# Research notes\n\n- **Example Domain** overview';
 
 beforeEach(() => {
   useStore.setState({ currentProject: project, projects: [project] });
-  vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: false, items: [] });
+  vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: false, items: [], voices: [] });
 });
 
 async function clickAudioSummary() {
