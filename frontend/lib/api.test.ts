@@ -538,6 +538,12 @@ describe('API client', () => {
           page_num: 4,
           text_preview: 'Evidence',
         }],
+        citation_checks: [{
+          sentence_index: 0,
+          cited_labels: [1],
+          score: 0.31,
+          supported: false,
+        }],
       }],
     })));
 
@@ -555,6 +561,12 @@ describe('API client', () => {
         document_title: 'Research paper',
         page_num: 4,
         text_preview: 'Evidence',
+      }],
+      citation_checks: [{
+        sentence_index: 0,
+        cited_labels: [1],
+        score: 0.31,
+        supported: false,
       }],
     }]);
   });

@@ -130,7 +130,11 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         } rounded-lg px-4 py-3`}
       >
         {message.role === 'assistant' ? (
-          <MarkdownRenderer content={message.content} citations={message.citations} />
+          <MarkdownRenderer
+            content={message.content}
+            citations={message.citations}
+            citationChecks={message.citation_checks}
+          />
         ) : (
           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
         )}

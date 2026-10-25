@@ -116,6 +116,13 @@ class QueryRequest(BaseModel):
         return unique_ids
 
 
+class CitationCheckResponse(BaseModel):
+    sentence_index: int
+    cited_labels: List[int]
+    score: float
+    supported: bool
+
+
 class QueryResponse(BaseModel):
     """Query response model."""
     answer: str
@@ -124,6 +131,7 @@ class QueryResponse(BaseModel):
     model_used: Optional[str]
     usage: dict
     conversation_id: Optional[str] = None
+    citation_checks: Optional[List[CitationCheckResponse]] = None
 
 
 class ConversationCreateRequest(BaseModel):
@@ -153,7 +161,11 @@ class MessageRatingRequest(BaseModel):
     rating: Optional[Literal["up", "down"]] = None
 
 
-@router.post("/query", response_model=QueryResponse)
+@router.post(
+    "/query",
+    response_model=QueryResponse,
+    response_model_exclude_unset=True,
+)
 def query(
     request: QueryRequest,
     db: Session = Depends(get_db),
@@ -281,13 +293,17 @@ def query(
         finally:
             lease.release()
         
+        response_fields = {}
+        if "citation_checks" in result:
+            response_fields["citation_checks"] = result["citation_checks"]
         return QueryResponse(
             answer=result["answer"],
             sources=result.get("sources", []),
             chunks_used=result["chunks_used"],
             model_used=result["model_used"],
             usage=result.get("usage", {}),
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            **response_fields,
         )
         
     except HTTPException:
@@ -350,6 +366,8 @@ def get_conversation(
             "citations": msg.citations_json,
             "rating": msg.rating,
         })
+        if get_settings().citation_check_enabled and msg.citation_checks_json is not None:
+            messages[-1]["citation_checks"] = msg.citation_checks_json
     
     return {
         "id": conversation.id,

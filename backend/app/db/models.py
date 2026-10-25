@@ -382,6 +382,7 @@ class Message(Base):
     role = Column(String, nullable=False)  # user, assistant, system
     text = Column(Text, nullable=False)
     citations_json = Column(JSON, default=[])
+    citation_checks_json = Column(JSON, nullable=True)
     used_mode = Column(String)  # local, cloud
     token_count = Column(Integer)
     cost = Column(Float)

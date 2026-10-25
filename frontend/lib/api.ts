@@ -108,7 +108,15 @@ export interface Message {
   content: string;
   created_at: string;
   citations?: Citation[];
+  citation_checks?: CitationCheck[];
   rating?: MessageRating;
+}
+
+export interface CitationCheck {
+  sentence_index: number;
+  cited_labels: number[];
+  score: number;
+  supported: boolean;
 }
 
 export type StudioNoteKind = 'report' | 'mindmap' | 'video_summary';
@@ -144,6 +152,7 @@ export interface QueryResponse {
   model_used: string | null;
   usage: Record<string, unknown>;
   conversation_id: string | null;
+  citation_checks?: CitationCheck[];
 }
 
 /** Generated once a project's sources are ready; empty without a model. */
@@ -308,6 +317,7 @@ interface BackendMessage {
   text: string;
   created_at: string;
   citations?: BackendCitation[] | null;
+  citation_checks?: CitationCheck[] | null;
   rating?: MessageRating;
 }
 
@@ -680,6 +690,9 @@ const normalizeMessage = (
   created_at: message.created_at,
   ...(message.citations?.length
     ? { citations: message.citations.map(normalizeCitation) }
+    : {}),
+  ...(message.citation_checks?.length
+    ? { citation_checks: message.citation_checks }
     : {}),
   ...(message.rating ? { rating: message.rating } : {}),
 });

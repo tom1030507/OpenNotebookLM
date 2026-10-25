@@ -194,6 +194,8 @@ class Settings(BaseSettings):
     # in characters rather than tokens on purpose: it needs no tokenizer and
     # is conservative for Latin text, where a character is well under a token.
     context_char_budget: int = 12000
+    citation_check_enabled: bool = True
+    citation_check_threshold: float = Field(default=0.83, ge=0.0, le=1.0)
 
     @field_validator(
         "llm_max_output_tokens", "llm_max_request_tokens", mode="before",

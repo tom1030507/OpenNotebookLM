@@ -71,6 +71,16 @@ OLD_SCHEMA = (
         updated_at DATETIME NOT NULL
     )
     """,
+    """
+    CREATE TABLE messages (
+        id VARCHAR NOT NULL PRIMARY KEY,
+        conversation_id VARCHAR NOT NULL,
+        role VARCHAR NOT NULL,
+        text TEXT NOT NULL,
+        citations_json JSON,
+        rating VARCHAR
+    )
+    """,
 )
 
 
@@ -122,6 +132,7 @@ class TestUpgrade:
         assert sorted(added) == [
             "conversations.user_id",
             "documents.user_id",
+            "messages.citation_checks_json",
             "notes.payload_json",
             "notes.studio_kind",
             "project_documents.shared_by_user_id",

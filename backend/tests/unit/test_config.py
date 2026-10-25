@@ -56,6 +56,25 @@ def test_a_set_optional_number_is_still_read(tmp_path):
     assert Settings(_env_file=env_file).llm_max_request_tokens == 8000
 
 
+def test_citation_check_defaults_to_the_calibrated_threshold_and_can_be_disabled(monkeypatch):
+    monkeypatch.delenv("CITATION_CHECK_ENABLED", raising=False)
+    monkeypatch.delenv("CITATION_CHECK_THRESHOLD", raising=False)
+
+    defaults = Settings(_env_file=None)
+
+    assert defaults.citation_check_enabled is True
+    assert defaults.citation_check_threshold == 0.83
+    example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "CITATION_CHECK_ENABLED=true" in example
+    assert "CITATION_CHECK_THRESHOLD=0.83" in example
+
+    monkeypatch.setenv("CITATION_CHECK_ENABLED", "false")
+    monkeypatch.setenv("CITATION_CHECK_THRESHOLD", "0.91")
+    overrides = Settings(_env_file=None)
+    assert overrides.citation_check_enabled is False
+    assert overrides.citation_check_threshold == 0.91
+
+
 def test_allowed_upload_types_match_the_documented_example():
     """The route allowlist and the tracked environment example stay aligned."""
     expected = [
