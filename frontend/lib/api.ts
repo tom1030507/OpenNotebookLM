@@ -106,6 +106,19 @@ export interface Citation extends Record<string, unknown> {
   text?: string;
 }
 
+export type ReportFormat = 'briefing' | 'study_guide' | 'faq' | 'timeline' | 'custom';
+
+export interface ProjectReportRequest {
+  format: ReportFormat;
+  instruction?: string;
+  document_ids?: string[];
+}
+
+export interface ProjectReport {
+  markdown: string;
+  citations: Citation[];
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -1150,6 +1163,13 @@ const api = {
       `/export/project/${projectId}/summary`,
       studioRequest(documentIds),
     );
+  },
+
+  fetchProjectReport(projectId: string, options: ProjectReportRequest): Promise<ProjectReport> {
+    return requestJson<ProjectReport>(`/projects/${projectId}/report`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
   },
 
   listNotes(projectId: string): Promise<Note[]> {

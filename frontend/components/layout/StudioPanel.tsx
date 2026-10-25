@@ -17,13 +17,13 @@ import useNotes from '@/store/useNotes';
 import api, { ApiError } from '@/lib/api';
 import type { MindMap, StudioNoteKind, VideoSummary } from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
-import MarkdownRenderer from '../MarkdownRenderer';
 import NotesSection from './NotesSection';
 
 const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
 const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
 const AudioOverviewDialog = React.lazy(() => import('@/components/AudioOverviewDialog'));
 const StudyToolsDialog = React.lazy(() => import('@/components/StudyToolsDialog'));
+const ReportDialog = React.lazy(() => import('@/components/ReportDialog'));
 
 interface ProjectResult<T> {
   projectId: string;
@@ -82,10 +82,12 @@ export default function StudioPanel({
   const documents = useStore((state) => state.documents);
   const loadingDocuments = useStore((state) => state.loadingDocuments);
   const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState('');
-  const [report, setReport] = useState<ProjectResult<string> | null>(null);
-  const [reportSaveState, setReportSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [reportDialog, setReportDialog] = useState<{
+    projectId: string;
+    projectName: string;
+    documentIds?: string[];
+  } | null>(null);
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
   const [mindMap, setMindMap] = useState<ProjectResult<MindMap> | null>(null);
@@ -146,15 +148,13 @@ export default function StudioPanel({
     projectGeneration.current += 1;
     playbackRun.current += 1;
     stopSpeaking();
-    setIsGeneratingReport(false);
     setIsPreparingAudio(false);
     setIsSpeaking(false);
     setIsCheckingAudioCapability(false);
     setIsBuildingMindMap(false);
     setIsPreparingVideo(false);
     setMindMap(null);
-    setReport(null);
-    setReportSaveState('idle');
+    setReportDialog(null);
     setVideoSummary(null);
     setStudyDialog(null);
     setIsMoreOptionsOpen(false);
@@ -280,42 +280,17 @@ export default function StudioPanel({
     }
   };
 
-  const generateReport = async () => {
-    const operation = beginProjectOperation();
-    if (!operation) return;
-
-    setIsGeneratingReport(true);
-    setReportError('');
-    setReport(null);
-    setReportSaveState('idle');
-
-    try {
-      const blob = await api.exportProjectSummary(
-        operation.project.id,
-        selectedSourceIds(useStore.getState()),
-      );
-      if (!operation.isCurrent()) return;
-      const content = await blob.text();
-      if (!operation.isCurrent()) return;
-      setReport({ projectId: operation.project.id, value: content });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${operation.project.name} report.md`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch {
-      if (operation.isCurrent()) {
-        setReportError('The report could not be generated. Please try again.');
-      }
-    } finally {
-      if (operation.isCurrent()) setIsGeneratingReport(false);
-    }
+  const openReport = () => {
+    if (!currentProject) return;
+    setReportDialog({
+      projectId: currentProject.id,
+      projectName: currentProject.name,
+      documentIds: selectedSourceIds(useStore.getState()),
+    });
   };
+
   const optionAction = (option: StudioOption) => {
-    if (option.action === 'report') return generateReport;
+    if (option.action === 'report') return openReport;
     if (option.action === 'mindmap') return buildMindMap;
     if (option.action === 'video') return playVideoSummary;
     if (option.action === 'audio') {
@@ -350,8 +325,8 @@ export default function StudioPanel({
   const currentMindMap = mindMap !== null && mindMap.projectId === currentProject?.id
     ? mindMap.value
     : null;
-  const currentReport = report !== null && report.projectId === currentProject?.id
-    ? report.value
+  const currentReportDialog = reportDialog?.projectId === currentProject?.id
+    ? reportDialog
     : null;
   const currentVideoSummary = videoSummary !== null && videoSummary.projectId === currentProject?.id
     ? videoSummary.value
@@ -377,7 +352,7 @@ export default function StudioPanel({
     if (option.action === 'video') {
       return isPreparingVideo || currentVideoSummary !== null || hasNoSources;
     }
-    return isGeneratingReport;
+    return reportDialog?.projectId === currentProject.id;
   };
 
   const optionLabel = (option: StudioOption) => {
@@ -397,10 +372,6 @@ export default function StudioPanel({
       if (isPreparingAudio) return <Loader2 className="w-5 h-5 animate-spin" />;
       if (isSpeaking) return <Square className="w-5 h-5" />;
       return option.icon;
-    }
-
-    if (option.action === 'report' && isGeneratingReport) {
-      return <Loader2 className="w-5 h-5 animate-spin" />;
     }
 
     if (option.action === 'mindmap' && isBuildingMindMap) {
@@ -440,9 +411,7 @@ export default function StudioPanel({
       return 'Watch a walkthrough of this project';
     }
 
-    if (option.action === 'report' && isGeneratingReport) {
-      return 'Generating report…';
-    }
+    if (option.action === 'report') return 'Choose a format and create a cited report';
 
     return 'Summarise this project';
   };
@@ -555,43 +524,6 @@ export default function StudioPanel({
             </p>
           )}
 
-          {currentReport !== null && currentProject && (
-            <section aria-label="Generated report" className="mt-4 rounded-lg border border-[var(--border)] p-3">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-medium">{currentProject.name} report</h3>
-                {canEditProject && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setReportSaveState('saving');
-                      try {
-                        await saveStudioNote(currentProject.id, `${currentProject.name} report`, {
-                          studio_kind: 'report', content: currentReport,
-                        });
-                        setReportSaveState('saved');
-                      } catch {
-                        setReportSaveState('error');
-                      }
-                    }}
-                    disabled={reportSaveState === 'saving' || reportSaveState === 'saved'}
-                    className="rounded px-2 py-1 text-xs hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-50"
-                  >
-                    {reportSaveState === 'saving' ? 'Saving…'
-                      : reportSaveState === 'saved' ? 'Saved to notes' : 'Save report to notes'}
-                  </button>
-                )}
-              </div>
-              {reportSaveState === 'error' && (
-                <p role="alert" className="mt-2 text-xs text-[var(--error)]">
-                  Could not save to notes. Please try again.
-                </p>
-              )}
-              <div className="mt-3 max-h-80 overflow-y-auto">
-                <MarkdownRenderer content={currentReport} className="text-sm" />
-              </div>
-            </section>
-          )}
-
           <div className="relative mt-4">
             <button
               ref={moreOptionsRef}
@@ -648,6 +580,23 @@ export default function StudioPanel({
               useStore.getState().draftMindMapQuestion(currentMindMap.project_id, question);
               setMindMap(null);
             }}
+          />
+        </React.Suspense>
+      )}
+
+      {currentReportDialog && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <ReportDialog
+            key={currentReportDialog.projectId}
+            projectId={currentReportDialog.projectId}
+            projectName={currentReportDialog.projectName}
+            documentIds={currentReportDialog.documentIds}
+            onClose={() => setReportDialog(null)}
+            onSave={canEditProject ? (markdown) => saveStudioNote(
+              currentReportDialog.projectId,
+              `${currentReportDialog.projectName} report`,
+              { studio_kind: 'report', content: markdown },
+            ) : undefined}
           />
         </React.Suspense>
       )}

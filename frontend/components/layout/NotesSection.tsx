@@ -23,7 +23,7 @@ const inputClass = 'w-full px-3 py-2 bg-[var(--card)] border border-[var(--input
 const actionClass = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--muted)] transition-base disabled:opacity-50';
 const EMPTY_NOTES: Note[] = [];
 
-function savedAnswerView(note: Note) {
+function savedCitationView(note: Note) {
   const sourceStart = note.content.lastIndexOf('\n\n**Sources**\n');
   if (sourceStart < 0) return null;
 
@@ -85,8 +85,10 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const answerNote = notes.find((note) => note.id === openId && note.origin === 'answer');
-  const answerView = answerNote ? savedAnswerView(answerNote) : null;
+  const citationNote = notes.find((note) => note.id === openId && (
+    note.origin === 'answer' || (note.origin === 'studio' && note.studio_kind === 'report')
+  ));
+  const citationView = citationNote ? savedCitationView(citationNote) : null;
 
   useEffect(() => {
     void useNotes.getState().load(projectId);
@@ -245,9 +247,9 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                     && (note.origin !== 'studio' || note.studio_kind === 'report') && (
                     <div className="px-3 pb-3">
                       <MarkdownRenderer
-                        content={answerView?.content ?? note.content}
-                        citations={answerView?.citations}
-                        citationLabels={answerView?.citationLabels}
+                        content={citationView?.content ?? note.content}
+                        citations={citationView?.citations}
+                        citationLabels={citationView?.citationLabels}
                         className="text-sm"
                       />
                       {canEdit && (

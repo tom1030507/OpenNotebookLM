@@ -227,9 +227,7 @@ describe('StudioPanel', () => {
   it('shows the generated report and saves its Markdown to notes', async () => {
     const markdown = '# Project report\n\nSaved findings.';
     vi.spyOn(api, 'listNotes').mockResolvedValue([]);
-    vi.spyOn(api, 'exportProjectSummary').mockResolvedValue({
-      text: async () => markdown,
-    } as Blob);
+    vi.spyOn(api, 'fetchProjectReport').mockResolvedValue({ markdown, citations: [] });
     const create = vi.spyOn(api, 'createNote').mockResolvedValue({
       id: 'report-note', project_id: projectA.id, title: 'Account A project report',
       content: markdown, origin: 'studio', source_message_id: null,
@@ -244,7 +242,8 @@ describe('StudioPanel', () => {
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Report' }));
-
+    await screen.findByRole('dialog', { name: `${projectA.name} report` });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     expect(await screen.findByText('Saved findings.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save report to notes' }));
 

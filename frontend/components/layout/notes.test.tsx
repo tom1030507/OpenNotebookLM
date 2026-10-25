@@ -202,6 +202,34 @@ describe('Studio notes', () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it('renders saved report citations as source previews', async () => {
+    vi.spyOn(api, 'listNotes').mockResolvedValue([note({
+      title: 'Saved report',
+      origin: 'studio',
+      studio_kind: 'report',
+      content: [
+        '# Report',
+        '',
+        'Rainfall increased [Source 1].',
+        '',
+        '**Sources**',
+        '',
+        '- Rainfall study',
+        '  - [1]',
+        '    > Rainfall increased in the western region.',
+      ].join('\n'),
+    })]);
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Saved report/ }));
+
+    const previews = await screen.findAllByRole('button', { name: 'Preview source 1' });
+    expect(previews).toHaveLength(2);
+    fireEvent.click(previews[0]);
+    expect((await screen.findByRole('tooltip')).textContent)
+      .toContain('Rainfall increased in the western region.');
+  });
+
   it('lets viewers read notes but hides every note write control', async () => {
     useStore.setState({
       currentProject: { id: 'project-1', name: 'P', role: 'viewer' } as Project,

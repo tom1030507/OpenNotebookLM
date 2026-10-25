@@ -168,30 +168,40 @@ test('studies selected sources with flashcards and a scored quiz', async ({ api,
   await expect(quiz).toContainText('Final score: 1 / 1');
 });
 
-test('downloads a Markdown project report', async ({ api, page }, testInfo) => {
-  const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'report');
-  const endpoint = `${runtime.browserApiUrl}/export/project/${project.id}/summary`;
-  const assertOneExportRequest = observeExportRequest(page, endpoint, 'POST');
+test('generates and downloads a custom report', async ({ api, page }, testInfo) => {
+  const { project, documentId } = await setupReadyUrlWorkspace(api, page, testInfo, 'report');
+  const endpoint = `${runtime.browserApiUrl}/projects/${project.id}/report`;
+  const studio = page.getByRole('complementary', { name: 'Studio' });
+  await studio.getByRole('button', { name: 'Report', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: `${project.name} report` });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Report format').selectOption('custom');
+  await dialog.getByLabel('Custom instructions').fill('Include the access code from the source.');
   const responsePromise = page.waitForResponse(
-    (response) => response.url() === endpoint
-      && response.request().method() === 'POST',
+    (response) => response.url() === endpoint && response.request().method() === 'POST',
   );
-  const downloadPromise = page.waitForEvent('download');
-  await page
-    .getByRole('complementary', { name: 'Studio' })
-    .getByRole('button', { name: 'Report', exact: true })
-    .click();
+  await dialog.getByRole('button', { name: 'Generate report', exact: true }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(200);
+  expect((await response.json()).citations).toContainEqual(expect.objectContaining({
+    document_id: documentId,
+    source: 'E2E Observatory Field Notes',
+  }));
+  expect(response.request().postDataJSON()).toEqual({
+    format: 'custom',
+    instruction: 'Include the access code from the source.',
+  });
+  await expect(dialog).toContainText('ORBIT-7319');
+  await dialog.getByRole('button', { name: 'Preview source 1' }).click();
+  await expect(page.getByRole('tooltip')).toContainText('E2E Observatory Field Notes');
+
+  const downloadPromise = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download Markdown' }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe(`${project.name} report.md`);
+  expect(download.suggestedFilename()).toBe(`${project.name}-report.md`);
   const savedPath = await download.path();
   expect(savedPath).not.toBeNull();
-  expect(await readFile(savedPath as string, 'utf8')).toContain(`# Project Summary: ${project.name}`);
-  await expect(
-    page.getByRole('complementary', { name: 'Studio' }).getByRole('button', { name: 'Report' }),
-  ).toBeEnabled();
-  assertOneExportRequest();
+  expect(await readFile(savedPath as string, 'utf8')).toContain('ORBIT-7319');
 });
 
 test('exports the current project as Markdown', async ({ api, page }, testInfo) => {
