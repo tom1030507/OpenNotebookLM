@@ -98,6 +98,39 @@ describe('ChatArea', () => {
     expect(useStore.getState().messages).toEqual([]);
   });
 
+  it('disables starter questions when every source is deselected', async () => {
+    const query = vi.spyOn(api, 'query').mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: 'conversation-2',
+    });
+    const createConversation = vi.spyOn(api, 'createConversation')
+      .mockResolvedValue(conversation('conversation-2', project.id));
+    vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
+      project_name: project.name,
+      overview: null,
+      questions: ['Why does this matter?'],
+    });
+    vi.spyOn(api, 'getMessages').mockResolvedValue([]);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      deselectedSources: { [project.id]: [readyDocument.id] },
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    const suggestion = await screen.findByRole('button', { name: 'Why does this matter?' });
+    expect((suggestion as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(suggestion);
+
+    expect(query).not.toHaveBeenCalled();
+    expect(createConversation).not.toHaveBeenCalled();
+  });
+
   it('resizes the composer for multiline input and keeps the source badge clear', () => {
     useStore.setState({
       currentProject: project,
@@ -143,6 +176,28 @@ describe('ChatArea', () => {
     expect(composer.className).not.toContain('pr-20');
   });
 
+  it('shows the selected source count in the composer badge', () => {
+    const secondReadyDocument = { ...readyDocument, id: 'document-2', name: 'Second source' };
+    vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
+      project_name: project.name,
+      overview: null,
+      questions: [],
+    });
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument, secondReadyDocument],
+      deselectedSources: {
+        [project.id]: [readyDocument.id, secondReadyDocument.id],
+      },
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Question' } });
+
+    expect(screen.getByText('0 sources')).toBeTruthy();
+  });
+
   describe('mind map question handoff', () => {
     beforeEach(() => {
       useStore.setState({
@@ -183,6 +238,30 @@ describe('ChatArea', () => {
       act(() => useStore.getState().draftMindMapQuestion(project.id, 'Explain attention.'));
 
       await waitFor(() => expect(composer.value).toBe('Compare the two methods.\n\nExplain attention.'));
+    });
+
+    it('waits to hand off a mind-map question until a source is selected', async () => {
+      vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
+        project_name: project.name,
+        overview: null,
+        questions: [],
+      });
+      useStore.setState({
+        deselectedSources: { [project.id]: [readyDocument.id] },
+      });
+      render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+      const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+      act(() => useStore.getState().draftMindMapQuestion(project.id, 'Explain attention.'));
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+
+      expect(composer.value).toBe('');
+      expect(useStore.getState().pendingMindMapQuestion).not.toBeNull();
+
+      act(() => useStore.getState().toggleSourceSelected(project.id, readyDocument.id));
+      await waitFor(() => expect(composer.value).toBe('Explain attention.'));
     });
 
     it('ignores a stale project handoff without changing the composer', () => {
@@ -525,6 +604,34 @@ describe('ChatArea', () => {
     await waitFor(() => expect(screen.getByText('It explains the source.')).toBeTruthy());
     expect(screen.getAllByText(question)).toHaveLength(1);
     expect(screen.getAllByText('It explains the source.')).toHaveLength(1);
+  });
+
+  it('does not retry a pending question after every source is deselected', async () => {
+    const question = 'What does this source say?';
+    const query = vi.spyOn(api, 'query').mockRejectedValue(new Error('Request failed'));
+    vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
+      project_name: project.name,
+      overview: null,
+      questions: [],
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      currentConversation: conversation('conversation-1', project.id),
+      messages: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Request failed');
+
+    act(() => useStore.getState().toggleSourceSelected(project.id, readyDocument.id));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry question' }));
+
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes persisted messages without resending a question after its query succeeds', async () => {
