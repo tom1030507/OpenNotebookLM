@@ -142,6 +142,31 @@ export interface ProjectReport {
   citations: Citation[];
 }
 
+export interface ProjectTableRequest {
+  instruction: string;
+  columns?: string[];
+  source_ids?: string[];
+}
+
+export interface ProjectTableCell {
+  value: string;
+  document_id: string | null;
+  source_id: number | null;
+}
+
+export interface ProjectTableSource {
+  id: number;
+  document_id: string;
+  title: string;
+  excerpt: string;
+}
+
+export interface ProjectTable {
+  columns: string[];
+  rows: ProjectTableCell[][];
+  sources: ProjectTableSource[];
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -1218,6 +1243,13 @@ const api = {
 
   fetchProjectReport(projectId: string, options: ProjectReportRequest): Promise<ProjectReport> {
     return requestJson<ProjectReport>(`/projects/${projectId}/report`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
+  },
+
+  fetchProjectTable(projectId: string, options: ProjectTableRequest): Promise<ProjectTable> {
+    return requestJson<ProjectTable>(`/projects/${projectId}/table`, {
       method: 'POST',
       body: JSON.stringify(options),
     });

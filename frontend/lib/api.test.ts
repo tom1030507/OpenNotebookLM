@@ -343,6 +343,32 @@ describe('API client', () => {
     }));
   });
 
+  it('extracts a table with its instruction, requested columns, and source selection', async () => {
+    const options = {
+      instruction: 'One row per paper',
+      columns: ['Title', 'Year'],
+      source_ids: ['doc-1'],
+    };
+    const response = {
+      columns: ['Title', 'Year'],
+      rows: [[
+        { value: 'A study', document_id: 'doc-1' },
+        { value: '2025', document_id: 'doc-1' },
+      ]],
+      sources: [{ document_id: 'doc-1', title: 'Paper A', excerpt: 'A study from 2025.' }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.fetchProjectTable('project-1', options)).resolves.toEqual(response);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/table');
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(options),
+    }));
+  });
+
   it.each([
     { output: 'mind map', request: () => api.fetchProjectMindMap('project-1', ['doc-1']) },
     { output: 'video summary', request: () => api.fetchProjectVideoSummary('project-1', ['doc-1']) },

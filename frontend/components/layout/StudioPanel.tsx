@@ -11,6 +11,7 @@ import {
   PanelRightOpen,
   Loader2,
   Square,
+  Table,
 } from 'lucide-react';
 import useStore, { selectedSourceIds } from '@/store/useStore';
 import useNotes from '@/store/useNotes';
@@ -24,6 +25,7 @@ const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDia
 const AudioOverviewDialog = React.lazy(() => import('@/components/AudioOverviewDialog'));
 const StudyToolsDialog = React.lazy(() => import('@/components/StudyToolsDialog'));
 const ReportDialog = React.lazy(() => import('@/components/ReportDialog'));
+const DataTableDialog = React.lazy(() => import('@/components/DataTableDialog'));
 
 interface ProjectResult<T> {
   projectId: string;
@@ -63,7 +65,7 @@ interface StudioOption {
   /** Outputs with no backend endpoint stay unavailable. */
   available?: boolean;
   /** Distinguishes the live actions from one another. */
-  action?: 'report' | 'audio' | 'mindmap' | 'video';
+  action?: 'report' | 'audio' | 'mindmap' | 'video' | 'table';
 }
 
 interface StudioPanelProps {
@@ -89,6 +91,11 @@ export default function StudioPanel({
     projectId: string;
     projectName: string;
     documentIds?: string[];
+  } | null>(null);
+  const [tableDialog, setTableDialog] = useState<{
+    projectId: string;
+    projectName: string;
+    sourceIds?: string[];
   } | null>(null);
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
@@ -157,6 +164,7 @@ export default function StudioPanel({
     setIsPreparingVideo(false);
     setMindMap(null);
     setReportDialog(null);
+    setTableDialog(null);
     setVideoSummary(null);
     setStudyDialog(null);
     setIsMoreOptionsOpen(false);
@@ -291,8 +299,18 @@ export default function StudioPanel({
     });
   };
 
+  const openTable = () => {
+    if (!currentProject) return;
+    setTableDialog({
+      projectId: currentProject.id,
+      projectName: currentProject.name,
+      sourceIds: selectedSourceIds(useStore.getState()),
+    });
+  };
+
   const optionAction = (option: StudioOption) => {
     if (option.action === 'report') return openReport;
+    if (option.action === 'table') return openTable;
     if (option.action === 'mindmap') return buildMindMap;
     if (option.action === 'video') return playVideoSummary;
     if (option.action === 'audio') {
@@ -351,6 +369,7 @@ export default function StudioPanel({
         || isPreparingAudio;
     }
     if (option.action === 'mindmap') return isBuildingMindMap || currentMindMap !== null;
+    if (option.action === 'table') return hasNoSources || tableDialog?.projectId === currentProject.id;
     if (option.action === 'video') {
       return isPreparingVideo || currentVideoSummary !== null || hasNoSources;
     }
@@ -414,6 +433,7 @@ export default function StudioPanel({
     }
 
     if (option.action === 'report') return 'Choose a format and create a cited report';
+    if (option.action === 'table') return 'Extract and export a source comparison table';
 
     return 'Summarise this project';
   };
@@ -446,6 +466,13 @@ export default function StudioPanel({
       action: 'report',
       title: 'Report',
       icon: <FileText className="w-5 h-5" />
+    },
+    {
+      id: 'table',
+      available: true,
+      action: 'table',
+      title: 'Data table',
+      icon: <Table className="w-5 h-5" />
     }
   ];
 
@@ -599,6 +626,18 @@ export default function StudioPanel({
               `${currentReportDialog.projectName} report`,
               { studio_kind: 'report', content: markdown },
             ) : undefined}
+          />
+        </React.Suspense>
+      )}
+
+      {tableDialog && tableDialog.projectId === currentProject?.id && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <DataTableDialog
+            key={tableDialog.projectId}
+            projectId={tableDialog.projectId}
+            projectName={tableDialog.projectName}
+            sourceIds={tableDialog.sourceIds}
+            onClose={() => setTableDialog(null)}
           />
         </React.Suspense>
       )}

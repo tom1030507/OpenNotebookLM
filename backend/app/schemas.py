@@ -547,6 +547,103 @@ class ReportResponse(BaseModel):
     citations: List[ReportCitation] = Field(default_factory=list)
 
 
+class TableRequest(BaseModel):
+    """Options for extracting a source-grounded project table."""
+    model_config = {"extra": "forbid"}
+
+    instruction: str = Field(min_length=1, max_length=500)
+    columns: Optional[List[str]] = Field(default=None, min_length=1, max_length=12)
+    source_ids: Optional[List[str]] = Field(
+        default=None, min_length=1, max_length=MAX_DOCUMENT_SELECTION,
+    )
+
+    @field_validator("instruction")
+    @classmethod
+    def instruction_must_not_be_blank(cls, instruction: str) -> str:
+        """Reject empty extraction requests while keeping the user's wording.
+
+        Args:
+            instruction: Requested table description.
+
+        Returns:
+            The validated instruction.
+        """
+        if not instruction.strip():
+            raise ValueError("instruction must not be blank")
+        return instruction.strip()
+
+    @field_validator("columns")
+    @classmethod
+    def columns_must_be_nonblank(cls, columns: Optional[List[str]]) -> Optional[List[str]]:
+        """Trim supplied column labels and reject blank names.
+
+        Args:
+            columns: Optional fixed column list.
+
+        Returns:
+            The normalized column labels.
+        """
+        if columns is None:
+            return None
+        normalized = [column.strip() for column in columns]
+        if any(not column for column in normalized):
+            raise ValueError("column labels must not be blank")
+        if any(len(column) > 100 for column in normalized):
+            raise ValueError("column labels must be at most 100 characters")
+        return normalized
+
+    @field_validator("source_ids", mode="before")
+    @classmethod
+    def deduplicate_source_ids(cls, source_ids: Any) -> Any:
+        """Keep only the first copy of each selected source id.
+
+        Args:
+            source_ids: Optional document ids supplied by the client.
+
+        Returns:
+            The selection in request order with duplicates removed.
+        """
+        if not isinstance(source_ids, (list, tuple)):
+            return source_ids
+        unique_ids = []
+        seen_ids = set()
+        for source_id in source_ids:
+            if not isinstance(source_id, str):
+                unique_ids.append(source_id)
+            elif source_id not in seen_ids:
+                seen_ids.add(source_id)
+                unique_ids.append(source_id)
+        return unique_ids
+
+
+class TableCellResponse(BaseModel):
+    """One validated table value and its optional source document."""
+    model_config = {"extra": "forbid"}
+
+    value: str
+    document_id: Optional[str] = None
+    source_id: Optional[int] = None
+
+
+class TableSourceResponse(BaseModel):
+    """A source excerpt used by at least one extracted cell."""
+    model_config = {"extra": "forbid"}
+
+    id: int
+    document_id: str
+    title: str
+    excerpt: str
+
+
+class TableResponse(BaseModel):
+    """Validated columns, rows, and evidence sources for a project table."""
+    model_config = {"extra": "forbid"}
+
+    columns: List[str] = Field(default_factory=list)
+    rows: List[List[TableCellResponse]] = Field(default_factory=list)
+    sources: List[TableSourceResponse] = Field(default_factory=list)
+
+
 class StudyRequest(SourceSelection):
     """Options for one temporary flashcard or quiz generation request."""
 
