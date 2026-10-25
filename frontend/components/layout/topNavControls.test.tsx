@@ -99,6 +99,21 @@ afterEach(() => {
 });
 
 describe('TopNav controls that were previously inert', () => {
+  it('closes the user menu on Escape and on a click outside it', () => {
+    renderTopNav();
+    const trigger = screen.getByRole('button', { name: 'User menu' });
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu', { name: 'User menu' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('menu', { name: 'User menu' })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('menu', { name: 'User menu' })).toBeNull();
+  });
+
   it('shows the project cover in the workspace header', () => {
     renderTopNav();
 

@@ -605,17 +605,13 @@ describe('workspace accessibility contract', () => {
     renderWorkspace(<ConversationList />);
 
     [
-      'Collapse conversations',
+      'New Conversation',
       'Rename conversation',
       'Delete conversation',
       // Each name must exist; uniqueness is not required, since the top
       // navigation and the Sources panel both legitimately offer New Project.
     ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse conversations' }));
-    expect(screen.getByRole('button', { name: 'Expand conversations' })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Expand conversations' }));
     fireEvent.click(screen.getByRole('button', { name: 'Rename conversation' }));
 
     expect(screen.getByRole('button', { name: 'Save conversation name' })).toBeTruthy();

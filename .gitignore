@@ -95,3 +95,6 @@ __pycache__/
 # Eval artefacts
 output/
 backend/tests/eval/.cache/
+
+# taste-skill run artifacts (before/after captures, dealt direction)
+.taste-skill/

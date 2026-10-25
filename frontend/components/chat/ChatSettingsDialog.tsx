@@ -70,14 +70,14 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50 p-4">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--background)] rounded-lg w-full max-w-md max-h-full overflow-y-auto"
+        className="bg-[var(--popover)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md max-h-full overflow-y-auto"
       >
         <div className="p-6 border-b border-[var(--border)]">
           <div className="flex items-center justify-between">
@@ -115,7 +115,7 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
                 {ROLES.map((role) => (
                   <label
                     key={role.value}
-                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
                       settings.role === role.value
                         ? 'border-[var(--primary)] bg-[var(--primary)]/5'
                         : 'border-[var(--border)] hover:bg-[var(--muted)]'
@@ -149,7 +149,7 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
                     maxLength={INSTRUCTIONS_MAX_LENGTH}
                     rows={4}
                     placeholder="For example: answer as a peer reviewer and point out weak evidence."
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-[var(--ring)] text-sm"
+                    className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-[var(--ring)] text-sm"
                   />
                   <p className="mt-1 text-xs text-[var(--muted-foreground)] text-right">
                     {settings.instructions.length}/{INSTRUCTIONS_MAX_LENGTH}
@@ -163,7 +163,7 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
                   {LENGTHS.map((length) => (
                     <label
                       key={length.value}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-all ${
+                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors ${
                         settings.answer_length === length.value
                           ? 'border-[var(--primary)] bg-[var(--primary)]/5'
                           : 'border-[var(--border)] hover:bg-[var(--muted)]'

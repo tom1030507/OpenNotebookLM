@@ -56,6 +56,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const [showHelp, setShowHelp] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const moreActionsRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const firstOverflowActionRef = useRef<HTMLButtonElement>(null);
 
   const currentProject = useStore((state) => state.currentProject);
@@ -78,16 +79,38 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
     initializeTheme();
   }, []);
 
+  // The user menu only closed from its own button: Escape and clicks elsewhere
+  // left it open, and on a phone it then covered the panel buttons below it.
+  useEffect(() => {
+    if (!showUserMenu) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setShowUserMenu(false);
+      userMenuRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.focus();
+    };
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!userMenuRef.current?.contains(event.target as Node)) setShowUserMenu(false);
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('pointerdown', closeOnOutsidePointer);
+    };
+  }, [showUserMenu]);
+
   const readAccount = () => {
     try {
       const raw = window.localStorage.getItem('user');
       const parsed = raw ? JSON.parse(raw) as { username?: string; email?: string } : null;
       return {
-        username: parsed?.username || 'Demo user',
-        email: parsed?.email || 'demo@example.com',
+        username: parsed?.username || 'Signed-in account',
+        email: parsed?.email || '—',
       };
     } catch {
-      return { username: 'Demo user', email: 'demo@example.com' };
+      return { username: 'Signed-in account', email: '—' };
     }
   };
 
@@ -167,7 +190,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const actionButtonClassName = `${
     isCompact ? 'flex h-11 w-11 items-center justify-center' : 'p-2'
   } text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base`;
-  const menuPanelClassName = 'absolute right-0 mt-2 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50';
+  const menuPanelClassName = 'absolute right-0 mt-2 bg-[var(--popover)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50';
   // Menu rows only need the 44px floor where fingers, not pointers, use them.
   const menuItemClassName = `w-full ${isCompact ? 'min-h-11 ' : ''}text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base`;
 
@@ -188,11 +211,11 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
 
   return (
     <>
-      <header className="h-14 border-b border-[var(--border)] bg-[var(--card)] flex items-center px-4 gap-4">
+      <header className="h-12 border-b border-[var(--border)] bg-[var(--background)] flex items-center px-4 gap-4">
         {/* Logo */}
         <BrandLogo
           label={displayedTitle === 'OpenNotebookLM' ? undefined : 'OpenNotebookLM logo'}
-          className="w-8 h-8 shrink-0"
+          className="w-6 h-6 shrink-0"
         />
 
         {/* Notebook Title — truncates so the controls keep their tap targets */}
@@ -201,10 +224,10 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             <ProjectCover
               emoji={currentProject.cover_emoji}
               color={currentProject.cover_color}
-              className="w-8 h-8 text-base"
+              className="w-7 h-7 text-sm shrink-0"
             />
           )}
-          <h1 className="text-base font-medium text-[var(--foreground)] truncate">
+          <h1 className="text-[15px] font-semibold text-[var(--foreground)] truncate">
             {displayedTitle}
           </h1>
           {currentConversation && (
@@ -287,16 +310,16 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           )}
 
           {/* User Menu */}
-          <div className="relative">
+          <div ref={userMenuRef} className="relative">
             <button
               onClick={openUserMenu}
               aria-label={'User menu'}
               title={'User menu'}
               aria-haspopup="menu"
               aria-expanded={showUserMenu}
-              className={`${isCompact ? 'h-11 w-11' : 'w-8 h-8'} rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-medium hover:opacity-90 transition-base`}
+              className={`${isCompact ? 'h-11 w-11' : 'w-8 h-8'} rounded-full border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] flex items-center justify-center text-sm font-medium hover:bg-[var(--muted)] transition-base`}
             >
-              <User className="w-5 h-5" />
+              <User className="w-4 h-4" />
             </button>
 
             {showUserMenu && (
@@ -355,7 +378,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             </div>
           </dl>
           <p className="mt-4 text-xs text-[var(--muted-foreground)]">
-            This workspace runs in demo mode. Account details come from the browser session.
+            Signed in to this server. Your projects and sources are visible only to this account.
           </p>
         </TopNavInfoDialog>
       )}
@@ -364,18 +387,17 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
         <TopNavInfoDialog title="Help" onClose={() => setShowHelp(false)}>
           <ol className="space-y-2 text-sm list-decimal list-inside">
             <li>Create a project to hold related material.</li>
-            <li>Add sources: upload a supported file, or paste a web page or YouTube link.</li>
-            <li>Wait for a source to report Ready, then ask a question in the composer.</li>
-            <li>Export a conversation or a whole project from the toolbar.</li>
+            <li>Add sources: upload a file, paste text, or add a web page or YouTube link.</li>
+            <li>Wait for a source to report Ready, then ask a question; answers cite the passages they use.</li>
+            <li>Tick or untick sources to choose which ones answers and Studio draw on.</li>
+            <li>Use Studio for an audio summary, video summary, mind map or report, and Notes to keep answers.</li>
+            <li>Export the open conversation from the toolbar.</li>
           </ol>
-          <p className="mt-4 text-xs text-[var(--muted-foreground)]">
-            Studio outputs (audio, video, mind maps) are not available yet.
-          </p>
           <a
             href="https://github.com/tom1030507/OpenNotebookLM"
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-4 inline-block text-sm text-[var(--primary)] hover:underline"
+            className="mt-4 inline-block text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
           >
             Documentation on GitHub
           </a>

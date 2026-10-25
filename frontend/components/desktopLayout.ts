@@ -33,10 +33,13 @@ interface FluidTrack {
 }
 
 const COLLAPSED_PANEL_WIDTH = 48;
+// The left column holds Sources and, on desktop, Conversations too, so it is
+// a little wider than Studio: wide enough that a source name and its error
+// message read on one or two lines instead of one word per line.
 const SOURCES_TRACK: FluidTrack = {
-  min: 192,
-  preferredViewportRatio: 0.15,
-  max: 272,
+  min: 240,
+  preferredViewportRatio: 0.18,
+  max: 288,
 };
 const CONVERSATIONS_TRACK: FluidTrack = {
   min: 184,
@@ -44,8 +47,8 @@ const CONVERSATIONS_TRACK: FluidTrack = {
   max: 224,
 };
 const STUDIO_TRACK: FluidTrack = {
-  min: 192,
-  preferredViewportRatio: 0.15,
+  min: 220,
+  preferredViewportRatio: 0.16,
   max: 272,
 };
 
@@ -156,23 +159,24 @@ export const welcomeHeroStyles: Record<
     maxWidth: '60rem',
   },
   icon: {
-    width: 'clamp(4rem, 10cqw, 5.5rem)',
-    height: 'clamp(4rem, 10cqw, 5.5rem)',
-    marginBottom: 'clamp(1.5rem, 5cqw, 2.25rem)',
+    width: 'clamp(2.5rem, 6cqw, 3rem)',
+    height: 'clamp(2.5rem, 6cqw, 3rem)',
+    marginBottom: 'clamp(1rem, 3cqw, 1.5rem)',
   },
   glyph: {
     width: 'clamp(2rem, 5cqw, 2.75rem)',
     height: 'clamp(2rem, 5cqw, 2.75rem)',
   },
+  // An app screen's title, not a landing page's: it tops out at 32px.
   title: {
-    fontSize: 'clamp(1.75rem, 5cqw, 2.75rem)',
+    fontSize: 'clamp(1.375rem, 4cqw, 2rem)',
   },
   actions: {
-    marginTop: 'clamp(2.5rem, 8cqw, 4rem)',
-    gap: 'clamp(1rem, 3cqw, 1.5rem)',
+    marginTop: 'clamp(1.5rem, 5cqw, 2.5rem)',
+    gap: 'clamp(0.5rem, 2cqw, 0.75rem)',
     gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 15rem), 1fr))',
   },
   card: {
-    padding: 'clamp(1rem, 3cqw, 1.5rem)',
+    padding: 'clamp(0.875rem, 2.5cqw, 1.25rem)',
   },
 };

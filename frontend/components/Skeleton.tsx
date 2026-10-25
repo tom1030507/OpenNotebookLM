@@ -17,7 +17,7 @@ export function Skeleton({
   width,
   height,
 }: SkeletonProps) {
-  const baseClasses = 'bg-gray-200 dark:bg-gray-700';
+  const baseClasses = 'bg-[var(--border)]';
   
   const variantClasses = {
     text: 'rounded',
@@ -95,8 +95,8 @@ export function ChatAreaSkeleton() {
           <MessageSkeleton />
           <div className="flex gap-3 justify-end">
             <div className="max-w-[70%]">
-              <div className="bg-[var(--primary)] bg-opacity-10 rounded-lg px-4 py-3">
-                <Skeleton variant="text" className="bg-[var(--primary)] bg-opacity-20" />
+              <div className="bg-[var(--muted)] rounded-lg px-4 py-3">
+                <Skeleton variant="text" className="bg-[var(--border)]" />
               </div>
             </div>
             <Skeleton variant="circular" width={32} height={32} />

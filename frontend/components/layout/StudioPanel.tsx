@@ -46,7 +46,7 @@ const StudioDialogFallback = () => (
     role="status"
     aria-live="polite"
     aria-label="Loading studio result"
-    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)]"
   >
     <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--card)] px-4 py-3 text-sm">
       <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
@@ -455,7 +455,7 @@ export default function StudioPanel({
     <aside
       aria-label="Studio"
       data-panel-state={isCollapsed ? 'collapsed' : 'expanded'}
-      className="relative w-full min-w-0 overflow-hidden border-l border-[var(--border)] bg-[var(--card)] flex flex-col h-full"
+      className="relative w-full min-w-0 overflow-hidden border-l border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full"
     >
       {onCollapsedChange && (
         <button
@@ -483,13 +483,16 @@ export default function StudioPanel({
         className="min-h-0 flex-1 flex flex-col"
       >
         {/* Header */}
-        <div className="p-4 border-b border-[var(--border)]">
-          <h2 className="pr-10 text-base font-medium">Studio</h2>
+        <div className="px-4 pt-4">
+          <h2 className="pr-10 text-sm font-semibold">Studio</h2>
         </div>
 
         {/* Studio Options */}
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="space-y-3">
+          {/* One divided card of rows rather than four tinted tiles with an
+              icon in a square each: the outputs are peers, and the tiles were
+              the heaviest thing on the screen while doing the least. */}
+          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] divide-y divide-[var(--border)]">
             {studioOptions.map((option) => {
               const hint = optionHint(option);
               const hintId = `${optionHintIdPrefix}-${option.id}-hint`;
@@ -503,13 +506,13 @@ export default function StudioPanel({
                   aria-label={optionLabel(option)}
                   aria-describedby={hintId}
                   title={hint}
-                  className="w-full p-4 bg-[var(--secondary)] rounded-lg text-left group disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full px-3 h-11 text-left hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] transition-base disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-[var(--card)] rounded-lg group-hover:bg-[var(--secondary)] transition-base">
+                    <span className="flex shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
                       {optionIcon(option)}
-                    </div>
-                    <h3 className="flex-1 text-sm font-medium">
+                    </span>
+                    <h3 className="flex-1 truncate text-sm font-medium">
                       {option.title}
                     </h3>
                   </div>
