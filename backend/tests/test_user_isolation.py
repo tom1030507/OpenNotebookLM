@@ -256,6 +256,13 @@ class FakeDocumentService:
         """Return a queued record without network or extraction work."""
         return await self._queued(**kwargs)
 
+    def enqueue_resync(self, db, project_id, document, operation_lease):
+        """Complete the route boundary without starting an ingestion worker."""
+        operation_lease.release()
+        document.status = "processing"
+        db.commit()
+        return document
+
     def delete_document(self, db, document_id):
         """Report success if a route reaches the deletion service."""
         return True
@@ -263,6 +270,71 @@ class FakeDocumentService:
 
 class TestSharedProjectSourceRoles:
     """Shared roles govern project sources and related mutations."""
+
+    def test_resync_requires_project_editor_and_existing_url_source(self, env):
+        from app.routers.ingest import get_document_service
+
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session,
+            env.alice_user,
+            title="Article",
+            source_type="url",
+        )
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        membership = grant_project_role(env, project_id, "viewer")
+        production_app.dependency_overrides[get_document_service] = (
+            lambda: FakeDocumentService()
+        )
+
+        route = "/api/projects/%s/documents/%s/resync" % (project_id, document_id)
+        assert env.bob.post(route).status_code == 404
+
+        membership.role = "editor"
+        env.session.commit()
+        response = env.bob.post(route)
+        assert response.status_code == 200, response.text
+        assert response.json()["doc_id"] == document_id
+        assert response.json()["status"] == "processing"
+
+        pdf_id = make_document(env.session, env.alice_user, source_type="pdf")
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, pdf_id)
+        ).status_code == 200
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s/resync" % (project_id, pdf_id)
+        ).status_code == 400
+
+    def test_watched_folder_is_owner_only_and_confined_to_server_root(
+        self, env, tmp_path, monkeypatch
+    ):
+        project_id = make_project(env.alice)
+        root = tmp_path / "watch-root"
+        allowed = root / "project"
+        outside = tmp_path / "outside"
+        allowed.mkdir(parents=True)
+        outside.mkdir()
+        monkeypatch.setattr(
+            "app.routers.projects.get_settings",
+            lambda: Settings(watched_folder_root=str(root)),
+        )
+        grant_project_role(env, project_id, "viewer")
+        route = "/api/projects/%s/watched-folder" % project_id
+
+        assert env.bob.get(route).status_code == 404
+        assert env.bob.put(route, json={"path": str(allowed)}).status_code == 404
+        invalid = env.alice.put(route, json={"path": str(outside)})
+        assert invalid.status_code == 422
+
+        saved = env.alice.put(route, json={"path": str(allowed)})
+        assert saved.status_code == 200, saved.text
+        assert saved.json() == {"enabled": True, "path": str(allowed.resolve())}
+        assert env.alice.get(route).json() == saved.json()
+        cleared = env.alice.put(route, json={"path": None})
+        assert cleared.status_code == 200
+        assert cleared.json()["path"] is None
 
     def test_invalid_foreign_source_link_is_hidden_from_project_reads(self, env):
         project_id = make_project(env.alice)

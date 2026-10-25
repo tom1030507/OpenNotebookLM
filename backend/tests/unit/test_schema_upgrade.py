@@ -131,8 +131,13 @@ class TestUpgrade:
 
         assert sorted(added) == [
             "conversations.user_id",
+            "documents.content_hash",
+            "documents.last_sync_changed",
+            "documents.last_synced_at",
             "documents.note_id",
             "documents.user_id",
+            "documents.watch_file_hash",
+            "documents.watch_source_path",
             "messages.citation_checks_json",
             "notes.payload_json",
             "notes.studio_kind",
@@ -146,6 +151,7 @@ class TestUpgrade:
             "projects.output_language",
             "projects.overview_json",
             "projects.user_id",
+            "projects.watched_folder",
         ]
         inspector = inspect(old_database)
         for table, column, _, _ in ADDED_COLUMNS:

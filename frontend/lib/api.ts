@@ -107,6 +107,13 @@ export interface Document {
   created_at: string;
   updated_at: string;
   chunk_count: number;
+  last_synced_at?: string | null;
+  last_sync_changed?: boolean | null;
+}
+
+export interface WatchedFolderSettings {
+  enabled: boolean;
+  path: string | null;
 }
 
 export interface SourceGuide {
@@ -410,6 +417,8 @@ interface BackendDocument {
   updated_at: string;
   chunk_count: number;
   is_owned_by_caller: boolean;
+  last_synced_at?: string | null;
+  last_sync_changed?: boolean | null;
 }
 
 interface FileUploadResponse {
@@ -782,6 +791,12 @@ const normalizeDocument = (document: BackendDocument): Document => {
     updated_at: document.updated_at,
     chunk_count: document.chunk_count,
     isOwnedByCaller: document.is_owned_by_caller,
+    ...(document.last_synced_at !== undefined
+      ? { last_synced_at: document.last_synced_at }
+      : {}),
+    ...(document.last_sync_changed !== undefined
+      ? { last_sync_changed: document.last_sync_changed }
+      : {}),
   };
 };
 
@@ -1003,6 +1018,26 @@ const api = {
       { signal },
     );
     return documents.map(normalizeDocument);
+  },
+
+  getWatchedFolder(projectId: string): Promise<WatchedFolderSettings> {
+    return requestJson<WatchedFolderSettings>(
+      `/projects/${projectId}/watched-folder`,
+    );
+  },
+
+  setWatchedFolder(projectId: string, path: string | null): Promise<WatchedFolderSettings> {
+    return requestJson<WatchedFolderSettings>(
+      `/projects/${projectId}/watched-folder`,
+      { method: 'PUT', body: JSON.stringify({ path }) },
+    );
+  },
+
+  async resyncDocument(projectId: string, documentId: string): Promise<void> {
+    await requestJson<FileUploadResponse>(
+      `/projects/${projectId}/documents/${documentId}/resync`,
+      { method: 'POST' },
+    );
   },
 
   getUploadConfig(): Promise<UploadConfig> {

@@ -14,12 +14,12 @@ from app.schemas import (
     DocumentUpdateRequest, SourceGuideResponse,
     WebDiscoveryRequest, WebDiscoveryResponse,
 )
-from app.db.models import User
+from app.db.models import Document, User
 from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
 from app.config import get_settings
 from app.adapters.office import SUPPORTED_UPLOAD_EXTENSIONS
 from app.routers.auth import get_current_user
-from app.routers.ownership import require_document, require_project
+from app.routers.ownership import require_document, require_documents, require_project
 from app.routers.rate_limit import (
     acquire_account_lease,
     enforce_account_rate_limit,
@@ -571,6 +571,61 @@ async def get_document(
         updated_at=document.updated_at,
         chunk_count=chunk_count,
         is_owned_by_caller=document.user_id == current_user.id,
+        last_synced_at=document.last_synced_at,
+        last_sync_changed=document.last_sync_changed,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/documents/{document_id}/resync",
+    response_model=FileUploadResponse,
+)
+def resync_document(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    document_service: Any = Depends(get_document_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
+):
+    """Re-fetch a URL or YouTube source through the durable ingestion queue.
+
+    Args:
+        project_id: Project containing the source.
+        document_id: Existing source to refresh.
+        db: Session used to resolve project ownership and enqueue work.
+        current_user: Signed-in caller.
+        document_service: Durable document ingestion service.
+        request_limiter: Per-account ingestion request limiter.
+        concurrency_limiter: Per-account active-operation limiter.
+
+    Returns:
+        The source id and queued status.
+    """
+    require_project(db, project_id, current_user, min_role="editor")
+    require_documents(db, [document_id], current_user, project_id=project_id)
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if document.source_type not in {"url", "youtube"}:
+        raise HTTPException(status_code=400, detail="Only URL and YouTube sources can be re-synced")
+
+    lease = _begin_ingestion(
+        current_user.id,
+        request_limiter,
+        concurrency_limiter,
+    )
+    document_service.enqueue_resync(
+        db,
+        project_id=project_id,
+        document=document,
+        operation_lease=lease,
+    )
+    return FileUploadResponse(
+        doc_id=document.id,
+        status=document.status,
+        message="Source re-sync queued.",
     )
 
 
@@ -658,6 +713,8 @@ async def rename_document(
         updated_at=document.updated_at,
         chunk_count=len(document.chunks) if document.chunks else 0,
         is_owned_by_caller=True,
+        last_synced_at=document.last_synced_at,
+        last_sync_changed=document.last_sync_changed,
     )
 
 

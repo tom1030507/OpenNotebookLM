@@ -221,6 +221,17 @@ class ProjectMemberResponse(BaseModel):
     created_at: UtcDatetime
 
 
+class WatchedFolderRequest(BaseModel):
+    """Configure or clear a server-side folder watched by one project."""
+    path: Optional[str] = Field(None, max_length=4096)
+
+
+class WatchedFolderResponse(BaseModel):
+    """Show the owner whether folder watching is configured."""
+    enabled: bool
+    path: Optional[str] = None
+
+
 # Document schemas
 class DocumentBase(BaseModel):
     """Base document schema."""
@@ -244,6 +255,8 @@ class DocumentResponse(DocumentBase):
     updated_at: UtcDatetime
     chunk_count: int = 0
     is_owned_by_caller: bool = False
+    last_synced_at: Optional[UtcDatetime] = None
+    last_sync_changed: Optional[bool] = None
     
     class Config:
         from_attributes = True

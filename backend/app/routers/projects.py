@@ -5,16 +5,19 @@ from sqlalchemy.orm import Session
 import structlog
 
 from app.db.database import get_db
+from app.config import get_settings
 from app.schemas import (
     ChatSettings, ProjectCreate, ProjectUpdate, ProjectResponse, 
     ProjectListResponse, DocumentResponse, ProjectMemberCreate,
     ProjectMemberUpdate, ProjectMemberResponse, ProjectAnalyticsResponse,
+    WatchedFolderRequest, WatchedFolderResponse,
 )
 from app.db.models import User
 from app.services.projects import ProjectService
 from app.routers.auth import get_current_user
 from app.routers.ownership import project_role, require_document, require_project
 from app.services.project_analytics import get_project_analytics
+from app.services.watched_folders import resolve_watched_folder
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -284,6 +287,72 @@ async def update_project(
     )
 
 
+@router.get(
+    "/projects/{project_id}/watched-folder",
+    response_model=WatchedFolderResponse,
+)
+def get_watched_folder(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WatchedFolderResponse:
+    """Return watched-folder settings to the project owner only.
+
+    Args:
+        project_id: Project whose watch setting is being read.
+        db: Database session.
+        current_user: Signed-in project owner.
+
+    Returns:
+        Whether server-side watching is configured and the project path.
+    """
+    project = require_project(db, project_id, current_user, min_role="owner")
+    return WatchedFolderResponse(
+        enabled=bool(get_settings().watched_folder_root),
+        path=project.watched_folder,
+    )
+
+
+@router.put(
+    "/projects/{project_id}/watched-folder",
+    response_model=WatchedFolderResponse,
+)
+def update_watched_folder(
+    project_id: str,
+    request: WatchedFolderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WatchedFolderResponse:
+    """Set or clear a project folder within the configured server root.
+
+    Args:
+        project_id: Project to update.
+        request: Server path selected by the owner, or null to clear it.
+        db: Database session.
+        current_user: Signed-in project owner.
+
+    Returns:
+        The new owner-only watched-folder setting.
+    """
+    project = require_project(db, project_id, current_user, min_role="owner")
+    path = (request.path or "").strip()
+    root = get_settings().watched_folder_root
+    if path and not root:
+        raise HTTPException(
+            status_code=503,
+            detail="Server-side folder watching is not configured",
+        )
+    if path:
+        try:
+            project.watched_folder = str(resolve_watched_folder(root, path))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+    else:
+        project.watched_folder = None
+    db.commit()
+    return WatchedFolderResponse(enabled=bool(root), path=project.watched_folder)
+
+
 @router.post("/projects/{project_id}/duplicate", response_model=ProjectResponse)
 async def duplicate_project(
     project_id: str,
@@ -384,6 +453,8 @@ async def get_project_documents(
             updated_at=doc.updated_at,
             chunk_count=getattr(doc, 'chunk_count', 0),
             is_owned_by_caller=doc.user_id == current_user.id,
+            last_synced_at=doc.last_synced_at,
+            last_sync_changed=doc.last_sync_changed,
         ) for doc in documents
     ]
 
