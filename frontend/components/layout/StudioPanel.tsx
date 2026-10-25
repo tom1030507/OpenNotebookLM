@@ -69,11 +69,13 @@ interface StudioOption {
 interface StudioPanelProps {
   isCollapsed?: boolean;
   onCollapsedChange?: (isCollapsed: boolean) => void;
+  outputLanguageRevision?: number;
 }
 
 export default function StudioPanel({
   isCollapsed = false,
   onCollapsedChange,
+  outputLanguageRevision = 0,
 }: StudioPanelProps) {
   const availabilityLabel = 'coming soon';
   const optionHintIdPrefix = useId();
@@ -160,7 +162,7 @@ export default function StudioPanel({
     setIsMoreOptionsOpen(false);
     setIsAudioOverviewOpen(false);
     setReportError('');
-  }, [currentProject?.id]);
+  }, [currentProject?.id, outputLanguageRevision]);
 
   const playAudioSummary = async () => {
     const operation = beginProjectOperation();

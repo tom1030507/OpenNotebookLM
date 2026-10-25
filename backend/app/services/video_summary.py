@@ -48,6 +48,7 @@ from app.schemas import (
     VideoSummaryPptxRequest,
 )
 from app.services.llm import FALLBACK_MODEL, LLMService
+from app.services.output_language import with_output_language
 from app.services.source_digest import (
     document_excerpt,
     document_text,
@@ -344,7 +345,10 @@ class VideoSummaryService:
 
         generated_at = utc_now()
         scenes, model_used = self.build_scenes(
-            project.name, documents, generated_at,
+            project.name,
+            documents,
+            generated_at,
+            getattr(project, "output_language", None) or "auto",
         )
         try:
             VideoSummaryPptxRequest(scenes=[
@@ -373,6 +377,7 @@ class VideoSummaryService:
         project_name: str,
         documents: List[Any],
         generated_at: datetime,
+        output_language: str = "auto",
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Assemble the title, source and closing scenes.
 
@@ -387,8 +392,10 @@ class VideoSummaryService:
             documents themselves. Returned together rather than recorded on the
             service, which two concurrent scripts share.
         """
-        written, model_used = self._written_scenes(documents)
+        written, model_used = self._written_scenes(documents, output_language)
 
+        # shortcut: Static frames and offline extracts keep existing wording;
+        # localize them if fixed-language fallback copy becomes required.
         source_scenes = [
             self._source_scene(document, written.get(index))
             for index, document in enumerate(documents, start=1)
@@ -599,6 +606,7 @@ class VideoSummaryService:
     def _written_scenes(
         self,
         documents: List[Any],
+        output_language: str = "auto",
     ) -> Tuple[Dict[int, Dict[str, Any]], str]:
         """Ask the model to write a scene for each document.
 
@@ -616,7 +624,7 @@ class VideoSummaryService:
 
         try:
             result = self.llm.generate(
-                prompt=self._script_prompt(documents),
+                prompt=self._script_prompt(documents, output_language),
                 temperature=0.3,
                 # As much as the model will give. A reasoning model spends this
                 # budget on thinking before it writes anything, and a script cut
@@ -652,7 +660,9 @@ class VideoSummaryService:
 
         return scenes, result.get("model") or FALLBACK_MODEL
 
-    def _script_prompt(self, documents: List[Any]) -> str:
+    def _script_prompt(
+        self, documents: List[Any], output_language: str = "auto"
+    ) -> str:
         """Compose the single request that covers every document.
 
         One call rather than one per document: the cost of a summary should not
@@ -673,7 +683,7 @@ class VideoSummaryService:
                 )
             )
 
-        return (
+        prompt = (
             "Write one slide of a spoken walkthrough for each source below.\n\n"
             "Rules:\n"
             "- headline: one clause naming what the source says, at most ten "
@@ -687,3 +697,4 @@ class VideoSummaryService:
             '"bullets": ["..."], "narration": "..."}]}\n\n'
             "Sources:\n\n%s"
         ) % (MAX_BULLETS_PER_SCENE, "\n\n".join(sections))
+        return with_output_language(prompt, output_language)

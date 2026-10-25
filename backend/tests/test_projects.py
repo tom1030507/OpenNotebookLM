@@ -271,7 +271,8 @@ def test_duplicate_project_copies_owned_data_but_not_conversations():
     ).json()
     client.put(
         f"/api/projects/{original['id']}/chat-settings",
-        json={"role": "custom", "instructions": "Be concise", "answer_length": "longer"},
+        json={"role": "custom", "instructions": "Be concise", "answer_length": "longer",
+              "output_language": "ja"},
     )
 
     with TestingSessionLocal() as db:
@@ -318,7 +319,8 @@ def test_duplicate_project_copies_owned_data_but_not_conversations():
     assert duplicate["description"] == "Summary"
     assert duplicate["meta_json"] == {"nested": {"key": "value"}}
     assert client.get(f"/api/projects/{duplicate['id']}/chat-settings").json() == {
-        "role": "custom", "instructions": "Be concise", "answer_length": "longer"
+        "role": "custom", "instructions": "Be concise", "answer_length": "longer",
+        "output_language": "ja",
     }
     with TestingSessionLocal() as db:
         copied = db.get(Project, duplicate["id"])
@@ -347,14 +349,16 @@ def test_duplicate_project_copies_owned_data_but_not_conversations():
     assert changed.status_code == 200
     client.put(
         f"/api/projects/{duplicate['id']}/chat-settings",
-        json={"role": "default", "instructions": "", "answer_length": "shorter"},
+        json={"role": "default", "instructions": "", "answer_length": "shorter",
+              "output_language": "auto"},
     )
     assert client.delete(
         f"/api/projects/{duplicate['id']}/documents/copy-own-document"
     ).status_code == 200
     assert client.get(f"/api/projects/{original['id']}").json()["name"] == "Notebook"
     assert client.get(f"/api/projects/{original['id']}/chat-settings").json() == {
-        "role": "custom", "instructions": "Be concise", "answer_length": "longer"
+        "role": "custom", "instructions": "Be concise", "answer_length": "longer",
+        "output_language": "ja",
     }
     assert "copy-own-document" in {
         document["id"] for document in client.get(
@@ -429,14 +433,15 @@ def test_chat_settings_default_until_set():
 
     assert response.status_code == 200
     assert response.json() == {
-        "role": "default", "instructions": "", "answer_length": "default"}
+        "role": "default", "instructions": "", "answer_length": "default",
+        "output_language": "auto"}
 
 
 def test_chat_settings_persist():
     """Saved chat settings are what the project reads back."""
     project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
     settings = {"role": "custom", "instructions": "Answer as a terse reviewer.",
-                "answer_length": "shorter"}
+                "answer_length": "shorter", "output_language": "zh-Hant"}
 
     assert client.put(
         f"/api/projects/{project_id}/chat-settings", json=settings).json() == settings
@@ -444,11 +449,22 @@ def test_chat_settings_persist():
 
 
 def test_chat_settings_reject_unknown_values_and_long_instructions():
-    """Only the listed roles and lengths are accepted, and instructions are capped."""
+    """Settings accept listed roles, lengths, languages, and bounded instructions."""
     project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
     url = f"/api/projects/{project_id}/chat-settings"
 
     assert client.put(url, json={"role": "pirate"}).status_code == 422
     assert client.put(url, json={"answer_length": "epic"}).status_code == 422
+    assert client.put(url, json={"output_language": "xx"}).status_code == 422
     assert client.put(url, json={"instructions": "x" * 2001}).status_code == 422
     assert client.get(url).json()["role"] == "default"
+
+
+def test_chat_settings_update_from_older_client_preserves_output_language():
+    project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
+    url = f"/api/projects/{project_id}/chat-settings"
+
+    assert client.put(url, json={"output_language": "fr"}).status_code == 200
+    assert client.put(url, json={"answer_length": "longer"}).status_code == 200
+
+    assert client.get(url).json()["output_language"] == "fr"

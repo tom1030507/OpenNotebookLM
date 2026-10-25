@@ -32,14 +32,15 @@ class Project(Base):
     created_at = Column(UTCDateTime, default=func.now())
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
     # Chat settings applied to every answer in the project. Null on rows that
-    # predate them, which reads as "default" (see ProjectService.get_chat_settings).
+    # predate them, which reads as the defaults in ProjectService.get_chat_settings.
     chat_role = Column(String)
     chat_instructions = Column(Text)
     answer_length = Column(String)
+    output_language = Column(String, default="auto")
     cover_emoji = Column(String)
     cover_color = Column(String)
-    # Generated overview and suggested questions, plus the source ids they were
-    # generated from so a changed source set is noticed. See services.project_overview.
+    # Generated overview and questions, keyed by source ids and output language.
+    # See services.project_overview.
     overview_json = Column(JSON)
     # True while `name` is a placeholder or a generated title. Renaming clears it,
     # so a generated title can never overwrite a name the user chose.

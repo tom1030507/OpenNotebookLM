@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Project
 from app.services.llm import FALLBACK_MODEL, LLMService
+from app.services.output_language import with_output_language
 from app.services.source_digest import document_excerpt, load_json_object, project_documents
 
 logger = structlog.get_logger()
@@ -246,7 +247,10 @@ class StudyService:
         if documents:
             try:
                 result = self.llm.generate(
-                    prompt=self._prompt(documents, count, focus, kind),
+                    prompt=with_output_language(
+                        self._prompt(documents, count, focus, kind),
+                        getattr(project, "output_language", None),
+                    ),
                     temperature=0.2,
                     max_tokens=None,
                     system_prompt=SYSTEM_PROMPT,

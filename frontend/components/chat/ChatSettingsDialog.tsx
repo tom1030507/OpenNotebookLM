@@ -3,7 +3,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import api from '@/lib/api';
-import type { AnswerLength, ChatRole, ChatSettings } from '@/lib/api';
+import type { AnswerLength, ChatRole, ChatSettings, OutputLanguage } from '@/lib/api';
 import useDialogFocus from '@/hooks/useDialogFocus';
 
 // Matches CHAT_INSTRUCTIONS_MAX_LENGTH on the backend, which rejects longer text.
@@ -21,19 +21,38 @@ const LENGTHS: { value: AnswerLength; label: string }[] = [
   { value: 'shorter', label: 'Shorter' },
 ];
 
+const OUTPUT_LANGUAGES: { value: OutputLanguage; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'en', label: 'English' },
+  { value: 'zh-Hant', label: '繁體中文' },
+  { value: 'zh-Hans', label: '简体中文' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'es', label: 'Español' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+];
+
 interface ChatSettingsDialogProps {
   projectId: string;
   onClose: () => void;
+  onOutputLanguageChanged?: () => void;
 }
 
-export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsDialogProps) {
+export default function ChatSettingsDialog({
+  projectId,
+  onClose,
+  onOutputLanguageChanged,
+}: ChatSettingsDialogProps) {
   const [settings, setSettings] = useState<ChatSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const initialOutputLanguage = useRef<OutputLanguage>('auto');
   const titleId = useId();
   const instructionsId = useId();
+  const outputLanguageId = useId();
 
   useDialogFocus({
     isOpen: true,
@@ -46,7 +65,11 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
   useEffect(() => {
     let active = true;
     api.getChatSettings(projectId)
-      .then((loaded) => { if (active) setSettings(loaded); })
+      .then((loaded) => {
+        if (!active) return;
+        initialOutputLanguage.current = loaded.output_language ?? 'auto';
+        setSettings({ ...loaded, output_language: initialOutputLanguage.current });
+      })
       .catch(() => { if (active) setError('Could not load chat settings.'); });
     return () => { active = false; };
   }, [projectId]);
@@ -61,6 +84,9 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
     setError(null);
     try {
       await api.updateChatSettings(projectId, settings);
+      if (settings.output_language !== initialOutputLanguage.current) {
+        onOutputLanguageChanged?.();
+      }
       onClose();
     } catch {
       setError('Could not save chat settings. Please try again.');
@@ -95,7 +121,7 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
             </button>
           </div>
           <p className="text-sm text-[var(--muted-foreground)] mt-2">
-            Applies to every answer in this project. Answers always stay grounded in your sources and cite them.
+            Applies to every answer and Studio output in this project. Answers stay grounded in your sources and cite them.
           </p>
         </div>
 
@@ -156,6 +182,27 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
                   </p>
                 </div>
               )}
+
+              <div>
+                <label htmlFor={outputLanguageId} className="block text-sm font-medium mb-2">
+                  Output language
+                </label>
+                <select
+                  id={outputLanguageId}
+                  value={settings.output_language}
+                  onChange={(event) => update({
+                    output_language: event.target.value as OutputLanguage,
+                  })}
+                  className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] text-sm"
+                >
+                  {OUTPUT_LANGUAGES.map((language) => (
+                    <option key={language.value} value={language.value}>{language.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                  Auto keeps the current behavior, matching the question or source language.
+                </p>
+              </div>
 
               <fieldset>
                 <legend className="text-sm font-medium mb-3">Answer length</legend>

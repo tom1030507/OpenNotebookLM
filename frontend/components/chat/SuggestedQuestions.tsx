@@ -35,12 +35,19 @@ interface ProjectOverviewProps {
   projectId: string;
   /** Changes whenever the set of ready sources does, which may regenerate the overview. */
   readySourceKey: string;
+  outputLanguageRevision?: number;
   disabled?: boolean;
   onAsk: (question: string) => void;
 }
 
 /** The generated overview and starter questions; renders nothing until there are some. */
-export function ProjectOverview({ projectId, readySourceKey, disabled, onAsk }: ProjectOverviewProps) {
+export function ProjectOverview({
+  projectId,
+  readySourceKey,
+  outputLanguageRevision = 0,
+  disabled,
+  onAsk,
+}: ProjectOverviewProps) {
   const [overview, setOverview] = useState<{ text: string | null; questions: string[] }>({
     text: null,
     questions: [],
@@ -68,7 +75,7 @@ export function ProjectOverview({ projectId, readySourceKey, disabled, onAsk }: 
     return () => {
       current = false;
     };
-  }, [projectId, readySourceKey]);
+  }, [projectId, readySourceKey, outputLanguageRevision]);
 
   if (!overview.text && overview.questions.length === 0) return null;
 

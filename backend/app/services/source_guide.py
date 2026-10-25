@@ -166,6 +166,8 @@ class SourceGuideService:
         return guide
 
     def _generate(self, document: Document) -> Optional[Dict[str, Any]]:
+        # shortcut: Guides are cached per document, which can be shared across
+        # projects with different languages; add project-scoped caching if needed.
         excerpt = representative_excerpt(document, limit=6000)
         prompt = (
             "Write a 2–4 sentence summary and 3–6 key topics for this source. "

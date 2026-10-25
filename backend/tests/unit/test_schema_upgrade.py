@@ -142,6 +142,7 @@ class TestUpgrade:
             "projects.chat_role",
             "projects.cover_color",
             "projects.cover_emoji",
+            "projects.output_language",
             "projects.overview_json",
             "projects.user_id",
         ]

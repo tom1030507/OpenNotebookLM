@@ -206,6 +206,40 @@ def test_a_changed_source_set_regenerates(env):
     assert "Sea ice" in llm.prompts[1]
 
 
+def test_changing_output_language_regenerates_cached_overview(env):
+    client, session_factory, llm = env
+    project_id = client.post("/api/projects", json={}).json()["id"]
+    add_source(session_factory, project_id)
+    client.get("/api/projects/%s/overview" % project_id)
+
+    settings_url = "/api/projects/%s/chat-settings" % project_id
+    assert client.put(settings_url, json={"output_language": "fr"}).status_code == 200
+    result = client.get("/api/projects/%s/overview" % project_id).json()
+
+    assert result["overview"] == OVERVIEW_REPLY["overview"]
+    assert len(llm.prompts) == 2
+    assert "Write all generated output in French." in llm.prompts[1]
+
+
+def test_old_language_overview_is_not_served_when_regeneration_fails(env):
+    client, session_factory, llm = env
+    project_id = client.post("/api/projects", json={}).json()["id"]
+    add_source(session_factory, project_id)
+    client.get("/api/projects/%s/overview" % project_id)
+    with session_factory() as db:
+        project = db.get(Project, project_id)
+        project.output_language = "fr"
+        db.commit()
+
+    client.app.dependency_overrides[project_overview.get_project_overview_service] = (
+        lambda: ProjectOverviewService(llm_service=OfflineLLM())
+    )
+    result = client.get("/api/projects/%s/overview" % project_id).json()
+
+    assert result["overview"] is None
+    assert result["questions"] == []
+
+
 def test_a_name_the_user_chose_is_never_overwritten(env):
     client, session_factory, _ = env
     named = client.post("/api/projects", json={"name": "My glaciers"}).json()["id"]
@@ -253,6 +287,27 @@ def test_follow_ups_come_from_the_last_answer(env):
 
     assert body == {"questions": ["What next?", "And then?"]}
     assert "Why retreat?" in llm.prompts[0] and "Warming." in llm.prompts[0]
+
+
+def test_follow_ups_use_the_project_output_language(env):
+    client, session_factory, llm = env
+    llm.reply = {"questions": ["Que se passe-t-il ensuite ?", "Pourquoi ?"]}
+    project_id = client.post("/api/projects", json={"name": "Notes"}).json()["id"]
+    client.put(
+        "/api/projects/%s/chat-settings" % project_id,
+        json={"output_language": "fr"},
+    )
+    with session_factory() as db:
+        db.add(Conversation(id="c-fr", project_id=project_id, title="Chat"))
+        db.add_all([
+            Message(id="m-fr-user", conversation_id="c-fr", role="user", text="Why?"),
+            Message(id="m-fr-answer", conversation_id="c-fr", role="assistant", text="Because."),
+        ])
+        db.commit()
+
+    client.post("/api/conversations/c-fr/follow-ups")
+
+    assert "Write all generated output in French." in llm.prompts[0]
 
 
 def test_an_unanswered_conversation_has_no_follow_ups(env):

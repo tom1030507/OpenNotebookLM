@@ -2,8 +2,8 @@
 
 Generation runs when the chat asks for it rather than inside ingestion, so a
 slow or broken model can never hold a source in "processing". The result is
-stored on the project with the ids of the sources it was generated from; it is
-regenerated only when that set of ready sources changes.
+stored on the project with the source ids and output language; it is regenerated
+only when either changes.
 
 There is deliberately no extractive fallback: a suggested question that the
 model did not write is noise, so an unconfigured or failing model leaves the
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Conversation, Project
 from app.services.llm import FALLBACK_MODEL, LLMService
 from app.services.mindmap_sources import representative_excerpt
+from app.services.output_language import with_output_language
 from app.services.source_digest import load_json_object, project_documents
 from app.utils.time import utc_now
 
@@ -97,7 +98,7 @@ class ProjectOverviewService:
         self.llm = llm_service if llm_service is not None else LLMService()
 
     def overview(self, db: Session, project: Project) -> Dict[str, Any]:
-        """Return the project's overview, generating it if its sources changed.
+        """Return the project's overview, generating it if sources or language changed.
 
         Args:
             db: Database session.
@@ -113,10 +114,16 @@ class ProjectOverviewService:
             if document.status == "ready"
         ]
         source_ids = sorted(document.id for document in documents)
+        output_language = project.output_language or "auto"
         stored = project.overview_json or {}
 
-        if documents and stored.get("source_ids") != source_ids:
-            generated = self._generate(documents[:MAX_SOURCE_DOCUMENTS])
+        if documents and (
+            stored.get("source_ids") != source_ids
+            or stored.get("output_language", "auto") != output_language
+        ):
+            generated = self._generate(
+                documents[:MAX_SOURCE_DOCUMENTS], output_language
+            )
             if generated:
                 if project.auto_title and generated["title"]:
                     project.name = generated["title"]
@@ -126,12 +133,16 @@ class ProjectOverviewService:
                     "overview": generated["overview"],
                     "questions": generated["questions"],
                     "source_ids": source_ids,
+                    "output_language": output_language,
                     "generated_at": utc_now().isoformat(),
                 }
                 project.overview_json = stored
                 db.commit()
 
-        current = bool(documents) and stored.get("source_ids") == source_ids
+        current = bool(documents) and (
+            stored.get("source_ids") == source_ids
+            and stored.get("output_language", "auto") == output_language
+        )
         return {
             "project_name": project.name,
             "overview": stored.get("overview") if current else None,
@@ -177,7 +188,9 @@ class ProjectOverviewService:
             return self.overview(db, project)["overview"]
 
         # shortcut: matches the overview's 12-source prompt cap; raise both limits for broader reports.
-        generated = self._generate(selected[:MAX_SOURCE_DOCUMENTS])
+        generated = self._generate(
+            selected[:MAX_SOURCE_DOCUMENTS], project.output_language or "auto"
+        )
         return generated["overview"] if generated else None
 
     def follow_ups(self, conversation: Conversation) -> List[str]:
@@ -208,10 +221,27 @@ class ProjectOverviewService:
             question.text[:MAX_TURN_CHARS],
             answer.text[:MAX_TURN_CHARS],
         )
+        prompt = with_output_language(
+            prompt,
+            getattr(
+                getattr(conversation, "project", None), "output_language", None
+            ),
+        )
         payload = load_json_object(self._ask(prompt) or "")
         return _questions((payload or {}).get("questions"), FOLLOW_UP_QUESTIONS)
 
-    def _generate(self, documents: List[Any]) -> Optional[Dict[str, Any]]:
+    def _generate(
+        self, documents: List[Any], output_language: str = "auto"
+    ) -> Optional[Dict[str, Any]]:
+        """Generate an overview and questions for the selected language.
+
+        Args:
+            documents: Ready project sources to summarize.
+            output_language: Fixed language code or ``auto``.
+
+        Returns:
+            Parsed overview data, or None when generation is unusable.
+        """
         per_document = MAX_SOURCE_CHARS // len(documents)
         sections = [
             "Source %d: %s\n%s" % (
@@ -233,7 +263,9 @@ class ProjectOverviewService:
             '"questions": ["...", "...", "..."]}\n\n'
             "Sources:\n\n%s"
         ) % (OVERVIEW_QUESTIONS, "\n\n".join(sections))
-        return parse_overview(self._ask(prompt))
+        return parse_overview(
+            self._ask(with_output_language(prompt, output_language))
+        )
 
     def _ask(self, prompt: str) -> Optional[str]:
         """Run one JSON request, treating every failure as "no suggestions".

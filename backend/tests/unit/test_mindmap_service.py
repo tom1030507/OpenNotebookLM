@@ -291,6 +291,16 @@ class TestGeneratedTopics:
 
         assert stub.calls[0]["max_tokens"] is None
 
+    def test_selected_output_language_reaches_the_model_prompt(self):
+        stub = StubLLM("not json", model="fallback")
+
+        MindMapService(stub).build_tree(
+            "Notebook", [FakeDocument("d1", "Paper", content="Evidence.")],
+            output_language="ja",
+        )
+
+        assert "Write all generated output in Japanese." in stub.prompts[0]
+
     def test_mindmap_opts_into_json_output_mode(self):
         """The concept tree requires provider-enforced JSON syntax when available."""
         stub = StubLLM("unavailable", model="fallback")

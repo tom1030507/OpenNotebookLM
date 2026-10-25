@@ -55,6 +55,19 @@ def test_prompt_carries_options_and_only_the_supplied_source_digest():
     assert "Not selected" not in llm.prompt
 
 
+def test_selected_output_language_reaches_the_model_prompt():
+    llm = FixedLLM('[{"speaker":"A","text":"A grounded opening."}]')
+
+    AudioOverviewService(llm_service=llm).build_script(
+        project_name="Climate",
+        documents=[doc("Source", "Evidence.")],
+        options={"format": "brief", "length": "short"},
+        output_language="de",
+    )
+
+    assert "Write all generated output in German." in llm.prompt
+
+
 def test_unusable_llm_reply_falls_back_to_one_voice_and_respects_short_length():
     llm = FixedLLM("not JSON")
     service = AudioOverviewService(llm_service=llm)

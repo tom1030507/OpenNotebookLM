@@ -30,6 +30,7 @@ export default function Home() {
     },
   );
   const [isAddSourcesOpen, setIsAddSourcesOpen] = useState(false);
+  const [outputLanguageRevision, setOutputLanguageRevision] = useState(0);
   // On desktop, conversations share the left column with Sources instead of
   // taking a fourth track: four columns left the answer about 690px wide at
   // 1440px and every panel cramped. Below `xl` they keep their own drawer.
@@ -81,6 +82,7 @@ export default function Home() {
           conversationPanel={isDesktop ? undefined : <ConversationList />}
           rightPanel={(isDrawer) => (
             <StudioPanel
+              outputLanguageRevision={outputLanguageRevision}
               isCollapsed={isDrawer ? false : layoutState.studio}
               onCollapsedChange={isDrawer ? undefined : () => {
                   dispatchLayout({ type: 'toggle-panel', panel: 'studio' });
@@ -88,7 +90,11 @@ export default function Home() {
             />
           )}
         >
-          <ChatArea onAddSourcesOpenChange={setIsAddSourcesOpen} />
+          <ChatArea
+            onAddSourcesOpenChange={setIsAddSourcesOpen}
+            outputLanguageRevision={outputLanguageRevision}
+            onOutputLanguageChanged={() => setOutputLanguageRevision((value) => value + 1)}
+          />
         </ResponsiveLayout>
       </div>
     </ProjectDialogProvider>

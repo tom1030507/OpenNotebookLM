@@ -151,7 +151,7 @@ def test_study_service_uses_only_ready_selected_sources_and_forwards_count_focus
     service = StudyService(llm_service=llm)
 
     result = service.generate_flashcards(
-        object(), SimpleNamespace(id="project", name="Notebook"),
+        object(), SimpleNamespace(id="project", name="Notebook", output_language="fr"),
         ["doc-a", "doc-c"], count=7, focus="Important ideas",
     )
 
@@ -162,6 +162,7 @@ def test_study_service_uses_only_ready_selected_sources_and_forwards_count_focus
     assert "not ready content" not in llm.calls[0]["prompt"]
     assert "Important ideas" in llm.calls[0]["prompt"]
     assert "Create exactly 7 items" in llm.calls[0]["prompt"]
+    assert "Write all generated output in French." in llm.calls[0]["prompt"]
     assert "return fewer only when the sources do not support enough distinct facts" in (
         llm.calls[0]["prompt"]
     )
