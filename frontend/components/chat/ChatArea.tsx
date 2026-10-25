@@ -217,7 +217,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const documents = useStore((state) => state.documents);
   const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
   const sendQuery = useStore((state) => state.sendQuery);
-  const createConversation = useStore((state) => state.createConversation);
+  const beginNewConversation = useStore((state) => state.beginNewConversation);
   const fetchMessages = useStore((state) => state.fetchMessages);
   const followMessageRead = useStore((state) => state.followMessageRead);
   const pendingMindMapQuestion = useStore((state) => state.pendingMindMapQuestion);
@@ -338,14 +338,10 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
     void submitQuery(pendingQuery.content);
   };
   
-  const handleNewConversation = async () => {
+  const handleNewConversation = () => {
     if (!currentProject) return;
-    
-    try {
-      await createConversation(currentProject.id, 'New Conversation');
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
-    }
+
+    beginNewConversation();
   };
   
   // Check if ready to chat
