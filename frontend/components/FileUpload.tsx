@@ -13,7 +13,7 @@ import {
   FileText,
   Loader2,
 } from 'lucide-react';
-import api, { type UploadConfig } from '@/lib/api';
+import api, { type UploadConfig, type WebDiscoveryResult } from '@/lib/api';
 import { getTextContentError, getUploadFileError } from '@/lib/uploadValidation';
 
 interface FileUploadProps {
@@ -21,6 +21,7 @@ interface FileUploadProps {
   multiple?: boolean;
   onUploadingChange?: (isUploading: boolean) => void;
   onAddText?: (title: string, text: string) => Promise<void>;
+  onDiscover?: (query: string) => Promise<WebDiscoveryResult[]>;
 }
 
 export default function FileUpload({ 
@@ -28,6 +29,7 @@ export default function FileUpload({
   multiple = false,
   onUploadingChange,
   onAddText,
+  onDiscover,
 }: FileUploadProps) {
   const [uploadConfig, setUploadConfig] = useState<UploadConfig | null>(null);
   const [uploadConfigFailed, setUploadConfigFailed] = useState(false);
@@ -36,7 +38,11 @@ export default function FileUpload({
   const [urlInput, setUrlInput] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [textInput, setTextInput] = useState('');
-  const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube' | 'text'>('file');
+  const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube' | 'text' | 'discover'>('file');
+  const [discoverQuery, setDiscoverQuery] = useState('');
+  const [discoverResults, setDiscoverResults] = useState<WebDiscoveryResult[]>([]);
+  const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+  const [isDiscovering, setIsDiscovering] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -44,6 +50,7 @@ export default function FileUpload({
   const validatingFilesRef = useRef(false);
   const allowedFileTypes = uploadConfig?.allowed_file_types ?? [];
   const canUploadFiles = Boolean(uploadConfig && allowedFileTypes.length > 0);
+  const canDiscover = Boolean(uploadConfig?.search_enabled && onDiscover);
 
   useEffect(() => {
     let current = true;
@@ -208,6 +215,34 @@ export default function FileUpload({
     }
   };
 
+  const handleDiscover = async () => {
+    if (!onDiscover || !discoverQuery.trim() || isDiscovering) return;
+    setErrors([]);
+    setSelectedUrls([]);
+    setIsDiscovering(true);
+    try {
+      setDiscoverResults(await onDiscover(discoverQuery.trim()));
+    } catch (error) {
+      setDiscoverResults([]);
+      setErrors([error instanceof Error ? error.message : 'Web search failed. Please try again.']);
+    } finally {
+      setIsDiscovering(false);
+    }
+  };
+
+  const handleImportDiscovered = async () => {
+    if (!selectedUrls.length || !startUpload()) return;
+    try {
+      await onUpload(selectedUrls);
+      setSelectedUrls([]);
+      setDiscoverResults([]);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : 'Import failed. Please try again.']);
+    } finally {
+      finishUpload();
+    }
+  };
+
   const handleUploadFiles = async () => {
     if (isUploading || uploadInFlightRef.current) return;
 
@@ -300,7 +335,90 @@ export default function FileUpload({
             Text
           </button>
         )}
+        {canDiscover && (
+          <button
+            onClick={() => setUploadType('discover')}
+            aria-pressed={uploadType === 'discover'}
+            className={`h-8 px-3 text-sm rounded-md transition-colors ${
+              uploadType === 'discover'
+                ? 'bg-[var(--card)] text-[var(--foreground)] font-medium ring-1 ring-[var(--border)]'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            <Link className="inline w-4 h-4 mr-1.5 -mt-0.5" />
+            Discover
+          </button>
+        )}
       </div>
+
+      {uploadType === 'discover' && canDiscover && (
+        <div className="border border-[var(--input)] rounded-lg p-4 space-y-3">
+          <form
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleDiscover();
+            }}
+          >
+            <input
+              aria-label="Search topic"
+              value={discoverQuery}
+              onChange={(event) => setDiscoverQuery(event.target.value)}
+              maxLength={300}
+              placeholder="What are you researching?"
+              className="flex-1 px-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:border-[var(--ring)]"
+            />
+            <button
+              type="submit"
+              disabled={!discoverQuery.trim() || isDiscovering || isUploading}
+              className="px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg disabled:opacity-50"
+            >
+              {isDiscovering ? 'Searching…' : 'Search'}
+            </button>
+          </form>
+          {isDiscovering && <p role="status">Searching the web…</p>}
+          {discoverResults.length > 0 && (
+            <div className="space-y-3">
+              <div className="space-y-2" aria-label="Search results">
+                {discoverResults.map((result) => (
+                  <label
+                    key={result.url}
+                    className="flex items-start gap-3 rounded-lg border border-[var(--border)] p-3"
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${result.title}`}
+                      checked={selectedUrls.includes(result.url)}
+                      onChange={(event) => setSelectedUrls((current) => (
+                        event.target.checked
+                          ? [...current, result.url]
+                          : current.filter((url) => url !== result.url)
+                      ))}
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-medium">{result.title}</span>
+                      <span className="block text-xs text-[var(--muted-foreground)]">
+                        {new URL(result.url).hostname}
+                      </span>
+                      <span className="block text-sm text-[var(--muted-foreground)]">
+                        {result.snippet}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleImportDiscovered()}
+                disabled={!selectedUrls.length || isUploading || isDiscovering}
+                className="w-full px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg disabled:opacity-50"
+              >
+                Import selected ({selectedUrls.length})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pasted Text Area */}
       {uploadType === 'text' && (

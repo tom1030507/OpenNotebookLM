@@ -119,6 +119,7 @@ def test_upload_config_reports_effective_runtime_limits(monkeypatch):
     monkeypatch.setattr(ingest.settings, "chunk_size", 512)
     monkeypatch.setattr(ingest.settings, "chunk_overlap", 50)
     monkeypatch.setattr(ingest.settings, "max_chunks_per_doc", 1000)
+    monkeypatch.setattr(ingest.settings, "search_provider", "none")
 
     response = TestClient(app).get("/api/upload-config")
 
@@ -127,7 +128,119 @@ def test_upload_config_reports_effective_runtime_limits(monkeypatch):
         "allowed_file_types": ["docx", "pdf", "txt"],
         "max_file_size_mb": 23,
         "max_text_characters": 462000,
+        "search_enabled": False,
     }
+
+
+def test_upload_config_exposes_search_capability_without_provider_secrets(monkeypatch):
+    monkeypatch.setattr(ingest.settings, "search_provider", "brave")
+    monkeypatch.setattr(ingest.settings, "brave_search_api_key", "private-key")
+
+    config = ingest.get_upload_config().model_dump()
+
+    assert config["search_enabled"] is True
+    assert "brave_search_api_key" not in config
+    assert "private-key" not in str(config)
+
+
+def test_discover_returns_only_results_not_already_in_the_project(monkeypatch):
+    from app.routers.ingest import get_web_search_service
+    from app.services.projects import ProjectService
+
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        ProjectService,
+        "project_document_query",
+        lambda *_args: SimpleNamespace(all=lambda: [
+            SimpleNamespace(source_type="url", source_url="https://example.com/already"),
+        ]),
+    )
+
+    class SearchService:
+        enabled = True
+
+        def search(self, query, count):
+            assert query == "topic"
+            assert count == 10
+            return [
+                {"title": "Already added", "url": "https://EXAMPLE.com/already#top", "snippet": ""},
+                {"title": "New", "url": "https://example.com/new", "snippet": "Useful"},
+            ]
+
+    app.dependency_overrides[get_web_search_service] = SearchService
+
+    response = TestClient(app).post("/api/projects/project/discover", json={"query": "topic"})
+
+    assert response.status_code == 200
+    assert response.json() == {"results": [
+        {"title": "New", "url": "https://example.com/new", "snippet": "Useful"},
+    ]}
+
+
+def test_discover_is_hidden_when_no_provider_is_configured(monkeypatch):
+    from app.routers.ingest import get_web_search_service
+
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
+    monkeypatch.setattr(ingest.settings, "search_provider", "none")
+
+    class DisabledSearchService:
+        enabled = False
+
+        def search(self, *_args):
+            raise AssertionError("disabled discovery called the provider")
+
+    app.dependency_overrides[get_web_search_service] = DisabledSearchService
+
+    response = TestClient(app).post("/api/projects/project/discover", json={"query": "topic"})
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("payload", [
+    {"query": " "},
+    {"query": "topic", "count": 0},
+    {"query": "topic", "count": 21},
+])
+def test_discover_rejects_blank_queries_and_out_of_range_counts(payload):
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+
+    response = TestClient(app).post("/api/projects/project/discover", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_discover_hides_provider_errors(monkeypatch):
+    from app.routers.ingest import get_web_search_service
+    import requests
+
+    app = FastAPI()
+    app.include_router(ingest.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(ingest, "require_project", lambda *args, **kwargs: object())
+
+    class FailedSearchService:
+        enabled = True
+
+        def search(self, *_args):
+            raise requests.Timeout("private provider detail")
+
+    app.dependency_overrides[get_web_search_service] = FailedSearchService
+
+    response = TestClient(app).post("/api/projects/project/discover", json={"query": "topic"})
+
+    assert response.status_code == 502
+    assert "private provider detail" not in response.text
 
 
 def test_upload_config_ignores_overlap_that_cannot_fit_a_next_chunk(monkeypatch):

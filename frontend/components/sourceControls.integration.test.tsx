@@ -98,6 +98,7 @@ beforeEach(() => {
     allowed_file_types: ['pdf', 'txt', 'md'],
     max_file_size_mb: 50,
     max_text_characters: 462000,
+    search_enabled: false,
   });
   useStore.setState({
     projects: [currentProject],

@@ -24,6 +24,13 @@ export interface UploadConfig {
   allowed_file_types: string[];
   max_file_size_mb: number;
   max_text_characters: number;
+  search_enabled: boolean;
+}
+
+export interface WebDiscoveryResult {
+  title: string;
+  url: string;
+  snippet: string;
 }
 
 export type ProjectAnalyticsWindow = 7 | 30 | 90;
@@ -957,6 +964,18 @@ const api = {
 
   getUploadConfig(): Promise<UploadConfig> {
     return requestJson<UploadConfig>('/upload-config');
+  },
+
+  async discoverSources(
+    projectId: string,
+    query: string,
+    count = 10,
+  ): Promise<WebDiscoveryResult[]> {
+    const response = await requestJson<{ results: WebDiscoveryResult[] }>(
+      `/projects/${projectId}/discover`,
+      { method: 'POST', body: JSON.stringify({ query, count }) },
+    );
+    return response.results;
   },
 
   uploadDocument(projectId: string, file: File): Promise<Document> {

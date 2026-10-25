@@ -41,12 +41,31 @@ describe('API client', () => {
       allowed_file_types: ['pdf', 'md'],
       max_file_size_mb: 23,
       max_text_characters: 462000,
+      search_enabled: false,
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(config));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.getUploadConfig()).resolves.toEqual(config);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/upload-config');
+  });
+
+  it('searches public sources for a project', async () => {
+    const results = [{
+      title: 'A paper',
+      url: 'https://example.com/paper',
+      snippet: 'Useful context',
+    }];
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ results }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.discoverSources('project-1', 'research topic')).resolves.toEqual(results);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/discover');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      query: 'research topic', count: 10,
+    });
   });
 
   it('creates and reloads authenticated audio overview resources', async () => {

@@ -5,12 +5,14 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 import structlog
+import requests
 
 from app.db.database import get_db
 from app.schemas import (
     FileUploadResponse, UploadConfigResponse, URLUploadRequest, YouTubeUploadRequest,
     DocumentResponse, DocumentContentResponse, DocumentStatusResponse, TextUploadRequest,
     DocumentUpdateRequest, SourceGuideResponse,
+    WebDiscoveryRequest, WebDiscoveryResponse,
 )
 from app.db.models import User
 from app.middleware.upload_body_limit import MULTIPART_ENVELOPE_ALLOWANCE_BYTES
@@ -30,6 +32,8 @@ from app.services.rate_limit import (
     UnlimitedConcurrencyLease,
 )
 from app.utils.network import UnsafeURLError, validate_http_url_syntax
+from app.services.projects import ProjectService
+from app.services.web_discovery import WebSearchService
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -81,7 +85,88 @@ def get_upload_config() -> UploadConfigResponse:
             settings.max_chunks_per_doc
             * max(1, settings.chunk_size - effective_overlap)
         ),
+        search_enabled=settings.search_enabled,
     )
+
+
+@lru_cache
+def get_web_search_service() -> WebSearchService:
+    """Return the configured process-wide web search service.
+
+    Returns:
+        Search service using the deployment's provider settings.
+    """
+    return WebSearchService(settings)
+
+
+@router.post("/projects/{project_id}/discover", response_model=WebDiscoveryResponse)
+def discover_project_sources(
+    project_id: str,
+    request: WebDiscoveryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    search_service: WebSearchService = Depends(get_web_search_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+):
+    """Search for public web pages that are not already linked to a project.
+
+    Args:
+        project_id: Project receiving any sources selected from these results.
+        request: Search terms and maximum number of results.
+        db: Database session used to check existing project sources.
+        current_user: Authenticated caller.
+        search_service: Configured provider adapter.
+        request_limiter: Shared request limiter for per-account abuse control.
+
+    Returns:
+        Safe, unique search results not already in the project.
+    """
+    require_project(db, project_id, current_user, min_role="editor")
+    if not search_service.enabled:
+        raise HTTPException(status_code=404, detail="Web discovery is not configured")
+    if settings.rate_limit_enabled:
+        enforce_account_rate_limit(
+            request_limiter,
+            "discover",
+            current_user.id,
+            limit=10,
+            window_seconds=60,
+        )
+
+    try:
+        results = search_service.search(request.query, request.count)
+    except requests.RequestException as error:
+        logger.warning(
+            "Web discovery provider failed",
+            project_id=project_id,
+            provider=settings.search_provider,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Web search is temporarily unavailable",
+        ) from error
+
+    existing_urls = set()
+    for document in ProjectService.project_document_query(db, project_id).all():
+        try:
+            existing_urls.add(validate_http_url_syntax(document.source_url))
+        except UnsafeURLError:
+            continue
+
+    filtered_results = []
+    seen_urls = set()
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        try:
+            url = validate_http_url_syntax(result.get("url"))
+        except UnsafeURLError:
+            continue
+        if url in existing_urls or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        filtered_results.append({**result, "url": url})
+    return {"results": filtered_results}
 
 
 @lru_cache

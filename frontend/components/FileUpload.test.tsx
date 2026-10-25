@@ -41,6 +41,48 @@ describe('FileUpload', () => {
     expect(await screen.findByText('report.docx is not a supported file type')).toBeTruthy();
   });
 
+  it('hides discovery when the backend has no search provider', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      allowed_file_types: ['pdf'],
+      max_file_size_mb: 23,
+      max_text_characters: 462000,
+      search_enabled: false,
+    })));
+
+    render(<FileUpload onUpload={async () => undefined} onDiscover={vi.fn()} />);
+
+    expect(await screen.findByRole('button', { name: 'File' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Discover' })).toBeNull();
+  });
+
+  it('searches, selects results, and imports only selected URLs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      allowed_file_types: ['pdf'],
+      max_file_size_mb: 23,
+      max_text_characters: 462000,
+      search_enabled: true,
+    })));
+    const results = [
+      { title: 'First result', url: 'https://one.example/page', snippet: 'First snippet' },
+      { title: 'Second result', url: 'https://two.example/page', snippet: 'Second snippet' },
+    ];
+    const onDiscover = vi.fn().mockResolvedValue(results);
+    const onUpload = vi.fn().mockResolvedValue(undefined);
+    render(<FileUpload onUpload={onUpload} onDiscover={onDiscover} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Discover' }));
+    fireEvent.change(screen.getByLabelText('Search topic'), { target: { value: 'climate' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(await screen.findByText('First snippet')).toBeTruthy();
+    expect(screen.getByText('one.example')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Select First result'));
+    fireEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }));
+
+    await waitFor(() => expect(onDiscover).toHaveBeenCalledWith('climate'));
+    await waitFor(() => expect(onUpload).toHaveBeenCalledWith(['https://one.example/page']));
+  });
+
   it('shows the server detail when a file upload fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       allowed_file_types: ['pdf'],
