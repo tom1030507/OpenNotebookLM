@@ -445,7 +445,7 @@ export default function SourcesPanel({
 
       {/* Upload Modal */}
       {isAddSourcesOpen && currentProject && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50">
           <div
             ref={uploadDialogRef}
             role="dialog"
@@ -453,7 +453,7 @@ export default function SourcesPanel({
             aria-modal="true"
             aria-labelledby={uploadTitleId}
             aria-busy={isUploading}
-            className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+            className="bg-[var(--popover)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto"
           >
             <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
               <h3 id={uploadTitleId} className="text-lg font-semibold">Add Source</h3>

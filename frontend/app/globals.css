@@ -42,6 +42,13 @@
   --brand-from: #1a73e8;
   --brand-to: #9b51e0;
 
+  /* What floats (dialogs, popovers, menus) and the scrim behind it. In dark
+     mode a floating panel has to be lighter than the page, and the scrim
+     stronger, or a dialog sits on the page in the same tone and reads as part
+     of it. */
+  --popover: #ffffff;
+  --overlay: rgb(0 0 0 / 0.4);
+
   --success: #2e7d32;
   --warning: #92400e;
   --error: #c4242a;
@@ -79,6 +86,8 @@
   --sidebar-border: #2e2e2e;
   --brand-from: #8ab4f8;
   --brand-to: #bb86fc;
+  --popover: #242424;
+  --overlay: rgb(0 0 0 / 0.7);
   --success: #3fc07a;
   --warning: #e0a84f;
   --error: #ef6b7f;

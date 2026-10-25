@@ -117,14 +117,14 @@ export default function AudioOverviewDialog({
   };
 
   const dialog = (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-4">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg border border-[var(--border)] bg-[var(--popover)] shadow-xl"
       >
         <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4">
           <div>

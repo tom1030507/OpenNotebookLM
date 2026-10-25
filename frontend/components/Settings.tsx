@@ -107,14 +107,14 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"
+        className="bg-[var(--popover)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-4xl max-h-[80vh] flex overflow-hidden"
       >
         {/* Sidebar */}
         <div className="w-64 border-r border-[var(--border)] bg-[var(--sidebar-bg)]">

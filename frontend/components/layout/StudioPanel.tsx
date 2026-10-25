@@ -46,7 +46,7 @@ const StudioDialogFallback = () => (
     role="status"
     aria-live="polite"
     aria-label="Loading studio result"
-    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)]"
   >
     <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--card)] px-4 py-3 text-sm">
       <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />

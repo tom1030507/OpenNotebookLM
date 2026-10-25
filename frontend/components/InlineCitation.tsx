@@ -99,7 +99,7 @@ export default function InlineCitation({ id, citation }: { id: number; citation:
           role="tooltip"
           onMouseEnter={enter}
           onMouseLeave={leave}
-          className="fixed z-[100] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm text-[var(--card-foreground)] shadow-lg break-words"
+          className="fixed z-[100] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--popover)] p-3 text-sm text-[var(--card-foreground)] shadow-lg break-words"
           style={{ ...position, width: 'min(360px, calc(100vw - 24px))', maxHeight: 'min(320px, calc(100vh - 24px))' }}
         >
           <p className="font-semibold">[{id}] {citation.source}</p>

@@ -82,7 +82,7 @@ function DefaultErrorFallback({ error, reset }: { error: Error; reset: () => voi
             </button>
             <button
               onClick={reset}
-              className="flex-1 px-4 py-2 text-sm font-medium text-white bg-[var(--primary)] rounded-lg hover:bg-[var(--primary-hover)] transition-colors flex items-center justify-center gap-2"
+              className="flex-1 px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] bg-[var(--primary)] rounded-lg hover:bg-[var(--primary-hover)] transition-colors flex items-center justify-center gap-2"
             >
               <RefreshCw className="w-4 h-4" />
               Try Again

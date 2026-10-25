@@ -55,6 +55,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const [showHelp, setShowHelp] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const moreActionsRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const firstOverflowActionRef = useRef<HTMLButtonElement>(null);
 
   const currentProject = useStore((state) => state.currentProject);
@@ -76,6 +77,28 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   useEffect(() => {
     initializeTheme();
   }, []);
+
+  // The user menu only closed from its own button: Escape and clicks elsewhere
+  // left it open, and on a phone it then covered the panel buttons below it.
+  useEffect(() => {
+    if (!showUserMenu) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setShowUserMenu(false);
+      userMenuRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.focus();
+    };
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!userMenuRef.current?.contains(event.target as Node)) setShowUserMenu(false);
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('pointerdown', closeOnOutsidePointer);
+    };
+  }, [showUserMenu]);
 
   const readAccount = () => {
     try {
@@ -166,7 +189,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const actionButtonClassName = `${
     isCompact ? 'flex h-11 w-11 items-center justify-center' : 'p-2'
   } text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-md transition-base`;
-  const menuPanelClassName = 'absolute right-0 mt-2 bg-[var(--card)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50';
+  const menuPanelClassName = 'absolute right-0 mt-2 bg-[var(--popover)] rounded-lg shadow-lg border border-[var(--border)] py-2 z-50';
   // Menu rows only need the 44px floor where fingers, not pointers, use them.
   const menuItemClassName = `w-full ${isCompact ? 'min-h-11 ' : ''}text-left px-4 py-2 text-sm hover:bg-[var(--muted)] transition-base`;
 
@@ -279,7 +302,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           )}
 
           {/* User Menu */}
-          <div className="relative">
+          <div ref={userMenuRef} className="relative">
             <button
               onClick={openUserMenu}
               aria-label={'User menu'}

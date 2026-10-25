@@ -350,7 +350,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     <div 
       // The backdrop always covers the window; only the panel insets. An inset
       // backdrop left a strip of the live workspace showing around the edge.
-      className={`fixed inset-0 bg-black/40 flex items-center justify-center z-50 ${
+      className={`fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50 ${
         isFullscreen ? '' : 'p-4'
       }`}
     >
@@ -360,7 +360,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg flex flex-col ${
+        className={`bg-[var(--popover)] border border-[var(--border)] shadow-xl rounded-lg flex flex-col ${
           isFullscreen ? 'w-full h-full' : 'w-full max-w-5xl h-[90vh]'
         }`}
       >

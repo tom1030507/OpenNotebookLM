@@ -120,7 +120,7 @@ export default function MindMapDialog({ map, onClose, onAsk, onSave }: MindMapDi
   const endDrag = () => { dragRef.current = null; setDragging(false); };
 
   return createPortal(
-    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 ${fullScreen ? '' : 'p-2 sm:p-5'}`}>
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] ${fullScreen ? '' : 'p-2 sm:p-5'}`}>
       <div ref={dialogRef} role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId}
         className={`flex w-full min-w-0 flex-col overflow-hidden bg-[var(--card)] shadow-xl ${
           fullScreen ? 'h-dvh' : 'h-[92dvh] max-w-[1440px] rounded-2xl border border-[var(--border)]'

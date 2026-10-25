@@ -164,7 +164,7 @@ export default function ResponsiveLayout({
             type="button"
             aria-label="Close panel"
             tabIndex={-1}
-            className="absolute inset-0 z-40 bg-black/50 xl:hidden"
+            className="absolute inset-0 z-40 bg-[var(--overlay)] xl:hidden"
             onClick={dismissDrawer}
           />
         )}

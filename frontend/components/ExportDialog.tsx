@@ -100,14 +100,14 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md"
+        className="bg-[var(--popover)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md"
       >
         {/* Header */}
         <div className="p-6 border-b border-[var(--border)]">

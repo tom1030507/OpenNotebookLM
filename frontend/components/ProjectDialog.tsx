@@ -62,14 +62,14 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--card)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md"
+        className="bg-[var(--popover)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md"
       >
         <div className="flex items-center justify-between p-6 border-b border-[var(--border)]">
           <div className="flex items-center gap-2">

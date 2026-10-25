@@ -283,7 +283,7 @@ export default function FileUpload({
           <button
             onClick={() => void handleTextSubmit()}
             disabled={!textTitle.trim() || !textInput.trim() || isUploading}
-            className="px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Add text
           </button>
@@ -346,7 +346,7 @@ export default function FileUpload({
             <button
               onClick={() => void handleUrlSubmit()}
               disabled={!urlInput.trim() || isUploading}
-              className="px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add
             </button>
@@ -399,7 +399,7 @@ export default function FileUpload({
         <button
           onClick={handleUploadFiles}
           disabled={isUploading}
-          className="mt-4 w-full px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="mt-4 w-full px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isUploading ? (
             <>
