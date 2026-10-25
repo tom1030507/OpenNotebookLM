@@ -2,6 +2,7 @@
 import json
 import hashlib
 import re
+import unicodedata
 from time import perf_counter
 from typing import List, Dict, Any, Optional, Tuple
 import structlog
@@ -194,12 +195,21 @@ class RAGService:
                 ),
                 answer["text"],
             )
+            valid_source_ids = {
+                str(number): number for number in range(1, len(context_chunks) + 1)
+            }
+
+            def normalize_source_label(match):
+                if not include_sources:
+                    return ""
+                number = "".join(
+                    str(unicodedata.decimal(digit)) for digit in match.group(1)
+                ).lstrip("0")
+                source_id = valid_source_ids.get(number)
+                return f"[Source {source_id}]" if source_id is not None else ""
+
             answer_text = SOURCE_LABEL.sub(
-                lambda match: (
-                    f"[Source {int(match.group(1))}]"
-                    if include_sources and 1 <= int(match.group(1)) <= len(context_chunks)
-                    else ""
-                ),
+                normalize_source_label,
                 answer_text,
             )
             cited_ids = {int(match.group(1)) for match in SOURCE_LABEL.finditer(answer_text)}

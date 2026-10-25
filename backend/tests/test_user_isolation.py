@@ -54,6 +54,7 @@ from app.routers.mindmap import get_mindmap_service  # noqa: E402
 from app.routers.video import get_video_summary_service  # noqa: E402
 from app.routers.study import get_study_service  # noqa: E402
 from app.routers.report import get_report_service  # noqa: E402
+from app.routers.table import get_table_service  # noqa: E402
 from app.routers.project_overview import get_project_overview_service  # noqa: E402
 from app.routers.audio_overview import get_audio_overview_worker  # noqa: E402
 from app.services.project_overview import ProjectOverviewService  # noqa: E402
@@ -1515,12 +1516,95 @@ class TestReportIsolation:
         assert service.calls == [(project_id, "briefing", None, [kept])]
 
 
+class TestTableIsolation:
+    """Generated tables only receive sources authorized for their project."""
+
+    def _install_table_stub(self, monkeypatch):
+        class StubTableService:
+            def __init__(self):
+                self.calls = []
+
+            def generate(self, db, project_id, instruction, columns, document_ids):
+                self.calls.append((project_id, instruction, columns, document_ids))
+                return {
+                    "columns": columns or ["Paper"],
+                    "rows": [[{
+                        "value": "Paper A", "document_id": document_ids[0], "source_id": 1,
+                    }]],
+                    "sources": [{
+                        "id": 1,
+                        "document_id": document_ids[0],
+                        "title": "Paper A",
+                        "excerpt": "Evidence.",
+                    }],
+                }
+
+        service = StubTableService()
+        monkeypatch.setitem(
+            production_app.dependency_overrides,
+            get_table_service,
+            lambda: service,
+        )
+        return service
+
+    def test_generating_for_someone_elses_project_is_not_found(self, env, monkeypatch):
+        service = self._install_table_stub(monkeypatch)
+        project_id = make_project(env.alice)
+
+        foreign = env.bob.post(
+            "/api/projects/%s/table" % project_id,
+            json={"instruction": "Compare the sources"},
+        )
+        missing = env.bob.post(
+            "/api/projects/%s/table" % MISSING_ID,
+            json={"instruction": "Compare the sources"},
+        )
+
+        assert foreign.status_code == 404
+        assert foreign.json() == missing.json()
+        assert service.calls == []
+
+    def test_table_service_receives_only_selected_linked_sources(self, env, monkeypatch):
+        service = self._install_table_stub(monkeypatch)
+        project_id = make_project(env.alice)
+        kept = make_document(env.session, env.alice_user, "Kept paper")
+        dropped = make_document(env.session, env.alice_user, "Dropped paper")
+        for document_id in (kept, dropped):
+            assert env.alice.post(
+                "/api/projects/%s/documents/%s" % (project_id, document_id)
+            ).status_code == 200
+
+        response = env.alice.post(
+            "/api/projects/%s/table" % project_id,
+            json={
+                "instruction": "One row per paper",
+                "columns": ["Paper", "Year"],
+                "source_ids": [kept],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert service.calls == [(
+            project_id, "One row per paper", ["Paper", "Year"], [kept],
+        )]
+
+
+def test_table_route_requires_authentication():
+    response = TestClient(production_app).post(
+        "/api/projects/%s/table" % MISSING_ID,
+        json={"instruction": "Compare the sources"},
+    )
+
+    assert response.status_code == 401
+
+
 SELECTION_ROUTES = [
     "/api/projects/%s/mindmap",
     "/api/projects/%s/video-summary",
     "/api/projects/%s/flashcards",
     "/api/projects/%s/quiz",
     "/api/projects/%s/report",
+    "/api/projects/%s/table",
     "/api/export/project/%s/summary",
 ]
 
@@ -1567,6 +1651,13 @@ class TestSourceSelectionIsolation:
         if route.endswith("/report"):
             foreign_body = {"format": "briefing", "document_ids": [alice_document]}
             missing_body = {"format": "briefing", "document_ids": [MISSING_ID]}
+        elif route.endswith("/table"):
+            foreign_body = {
+                "instruction": "Compare the sources", "source_ids": [alice_document],
+            }
+            missing_body = {
+                "instruction": "Compare the sources", "source_ids": [MISSING_ID],
+            }
         else:
             foreign_body = {"document_ids": [alice_document]}
             missing_body = {"document_ids": [MISSING_ID]}
@@ -1591,9 +1682,12 @@ class TestSourceSelectionIsolation:
     def test_an_empty_selection_is_refused(self, env, route):
         project_id = make_project(env.alice)
 
-        payload = {"format": "briefing", "document_ids": []} if route.endswith(
-            "/report"
-        ) else {"query": "anything", "document_ids": []}
+        if route.endswith("/report"):
+            payload = {"format": "briefing", "document_ids": []}
+        elif route.endswith("/table"):
+            payload = {"instruction": "Compare the sources", "source_ids": []}
+        else:
+            payload = {"query": "anything", "document_ids": []}
         response = env.alice.post(
             route % project_id if "%s" in route else route,
             json=payload,

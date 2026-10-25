@@ -139,6 +139,29 @@ def test_a_nonexistent_source_label_is_not_published(
     assert "[Source 999]" not in response["answer"]
 
 
+def test_an_oversized_source_label_is_ignored_without_raising(
+    rag_module, monkeypatch, passages,
+):
+    response, _ = answer_with(
+        rag_module, monkeypatch, passages,
+        "Attention [Source %s]." % ("9" * 5_000),
+    )
+
+    assert response["sources"] == []
+    assert "[Source" not in response["answer"]
+
+
+def test_unicode_decimal_source_label_resolves_to_its_passage(
+    rag_module, monkeypatch, passages,
+):
+    response, _ = answer_with(
+        rag_module, monkeypatch, passages, "Attention [Source ١].",
+    )
+
+    assert response["answer"] == "Attention [Source 1]."
+    assert [source["id"] for source in response["sources"]] == [1]
+
+
 @pytest.mark.parametrize("label", [
     "[Source\u202f1, Source\u202f3, Source\u202f999]",
     "[Source 1, 3, 999]",
