@@ -213,7 +213,7 @@ export default function ConversationList({ embedded = false }: ConversationListP
                                 if (e.key === 'Enter') handleSaveEdit();
                                 if (e.key === 'Escape') handleCancelEdit();
                               }}
-                              className="flex-1 px-2 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
+                              className="flex-1 px-2 py-1 text-xs bg-[var(--card)] border border-[var(--input)] rounded focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
                               autoFocus
                             />
                             <button

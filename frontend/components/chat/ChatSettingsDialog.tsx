@@ -149,7 +149,7 @@ export default function ChatSettingsDialog({ projectId, onClose }: ChatSettingsD
                     maxLength={INSTRUCTIONS_MAX_LENGTH}
                     rows={4}
                     placeholder="For example: answer as a peer reviewer and point out weak evidence."
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-[var(--ring)] text-sm"
+                    className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-[var(--ring)] text-sm"
                   />
                   <p className="mt-1 text-xs text-[var(--muted-foreground)] text-right">
                     {settings.instructions.length}/{INSTRUCTIONS_MAX_LENGTH}

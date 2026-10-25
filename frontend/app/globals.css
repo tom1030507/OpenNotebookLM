@@ -113,6 +113,9 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  /* Native radios and checkboxes otherwise paint in the browser's own blue,
+     a second hue next to the citation marks. */
+  accent-color: var(--primary);
   font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.5;

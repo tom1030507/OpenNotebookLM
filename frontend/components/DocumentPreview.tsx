@@ -367,7 +367,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         {/* Header */}
         <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-[var(--muted)] rounded">
+            <div className="shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
               {getIcon()}
             </div>
             <div>

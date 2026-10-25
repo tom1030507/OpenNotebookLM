@@ -192,6 +192,10 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const projectDialog = useOptionalProjectDialog();
   
   const currentProject = useStore((state) => state.currentProject);
+  // Until the first project list arrives there is no telling a new account
+  // from a returning one; showing "Create a project" in that gap told every
+  // returning reader, for a second or two, that their work was gone.
+  const awaitingProjects = useStore((state) => state.loadingProjects && !state.currentProject);
   const currentConversation = useStore((state) => state.currentConversation);
   const messages = useStore((state) => state.messages);
   const documents = useStore((state) => state.documents);
@@ -385,7 +389,12 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
     >
       {/* Chat Messages Area */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {visibleMessages.length === 0 ? (
+        {awaitingProjects ? (
+          <div className="min-h-full flex items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]" role="status">
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+            Loading your projects…
+          </div>
+        ) : visibleMessages.length === 0 ? (
           <div
             className="min-h-full flex flex-col items-center justify-center py-8"
             style={welcomeHeroStyles.frame}
@@ -544,7 +553,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       {/* Input Area */}
       <div
         data-layout="chat-composer"
-        className={`border-t border-[var(--border)] bg-[var(--card)] ${currentProject ? 'p-4' : 'p-3'}`}
+        className={`bg-[var(--background)] ${currentProject ? 'p-4' : 'p-3'}`}
       >
         <div className="max-w-3xl mx-auto">
           <div className={`min-w-0 flex items-end ${currentProject ? 'gap-3' : 'gap-2'}`}>
@@ -590,7 +599,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                         ? 'Select a source to start chatting'
                         : 'Ask anything about your sources...'
                 }
-                className="w-full px-4 py-3 bg-[var(--background)] border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
+                className="w-full px-4 py-3 bg-[var(--card)] border border-[var(--input)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm"
                 rows={1}
                 disabled={!canChat || isStreaming}
               />

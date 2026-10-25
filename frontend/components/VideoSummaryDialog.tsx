@@ -227,7 +227,7 @@ export default function VideoSummaryDialog({
                       <li key={bullet} className="flex gap-2 text-sm">
                         <span
                           aria-hidden="true"
-                          className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0"
+                          className="mt-2 w-1 h-1 rounded-full bg-[var(--muted-foreground)] shrink-0"
                         />
                         <span>{bullet}</span>
                       </li>
@@ -289,7 +289,7 @@ export default function VideoSummaryDialog({
                   onClick={() => setIsPlaying((playing) => !playing)}
                   aria-label={isPlaying ? 'Pause video summary' : 'Play video summary'}
                   title={isPlaying ? 'Pause video summary' : 'Play video summary'}
-                  className="p-2.5 rounded-lg bg-[var(--accent)] text-white transition-base"
+                  className="p-2.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] transition-base"
                 >
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </button>
