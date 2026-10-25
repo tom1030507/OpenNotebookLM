@@ -85,14 +85,18 @@ export interface Message {
   rating?: MessageRating;
 }
 
+export type StudioNoteKind = 'report' | 'mindmap' | 'video_summary';
+
 export interface Note {
   id: string;
   project_id: string;
   title: string;
   /** Markdown. A saved answer carries its source list in here. */
   content: string;
-  origin: 'manual' | 'answer';
+  origin: 'manual' | 'answer' | 'studio';
   source_message_id: string | null;
+  studio_kind: StudioNoteKind | null;
+  payload_json: MindMap | VideoSummary | null;
   created_at: string;
   updated_at: string;
 }
@@ -186,6 +190,39 @@ export interface VideoSummary {
    */
   estimated_seconds: number;
   scenes: VideoScene[];
+}
+
+export type AudioOverviewFormat = 'deep_dive' | 'brief' | 'critique' | 'debate';
+export type AudioOverviewLength = 'short' | 'default';
+
+export interface AudioOverviewOptions {
+  document_ids?: string[];
+  format: AudioOverviewFormat;
+  length: AudioOverviewLength;
+  focus?: string | null;
+}
+
+export interface AudioOverviewTurn {
+  speaker: 'A' | 'B';
+  text: string;
+}
+
+export interface AudioOverview {
+  id: string;
+  status: 'queued' | 'running' | 'ready' | 'failed';
+  options: AudioOverviewOptions;
+  script: AudioOverviewTurn[];
+  duration_seconds: number | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AudioOverviewList {
+  enabled: boolean;
+  items: AudioOverview[];
 }
 
 interface ProjectListResponse {
@@ -284,6 +321,13 @@ interface ValidationErrorItem {
 
 interface ErrorResponse {
   detail?: string | ValidationErrorItem[];
+}
+
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
 }
 
 /** Same-origin prefix that Next proxies to the internal backend. */
@@ -405,13 +449,14 @@ const extractError = async (response: Response): Promise<Error> => {
     const payload = await response.json() as ErrorResponse;
     const detail = describeDetail(payload.detail);
     if (detail) {
-      return new Error(detail);
+      return new ApiError(response.status, detail);
     }
   } catch {
     // Fall back to the HTTP status below when the response is not JSON.
   }
 
-  return new Error(
+  return new ApiError(
+    response.status,
     response.statusText || `Request failed with status ${response.status}`,
   );
 };
@@ -888,6 +933,57 @@ const api = {
     );
   },
 
+  listAudioOverviews(projectId: string): Promise<AudioOverviewList> {
+    return requestJson<AudioOverviewList>(`/projects/${projectId}/audio-overviews`);
+  },
+
+  createAudioOverview(
+    projectId: string,
+    options: AudioOverviewOptions & { document_ids?: string[] },
+  ): Promise<AudioOverview> {
+    return requestJson<AudioOverview>(`/projects/${projectId}/audio-overviews`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
+  },
+
+  getAudioOverview(projectId: string, overviewId: string): Promise<AudioOverview> {
+    return requestJson<AudioOverview>(
+      `/projects/${projectId}/audio-overviews/${overviewId}`,
+    );
+  },
+
+  fetchAudioOverviewFile(projectId: string, overviewId: string): Promise<Blob> {
+    return requestBlob(
+      `/projects/${projectId}/audio-overviews/${overviewId}/file`,
+    );
+  },
+
+  async deleteAudioOverview(projectId: string, overviewId: string): Promise<void> {
+    await requestJson(
+      `/projects/${projectId}/audio-overviews/${overviewId}`,
+      { method: 'DELETE' },
+    );
+  },
+
+  exportProjectVideoSummaryPptx(
+    projectId: string,
+    scenes: VideoScene[],
+  ): Promise<Blob> {
+    return requestDetachedExportBlob(
+      `/projects/${projectId}/video-summary/pptx`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenes: scenes.map(({ id, kind, headline, bullets, narration, document_id }) => ({
+            id, kind, headline, bullets, narration, document_id,
+          })),
+        }),
+      },
+    );
+  },
+
   exportProjectSummary(projectId: string, documentIds?: string[]): Promise<Blob> {
     return requestDetachedExportBlob(
       `/export/project/${projectId}/summary`,
@@ -902,7 +998,13 @@ const api = {
   /** With `source_message_id` the server writes the content from that answer. */
   createNote(
     projectId: string,
-    note: { title: string; content?: string; source_message_id?: string },
+    note: {
+      title: string;
+      content?: string;
+      source_message_id?: string;
+      studio_kind?: StudioNoteKind;
+      payload_json?: MindMap | VideoSummary;
+    },
   ): Promise<Note> {
     return requestJson<Note>(`/projects/${projectId}/notes`, {
       method: 'POST',

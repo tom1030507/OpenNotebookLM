@@ -45,11 +45,11 @@ def create_note(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Write a note, or save an answer from the project's conversations.
+    """Write a note, save an answer, or keep a Studio result.
 
     Args:
         project_id: Project to resolve through the caller's ownership.
-        data: The note, or the id of the answer to save.
+        data: Note content, an answer id, or a validated Studio result.
         db: Database session.
         current_user: Authenticated caller.
 

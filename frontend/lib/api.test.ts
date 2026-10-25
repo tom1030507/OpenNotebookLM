@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import api from './api';
+import api, { ApiError } from './api';
 
 
 const jsonResponse = (body: unknown, status = 200) => new Response(
@@ -19,6 +19,56 @@ afterEach(() => {
 
 
 describe('API client', () => {
+  it('creates and reloads authenticated audio overview resources', async () => {
+    const audio = {
+      id: 'overview-1',
+      status: 'queued',
+      options: {
+        document_ids: ['doc-1'],
+        format: 'debate',
+        length: 'short',
+        focus: 'methods',
+      },
+      script: [],
+      duration_seconds: null,
+      error: null,
+      created_at: '2026-10-25T00:00:00Z',
+      updated_at: '2026-10-25T00:00:00Z',
+      started_at: null,
+      completed_at: null,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ enabled: true, items: [audio] }))
+      .mockResolvedValueOnce(jsonResponse(audio, 202))
+      .mockResolvedValueOnce(new Response('mp3 audio'))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.listAudioOverviews('project-1')).resolves.toEqual({
+      enabled: true,
+      items: [audio],
+    });
+    await api.createAudioOverview('project-1', {
+      document_ids: ['doc-1'],
+      format: 'debate',
+      length: 'short',
+      focus: 'methods',
+    });
+    await expect(api.fetchAudioOverviewFile('project-1', 'overview-1'))
+      .resolves.toBeInstanceOf(Blob);
+    await expect(api.deleteAudioOverview('project-1', 'overview-1'))
+      .resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/projects/project-1/audio-overviews',
+      '/api/projects/project-1/audio-overviews',
+      '/api/projects/project-1/audio-overviews/overview-1/file',
+      '/api/projects/project-1/audio-overviews/overview-1',
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual(audio.options);
+    expect(fetchMock.mock.calls[3][1].method).toBe('DELETE');
+  });
+
   it('unwraps the paginated project response', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       projects: [{
@@ -175,6 +225,60 @@ describe('API client', () => {
     const init = fetchMock.mock.calls[0][1];
     expect(JSON.parse(init.body)).toEqual({ document_ids: ['doc-1'] });
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+  });
+
+  it('exports the current video summary scenes as a PowerPoint blob', async () => {
+    const scenes = [{
+      id: 'title',
+      kind: 'title' as const,
+      headline: 'Research',
+      bullets: ['Finding'],
+      narration: 'Narration.',
+      document_id: null,
+      source_label: 'Research source',
+    }];
+    const fetchMock = vi.fn().mockResolvedValue(new Response('pptx bytes', {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const blob = await api.exportProjectVideoSummaryPptx('project-1', scenes);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/video-summary/pptx',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          scenes: [{
+            id: 'title',
+            kind: 'title',
+            headline: 'Research',
+            bullets: ['Finding'],
+            narration: 'Narration.',
+            document_id: null,
+          }],
+        }),
+      }),
+    );
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Content-Type')).toBe(
+      'application/json',
+    );
+    expect(blob.type).toBe(
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    );
+    await expect(blob.text()).resolves.toBe('pptx bytes');
+  });
+
+  it('preserves the HTTP status on API errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      detail: 'Video summary exceeds the export limits',
+    }, 413)));
+    const request = api.fetchProjectVideoSummary('project-1');
+
+    await expect(request).rejects.toBeInstanceOf(ApiError);
+    await expect(request).rejects.toMatchObject({ status: 413 });
   });
 
   it('fetches the complete document after a file upload', async () => {

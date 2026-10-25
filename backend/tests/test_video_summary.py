@@ -6,9 +6,11 @@ module-level service would point at a local provider and every request here
 would open a socket to it.
 """
 import inspect
+from io import BytesIO
 
 import pytest
 from fastapi import FastAPI
+from pptx import Presentation
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -16,7 +18,8 @@ from sqlalchemy.pool import StaticPool
 from app.db.database import get_db
 from app.db.models import Base, Chunk, Document, Project, ProjectDocument
 from app.routers import video
-from app.services.video_summary import VideoSummaryService
+from app.services.source_digest import project_documents
+from app.services.video_summary import VideoSummaryService, VideoSummaryTooLargeError
 from conftest import OfflineLLM, auth_headers, authenticated_client, owner_id
 
 app = FastAPI()
@@ -160,6 +163,82 @@ def test_the_script_closes_on_a_recap(two_projects_with_own_documents):
     assert body["scenes"][-1]["bullets"] == ["Only In A"]
 
 
+def test_the_existing_script_exports_as_a_powerpoint_without_regeneration(
+    two_projects_with_own_documents,
+):
+    """The slides and speaker notes come from the scene script the dialog has."""
+    with TestingSessionLocal() as db:
+        project = db.query(Project).filter(Project.id == "project-a").one()
+        project.name = "../Project A?."
+        db.commit()
+
+    scenes = [
+        {
+            "id": "title",
+            "kind": "title",
+            "headline": "A prepared title",
+            "bullets": ["Prepared bullet"],
+            "narration": "Prepared narration.",
+            "document_id": None,
+            "source_label": None,
+        },
+        {
+            "id": "closing",
+            "kind": "closing",
+            "headline": "A prepared close",
+            "bullets": [],
+            "narration": "Prepared closing narration.",
+            "document_id": None,
+            "source_label": None,
+        },
+    ]
+
+    response = client.post(
+        "/api/projects/project-a/video-summary/pptx",
+        json={"scenes": scenes},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+    assert response.headers["content-disposition"] == (
+        "attachment; filename*=utf-8''_Project%20A_.pptx"
+    )
+    presentation = Presentation(BytesIO(response.content))
+    assert len(presentation.slides) == 2
+    first_slide = presentation.slides[0]
+    assert first_slide.shapes.title.text == "A prepared title"
+    assert first_slide.placeholders[1].text == "Prepared bullet"
+    assert "Prepared narration." in first_slide.notes_slide.notes_text_frame.text
+    assert presentation.slides[1].shapes.title.text == "A prepared close"
+
+
+def test_powerpoint_export_rejects_malformed_scene_bullets():
+    """The file endpoint accepts only the bounded scene shape we generate."""
+    scenes = [
+        {
+            "id": "title",
+            "kind": "title",
+            "headline": "Title",
+            "bullets": ["one", "two", "three", "four", "five"],
+            "narration": "Narration.",
+        },
+        {
+            "id": "closing",
+            "kind": "closing",
+            "headline": "Close",
+            "bullets": [],
+            "narration": "Closing.",
+        },
+    ]
+
+    assert client.post(
+        "/api/projects/project-a/video-summary/pptx",
+        json={"scenes": scenes},
+    ).status_code == 422
+
+
 def test_every_scene_has_narration(two_projects_with_own_documents):
     """The scene advances when the voice finishes, so silence would stall it."""
     body = client.post("/api/projects/project-a/video-summary").json()
@@ -176,6 +255,32 @@ def test_scene_count_and_duration_describe_the_script(
     assert body["scene_count"] == 3
     assert body["scene_count"] == len(body["scenes"])
     assert body["estimated_seconds"] > 0
+
+
+def test_oversized_video_summary_returns_payload_too_large(
+    two_projects_with_own_documents,
+    monkeypatch,
+):
+    """The UI never receives a script that cannot be exported."""
+    def reject_summary(*_args, **_kwargs):
+        raise VideoSummaryTooLargeError("Video summary exceeds the export limits")
+
+    monkeypatch.setattr(VideoSummaryService, "generate", reject_summary)
+
+    response = client.post("/api/projects/project-a/video-summary")
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Video summary exceeds the export limits"
+
+
+def test_project_document_loader_applies_a_query_limit(two_projects_with_own_documents):
+    """The summary can detect oversized projects without loading every source."""
+    with TestingSessionLocal() as db:
+        project = db.query(Project).filter_by(id="project-a").one()
+
+        documents = project_documents(db, project, limit=1)
+
+    assert len(documents) == 1
 
 
 def test_the_model_is_reported(two_projects_with_own_documents):

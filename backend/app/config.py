@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     yt_max_duration_seconds: int = 1800
     yt_whisper_cache_dir: str = "./models/whisper"
     audio_max_duration_seconds: int = Field(default=1800, ge=1)
+    audio_overview_tts_enabled: bool = True
     ocr_enabled: bool = True
     ocr_model_cache_dir: str = "./models/rapidocr"
     

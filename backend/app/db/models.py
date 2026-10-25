@@ -48,6 +48,11 @@ class Project(Base):
     documents = relationship("ProjectDocument", back_populates="project", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="project", cascade="all, delete-orphan")
+    audio_overviews = relationship(
+        "AudioOverview",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("idx_projects_user_id", "user_id"),
@@ -146,6 +151,40 @@ class IngestionJob(Base):
             sqlite_where=text("status IN ('queued', 'running')"),
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
+    )
+
+
+class AudioOverview(Base):
+    """Durable generation request and transcript for one project overview."""
+    __tablename__ = "audio_overviews"
+
+    id = Column(String, primary_key=True)
+    project_id = Column(
+        String,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status = Column(String, default="queued", nullable=False)
+    options_json = Column(JSON, default=dict, nullable=False)
+    script_json = Column(JSON, default=list, nullable=False)
+    file_path = Column(String)
+    duration_seconds = Column(Float)
+    error = Column(Text)
+    created_at = Column(UTCDateTime, default=ordered_utc_now, nullable=False)
+    updated_at = Column(
+        UTCDateTime,
+        default=ordered_utc_now,
+        onupdate=ordered_utc_now,
+        nullable=False,
+    )
+    started_at = Column(UTCDateTime)
+    completed_at = Column(UTCDateTime)
+
+    project = relationship("Project", back_populates="audio_overviews")
+
+    __table_args__ = (
+        Index("idx_audio_overviews_project_created", "project_id", "created_at"),
+        Index("idx_audio_overviews_status_created", "status", "created_at"),
     )
 
 
@@ -321,18 +360,20 @@ class Message(Base):
 
 
 class Note(Base):
-    """A Markdown note kept beside a project's sources."""
+    """A manual, saved answer, or Studio result kept with a project's sources."""
     __tablename__ = "notes"
 
     id = Column(String, primary_key=True)
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False, default="")
-    origin = Column(String, nullable=False, default="manual")  # manual, answer
+    origin = Column(String, nullable=False, default="manual")  # manual, answer, studio
     # Deliberately not a foreign key: the note holds its own copy of the answer,
     # so deleting the conversation must neither take the note with it nor be
     # refused because a note still points at one of its messages.
     source_message_id = Column(String)
+    studio_kind = Column(String)
+    payload_json = Column(JSON)
     # Python-side so notes saved in quick succession still list in order.
     created_at = Column(UTCDateTime, default=ordered_utc_now, nullable=False)
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)

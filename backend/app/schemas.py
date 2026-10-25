@@ -339,6 +339,8 @@ class MindMapNode(BaseModel):
     The same shape at every level — project, document, topic — so the browser can
     draw the tree with one recursive renderer instead of three.
     """
+    model_config = {"extra": "forbid"}
+
     id: str
     label: str
     kind: str = Field(..., pattern="^(project|document|topic)$")
@@ -389,6 +391,43 @@ class SourceSelection(BaseModel):
         return unique_ids
 
 
+class AudioOverviewCreate(SourceSelection):
+    """Generation style and source selection for one audio overview."""
+
+    format: Literal["deep_dive", "brief", "critique", "debate"] = "deep_dive"
+    length: Literal["short", "default"] = "default"
+    focus: Optional[str] = Field(default=None, max_length=500)
+
+
+class AudioOverviewTurn(BaseModel):
+    """One validated host turn in the stored transcript."""
+
+    speaker: Literal["A", "B"]
+    text: str = Field(..., min_length=1, max_length=300)
+
+
+class AudioOverviewResponse(BaseModel):
+    """Persisted status, options, transcript, and timing for an overview."""
+
+    id: str
+    status: Literal["queued", "running", "ready", "failed"]
+    options: AudioOverviewCreate
+    script: List[AudioOverviewTurn] = Field(default_factory=list)
+    duration_seconds: Optional[float] = None
+    error: Optional[str] = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    started_at: Optional[UtcDatetime] = None
+    completed_at: Optional[UtcDatetime] = None
+
+
+class AudioOverviewListResponse(BaseModel):
+    """Stored overviews and the runtime synthesis capability."""
+
+    enabled: bool
+    items: List[AudioOverviewResponse] = Field(default_factory=list)
+
+
 class MindMapResponse(BaseModel):
     """Schema for a generated mind map."""
 
@@ -396,7 +435,7 @@ class MindMapResponse(BaseModel):
     # pinned pydantic 2.5.0 warns about every such field at import time. The name
     # is kept because a query answer already reports `model_used` and the browser
     # reads that key; the guard is waived rather than the field renamed.
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
 
     project_id: str
     project_name: str
@@ -420,6 +459,8 @@ class VideoScene(BaseModel):
     The same shape for all three kinds — title card, source, closing recap — so
     the browser plays them with one renderer instead of three.
     """
+    model_config = {"extra": "forbid"}
+
     id: str
     kind: str = Field(..., pattern="^(title|source|closing)$")
     # One clause naming what this scene is about.
@@ -436,6 +477,76 @@ class VideoScene(BaseModel):
     source_label: Optional[str] = None
 
 
+# Summary generation covers every project source, not only the 500-source
+# selection request. Keep export bounded while supporting large projects.
+# shortcut: 1,000 source slides max; raise after measuring larger deck exports.
+MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES = 1_000
+MAX_VIDEO_SUMMARY_PPTX_SCENES = MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 2
+MAX_VIDEO_SUMMARY_PPTX_TEXT_CHARS = 500_000
+MAX_VIDEO_SUMMARY_PPTX_BULLET_CHARS = 120
+MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS = 10_000
+
+
+class VideoSummaryPptxScene(VideoScene):
+    """A bounded video scene accepted by the PowerPoint export endpoint."""
+
+    model_config = {"extra": "forbid"}
+
+    id: str = Field(..., min_length=1, max_length=128)
+    headline: str = Field(..., min_length=1, max_length=500)
+    bullets: List[
+        Annotated[str, Field(max_length=MAX_VIDEO_SUMMARY_PPTX_BULLET_CHARS)]
+    ] = Field(default_factory=list, max_length=4)
+    narration: str = Field(
+        ..., min_length=1, max_length=MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
+    )
+    document_id: Optional[str] = Field(None, max_length=128)
+    source_label: Optional[str] = Field(None, max_length=500)
+
+
+class VideoSummaryPptxRequest(BaseModel):
+    """The scenes already shown in the video summary dialog."""
+
+    model_config = {"extra": "forbid"}
+
+    scenes: List[VideoSummaryPptxScene] = Field(
+        ..., min_length=2, max_length=MAX_VIDEO_SUMMARY_PPTX_SCENES,
+    )
+
+    @field_validator("scenes")
+    @classmethod
+    def scenes_fit_one_summary(
+        cls,
+        scenes: List[VideoSummaryPptxScene],
+    ) -> List[VideoSummaryPptxScene]:
+        """Reject oversized or out-of-order scene lists at the export boundary.
+
+        Args:
+            scenes: Validated video summary scenes.
+
+        Returns:
+            The original scenes when they fit the generated-summary contract.
+        """
+        if scenes[0].kind != "title" or scenes[-1].kind != "closing":
+            raise ValueError("scenes must start with a title and end with a closing scene")
+        if any(scene.kind != "source" for scene in scenes[1:-1]):
+            raise ValueError("only source scenes may appear between the title and closing")
+        if any(not scene.document_id for scene in scenes[1:-1]):
+            raise ValueError("source scenes must include a document id")
+
+        text_chars = sum(
+            len(scene.headline)
+            + len(scene.narration)
+            + sum(len(bullet) for bullet in scene.bullets)
+            + len(scene.source_label or "")
+            for scene in scenes
+        )
+        if text_chars > MAX_VIDEO_SUMMARY_PPTX_TEXT_CHARS:
+            raise ValueError("scene text exceeds the PowerPoint export limit")
+
+        return scenes
+
+
 class VideoSummaryResponse(BaseModel):
     """Schema for a generated video summary script."""
 
@@ -444,7 +555,7 @@ class VideoSummaryResponse(BaseModel):
     # is kept because a query answer and a mind map already report `model_used`
     # and the browser reads that key; the guard is waived rather than the field
     # renamed.
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
 
     project_id: str
     project_name: str
@@ -466,17 +577,22 @@ class VideoSummaryResponse(BaseModel):
 # Note schemas
 # A bound on what one request can store; long enough for any answer or essay.
 NOTE_CONTENT_MAX_LENGTH = 100_000
+NOTE_PAYLOAD_MAX_BYTES = 750_000
 
 
 class NoteCreate(BaseModel):
     """Schema for creating a note.
 
-    With `source_message_id` the note is a saved answer: the server writes its
-    content from the stored message and citations, and `content` is ignored.
+    `source_message_id` saves an answer from stored data; `studio_kind` saves
+    client-supplied report Markdown or a validated Studio JSON result.
     """
+    model_config = {"extra": "forbid"}
+
     title: str = Field(..., min_length=1, max_length=200)
     content: str = Field(default="", max_length=NOTE_CONTENT_MAX_LENGTH)
     source_message_id: Optional[str] = None
+    studio_kind: Optional[Literal["report", "mindmap", "video_summary"]] = None
+    payload_json: Optional[Dict[str, Any]] = None
 
 
 class NoteUpdate(BaseModel):
@@ -493,6 +609,8 @@ class NoteResponse(BaseModel):
     content: str
     origin: str
     source_message_id: Optional[str] = None
+    studio_kind: Optional[Literal["report", "mindmap", "video_summary"]] = None
+    payload_json: Optional[Dict[str, Any]] = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

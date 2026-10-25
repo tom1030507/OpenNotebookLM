@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 
 import api, {
+  ApiError,
   type Document,
   type MindMap,
   type Project,
   type VideoSummary,
 } from '@/lib/api';
 import useStore from '@/store/useStore';
+import useNotes from '@/store/useNotes';
 import StudioPanel from './StudioPanel';
 
 const projectA: Project = {
@@ -91,12 +93,14 @@ beforeEach(() => {
     currentProject: projectA,
     documents: [readyDocument],
   });
+  useNotes.setState({ projectId: projectA.id, notes: [], loading: false, error: '' });
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   useStore.getState().resetForTests();
+  useNotes.setState({ projectId: null, notes: [], loading: false, error: '' });
 });
 
 describe('StudioPanel', () => {
@@ -111,6 +115,17 @@ describe('StudioPanel', () => {
     ]) {
       expect(screen.getByRole('button', { name }).getAttribute('type')).toBe('button');
     }
+  });
+
+  it('explains how to fix a video summary that exceeds the export limits', async () => {
+    vi.spyOn(api, 'fetchProjectVideoSummary').mockRejectedValue(
+      new ApiError(413, 'Video summary exceeds the PowerPoint export limits'),
+    );
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
+
+    expect(await screen.findByText(/select fewer sources/i)).toBeTruthy();
   });
 
   it('does not open project A results after switching to project B', async () => {
@@ -179,5 +194,56 @@ describe('StudioPanel', () => {
     });
 
     expect(screen.queryByRole('dialog', { name: `${projectA.name} video summary` })).toBeNull();
+  });
+
+  it('shows the generated report and saves its Markdown to notes', async () => {
+    const markdown = '# Project report\n\nSaved findings.';
+    vi.spyOn(api, 'listNotes').mockResolvedValue([]);
+    vi.spyOn(api, 'exportProjectSummary').mockResolvedValue({
+      text: async () => markdown,
+    } as Blob);
+    const create = vi.spyOn(api, 'createNote').mockResolvedValue({
+      id: 'report-note', project_id: projectA.id, title: 'Account A project report',
+      content: markdown, origin: 'studio', source_message_id: null,
+      studio_kind: 'report', payload_json: null,
+      created_at: '2026-10-25T00:00:00Z', updated_at: '2026-10-25T00:00:00Z',
+    });
+    class TestURL extends URL {}
+    TestURL.createObjectURL = vi.fn(() => 'blob:report');
+    TestURL.revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', TestURL);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+
+    expect(await screen.findByText('Saved findings.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save report to notes' }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith(projectA.id, {
+      title: 'Account A project report', content: markdown, studio_kind: 'report',
+    }));
+    expect(useNotes.getState().notes).toHaveLength(1);
+  });
+
+  it('saves the displayed mind map payload to notes', async () => {
+    vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMapFor(projectA));
+    vi.spyOn(api, 'createNote').mockResolvedValue({
+      id: 'map-note', project_id: projectA.id, title: 'Account A project mind map',
+      content: '', origin: 'studio', source_message_id: null,
+      studio_kind: 'mindmap', payload_json: mindMapFor(projectA),
+      created_at: '2026-10-25T00:00:00Z', updated_at: '2026-10-25T00:00:00Z',
+    });
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    await screen.findByRole('dialog', { name: `${projectA.name} mind map` });
+    fireEvent.click(screen.getByRole('button', { name: 'Save to notes' }));
+
+    await waitFor(() => expect(api.createNote).toHaveBeenCalledWith(projectA.id, {
+      title: 'Account A project mind map',
+      studio_kind: 'mindmap', payload_json: mindMapFor(projectA),
+    }));
+    expect(await screen.findByRole('button', { name: 'Saved to notes' })).toBeTruthy();
   });
 });

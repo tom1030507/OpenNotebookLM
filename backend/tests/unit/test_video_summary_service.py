@@ -9,13 +9,20 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 
+from app.schemas import (
+    MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
+    MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES,
+    VideoSummaryPptxRequest,
+)
 from app.services.video_summary import (
     BULLET_MAX_CHARS,
     MAX_BULLETS_PER_SCENE,
     VideoSummaryService,
+    VideoSummaryTooLargeError,
     estimate_seconds,
     leading_sentences,
     parse_llm_scenes,
@@ -55,7 +62,7 @@ class TestLeadingSentences:
 
         bullet = leading_sentences(text, limit=1)[0]
 
-        assert len(bullet) <= BULLET_MAX_CHARS + 1
+        assert len(bullet) <= BULLET_MAX_CHARS
         assert bullet.endswith("…")
         assert "wor…" not in bullet
 
@@ -125,6 +132,18 @@ class TestParseLlmScenes:
     def test_a_prose_reply_yields_nothing(self):
         """With no provider configured the service answers with prose."""
         assert parse_llm_scenes("Configure an LLM for better answers.", 2) == {}
+
+    def test_bounds_model_narration_to_the_export_limit(self):
+        """A verbose provider response still fits the speaker notes field."""
+        reply = json.dumps({"scenes": [{
+            "index": 1,
+            "narration": "word " * (MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS // 3),
+        }]})
+
+        narration = parse_llm_scenes(reply, 1)[1]["narration"]
+
+        assert len(narration) <= MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS
+        assert narration.endswith("…")
 
 
 class TestEstimateSeconds:
@@ -235,6 +254,25 @@ class TestSkeleton:
 
         assert len(ids) == len(set(ids))
 
+    def test_long_source_titles_fit_the_export_headline(self, service):
+        """Fallback titles are bounded to the same width as slide headlines."""
+        document = FakeDocument("d1", "Research " * 80)
+
+        source = _scenes(service, [document])[1]
+
+        assert len(source["headline"]) <= BULLET_MAX_CHARS
+        assert source["headline"].endswith("…")
+
+    def test_keyword_fallback_shortens_long_unbroken_words(self, service):
+        """A source with a single long token still produces an exportable bullet."""
+        document = FakeDocument("d1", "Long token", content="x" * 500)
+
+        source = _scenes(service, [document])[1]
+
+        assert source["bullets"]
+        assert all(len(bullet) <= BULLET_MAX_CHARS for bullet in source["bullets"])
+
+
     def test_the_title_scene_names_the_project_and_counts_its_sources(self, service):
         """The opening card is the only place the whole project is stated."""
         scenes = _scenes(service, [FakeDocument("d1", "One")], project_name="RAG notes")
@@ -274,6 +312,88 @@ class TestSkeleton:
         documents = [FakeDocument("d1", "One", chunks=[FakeChunk(text="")])]
 
         assert all(scene["narration"].strip() for scene in _scenes(service, documents))
+
+
+def test_pptx_request_accepts_more_than_the_source_selection_limit():
+    """Project-wide summaries can contain more sources than explicit selections."""
+    title = {
+        "id": "title", "kind": "title", "headline": "Project",
+        "bullets": [], "narration": "Project summary.",
+    }
+    sources = [
+        {
+            "id": "doc-%d" % index, "kind": "source",
+            "headline": "Source %d" % index, "bullets": [],
+            "narration": "Source narration.", "document_id": "doc-%d" % index,
+        }
+        for index in range(501)
+    ]
+    closing = {
+        "id": "closing", "kind": "closing", "headline": "Recap",
+        "bullets": [], "narration": "Closing summary.",
+    }
+
+    request = VideoSummaryPptxRequest(scenes=[title, *sources, closing])
+
+    assert len(request.scenes) == 503
+
+
+def test_pptx_request_keeps_a_bound_on_project_wide_scene_count():
+    """The larger project-wide limit still prevents unbounded slide generation."""
+    title = {
+        "id": "title", "kind": "title", "headline": "Project",
+        "bullets": [], "narration": "Project summary.",
+    }
+    sources = [
+        {
+            "id": "doc-%d" % index, "kind": "source",
+            "headline": "Source", "bullets": [], "narration": "Narration.",
+            "document_id": "doc-%d" % index,
+        }
+        for index in range(1001)
+    ]
+    closing = {
+        "id": "closing", "kind": "closing", "headline": "Recap",
+        "bullets": [], "narration": "Closing summary.",
+    }
+
+    with pytest.raises(ValueError):
+        VideoSummaryPptxRequest(scenes=[title, *sources, closing])
+
+
+def test_summary_service_rejects_more_sources_than_export_supports(monkeypatch):
+    """An oversized script fails before Studio can show a non-exportable result."""
+    documents = [FakeDocument("doc-%d" % index, "Source") for index in range(1001)]
+
+    def load_limited_documents(_db, _project, _document_ids=None, limit=None):
+        assert limit == MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 1
+        return documents
+
+    monkeypatch.setattr(
+        "app.services.video_summary.project_documents",
+        load_limited_documents,
+    )
+    service = VideoSummaryService(llm_service=ExplodingLLM())
+
+    with pytest.raises(VideoSummaryTooLargeError, match="at most 1000 sources"):
+        service.generate(None, SimpleNamespace(id="project", name="Project"))
+
+
+def test_pptx_request_rejects_bullets_that_do_not_fit_a_slide():
+    """A bounded request cannot turn one slide bullet into a wall of text."""
+    scenes = [
+        {
+            "id": "title", "kind": "title", "headline": "Project",
+            "bullets": ["x" * 121], "narration": "Project summary.",
+        },
+        {
+            "id": "closing", "kind": "closing", "headline": "Recap",
+            "bullets": [], "narration": "Closing summary.",
+        },
+    ]
+
+    with pytest.raises(ValueError):
+        VideoSummaryPptxRequest(scenes=scenes)
 
 
 class TestFallbackChain:
@@ -571,7 +691,7 @@ class TestConcurrentGeneration:
         )
         monkeypatch.setattr(
             "app.services.video_summary.project_documents",
-            lambda db, project, document_ids=None: documents[project.name],
+            lambda db, project, document_ids=None, limit=None: documents[project.name],
         )
 
         with ThreadPoolExecutor(max_workers=2) as pool:

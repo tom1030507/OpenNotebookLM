@@ -22,7 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import get_db
-from app.db.models import Base, Document, Project, User
+from app.db.models import AudioOverview, Base, Document, Project, User
 
 # Retrieval and model inference are not what these tests exercise. Replacing the
 # RAG service before the app is imported keeps them in the minimal environment;
@@ -41,6 +41,7 @@ from app.main import app as production_app  # noqa: E402
 from app.routers.mindmap import get_mindmap_service  # noqa: E402
 from app.routers.video import get_video_summary_service  # noqa: E402
 from app.routers.project_overview import get_project_overview_service  # noqa: E402
+from app.routers.audio_overview import get_audio_overview_worker  # noqa: E402
 from app.services.project_overview import ProjectOverviewService  # noqa: E402
 from app.services.mindmap import MindMapService  # noqa: E402
 from app.services.video_summary import VideoSummaryService  # noqa: E402
@@ -50,6 +51,11 @@ MISSING_ID = str(uuid.uuid4())
 
 ALICE_PROJECT = "Alice research"
 BOB_PROJECT = "Bob notes"
+
+
+class NoopAudioOverviewWorker:
+    def notify(self):
+        pass
 
 
 class Env:
@@ -103,6 +109,9 @@ def env():
     )
     production_app.dependency_overrides[get_project_overview_service] = (
         lambda: ProjectOverviewService(llm_service=OfflineLLM())
+    )
+    production_app.dependency_overrides[get_audio_overview_worker] = (
+        lambda: NoopAudioOverviewWorker()
     )
 
     alice = authenticated_client(production_app, session, "alice")
@@ -203,6 +212,7 @@ class TestProjectIsolation:
         assert env.alice.get("/api/projects").json()["total"] == 2
         assert env.bob.get("/api/projects").json()["total"] == 1
 
+
     def test_reading_someone_elses_project_is_not_found(self, env):
         project_id = make_project(env.alice)
         assert env.bob.get("/api/projects/%s" % project_id).status_code == 404
@@ -237,6 +247,30 @@ class TestProjectIsolation:
         project_id = make_project(env.alice)
         assert env.alice.get("/api/projects/%s" % project_id).status_code == 200
         assert env.alice.get("/api/projects/%s/documents" % project_id).status_code == 200
+
+
+class TestAudioOverviewIsolation:
+    """An overview is only visible through the project that owns it."""
+
+    def test_another_users_audio_overview_routes_are_not_found(self, env):
+        project_id = make_project(env.alice)
+        overview_id = str(uuid.uuid4())
+        env.session.add(AudioOverview(
+            id=overview_id,
+            project_id=project_id,
+            options_json={},
+            script_json=[],
+            file_path="uploads/audio_overviews/%s.mp3" % overview_id,
+        ))
+        env.session.commit()
+
+        paths = [
+            "/api/projects/%s/audio-overviews" % project_id,
+            "/api/projects/%s/audio-overviews/%s" % (project_id, overview_id),
+            "/api/projects/%s/audio-overviews/%s/file" % (project_id, overview_id),
+        ]
+        assert [env.bob.get(path).status_code for path in paths] == [404, 404, 404]
+        assert env.bob.delete(paths[1]).status_code == 404
 
 
 class TestRefusalLeaksNothing:
@@ -485,6 +519,75 @@ class TestVideoSummaryIsolation:
 
         assert response.status_code == 200
         assert response.json()["scenes"][0]["headline"] == ALICE_PROJECT
+
+    def test_exporting_someone_elses_video_summary_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        scenes = [
+            {
+                "id": "title", "kind": "title", "headline": "Title",
+                "bullets": [], "narration": "Narration.",
+            },
+            {
+                "id": "closing", "kind": "closing", "headline": "Close",
+                "bullets": [], "narration": "Closing.",
+            },
+        ]
+
+        response = env.bob.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": scenes},
+        )
+
+        assert response.status_code == 404
+
+    def test_your_own_video_summary_can_be_exported(self, env):
+        project_id = make_project(env.alice)
+        scenes = [
+            {
+                "id": "title", "kind": "title", "headline": "Title",
+                "bullets": [], "narration": "Narration.",
+            },
+            {
+                "id": "closing", "kind": "closing", "headline": "Close",
+                "bullets": [], "narration": "Closing.",
+            },
+        ]
+
+        response = env.alice.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": scenes},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
+
+    def test_exporting_a_foreign_source_scene_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.bob_user, title="Bob's source")
+        scenes = [
+            {
+                "id": "title", "kind": "title", "headline": "Title",
+                "bullets": [], "narration": "Narration.",
+            },
+            {
+                "id": "doc-1", "kind": "source", "headline": "Source",
+                "bullets": [], "narration": "Source narration.",
+                "document_id": document_id,
+            },
+            {
+                "id": "closing", "kind": "closing", "headline": "Close",
+                "bullets": [], "narration": "Closing.",
+            },
+        ]
+
+        response = env.alice.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": scenes},
+        )
+
+        assert response.status_code == 404
 
 
 class TestNoteIsolation:

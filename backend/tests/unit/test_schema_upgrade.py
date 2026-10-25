@@ -42,6 +42,18 @@ OLD_SCHEMA = (
         updated_at DATETIME
     )
     """,
+    """
+    CREATE TABLE notes (
+        id VARCHAR NOT NULL PRIMARY KEY,
+        project_id VARCHAR NOT NULL,
+        title VARCHAR NOT NULL,
+        content TEXT NOT NULL,
+        origin VARCHAR NOT NULL,
+        source_message_id VARCHAR,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL
+    )
+    """,
 )
 
 
@@ -64,6 +76,10 @@ def old_database(tmp_path):
     connection.execute(
         "INSERT INTO documents (id, title, source_type, status)"
         " VALUES ('document-1', 'Existing upload', 'pdf', 'ready')")
+    connection.execute(
+        "INSERT INTO notes (id, project_id, title, content, origin, created_at, updated_at)"
+        " VALUES ('note-1', 'project-1', 'Kept note', '# Body', 'manual',"
+        " '2026-10-25T00:00:00Z', '2026-10-25T00:00:00Z')")
     connection.commit()
     connection.close()
 
@@ -82,6 +98,8 @@ class TestUpgrade:
 
         assert sorted(added) == [
             "documents.user_id",
+            "notes.payload_json",
+            "notes.studio_kind",
             "projects.answer_length",
             "projects.auto_title",
             "projects.chat_instructions",
@@ -147,10 +165,15 @@ class TestUpgrade:
             jobs = connection.exec_driver_sql(
                 "SELECT COUNT(*) FROM ingestion_jobs"
             ).scalar_one()
+            notes = list(connection.exec_driver_sql(
+                "SELECT id, title, content, origin, studio_kind, payload_json FROM notes"
+            ))
 
         assert projects == [("project-1", "Existing work")]
         assert documents == [("document-1", "Existing upload", "ready")]
         assert jobs == 0
+
+        assert notes == [("note-1", "Kept note", "# Body", "manual", None, None)]
 
     def test_a_database_with_no_tables_is_left_alone(self, tmp_path):
         engine = create_engine("sqlite:///%s" % (tmp_path / "empty.db"))

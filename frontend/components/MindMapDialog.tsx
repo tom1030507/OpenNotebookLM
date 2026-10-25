@@ -3,8 +3,9 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ChevronDown, ChevronRight, Download, Expand, Maximize2, MessageCircle,
-  Minimize2, Minus, Plus, UnfoldVertical, FoldVertical, X,
+  BookmarkPlus, Check, ChevronDown, ChevronRight, Download, Expand, Loader2,
+  Maximize2, MessageCircle, Minimize2, Minus, Plus, UnfoldVertical,
+  FoldVertical, X,
 } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import type { MindMap } from '@/lib/api';
@@ -18,6 +19,7 @@ interface MindMapDialogProps {
   map: MindMap;
   onClose: () => void;
   onAsk?: (question: string) => void;
+  onSave?: () => Promise<void>;
 }
 
 const BRANCH_COLORS = ['#536ec9', '#288778', '#b16d32', '#ae5271', '#8f63b8', '#318ba2'];
@@ -26,7 +28,7 @@ const TOOL_STYLE = 'rounded-lg p-2 hover:bg-[var(--muted)] focus-visible:outline
 const PADDING = 32;
 
 /** Explore concepts on a pannable canvas without making branch toggles ask a question. */
-export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProps) {
+export default function MindMapDialog({ map, onClose, onAsk, onSave }: MindMapDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -36,6 +38,7 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => collapsedBranches(map.root, 2));
   const [zoom, setZoom] = useState(1);
   const [fullScreen, setFullScreen] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [fitRequested, setFitRequested] = useState(0);
@@ -103,6 +106,17 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
     link.remove();
     URL.revokeObjectURL(url);
   };
+
+  const save = async () => {
+    if (!onSave) return;
+    setSaveState('saving');
+    try {
+      await onSave();
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  };
   const endDrag = () => { dragRef.current = null; setDragging(false); };
 
   return createPortal(
@@ -130,11 +144,20 @@ export default function MindMapDialog({ map, onClose, onAsk }: MindMapDialogProp
             <button type="button" onClick={download} aria-label="Download mind map" title="Download Markdown" className={TOOL_STYLE}>
               <Download className="h-4 w-4" />
             </button>
+            {onSave && <button type="button" onClick={save}
+              disabled={saveState === 'saving' || saveState === 'saved'}
+              className={`${TOOL_STYLE} inline-flex items-center gap-1 text-xs disabled:opacity-50`}>
+              {saveState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" />
+                : saveState === 'saved' ? <Check className="h-4 w-4" />
+                  : <BookmarkPlus className="h-4 w-4" />}
+              <span>{saveState === 'saved' ? 'Saved to notes' : 'Save to notes'}</span>
+            </button>}
             <button ref={closeRef} type="button" onClick={onClose} aria-label="Close mind map dialog" title="Close" className={TOOL_STYLE}>
               <X className="h-5 w-5" />
             </button>
           </div>
         </header>
+        {saveState === 'error' && <p role="alert" className="px-4 pt-2 text-xs text-[var(--error)]">Could not save to notes. Please try again.</p>}
 
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--card)] px-3 py-1.5 sm:px-5">
           <div className="flex items-center gap-1">

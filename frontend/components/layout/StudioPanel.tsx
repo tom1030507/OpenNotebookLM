@@ -13,17 +13,32 @@ import {
   Square,
 } from 'lucide-react';
 import useStore, { selectedSourceIds } from '@/store/useStore';
-import api from '@/lib/api';
-import type { MindMap, VideoSummary } from '@/lib/api';
+import useNotes from '@/store/useNotes';
+import api, { ApiError } from '@/lib/api';
+import type { MindMap, StudioNoteKind, VideoSummary } from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
+import MarkdownRenderer from '../MarkdownRenderer';
 import NotesSection from './NotesSection';
 
 const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
 const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
+const AudioOverviewDialog = React.lazy(() => import('@/components/AudioOverviewDialog'));
 
 interface ProjectResult<T> {
   projectId: string;
   value: T;
+}
+
+async function saveStudioNote(
+  projectId: string,
+  title: string,
+  fields: { studio_kind: StudioNoteKind } & {
+    content?: string;
+    payload_json?: MindMap | VideoSummary;
+  },
+): Promise<void> {
+  const note = await api.createNote(projectId, { title: title.slice(0, 200), ...fields });
+  useNotes.getState().upsert(note);
 }
 
 const StudioDialogFallback = () => (
@@ -67,11 +82,25 @@ export default function StudioPanel({
   const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [report, setReport] = useState<ProjectResult<string> | null>(null);
+  const [reportSaveState, setReportSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [isBuildingMindMap, setIsBuildingMindMap] = useState(false);
   const [mindMap, setMindMap] = useState<ProjectResult<MindMap> | null>(null);
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
   const [videoSummary, setVideoSummary] = useState<ProjectResult<VideoSummary> | null>(null);
+  const [audioOverviewCapability, setAudioOverviewCapability] = useState<{
+    projectId: string;
+    enabled: boolean;
+  } | null>(null);
+  const [isCheckingAudioCapability, setIsCheckingAudioCapability] = useState(false);
+  const [isAudioOverviewOpen, setIsAudioOverviewOpen] = useState(false);
+  const audioOverviewCapabilityKnown = Boolean(
+    currentProject && audioOverviewCapability?.projectId === currentProject.id,
+  );
+  const audioOverviewTtsEnabled = audioOverviewCapabilityKnown
+    ? audioOverviewCapability?.enabled ?? true
+    : true;
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   // Identifies the reading in progress. Stopping retires it, so anything the
@@ -110,10 +139,15 @@ export default function StudioPanel({
     stopSpeaking();
     setIsGeneratingReport(false);
     setIsPreparingAudio(false);
+    setIsSpeaking(false);
+    setIsCheckingAudioCapability(false);
     setIsBuildingMindMap(false);
     setIsPreparingVideo(false);
     setMindMap(null);
+    setReport(null);
+    setReportSaveState('idle');
     setVideoSummary(null);
+    setIsAudioOverviewOpen(false);
     setReportError('');
   }, [currentProject?.id]);
 
@@ -157,6 +191,32 @@ export default function StudioPanel({
     setIsSpeaking(false);
   };
 
+  const openAudioOverview = async () => {
+    const operation = beginProjectOperation();
+    if (!operation) return;
+    setIsCheckingAudioCapability(true);
+    setReportError('');
+    try {
+      const { enabled } = await api.listAudioOverviews(operation.project.id);
+      if (!operation.isCurrent()) return;
+      setAudioOverviewCapability({ projectId: operation.project.id, enabled });
+      if (enabled) {
+        setIsAudioOverviewOpen(true);
+      } else if (speechSupported) {
+        setIsCheckingAudioCapability(false);
+        await playAudioSummary();
+      } else {
+        setReportError('Audio playback is not supported in this browser.');
+      }
+    } catch {
+      if (operation.isCurrent()) {
+        setReportError('Audio summary availability could not be checked. Please try again.');
+      }
+    } finally {
+      if (operation.isCurrent()) setIsCheckingAudioCapability(false);
+    }
+  };
+
   const buildMindMap = async () => {
     const operation = beginProjectOperation();
     if (!operation) return;
@@ -196,9 +256,13 @@ export default function StudioPanel({
       if (operation.isCurrent()) {
         setVideoSummary({ projectId: operation.project.id, value: summary });
       }
-    } catch {
+    } catch (error) {
       if (operation.isCurrent()) {
-        setReportError('The video summary could not be prepared. Please try again.');
+        setReportError(
+          error instanceof ApiError && error.status === 413
+            ? 'This video summary is too large. Select fewer sources and try again.'
+            : 'The video summary could not be prepared. Please try again.',
+        );
       }
     } finally {
       if (operation.isCurrent()) setIsPreparingVideo(false);
@@ -211,6 +275,8 @@ export default function StudioPanel({
 
     setIsGeneratingReport(true);
     setReportError('');
+    setReport(null);
+    setReportSaveState('idle');
 
     try {
       const blob = await api.exportProjectSummary(
@@ -218,6 +284,9 @@ export default function StudioPanel({
         selectedSourceIds(useStore.getState()),
       );
       if (!operation.isCurrent()) return;
+      const content = await blob.text();
+      if (!operation.isCurrent()) return;
+      setReport({ projectId: operation.project.id, value: content });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -238,7 +307,11 @@ export default function StudioPanel({
     if (option.action === 'report') return generateReport;
     if (option.action === 'mindmap') return buildMindMap;
     if (option.action === 'video') return playVideoSummary;
-    if (option.action === 'audio') return isSpeaking ? stopAudioSummary : playAudioSummary;
+    if (option.action === 'audio') {
+      if (!audioOverviewCapabilityKnown) return openAudioOverview;
+      if (audioOverviewTtsEnabled) return () => setIsAudioOverviewOpen(true);
+      return isSpeaking ? stopAudioSummary : playAudioSummary;
+    }
     return undefined;
   };
 
@@ -253,18 +326,26 @@ export default function StudioPanel({
   const currentMindMap = mindMap !== null && mindMap.projectId === currentProject?.id
     ? mindMap.value
     : null;
+  const currentReport = report !== null && report.projectId === currentProject?.id
+    ? report.value
+    : null;
   const currentVideoSummary = videoSummary !== null && videoSummary.projectId === currentProject?.id
     ? videoSummary.value
     : null;
 
   // A reading already under way stays stoppable after its sources are cleared.
   const blockedBySelection = (option: StudioOption) => (
-    noSourcesSelected && !(option.action === 'audio' && isSpeaking)
+    noSourcesSelected && !(option.action === 'audio'
+      && audioOverviewCapabilityKnown && !audioOverviewTtsEnabled && isSpeaking)
   );
 
   const optionDisabled = (option: StudioOption) => {
     if (!option.available || !currentProject || blockedBySelection(option)) return true;
-    if (option.action === 'audio') return !speechSupported || isPreparingAudio;
+    if (option.action === 'audio') {
+      return isCheckingAudioCapability
+        || (audioOverviewCapabilityKnown && !audioOverviewTtsEnabled && !speechSupported)
+        || isPreparingAudio;
+    }
     if (option.action === 'mindmap') return isBuildingMindMap || currentMindMap !== null;
     if (option.action === 'video') {
       return isPreparingVideo || currentVideoSummary !== null || hasNoSources;
@@ -274,12 +355,18 @@ export default function StudioPanel({
 
   const optionLabel = (option: StudioOption) => {
     if (!option.available) return `${option.title} (${availabilityLabel})`;
-    if (option.action === 'audio' && isSpeaking) return 'Stop audio summary';
+    if (option.action === 'audio' && audioOverviewCapabilityKnown
+      && !audioOverviewTtsEnabled && isSpeaking) {
+      return 'Stop audio summary';
+    }
     return option.title;
   };
 
   const optionIcon = (option: StudioOption) => {
-    if (option.action === 'audio') {
+    if (option.action === 'audio' && isCheckingAudioCapability) {
+      return <Loader2 className="w-5 h-5 animate-spin" />;
+    }
+    if (option.action === 'audio' && !audioOverviewTtsEnabled) {
       if (isPreparingAudio) return <Loader2 className="w-5 h-5 animate-spin" />;
       if (isSpeaking) return <Square className="w-5 h-5" />;
       return option.icon;
@@ -306,6 +393,9 @@ export default function StudioPanel({
     if (blockedBySelection(option)) return 'Select a source first';
 
     if (option.action === 'audio') {
+      if (isCheckingAudioCapability) return 'Checking audio summary availability…';
+      if (!audioOverviewCapabilityKnown) return 'Check audio summary availability';
+      if (audioOverviewTtsEnabled) return 'Choose the format and length for this audio overview';
       if (!speechSupported) return 'Not supported in this browser';
       if (isPreparingAudio) return 'Preparing audio…';
       if (isSpeaking) return 'Playing — select to stop';
@@ -438,6 +528,41 @@ export default function StudioPanel({
             </p>
           )}
 
+          {currentReport !== null && currentProject && (
+            <section aria-label="Generated report" className="mt-4 rounded-lg border border-[var(--border)] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-medium">{currentProject.name} report</h3>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setReportSaveState('saving');
+                    try {
+                      await saveStudioNote(currentProject.id, `${currentProject.name} report`, {
+                        studio_kind: 'report', content: currentReport,
+                      });
+                      setReportSaveState('saved');
+                    } catch {
+                      setReportSaveState('error');
+                    }
+                  }}
+                  disabled={reportSaveState === 'saving' || reportSaveState === 'saved'}
+                  className="rounded px-2 py-1 text-xs hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-50"
+                >
+                  {reportSaveState === 'saving' ? 'Saving…'
+                    : reportSaveState === 'saved' ? 'Saved to notes' : 'Save report to notes'}
+                </button>
+              </div>
+              {reportSaveState === 'error' && (
+                <p role="alert" className="mt-2 text-xs text-[var(--error)]">
+                  Could not save to notes. Please try again.
+                </p>
+              )}
+              <div className="mt-3 max-h-80 overflow-y-auto">
+                <MarkdownRenderer content={currentReport} className="text-sm" />
+              </div>
+            </section>
+          )}
+
           {/* More Options */}
           <button
             disabled
@@ -465,6 +590,10 @@ export default function StudioPanel({
           <MindMapDialog
             map={currentMindMap}
             onClose={() => setMindMap(null)}
+            onSave={() => saveStudioNote(currentMindMap.project_id,
+              `${currentMindMap.project_name} mind map`, {
+                studio_kind: 'mindmap', payload_json: currentMindMap,
+              })}
             onAsk={(question) => {
               useStore.getState().draftMindMapQuestion(currentMindMap.project_id, question);
               setMindMap(null);
@@ -478,6 +607,19 @@ export default function StudioPanel({
           <VideoSummaryDialog
             summary={currentVideoSummary}
             onClose={() => setVideoSummary(null)}
+            onSave={() => saveStudioNote(currentVideoSummary.project_id,
+              `${currentVideoSummary.project_name} video summary`, {
+                studio_kind: 'video_summary', payload_json: currentVideoSummary,
+              })}
+          />
+        </React.Suspense>
+      )}
+      {isAudioOverviewOpen && currentProject && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <AudioOverviewDialog
+            projectId={currentProject.id}
+            documentIds={selectedSourceIds(useStore.getState())}
+            onClose={() => setIsAudioOverviewOpen(false)}
           />
         </React.Suspense>
       )}

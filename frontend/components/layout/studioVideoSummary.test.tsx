@@ -157,6 +157,26 @@ describe('Studio video summary', () => {
     expect(screen.getByText('Research notes video summary')).toBeTruthy();
   });
 
+  it('saves the displayed video summary payload to notes', async () => {
+    installSpeech();
+    vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(summary());
+    const create = vi.spyOn(api, 'createNote').mockResolvedValue({
+      id: 'video-note', project_id: 'project-1', title: 'Research notes video summary',
+      content: '', origin: 'studio', source_message_id: null,
+      studio_kind: 'video_summary', payload_json: summary(),
+      created_at: '2026-10-25T00:00:00Z', updated_at: '2026-10-25T00:00:00Z',
+    });
+
+    await openVideoSummary();
+    fireEvent.click(screen.getByRole('button', { name: 'Save to notes' }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith('project-1', {
+      title: 'Research notes video summary',
+      studio_kind: 'video_summary', payload_json: summary(),
+    }));
+    expect(await screen.findByRole('button', { name: 'Saved to notes' })).toBeTruthy();
+  });
+
   it('shows the first scene on the slide', async () => {
     installSpeech();
     vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(summary());
@@ -177,6 +197,30 @@ describe('Studio video summary', () => {
     await openVideoSummary();
 
     expect(await screen.findByText(/This is a video summary of the project/)).toBeTruthy();
+  });
+
+  it('downloads the scenes already shown as a PowerPoint', async () => {
+    installSpeech();
+    vi.spyOn(api, 'fetchProjectVideoSummary').mockResolvedValue(summary());
+    const exportSpy = vi.spyOn(api, 'exportProjectVideoSummaryPptx')
+      .mockResolvedValue(new Blob(['pptx'], {
+        type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      }));
+    const downloads: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click(
+      this: HTMLAnchorElement,
+    ) {
+      downloads.push(this);
+    });
+
+    await openVideoSummary();
+    fireEvent.click(screen.getByRole('button', { name: 'Download .pptx' }));
+
+    await waitFor(() => expect(exportSpy).toHaveBeenCalledWith(
+      'project-1', summary().scenes,
+    ));
+    await waitFor(() => expect(downloads).toHaveLength(1));
+    expect(downloads[0].download).toBe('Research notes.pptx');
   });
 
   it('starts reading the first scene out', async () => {
@@ -332,7 +376,7 @@ describe('Studio video summary', () => {
     });
 
     await openVideoSummary();
-    fireEvent.click(await screen.findByRole('button', { name: /download/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download video summary script' }));
 
     await waitFor(() => expect(downloads).toEqual(['Research notes video summary.md']));
   });

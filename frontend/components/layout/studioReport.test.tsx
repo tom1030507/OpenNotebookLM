@@ -55,7 +55,7 @@ afterEach(() => {
 
 describe('Studio report', () => {
   it('downloads a project summary when a project is selected', async () => {
-    const blob = new Blob(['# Summary'], { type: 'text/markdown' });
+    const blob = { text: async () => '# Summary' } as Blob;
     const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue(blob);
     const clicks: string[] = [];
     const realCreate = document.createElement.bind(document);
@@ -80,7 +80,9 @@ describe('Studio report', () => {
   });
 
   it('reports on the selected sources only', async () => {
-    const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue(new Blob(['#']));
+    const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue({
+      text: async () => '#',
+    } as Blob);
     useStore.getState().toggleSourceSelected('project-1', 'doc-2');
     render(<StudioPanel />);
 
@@ -127,15 +129,13 @@ describe('Studio report', () => {
     ).toBe(false));
   });
 
-  it('leaves an output the browser cannot produce disabled', () => {
+  it('leaves an output the browser cannot produce disabled', async () => {
+    vi.spyOn(api, 'listAudioOverviews').mockResolvedValue({ enabled: false, items: [] });
     render(<StudioPanel />);
 
-    // Audio has an endpoint but needs the Web Speech API, which jsdom has not.
-    // Every other output is produced by the backend, so every other output is
-    // usable here.
-    expect((screen.getByRole('button', {
-      name: /^Audio summary/,
-    }) as HTMLButtonElement).disabled).toBe(true);
+    const audio = screen.getByRole('button', { name: /^Audio summary/ });
+    fireEvent.click(audio);
+    await waitFor(() => expect((audio as HTMLButtonElement).disabled).toBe(true));
 
     for (const name of ['Video summary', 'Mind map', 'Report']) {
       const button = screen.getByRole('button', { name: new RegExp(`^${name}`) });
