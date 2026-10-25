@@ -26,6 +26,7 @@ from app.routers.ownership import require_documents, require_project
 from app.schemas import StudioSourceSelection, VideoSummaryPptxRequest, VideoSummaryResponse
 from app.services.slides_export import render_video_summary_pptx
 from app.services.video_summary import VideoSummaryService, VideoSummaryTooLargeError
+from app.services.admin_usage import track_studio_generation
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -90,7 +91,8 @@ def project_video_summary(
         )
 
     try:
-        return service.generate(db, project, document_ids, selection)
+        with track_studio_generation(db, current_user.id):
+            return service.generate(db, project, document_ids, selection)
     except VideoSummaryTooLargeError as error:
         raise HTTPException(status_code=413, detail=str(error)) from error
 

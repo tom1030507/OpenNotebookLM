@@ -993,6 +993,7 @@ class DocumentService:
                             "metadata": result.get("metadata", {}),
                             "headings": result.get("headings", []),
                             "num_links": len(result.get("links", [])),
+                            "text_size": len(result["text"].encode("utf-8")),
                             "processed_at": utc_now_iso(),
                         }
                         db.commit()
@@ -1182,6 +1183,7 @@ class DocumentService:
                             "language": result.get("language", "unknown"),
                             "metadata": result.get("metadata", {}),
                             "num_segments": len(result.get("segments", [])),
+                            "text_size": len(result["text"].encode("utf-8")),
                             "transcription_source": result.get(
                                 "transcription_source", "youtube_captions"
                             ),
@@ -1636,6 +1638,7 @@ class DocumentService:
                 "metadata": result.get("metadata", {}),
                 "headings": result.get("headings", []),
                 "num_links": len(result.get("links", [])),
+                "text_size": len(result["text"].encode("utf-8")),
                 **({
                     "num_pages": result["num_pages"],
                     "pages": result.get("pages", []),
@@ -1658,6 +1661,7 @@ class DocumentService:
                 "language": result.get("language", "unknown"),
                 "metadata": result.get("metadata", {}),
                 "num_segments": len(result.get("segments", [])),
+                "text_size": len(result["text"].encode("utf-8")),
                 "processed_at": utc_now_iso(),
             }
 

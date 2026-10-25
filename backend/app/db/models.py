@@ -88,6 +88,12 @@ class User(Base):
     email = Column(String, unique=True, nullable=False)
     hashed_password = Column(String, nullable=False)  # bcrypt hash, never plain text
     is_active = Column(Boolean, default=True, nullable=False)
+    is_admin = Column(
+        Boolean,
+        default=False,
+        server_default=text("false"),
+        nullable=False,
+    )
     created_at = Column(UTCDateTime, default=func.now())
     last_login_at = Column(UTCDateTime)
 
@@ -250,6 +256,14 @@ class AudioOverview(Base):
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # Older rows have no requester, so this stays nullable for upgrades.
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"))
+    token_count = Column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
     status = Column(String, default="queued", nullable=False)
     options_json = Column(JSON, default=dict, nullable=False)
     script_json = Column(JSON, default=list, nullable=False)
@@ -271,6 +285,25 @@ class AudioOverview(Base):
     __table_args__ = (
         Index("idx_audio_overviews_project_created", "project_id", "created_at"),
         Index("idx_audio_overviews_status_created", "status", "created_at"),
+    )
+
+
+class StudioGeneration(Base):
+    """One successful synchronous Studio generation and its provider tokens."""
+    __tablename__ = "studio_generations"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_count = Column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
+    created_at = Column(UTCDateTime, default=ordered_utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_studio_generations_user_created", "user_id", "created_at"),
     )
 
 

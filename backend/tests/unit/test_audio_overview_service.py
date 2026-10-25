@@ -6,16 +6,19 @@ from sqlalchemy.orm import sessionmaker
 
 import app.services.audio_overview as audio_overview_module
 from app.db.models import AudioOverview, Base, Document, Project, ProjectDocument, User
+from app.services.admin_usage import record_llm_usage
 from app.services.audio_overview import AudioOverviewService, parse_dialogue_script
 
 
 class FixedLLM:
-    def __init__(self, text):
+    def __init__(self, text, usage_tokens=0):
         self.text = text
+        self.usage_tokens = usage_tokens
         self.prompt = None
 
     def generate(self, prompt, **kwargs):
         self.prompt = prompt
+        record_llm_usage({"total_tokens": self.usage_tokens})
         return {"text": self.text, "model": "test-model"}
 
 
@@ -255,7 +258,8 @@ def test_worker_service_persists_script_and_ready_audio_without_loading_models(
 
         llm = FixedLLM(
             '[{"speaker":"A","text":"First host."},'
-            '{"speaker":"B","text":"Second host."}]'
+            '{"speaker":"B","text":"Second host."}]',
+            usage_tokens=19,
         )
         AudioOverviewService(llm_service=llm, tts=FakeTTS()).process(
             sessions,
@@ -270,6 +274,7 @@ def test_worker_service_persists_script_and_ready_audio_without_loading_models(
                 {"speaker": "B", "text": "Second host."},
             ]
             assert overview.duration_seconds == 2.5
+            assert overview.token_count == 19
             assert overview.completed_at is not None
         assert output_path.read_bytes() == b"fake mp3"
         assert "Format: brief" in llm.prompt

@@ -17,6 +17,7 @@ from app.routers.rate_limit import (
 )
 from app.schemas import FlashcardsResponse, QuizResponse, StudyRequest
 from app.services.study import StudyService
+from app.services.admin_usage import track_studio_generation
 from app.services.rate_limit import (
     ConcurrencyLimiter,
     OperationLease,
@@ -105,14 +106,15 @@ def project_flashcards(
         current_user.id, settings, request_limiter, concurrency_limiter,
     )
     try:
-        return {
-            **service.generate_flashcards(
-                db, project, document_ids, options.count, options.focus,
-            ),
-            "project_id": project.id,
-            "project_name": project.name,
-            "generated_at": utc_now(),
-        }
+        with track_studio_generation(db, current_user.id):
+            return {
+                **service.generate_flashcards(
+                    db, project, document_ids, options.count, options.focus,
+                ),
+                "project_id": project.id,
+                "project_name": project.name,
+                "generated_at": utc_now(),
+            }
     finally:
         lease.release()
 
@@ -154,13 +156,14 @@ def project_quiz(
         current_user.id, settings, request_limiter, concurrency_limiter,
     )
     try:
-        return {
-            **service.generate_quiz(
-                db, project, document_ids, options.count, options.focus,
-            ),
-            "project_id": project.id,
-            "project_name": project.name,
-            "generated_at": utc_now(),
-        }
+        with track_studio_generation(db, current_user.id):
+            return {
+                **service.generate_quiz(
+                    db, project, document_ids, options.count, options.focus,
+                ),
+                "project_id": project.id,
+                "project_name": project.name,
+                "generated_at": utc_now(),
+            }
     finally:
         lease.release()

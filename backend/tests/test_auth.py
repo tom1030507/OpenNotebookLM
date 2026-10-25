@@ -118,6 +118,24 @@ def test_register_stores_only_a_bcrypt_hash():
         assert user.hashed_password.startswith("$2")
 
 
+def test_register_grants_configured_admin_without_exposing_role():
+    """An allowlisted new account is admin immediately, but the role stays private."""
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None,
+        admin_emails="operator@example.com",
+    )
+    try:
+        response = register("operator", email="operator@example.com")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 200, response.text
+    assert "is_admin" not in response.json()
+    with TestingSessionLocal() as db:
+        user = db.query(User).filter(User.email == "operator@example.com").one()
+        assert user.is_admin is True
+
+
 def test_register_rejects_a_duplicate_username():
     """A second registration for the same username is refused."""
     register("alan", email="alan@example.com")

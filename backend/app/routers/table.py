@@ -17,6 +17,7 @@ from app.routers.rate_limit import (
     get_rate_limiter,
 )
 from app.schemas import TableRequest, TableResponse
+from app.services.admin_usage import track_studio_generation
 from app.services.rate_limit import (
     ConcurrencyLimiter,
     OperationLease,
@@ -80,8 +81,9 @@ def project_table(
         )
         lease = acquire_account_lease(concurrency_limiter, "table", current_user.id)
     try:
-        return service.generate(
-            db, project.id, request.instruction, request.columns, document_ids,
-        )
+        with track_studio_generation(db, current_user.id):
+            return service.generate(
+                db, project.id, request.instruction, request.columns, document_ids,
+            )
     finally:
         lease.release()

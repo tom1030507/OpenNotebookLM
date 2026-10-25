@@ -19,6 +19,33 @@ from app.db.models import Base
 # The shape these two tables had before ownership existed.
 OLD_SCHEMA = (
     """
+    CREATE TABLE users (
+        id VARCHAR NOT NULL PRIMARY KEY,
+        username VARCHAR NOT NULL,
+        email VARCHAR NOT NULL,
+        hashed_password VARCHAR NOT NULL,
+        is_active BOOLEAN NOT NULL,
+        created_at DATETIME,
+        last_login_at DATETIME
+    )
+    """,
+    """
+    CREATE TABLE audio_overviews (
+        id VARCHAR NOT NULL PRIMARY KEY,
+        project_id VARCHAR NOT NULL,
+        status VARCHAR NOT NULL,
+        options_json JSON NOT NULL,
+        script_json JSON NOT NULL,
+        file_path VARCHAR,
+        duration_seconds FLOAT,
+        error TEXT,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        started_at DATETIME,
+        completed_at DATETIME
+    )
+    """,
+    """
     CREATE TABLE projects (
         id VARCHAR NOT NULL PRIMARY KEY,
         name VARCHAR NOT NULL,
@@ -130,6 +157,8 @@ class TestUpgrade:
         added = ensure_added_columns(old_database)
 
         assert sorted(added) == [
+            "audio_overviews.token_count",
+            "audio_overviews.user_id",
             "conversations.user_id",
             "documents.content_hash",
             "documents.last_sync_changed",
@@ -153,6 +182,7 @@ class TestUpgrade:
             "projects.overview_json",
             "projects.user_id",
             "projects.watched_folder",
+            "users.is_admin",
         ]
         inspector = inspect(old_database)
         for table, column, _, _ in ADDED_COLUMNS:

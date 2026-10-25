@@ -127,6 +127,7 @@ def create_audio_overview(
     overview = AudioOverview(
         id=overview_id,
         project_id=project.id,
+        user_id=current_user.id,
         status="queued",
         options_json=options,
         script_json=[],

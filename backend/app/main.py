@@ -9,6 +9,7 @@ from app.routers import (
     audio_overview, notes, study, report, table,
 )
 from app.routers import project_overview
+from app.routers import admin_usage
 from app.api import cache
 from app.utils.logging import setup_logging
 from app.middleware.upload_body_limit import UploadBodyLimitMiddleware
@@ -59,6 +60,7 @@ app.include_router(study.router, prefix="/api", tags=["study tools"])
 app.include_router(report.router, prefix="/api", tags=["reports"])
 app.include_router(table.router, prefix="/api", tags=["tables"])
 app.include_router(project_overview.router, prefix="/api", tags=["project overview"])
+app.include_router(admin_usage.router, prefix="/api", tags=["admin"])
 app.include_router(cache.router)  # Cache management endpoints
 
 

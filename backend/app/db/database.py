@@ -107,6 +107,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # database created fresh gets the constraint from create_all. The column and its
 # index are what queries need.
 ADDED_COLUMNS = (
+    ("users", "is_admin", "BOOLEAN NOT NULL DEFAULT FALSE", None),
+    ("audio_overviews", "user_id", "VARCHAR", None),
+    ("audio_overviews", "token_count", "INTEGER NOT NULL DEFAULT 0", None),
     ("projects", "user_id", "VARCHAR", "idx_projects_user_id"),
     ("documents", "user_id", "VARCHAR", "idx_documents_user_id"),
     ("documents", "note_id", "VARCHAR", "idx_documents_note_id"),

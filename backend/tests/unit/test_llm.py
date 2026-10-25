@@ -5,6 +5,7 @@ import types
 import pytest
 
 from app.services import llm as llm_module
+from app.services.admin_usage import capture_llm_usage
 from app.services.llm import FALLBACK_MODEL, LLMService
 
 RAG_PROMPT = (
@@ -131,6 +132,19 @@ def test_no_provider_configured_answers_extractively(settings, monkeypatch):
     result = service.generate(RAG_PROMPT)
     assert result["model"] == FALLBACK_MODEL
     assert result["usage"]["total_tokens"] == 0
+
+
+def test_provider_usage_is_captured_inside_a_studio_generation(
+    settings, monkeypatch, fake_openai,
+):
+    """LLMService forwards provider token usage to the current request scope."""
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+    service = LLMService()
+
+    with capture_llm_usage() as usage:
+        service.generate(RAG_PROMPT)
+
+    assert usage.token_count == 18
 
 
 def test_auto_prefers_claude_when_its_key_is_set(settings, monkeypatch, fake_anthropic):
