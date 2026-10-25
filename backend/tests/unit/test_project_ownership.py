@@ -123,6 +123,7 @@ def test_shared_documents_are_limited_to_the_project_and_revoked_immediately(db)
     project = _project(db, owner)
     other_project = _project(db, owner, "project-2")
     _membership(db, project, editor, "editor")
+    _membership(db, project, other_owner, "editor")
     _membership(db, other_project, editor, "viewer")
     document = models.Document(
         id="document-1", user_id=other_owner.id, title="Shared",

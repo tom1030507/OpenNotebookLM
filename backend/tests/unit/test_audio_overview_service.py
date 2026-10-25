@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.services.audio_overview as audio_overview_module
-from app.db.models import AudioOverview, Base, Document, Project, ProjectDocument
+from app.db.models import AudioOverview, Base, Document, Project, ProjectDocument, User
 from app.services.audio_overview import AudioOverviewService, parse_dialogue_script
 
 
@@ -106,9 +106,19 @@ def test_process_fails_with_a_safe_error_when_sources_have_no_text(tmp_path):
     )
     try:
         with sessions() as db:
-            db.add(Project(id="empty-audio-project", name="Empty source"))
+            owner = User(
+                id="empty-audio-owner",
+                username="empty-audio-owner",
+                email="empty-audio-owner@example.com",
+                hashed_password="test",
+            )
+            db.add(owner)
+            db.add(Project(
+                id="empty-audio-project", user_id=owner.id, name="Empty source"
+            ))
             db.add(Document(
                 id="empty-audio-document",
+                user_id=owner.id,
                 title="Scanned file",
                 source_type="text",
                 content="  ",
@@ -164,15 +174,24 @@ def test_worker_service_persists_script_and_ready_audio_without_loading_models(
 
     try:
         with sessions() as db:
-            db.add(Project(id="audio-project", name="Climate"))
+            owner = User(
+                id="audio-owner",
+                username="audio-owner",
+                email="audio-owner@example.com",
+                hashed_password="test",
+            )
+            db.add(owner)
+            db.add(Project(id="audio-project", user_id=owner.id, name="Climate"))
             db.add(Document(
                 id="audio-document",
+                user_id=owner.id,
                 title="Research",
                 source_type="text",
                 content="Evidence from the selected source.",
             ))
             db.add(Document(
                 id="other-document",
+                user_id=owner.id,
                 title="Not selected",
                 source_type="text",
                 content="This source must stay out of the prompt.",

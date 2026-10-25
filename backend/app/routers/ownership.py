@@ -35,10 +35,10 @@ from app.db.models import (
     Conversation,
     Document,
     Project,
-    ProjectDocument,
     ProjectMember,
     User,
 )
+from app.services.projects import ProjectService
 
 ProjectRole = Literal["owner", "editor", "viewer"]
 _ROLE_LEVEL = {"viewer": 0, "editor": 1, "owner": 2}
@@ -88,9 +88,9 @@ def visible_documents(db: Session, user: User) -> Query:
         A query filtered by document owner or a currently visible project link.
     """
     accessible_project_ids = visible_projects(db, user).with_entities(Project.id)
-    shared_document_ids = db.query(ProjectDocument.document_id).filter(
-        ProjectDocument.project_id.in_(accessible_project_ids)
-    )
+    shared_document_ids = ProjectService.project_document_query(db).filter(
+        Project.id.in_(accessible_project_ids)
+    ).with_entities(Document.id)
     return db.query(Document).filter(
         or_(
             Document.user_id == user.id,
@@ -188,9 +188,8 @@ def require_document(
         require_project(db, project_id, user, min_role="viewer")
         if document.user_id == user.id:
             return document
-        linked = db.query(ProjectDocument.project_id).filter(
-            ProjectDocument.project_id == project_id,
-            ProjectDocument.document_id == document_id,
+        linked = ProjectService.project_document_query(db, project_id).filter(
+            Document.id == document_id,
         ).first()
         if linked is None:
             raise _not_found("document")
@@ -263,10 +262,9 @@ def owned_document_ids(
         query = query.filter(Document.user_id == user.id)
     else:
         require_project(db, project_id, user, min_role="viewer")
-        query = query.join(
-            ProjectDocument,
-            ProjectDocument.document_id == Document.id,
-        ).filter(ProjectDocument.project_id == project_id)
+        query = ProjectService.project_document_query(db, project_id).with_entities(
+            Document.id
+        )
     return [row[0] for row in query.all()]
 
 
@@ -300,10 +298,9 @@ def require_documents(
         query = query.filter(Document.user_id == user.id)
     else:
         require_project(db, project_id, user, min_role="viewer")
-        query = query.join(
-            ProjectDocument,
-            ProjectDocument.document_id == Document.id,
-        ).filter(ProjectDocument.project_id == project_id)
+        query = ProjectService.project_document_query(db, project_id).filter(
+            Document.id.in_(wanted)
+        ).with_entities(Document.id)
     accessible = {row[0] for row in query.all()}
     if len(accessible) != len(wanted):
         raise _not_found("document")

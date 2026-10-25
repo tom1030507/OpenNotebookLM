@@ -3,7 +3,7 @@ import copy
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 import structlog
 
@@ -33,6 +33,39 @@ UNTITLED_PROJECT_NAME = "Untitled notebook"
 
 class ProjectService:
     """Service for project operations."""
+
+    @staticmethod
+    def project_document_query(db: Session, project_id: Optional[str] = None):
+        """Return linked sources owned by the project owner or a current member.
+
+        Args:
+            db: Database session.
+            project_id: Optional project whose linked sources are being read.
+
+        Returns:
+            A query of linked documents with a source owner authorized to share.
+        """
+        query = db.query(Document).join(
+            ProjectDocument,
+            ProjectDocument.document_id == Document.id,
+        ).join(
+            Project,
+            Project.id == ProjectDocument.project_id,
+        ).outerjoin(
+            ProjectMember,
+            and_(
+                ProjectMember.project_id == Project.id,
+                ProjectMember.user_id == Document.user_id,
+            ),
+        ).filter(
+            or_(
+                Document.user_id == Project.user_id,
+                ProjectMember.user_id.isnot(None),
+            ),
+        )
+        if project_id is not None:
+            query = query.filter(Project.id == project_id)
+        return query
 
     @staticmethod
     def default_cover_emoji(project_id: str) -> str:
@@ -163,8 +196,9 @@ class ProjectService:
         
         if project:
             # Add counts
-            project.document_count = db.query(func.count(ProjectDocument.document_id))\
-                .filter(ProjectDocument.project_id == project_id).scalar() or 0
+            project.document_count = ProjectService.project_document_query(
+                db, project_id
+            ).count()
             conversations = db.query(func.count(Conversation.id)).filter(
                 Conversation.project_id == project_id,
             )
@@ -225,8 +259,9 @@ class ProjectService:
         
         # Add counts for each project
         for project in projects:
-            project.document_count = db.query(func.count(ProjectDocument.document_id))\
-                .filter(ProjectDocument.project_id == project.id).scalar() or 0
+            project.document_count = ProjectService.project_document_query(
+                db, project.id
+            ).count()
             conversations = db.query(func.count(Conversation.id)).filter(
                 Conversation.project_id == project.id,
             )
@@ -495,9 +530,7 @@ class ProjectService:
         limit: int = 100
     ) -> List[Document]:
         """Get documents for a project."""
-        documents = db.query(Document)\
-            .join(ProjectDocument)\
-            .filter(ProjectDocument.project_id == project_id)\
+        documents = ProjectService.project_document_query(db, project_id)\
             .order_by(Document.created_at.desc())\
             .offset(skip)\
             .limit(limit)\

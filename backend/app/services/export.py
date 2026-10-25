@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 import structlog
 
 from app.db.models import (
-    Project, Conversation, Message, Document, Chunk, ProjectDocument
+    Project, Conversation, Message, Document, Chunk
 )
+from app.services.projects import ProjectService
 from app.utils.time import utc_now
 
 logger = structlog.get_logger()
@@ -185,12 +186,7 @@ class ExportService:
         project: Project
     ) -> List[Document]:
         """Get the documents linked to a project."""
-        return db.query(Document).join(
-            ProjectDocument,
-            ProjectDocument.document_id == Document.id
-        ).filter(
-            ProjectDocument.project_id == project.id
-        ).all()
+        return ProjectService.project_document_query(db, project.id).all()
 
     def _get_project_conversations(
         self,

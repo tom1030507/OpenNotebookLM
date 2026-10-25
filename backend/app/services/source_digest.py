@@ -20,6 +20,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from sqlalchemy.orm import Session
 
 from app.db.models import Document, Project, ProjectDocument
+from app.services.projects import ProjectService
 
 # How much of a document a model is shown. The whole corpus would not fit, and
 # the opening of a document is where its subject is stated.
@@ -67,12 +68,7 @@ def project_documents(
         comes from SQLite's second-resolution clock and every document of one
         upload ties.
     """
-    query = db.query(Document).join(
-        ProjectDocument,
-        ProjectDocument.document_id == Document.id,
-    ).filter(
-        ProjectDocument.project_id == project.id,
-    )
+    query = ProjectService.project_document_query(db, project.id)
     if document_ids is not None:
         query = query.filter(Document.id.in_(document_ids))
     query = query.order_by(

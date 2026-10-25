@@ -30,6 +30,7 @@ from app.db.models import (
     Document,
     Message,
     Project,
+    ProjectDocument,
     ProjectMember,
     User,
 )
@@ -225,13 +226,26 @@ def grant_project_role(env, project_id, role):
 class FakeDocumentService:
     """No-op ingestion/deletion service for role checks."""
 
+    class QueuedDocument:
+        id = "queued-shared-document"
+        status = "queued"
+
+    async def _queued(self, **kwargs):
+        kwargs["operation_lease"].release()
+        return self.QueuedDocument()
+
+    async def process_pdf_upload(self, **kwargs):
+        return await self._queued(**kwargs)
+
+    async def process_text(self, **kwargs):
+        return await self._queued(**kwargs)
+
+    async def process_youtube(self, **kwargs):
+        return await self._queued(**kwargs)
+
     async def process_url(self, **kwargs):
         """Return a queued record without network or extraction work."""
-        class QueuedDocument:
-            id = "queued-shared-document"
-            status = "queued"
-
-        return QueuedDocument()
+        return await self._queued(**kwargs)
 
     def delete_document(self, db, document_id):
         """Report success if a route reaches the deletion service."""
@@ -240,6 +254,67 @@ class FakeDocumentService:
 
 class TestSharedProjectSourceRoles:
     """Shared roles govern project sources and related mutations."""
+
+    def test_invalid_foreign_source_link_is_hidden_from_project_reads(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.bob_user, title="Bob private source", content="Private text"
+        )
+        env.session.add(ProjectDocument(project_id=project_id, document_id=document_id))
+        env.session.commit()
+
+        listed = env.alice.get("/api/projects/%s/documents" % project_id)
+        direct = env.alice.get("/api/docs/%s" % document_id)
+        query = env.alice.post("/api/query", json={
+            "query": "Read Bob's source",
+            "project_id": project_id,
+            "document_ids": [document_id],
+        })
+        exported = env.alice.get("/api/export/project/%s?format=json" % project_id)
+
+        assert listed.status_code == 200
+        assert all(row["id"] != document_id for row in listed.json())
+        assert direct.status_code == 404
+        assert query.status_code == 404
+        assert exported.status_code == 200
+        assert all(row["id"] != document_id for row in exported.json()["documents"])
+
+    def test_every_ingest_route_requires_editor_access(self, env, monkeypatch):
+        from app.routers.ingest import get_document_service
+
+        project_id = make_project(env.alice)
+        production_app.dependency_overrides[get_document_service] = lambda: FakeDocumentService()
+        monkeypatch.setattr("app.routers.ingest.settings.enable_yt_transcription", True)
+
+        def upload_statuses(client):
+            base = "/api/projects/%s" % project_id
+            return [
+                client.post(
+                    "%s/upload" % base,
+                    files={"file": ("shared.pdf", b"shared source", "application/pdf")},
+                ).status_code,
+                client.post(
+                    "%s/upload-url" % base,
+                    json={"url": "https://example.com"},
+                ).status_code,
+                client.post(
+                    "%s/upload-youtube" % base,
+                    json={"youtube_url": "https://www.youtube.com/watch?v=video"},
+                ).status_code,
+                client.post(
+                    "%s/upload-text" % base,
+                    json={"title": "Shared notes", "text": "Source text"},
+                ).status_code,
+            ]
+
+        assert upload_statuses(env.bob) == [404, 404, 404, 404]
+        membership = grant_project_role(env, project_id, "viewer")
+        assert upload_statuses(env.bob) == [404, 404, 404, 404]
+
+        membership.role = "editor"
+        env.session.commit()
+        assert upload_statuses(env.bob) == [200, 200, 200, 200]
+        assert upload_statuses(env.alice) == [200, 200, 200, 200]
 
     def test_viewer_can_read_project_source_and_file(self, env, tmp_path, monkeypatch):
         project_id = make_project(env.alice)
