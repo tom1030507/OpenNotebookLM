@@ -2100,3 +2100,72 @@ def test_global_search_is_limited_to_owned_and_shared_projects(env):
         "Shared passage"
     )
     assert "Private passage" not in response.text
+
+
+def test_personal_api_key_only_reaches_its_owners_data(env):
+    """API-key auth uses the same account scope as a JWT."""
+    alice_project_id = make_project(env.alice, "Alice key project")
+    bob_project_id = make_project(env.bob, "Bob private project")
+    created = env.alice.post(
+        "/api/auth/api-keys",
+        json={"name": "automation"},
+    )
+    assert created.status_code == 201, created.text
+    api_key = created.json()["api_key"]
+    key_id = created.json()["id"]
+
+    assert env.bob.get("/api/auth/api-keys").json() == []
+    assert env.bob.delete("/api/auth/api-keys/%s" % key_id).status_code == 404
+
+    response = env.alice.get(
+        "/api/projects",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert {project["id"] for project in response.json()["projects"]} == {
+        alice_project_id,
+    }
+    assert bob_project_id not in response.text
+
+
+def test_personal_api_key_shares_the_account_query_rate_limit(env):
+    """JWT and API-key requests consume the same per-account query budget."""
+    from app.routers.query import get_concurrency_limiter, get_rate_limiter
+    from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
+
+    created = env.alice.post(
+        "/api/auth/api-keys",
+        json={"name": "rate-limited key"},
+    )
+    assert created.status_code == 201, created.text
+    api_key = created.json()["api_key"]
+    limiter = SlidingWindowRateLimiter()
+    production_app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    production_app.dependency_overrides[get_concurrency_limiter] = (
+        lambda: ConcurrencyLimiter(max_concurrent=1)
+    )
+    production_app.dependency_overrides[get_settings] = (
+        lambda: Settings(rate_limit_enabled=True)
+    )
+    try:
+        jwt_responses = [
+            env.alice.post("/api/search", json={"query": "hello"})
+            for _ in range(15)
+        ]
+        api_key_responses = [
+            env.alice.post(
+                "/api/search",
+                json={"query": "hello"},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            for _ in range(16)
+        ]
+    finally:
+        production_app.dependency_overrides.pop(get_rate_limiter, None)
+        production_app.dependency_overrides.pop(get_concurrency_limiter, None)
+        production_app.dependency_overrides.pop(get_settings, None)
+
+    assert all(response.status_code == 200 for response in jwt_responses)
+    assert [response.status_code for response in api_key_responses[:15]] == [200] * 15
+    assert api_key_responses[-1].status_code == 429

@@ -755,6 +755,9 @@ endpoints requires
 | `GET` | `/healthz`, `/readyz` | Liveness and readiness |
 | `POST` | `/api/auth/register`, `/api/auth/token` | Create an account, exchange credentials for a token |
 | `GET` | `/api/auth/me` | The account behind a bearer token |
+| `POST` | `/api/auth/api-keys` | Create a personal API key (JWT only; secret returned once) |
+| `GET` | `/api/auth/api-keys` | List personal API key metadata |
+| `DELETE` | `/api/auth/api-keys/{key_id}` | Revoke one of the caller's API keys |
 | `GET`/`POST` | `/api/projects` | List and create projects |
 | `GET`/`PUT`/`DELETE` | `/api/projects/{id}` | Read, rename, delete a project |
 | `GET` | `/api/projects/{id}/documents` | Documents in a project |
@@ -781,6 +784,17 @@ Every datetime the API returns carries a UTC designator (`+00:00`), so clients i
 any timezone render timestamps correctly.
 
 </details>
+
+Create a personal key in **Settings → API Keys**. Copy it when it is shown;
+the server stores only its SHA-256 hash. Keys inherit the account's data access
+and rate limits. Key management itself requires a login JWT.
+
+Use the key as a bearer token from a script:
+
+```bash
+curl -H 'Authorization: Bearer onlm_your_key' \
+  http://localhost:8000/api/projects
+```
 
 ## 🧪 Testing
 

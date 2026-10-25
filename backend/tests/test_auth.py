@@ -1,4 +1,6 @@
 """Tests for the authentication API."""
+import hashlib
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.config import Settings, get_settings
 from app.db.database import get_db
-from app.db.models import Base, User
+from app.db.models import APIKey, Base, User
 from app.routers import auth
 from app.routers.rate_limit import get_rate_limiter
 from app.services.auth import AuthService, get_auth_service
@@ -68,6 +70,27 @@ def get_token(username, password="correct-horse"):
         "/api/auth/token",
         data={"username": username, "password": password},
     )
+
+
+def create_api_key(username, name="automation"):
+    """Create a user and return its JWT and one-time personal key response.
+
+    Args:
+        username: Unique username for the test account.
+        name: Display name for the personal API key.
+
+    Returns:
+        The account JWT and API-key creation response.
+    """
+    register(username)
+    token = get_token(username).json()["access_token"]
+    response = client.post(
+        "/api/auth/api-keys",
+        json={"name": name},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    return token, response
 
 
 def test_register_returns_the_account_without_any_password():
@@ -150,6 +173,80 @@ def test_token_rejects_an_unknown_username():
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Incorrect username or password"
+
+
+def test_personal_api_key_can_be_created_with_a_jwt():
+    """A signed-in account can create a named personal API key."""
+    token, response = create_api_key("api-key-owner", "nightly job")
+    created = response.json()
+    api_key = created["api_key"]
+
+    assert created["name"] == "nightly job"
+    assert api_key.startswith("onlm_")
+    assert response.headers["Cache-Control"] == "no-store"
+
+    with TestingSessionLocal() as db:
+        record = db.query(APIKey).filter(APIKey.id == created["id"]).one()
+        assert record.key_hash == hashlib.sha256(api_key.encode()).hexdigest()
+        assert record.key_hash != api_key
+
+    listed = client.get(
+        "/api/auth/api-keys",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert listed.status_code == 200
+    assert api_key not in listed.text
+    assert "key_hash" not in listed.text
+    assert listed.json()[0]["last_used_at"] is None
+
+
+def test_personal_api_key_authentication_updates_last_used():
+    """A personal key authenticates its owner and records its last use."""
+    _token, response = create_api_key("api-key-auth")
+    created = response.json()
+    api_key = created["api_key"]
+
+    response = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["username"] == "api-key-auth"
+    with TestingSessionLocal() as db:
+        record = db.query(APIKey).filter(APIKey.id == created["id"]).one()
+        assert record.last_used_at is not None
+
+
+def test_revoked_api_key_is_rejected_and_cannot_manage_keys():
+    """Management requires a JWT and deleting a key invalidates its bearer."""
+    token, response = create_api_key("api-key-revoked")
+    created = response.json()
+    headers = {"Authorization": f"Bearer {created['api_key']}"}
+
+    assert client.get("/api/auth/api-keys", headers=headers).status_code == 401
+    revoked = client.delete(
+        f"/api/auth/api-keys/{created['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert revoked.status_code == 204
+
+    response = client.get("/api/auth/me", headers=headers)
+    assert response.status_code == 401
+
+
+def test_api_key_name_must_not_be_blank():
+    """A name with only whitespace is rejected at the request boundary."""
+    register("api-key-blank")
+    token = get_token("api-key-blank").json()["access_token"]
+
+    response = client.post(
+        "/api/auth/api-keys",
+        json={"name": "  "},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_me_accepts_a_freshly_issued_token():

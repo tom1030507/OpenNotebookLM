@@ -1,5 +1,5 @@
 """Authentication router: register, sign in and identify the caller."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import structlog
@@ -9,9 +9,18 @@ from app.config import Settings, get_settings
 from app.db.models import User
 from app.schemas import (
     DemoAccountResponse,
+    PersonalAPIKeyCreate,
+    PersonalAPIKeyCreatedResponse,
+    PersonalAPIKeyResponse,
     TokenResponse,
     UserRegister,
     UserResponse,
+)
+from app.services.api_keys import (
+    create_personal_api_key,
+    get_user_from_api_key,
+    list_personal_api_keys,
+    revoke_personal_api_key,
 )
 from app.services.auth import AuthService, DuplicateUserError, get_auth_service
 from app.services.bootstrap import advertised_demo_account
@@ -26,6 +35,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=Fals
 
 INVALID_CREDENTIALS = "Incorrect username or password"
 BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
+
+
+def _credentials_error() -> HTTPException:
+    """Return the shared response for missing, invalid, or revoked tokens."""
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers=BEARER_CHALLENGE,
+    )
 
 
 def require_public_registration(
@@ -65,12 +83,34 @@ async def get_current_user(
         Active account identified by the token.
     """
     user = token and auth_service.get_user_from_token(db, token)
+    if not user and token:
+        user = get_user_from_api_key(db, token)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers=BEARER_CHALLENGE,
-        )
+        raise _credentials_error()
+    return user
+
+
+async def get_current_user_jwt(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> User:
+    """Resolve a signed-in account for API-key management routes.
+
+    Args:
+        token: Presented bearer token, if any.
+        db: Database session.
+        auth_service: Token validation service.
+
+    Returns:
+        Active account identified by a JWT.
+
+    Raises:
+        HTTPException: With status 401 when the bearer token is not a valid JWT.
+    """
+    user = token and auth_service.get_user_from_token(db, token)
+    if not user:
+        raise _credentials_error()
     return user
 
 
@@ -146,6 +186,83 @@ async def login(
 async def get_me(current_user: User = Depends(get_current_user)):
     """Return the account the presented token belongs to."""
     return current_user
+
+
+@router.post(
+    "/auth/api-keys",
+    response_model=PersonalAPIKeyCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_api_key(
+    request: PersonalAPIKeyCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_jwt),
+):
+    """Create a named personal key and return the secret once.
+
+    Args:
+        request: Validated name for the new key.
+        db: Database session.
+        current_user: Account authenticated by a JWT.
+
+    Returns:
+        Key metadata and the newly generated bearer secret.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    record, secret = create_personal_api_key(db, current_user, request.name)
+    return PersonalAPIKeyCreatedResponse(
+        id=record.id,
+        name=record.name,
+        created_at=record.created_at,
+        last_used_at=record.last_used_at,
+        api_key=secret,
+    )
+
+
+@router.get(
+    "/auth/api-keys",
+    response_model=list[PersonalAPIKeyResponse],
+)
+async def get_api_keys(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_jwt),
+):
+    """List the caller's key metadata without returning any secret.
+
+    Args:
+        db: Database session.
+        current_user: Account authenticated by a JWT.
+
+    Returns:
+        The caller's personal API keys in newest-first order.
+    """
+    return list_personal_api_keys(db, current_user)
+
+
+@router.delete("/auth/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_api_key(
+    key_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_jwt),
+):
+    """Revoke one of the caller's personal API keys.
+
+    Args:
+        key_id: Key row id to revoke.
+        db: Database session.
+        current_user: Account authenticated by a JWT.
+
+    Returns:
+        An empty 204 response when the key was deleted.
+
+    Raises:
+        HTTPException: With status 404 when the key is missing or belongs to
+            another account.
+    """
+    if not revoke_personal_api_key(db, current_user, key_id):
+        raise HTTPException(status_code=404, detail="API key not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
