@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
-import type { Citation, MindMap, Note, VideoSummary } from '@/lib/api';
+import type { Citation, Document, MindMap, Note, VideoSummary } from '@/lib/api';
 import { citationId, referencedCitationIds, savedAnswerCitations } from '@/lib/citations';
 import useNotes from '@/store/useNotes';
 import useStore from '@/store/useStore';
@@ -22,6 +22,7 @@ interface Draft {
 const inputClass = 'w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]';
 const actionClass = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--muted)] transition-base disabled:opacity-50';
 const EMPTY_NOTES: Note[] = [];
+const EMPTY_DOCUMENTS: Document[] = [];
 
 function savedCitationView(note: Note) {
   const sourceStart = note.content.lastIndexOf('\n\n**Sources**\n');
@@ -81,6 +82,10 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     state.projectId === projectId ? state.loading : projectId !== null
   ));
   const loadError = useNotes((state) => state.projectId === projectId ? state.error : '');
+  const documents = useStore((state) => state.currentProject?.id === projectId
+    ? state.documents : EMPTY_DOCUMENTS);
+  const documentsLoading = useStore((state) => state.currentProject?.id === projectId
+    ? state.loadingDocuments : projectId !== null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -104,21 +109,93 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   if (!projectId) return null;
 
   const viewerNote = notes.find((note) => note.id === openId && note.origin === 'studio');
+  const noteHasSource = (note: Note) => Boolean(
+    note.source_document_id
+    && (documentsLoading || documents.some((document) => document.id === note.source_document_id)),
+  );
+  const unlinkedMarkdownNotes = notes.filter((note) => (
+    note.content.trim() && !noteHasSource(note)
+  ));
+
+  const submitNoteSource = async (note: Note) => {
+    const source = await api.convertNoteToSource(projectId, note.id);
+    useNotes.getState().upsert({
+      ...note,
+      source_document_id: source.doc_id,
+    });
+    await useStore.getState().fetchDocuments(projectId);
+  };
 
   const saveDraft = async () => {
     if (!canEdit || !draft || !draft.title.trim()) return;
     setSaving(true);
     setError('');
+    const linkedSource = draft.noteId
+      ? notes.find((note) => note.id === draft.noteId)
+      : null;
+    const shouldUpdateSource = Boolean(linkedSource && noteHasSource(linkedSource)
+      && confirm('Update the linked source with these note changes?'));
+    let savedNote: Note;
     try {
       const fields = { title: draft.title.trim(), content: draft.content };
-      const note = draft.noteId
+      savedNote = draft.noteId
         ? await api.updateNote(projectId, draft.noteId, fields)
         : await api.createNote(projectId, fields);
-      useNotes.getState().upsert(note);
+      useNotes.getState().upsert(savedNote);
       setDraft(null);
-      setOpenId(note.id);
+      setOpenId(savedNote.id);
     } catch {
       setError('The note could not be saved. Please try again.');
+      setSaving(false);
+      return;
+    }
+    if (shouldUpdateSource) {
+      try {
+        await submitNoteSource(savedNote);
+      } catch {
+        setError('The note was saved, but its source could not be updated.');
+      }
+    }
+    setSaving(false);
+  };
+
+  const convertAllNotes = async () => {
+    if (!canEdit || unlinkedMarkdownNotes.length === 0) return;
+    setSaving(true);
+    setError('');
+    try {
+      const result = await api.convertAllNotesToSources(projectId);
+      const currentNotes = useNotes.getState().notes;
+      for (const source of result.sources) {
+        const current = currentNotes.find((note) => note.id === source.note_id);
+        if (current) {
+          useNotes.getState().upsert({
+            ...current,
+            source_document_id: source.doc_id,
+          });
+        }
+      }
+      if (result.sources.length) {
+        await useStore.getState().fetchDocuments(projectId);
+      }
+      if (result.failed_note_ids.length) {
+        setError(`${result.failed_note_ids.length} note(s) could not be converted.`);
+      }
+    } catch {
+      setError('Notes could not be converted to sources. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const convertNote = async (note: Note) => {
+    if (!canEdit) return;
+    setSaving(true);
+    setError('');
+    try {
+      await submitNoteSource(note);
+    } catch {
+      setError('The note could not be converted to a source. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -177,15 +254,27 @@ export default function NotesSection({ projectId }: { projectId: string | null }
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold">Notes</h3>
         {canEdit && (
-          <button
-            type="button"
-            onClick={() => setDraft({ noteId: null, title: '', content: '' })}
-            disabled={draft?.noteId === null}
-            className={actionClass}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New note
-          </button>
+          <div className="flex gap-2">
+            {unlinkedMarkdownNotes.length > 0 && (
+              <button
+                type="button"
+                onClick={convertAllNotes}
+                disabled={saving}
+                className={actionClass}
+              >
+                Convert all notes
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setDraft({ noteId: null, title: '', content: '' })}
+              disabled={saving || draft?.noteId === null}
+              className={actionClass}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New note
+            </button>
+          </div>
         )}
       </div>
 
@@ -252,8 +341,23 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                         citationLabels={citationView?.citationLabels}
                         className="text-sm"
                       />
+                      {noteHasSource(note) && (
+                        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                          Used as a source
+                        </p>
+                      )}
                       {canEdit && (
                         <div className="flex justify-end gap-2 mt-2">
+                          {note.content.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => convertNote(note)}
+                              disabled={saving}
+                              className={actionClass}
+                            >
+                              {noteHasSource(note) ? 'Update source' : 'Use as source'}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => setDraft({

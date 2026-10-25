@@ -14,7 +14,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import create_database_engine, get_db
-from app.db.models import Base, Conversation, Message, Note, Project
+from app.db.models import (
+    Base,
+    Conversation,
+    Document,
+    IngestionJob,
+    Message,
+    Note,
+    Project,
+    ProjectDocument,
+)
 from app.routers import notes, projects
 from app.schemas import MindMapResponse, NoteCreate, NOTE_PAYLOAD_MAX_BYTES
 from app.services.notes import create_note
@@ -140,6 +149,158 @@ def test_manual_note_can_be_created_edited_and_deleted(client):
 
     assert api.delete("%s/%s" % (base, note["id"])).status_code == 200
     assert api.get(base).json() == []
+
+
+def test_note_can_be_used_as_a_source_and_deleted_independently(client, monkeypatch):
+    api, session_factory = client
+    project_id = create_project(api)
+    base = "/api/projects/%s/notes" % project_id
+    note = api.post(base, json={"title": "Idea", "content": "# Useful note"}).json()
+    monkeypatch.setattr("app.routers.ingest.settings.rate_limit_enabled", False)
+
+    converted = api.post("%s/%s/source" % (base, note["id"]))
+    assert converted.status_code == 200, converted.text
+    source = converted.json()
+    assert source["status"] == "queued"
+
+    repeated = api.post("%s/%s/source" % (base, note["id"]))
+    assert repeated.status_code == 200
+    assert repeated.json()["doc_id"] == source["doc_id"]
+
+    with session_factory() as db:
+        document = db.get(Document, source["doc_id"])
+        assert document.note_id == note["id"]
+        assert document.title == "Idea"
+        assert document.content == "# Useful note"
+        assert db.query(ProjectDocument).filter_by(
+            project_id=project_id, document_id=document.id
+        ).count() == 1
+
+    listed = api.get(base).json()[0]
+    assert listed["source_document_id"] == source["doc_id"]
+
+    assert api.delete("%s/%s" % (base, note["id"])).status_code == 200
+    with session_factory() as db:
+        document = db.get(Document, source["doc_id"])
+        assert document is not None
+        assert document.note_id is None
+
+
+def test_converting_a_saved_answer_removes_old_citations(client, monkeypatch):
+    api, session_factory = client
+    project_id = create_project(api)
+    message_id = add_message(
+        session_factory,
+        project_id,
+        text="Answer [Source 1] and [1].",
+        citations=CITATIONS,
+    )
+    note = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Answer", "source_message_id": message_id,
+    }).json()
+    monkeypatch.setattr("app.routers.ingest.settings.rate_limit_enabled", False)
+
+    response = api.post("/api/projects/%s/notes/%s/source" % (project_id, note["id"]))
+
+    assert response.status_code == 200, response.text
+    with session_factory() as db:
+        source = db.get(Document, response.json()["doc_id"])
+        assert "**Sources**" not in source.content
+        assert "[Source 1]" not in source.content
+        assert "[1]" not in source.content
+        assert "Answer" in source.content
+
+
+def test_editing_a_converted_note_reindexes_the_same_source(client, monkeypatch):
+    api, session_factory = client
+    project_id = create_project(api)
+    base = "/api/projects/%s/notes" % project_id
+    note = api.post(base, json={"title": "Idea", "content": "Old body"}).json()
+    monkeypatch.setattr("app.routers.ingest.settings.rate_limit_enabled", False)
+    first = api.post("%s/%s/source" % (base, note["id"]))
+    assert first.status_code == 200
+
+    with session_factory() as db:
+        source = db.get(Document, first.json()["doc_id"])
+        source.status = "ready"
+        db.query(IngestionJob).filter_by(document_id=source.id).update(
+            {"status": "completed"}
+        )
+        db.commit()
+
+    edited = api.put("%s/%s" % (base, note["id"]), json={
+        "title": "Updated idea", "content": "New body",
+    })
+    assert edited.status_code == 200
+    refreshed = api.post("%s/%s/source" % (base, note["id"]))
+
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["doc_id"] == first.json()["doc_id"]
+    assert refreshed.json()["status"] == "queued"
+    with session_factory() as db:
+        source = db.get(Document, first.json()["doc_id"])
+        assert source.title == "Updated idea"
+        assert source.content == "New body"
+        assert db.query(IngestionJob).filter_by(document_id=source.id).count() == 2
+
+
+def test_note_source_cannot_be_replaced_while_ingestion_is_active(client, monkeypatch):
+    api, session_factory = client
+    project_id = create_project(api)
+    base = "/api/projects/%s/notes" % project_id
+    note = api.post(base, json={"title": "Idea", "content": "Old body"}).json()
+    monkeypatch.setattr("app.routers.ingest.settings.rate_limit_enabled", False)
+    first = api.post("%s/%s/source" % (base, note["id"])).json()
+    api.put("%s/%s" % (base, note["id"]), json={"content": "New body"})
+
+    refreshed = api.post("%s/%s/source" % (base, note["id"]))
+
+    assert refreshed.status_code == 409
+    with session_factory() as db:
+        source = db.get(Document, first["doc_id"])
+        assert source.content == "Old body"
+        assert source.status == "queued"
+
+
+def test_convert_all_notes_queues_each_markdown_note_once(client, monkeypatch):
+    api, _ = client
+    project_id = create_project(api)
+    base = "/api/projects/%s/notes" % project_id
+    notes = [
+        api.post(base, json={"title": title, "content": content}).json()
+        for title, content in (("First", "First body"), ("Second", "Second body"))
+    ]
+    monkeypatch.setattr("app.routers.ingest.settings.rate_limit_enabled", False)
+
+    converted = api.post("%s/sources" % base)
+
+    assert converted.status_code == 200, converted.text
+    sources = converted.json()["sources"]
+    assert {source["note_id"] for source in sources} == {note["id"] for note in notes}
+    assert len({source["doc_id"] for source in sources}) == 2
+    assert converted.json()["failed_note_ids"] == []
+
+    repeated = api.post("%s/sources" % base)
+    assert repeated.status_code == 200
+    assert repeated.json() == {"sources": [], "failed_note_ids": []}
+
+
+def test_deleting_a_note_source_keeps_the_note(client, monkeypatch):
+    api, session_factory = client
+    project_id = create_project(api)
+    base = "/api/projects/%s/notes" % project_id
+    note = api.post(base, json={"title": "Idea", "content": "Keep me"}).json()
+    monkeypatch.setattr("app.routers.ingest.settings.rate_limit_enabled", False)
+    source = api.post("%s/%s/source" % (base, note["id"])).json()
+
+    with session_factory() as db:
+        db.delete(db.get(Document, source["doc_id"]))
+        db.commit()
+
+    remaining = api.get(base).json()
+    assert len(remaining) == 1
+    assert remaining[0]["id"] == note["id"]
+    assert remaining[0]["source_document_id"] is None
 
 
 def test_notes_list_newest_first(client):

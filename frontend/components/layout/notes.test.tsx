@@ -8,7 +8,7 @@ import SaveToNoteButton from '../chat/SaveToNoteButton';
 import useStore from '@/store/useStore';
 import useNotes from '@/store/useNotes';
 import api from '@/lib/api';
-import type { Message, MindMap, Note, Project, VideoSummary } from '@/lib/api';
+import type { Document, Message, MindMap, Note, Project, VideoSummary } from '@/lib/api';
 
 const note = (fields: Partial<Note>): Note => ({
   id: 'note-1',
@@ -62,6 +62,103 @@ describe('Studio notes', () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith('project-1', 'note-2'));
     expect(useNotes.getState().notes.map((n) => n.title)).toEqual(['First']);
     vi.unstubAllGlobals();
+  });
+
+  it('offers source conversion for a note and for all unlinked notes', async () => {
+    vi.spyOn(api, 'listNotes').mockResolvedValue([note({})]);
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /^First/ }));
+
+    expect(screen.getByRole('button', { name: 'Use as source' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Convert all notes' })).toBeTruthy();
+  });
+
+  it('converts one note and marks it as a source', async () => {
+    vi.spyOn(api, 'listNotes').mockResolvedValue([note({})]);
+    const refresh = vi.fn().mockImplementation(async () => {
+      useStore.setState({ documents: [{ id: 'doc-1' } as Document] });
+    });
+    useStore.setState({ fetchDocuments: refresh });
+    const convert = vi.spyOn(api, 'convertNoteToSource').mockResolvedValue({
+      note_id: 'note-1', doc_id: 'doc-1', status: 'queued',
+    });
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /^First/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use as source' }));
+
+    await waitFor(() => expect(convert).toHaveBeenCalledWith('project-1', 'note-1'));
+    await waitFor(() => expect(refresh).toHaveBeenCalledWith('project-1'));
+    expect(await screen.findByText('Used as a source')).toBeTruthy();
+    expect(useNotes.getState().notes[0].source_document_id).toBe('doc-1');
+  });
+
+  it('converts all eligible notes in one request', async () => {
+    vi.spyOn(api, 'listNotes').mockResolvedValue([
+      note({ id: 'note-1' }),
+      note({ id: 'note-2', title: 'Second' }),
+    ]);
+    const refresh = vi.fn().mockImplementation(async () => {
+      useStore.setState({ documents: [
+        { id: 'doc-1' } as Document,
+        { id: 'doc-2' } as Document,
+      ] });
+    });
+    useStore.setState({ fetchDocuments: refresh });
+    const convertAll = vi.spyOn(api, 'convertAllNotesToSources').mockResolvedValue({
+      sources: [
+        { note_id: 'note-1', doc_id: 'doc-1', status: 'queued' },
+        { note_id: 'note-2', doc_id: 'doc-2', status: 'queued' },
+      ],
+      failed_note_ids: [],
+    });
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Convert all notes' }));
+
+    await waitFor(() => expect(convertAll).toHaveBeenCalledWith('project-1'));
+    await waitFor(() => expect(refresh).toHaveBeenCalledWith('project-1'));
+    expect(useNotes.getState().notes.map((saved) => saved.source_document_id))
+      .toEqual(['doc-1', 'doc-2']);
+  });
+
+  it('offers to refresh a linked source after saving note edits', async () => {
+    const linked = note({ source_document_id: 'doc-1' });
+    vi.spyOn(api, 'listNotes').mockResolvedValue([linked]);
+    useStore.setState({ documents: [{ id: 'doc-1' } as Document] });
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    useStore.setState({ fetchDocuments: refresh });
+    const update = vi.spyOn(api, 'updateNote').mockResolvedValue({
+      ...linked, content: 'Updated body',
+    });
+    const convert = vi.spyOn(api, 'convertNoteToSource').mockResolvedValue({
+      note_id: linked.id, doc_id: 'doc-1', status: 'queued',
+    });
+    vi.stubGlobal('confirm', () => true);
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /^First/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Note content'), {
+      target: { value: 'Updated body' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    await waitFor(() => expect(convert).toHaveBeenCalledWith('project-1', linked.id));
+  });
+
+  it('offers conversion again after the linked source is deleted', async () => {
+    vi.spyOn(api, 'listNotes').mockResolvedValue([note({ source_document_id: 'doc-1' })]);
+    useStore.setState({ documents: [], loadingDocuments: false });
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /^First/ }));
+
+    expect(screen.queryByText('Used as a source')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Use as source' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Convert all notes' })).toBeTruthy();
   });
 
   it('saves an answer under the question it replied to', async () => {

@@ -75,6 +75,7 @@ def enqueue_ingestion_job_with_result(
     document_id: str,
     job_type: str,
     payload: dict,
+    force_new: bool = False,
 ) -> IngestionEnqueueResult:
     """Enqueue work and report whether this call created the active row.
 
@@ -83,6 +84,7 @@ def enqueue_ingestion_job_with_result(
         document_id: Document to extract and index.
         job_type: Source extraction type or ``reindex``.
         payload: Recoverable source references needed by the worker.
+        force_new: Queue completed source jobs again after replacing their text.
 
     Returns:
         The durable job and immutable lease-ownership decision.
@@ -96,7 +98,7 @@ def enqueue_ingestion_job_with_result(
 
     # Re-index input includes the title, so each rename needs a new job even
     # when an earlier title refresh completed successfully.
-    if job_type != "reindex":
+    if job_type != "reindex" and not force_new:
         latest = (
             db.query(IngestionJob)
             .filter(
@@ -129,7 +131,7 @@ def enqueue_ingestion_job_with_result(
                 "requested_title": payload["requested_title"],
             }
         return IngestionEnqueueResult(active, created_new_active=False)
-    if job_type != "reindex":
+    if job_type != "reindex" and not force_new:
         latest = (
             db.query(IngestionJob)
             .filter(

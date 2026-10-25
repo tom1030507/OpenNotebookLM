@@ -165,8 +165,20 @@ export interface Note {
   source_message_id: string | null;
   studio_kind: StudioNoteKind | null;
   payload_json: MindMap | VideoSummary | null;
+  source_document_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface NoteSource {
+  note_id: string;
+  doc_id: string;
+  status: string;
+}
+
+export interface NoteSourceBatch {
+  sources: NoteSource[];
+  failed_note_ids: string[];
 }
 
 export type MessageRating = 'up' | 'down' | null;
@@ -1238,6 +1250,18 @@ const api = {
 
   async deleteNote(projectId: string, noteId: string): Promise<void> {
     await requestJson(`/projects/${projectId}/notes/${noteId}`, { method: 'DELETE' });
+  },
+
+  convertNoteToSource(projectId: string, noteId: string): Promise<NoteSource> {
+    return requestJson<NoteSource>(`/projects/${projectId}/notes/${noteId}/source`, {
+      method: 'POST',
+    });
+  },
+
+  convertAllNotesToSources(projectId: string): Promise<NoteSourceBatch> {
+    return requestJson<NoteSourceBatch>(`/projects/${projectId}/notes/sources`, {
+      method: 'POST',
+    });
   },
 
   /** The same summary as text, for reading aloud rather than downloading. */

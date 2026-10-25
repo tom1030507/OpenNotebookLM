@@ -109,6 +109,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 ADDED_COLUMNS = (
     ("projects", "user_id", "VARCHAR", "idx_projects_user_id"),
     ("documents", "user_id", "VARCHAR", "idx_documents_user_id"),
+    ("documents", "note_id", "VARCHAR", "idx_documents_note_id"),
     (
         "retrieval_index_entries",
         "indexed_lexical_text",

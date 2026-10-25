@@ -201,6 +201,59 @@ class UnlimitedConcurrencyLease:
         """
 
 
+class OperationLeaseGroup:
+    """Hold one account slot until each job in a batch has finished.
+
+    Args:
+        lease: Account slot owned by the batch.
+        operations: Number of durable jobs that will release this group.
+    """
+
+    def __init__(self, lease: OperationLease, operations: int):
+        """Initialize a shared lease for a fixed number of jobs.
+
+        Args:
+            lease: Account slot owned by the batch.
+            operations: Number of durable jobs that will release this group.
+
+        Returns:
+            None.
+
+        Raises:
+            ValueError: If the batch contains no jobs.
+        """
+        if operations < 1:
+            raise ValueError("operations must be positive")
+        self._lease = lease
+        self._remaining = operations
+        self._lock = threading.Lock()
+
+    def release(self) -> None:
+        """Release the account slot after the last job completes.
+
+        Returns:
+            None.
+        """
+        release_lease = False
+        with self._lock:
+            if self._remaining:
+                self._remaining -= 1
+                release_lease = self._remaining == 0
+        if release_lease:
+            self._lease.release()
+
+    def defer_release_until(self, future) -> None:
+        """Defer release while a child job has blocking work in flight.
+
+        Args:
+            future: Future for the blocking operation.
+
+        Returns:
+            None.
+        """
+        self._lease.defer_release_until(future)
+
+
 class ConcurrencyLease:
     """Thread-safe handle whose release can wait for underlying futures."""
 

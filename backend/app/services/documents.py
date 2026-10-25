@@ -57,6 +57,10 @@ class UploadTooLargeError(ValueError):
     """Raised when an upload crosses the configured byte limit."""
 
 
+class TextSourceBusyError(ValueError):
+    """Raised when a text source is already being processed."""
+
+
 class InvalidUploadFileError(ValueError):
     """Raised when an upload's extension or file contents are unsupported."""
 
@@ -1219,8 +1223,10 @@ class DocumentService:
         title: str,
         text: str,
         operation_lease: Optional[OperationLease] = None,
+        document_id: Optional[str] = None,
+        note_id: Optional[str] = None,
     ) -> Document:
-        """Store pasted text as a source and queue it for indexing.
+        """Store or refresh pasted text as a source and queue it for indexing.
 
         Args:
             db: Database session
@@ -1230,6 +1236,9 @@ class DocumentService:
             text: Pasted body
             operation_lease: Explicit quota ownership transferred to this
                 service until background indexing really finishes.
+            document_id: Existing text source to refresh, or a stable id for a
+                note source.
+            note_id: Note linked to this source, when it came from a note.
 
         Returns:
             Created document
@@ -1246,34 +1255,66 @@ class DocumentService:
                     % self.settings.max_file_size_mb
                 )
 
-            doc_id = str(uuid.uuid4())
-            # The text is the source, so it is stored now; the job only has to
-            # chunk and embed it, exactly as it does for extracted content.
-            document = Document(
-                id=doc_id,
-                user_id=user_id,
-                title=title,
-                source_type="text",
-                content=text,
-                status="queued",
-                meta_json={
+            doc_id = document_id or str(uuid.uuid4())
+            document = db.get(Document, doc_id)
+            is_refresh = document is not None
+            if is_refresh:
+                if document.source_type != "text" or document.note_id != note_id:
+                    raise ValueError("Only the linked note source can be refreshed")
+                active_job = db.query(IngestionJob.id).filter(
+                    IngestionJob.document_id == doc_id,
+                    IngestionJob.status.in_(("queued", "running")),
+                ).first()
+                if (
+                    document.status in {"queued", "processing", "transcribing"}
+                    or active_job is not None
+                ):
+                    raise TextSourceBusyError("The note source is still processing")
+                # Do not leave old passages searchable after the saved note changes.
+                get_retrieval_index().delete_document(db, doc_id)
+                for chunk in db.query(Chunk).filter(Chunk.document_id == doc_id).all():
+                    db.delete(chunk)
+                document.title = title
+                document.content = text
+                document.status = "queued"
+                document.error_message = None
+                document.meta_json = {
+                    **(document.meta_json or {}),
                     "text_size": size,
                     "upload_time": utc_now_iso(),
-                },
-            )
-            db.add(document)
-            db.add(ProjectDocument(
-                project_id=project_id,
-                document_id=doc_id,
-                shared_by_user_id=user_id,
-            ))
+                }
+            else:
+                # The text is the source, so the job only has to chunk and embed it.
+                document = Document(
+                    id=doc_id,
+                    user_id=user_id,
+                    note_id=note_id,
+                    title=title,
+                    source_type="text",
+                    content=text,
+                    status="queued",
+                    meta_json={
+                        "text_size": size,
+                        "upload_time": utc_now_iso(),
+                    },
+                )
+                db.add(document)
+                db.add(ProjectDocument(
+                    project_id=project_id,
+                    document_id=doc_id,
+                    shared_by_user_id=user_id,
+                ))
             payload = {"document_id": doc_id}
             enqueue_result = enqueue_ingestion_job_with_result(
                 db,
                 document_id=doc_id,
                 job_type="text",
                 payload=payload,
+                force_new=is_refresh,
             )
+            if is_refresh and not enqueue_result.created_new_active:
+                db.rollback()
+                raise TextSourceBusyError("The note source is still processing")
             job_id = enqueue_result.job.id
             owns_retained_lease = retain_enqueued_operation_lease(
                 enqueue_result,

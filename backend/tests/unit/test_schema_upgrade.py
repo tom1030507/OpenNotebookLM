@@ -131,6 +131,7 @@ class TestUpgrade:
 
         assert sorted(added) == [
             "conversations.user_id",
+            "documents.note_id",
             "documents.user_id",
             "messages.citation_checks_json",
             "notes.payload_json",
