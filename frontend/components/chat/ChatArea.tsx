@@ -256,7 +256,12 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const currentConversation = useStore((state) => state.currentConversation);
   const messages = useStore((state) => state.messages);
   const documents = useStore((state) => state.documents);
-  const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
+  const selectedSourceCount = useStore((state) => {
+    const selectedIds = selectedSourceIds(state);
+    return selectedIds?.length
+      ?? state.documents.filter((document) => document.status !== 'error').length;
+  });
+  const noSourcesSelected = selectedSourceCount === 0;
   const sendQuery = useStore((state) => state.sendQuery);
   const beginNewConversation = useStore((state) => state.beginNewConversation);
   const fetchMessages = useStore((state) => state.fetchMessages);
@@ -291,7 +296,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   }, [messages]);
 
   const submitQuery = async (query: string) => {
-    if (!currentProject) return;
+    if (!currentProject || noSourcesSelected) return;
 
     const composerGeneration = composerGenerationRef.current;
     const requestId = nextRequestIdRef.current + 1;
@@ -407,7 +412,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
   const isStreaming = pendingQueryIsActive && !pendingQuery.error;
 
   useEffect(() => {
-    if (!pendingMindMapQuestion || !currentProject || !canChat || isStreaming) return;
+    if (!pendingMindMapQuestion || !currentProject || !canChat || noSourcesSelected || isStreaming) return;
 
     // Dialog and drawer cleanup restores their trigger first; focusing in the
     // next frame keeps that cleanup from stealing focus back from the composer.
@@ -418,7 +423,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
       composerRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [pendingMindMapQuestion, currentProject, canChat, isStreaming, consumeMindMapQuestion]);
+  }, [pendingMindMapQuestion, currentProject, canChat, noSourcesSelected, isStreaming, consumeMindMapQuestion]);
 
   const hasPendingMessage = pendingQueryIsActive && !messages.some((message) => (
     message.role === 'user'
@@ -501,6 +506,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 <ProjectOverview
                   projectId={currentProject.id}
                   readySourceKey={readyDocumentIds.sort().join(',')}
+                  disabled={noSourcesSelected}
                   onAsk={(question) => void submitQuery(question)}
                 />
               )}
@@ -589,6 +595,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 <FollowUpQuestions
                   conversationId={currentConversation.id}
                   messageId={lastMessage.id}
+                  disabled={noSourcesSelected}
                   onAsk={(question) => void submitQuery(question)}
                 />
               )}
@@ -679,7 +686,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               
               {inputValue && hasDocuments && (
                 <span className="absolute right-3 bottom-2 text-xs text-[var(--muted-foreground)]">
-                  {readyDocumentCount} {readyDocumentCount === 1 ? 'source' : 'sources'}
+                  {selectedSourceCount} {selectedSourceCount === 1 ? 'source' : 'sources'}
                 </span>
               )}
             </div>

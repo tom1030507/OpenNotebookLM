@@ -74,4 +74,20 @@ describe('FollowUpQuestions', () => {
     expect(fetchFollowUps).toHaveBeenCalledWith('c1');
     expect(onAsk).toHaveBeenCalledWith('And then?');
   });
+
+  it('disables follow-up questions when no source is selected', async () => {
+    vi.spyOn(api, 'fetchFollowUpQuestions').mockResolvedValue(['What next?']);
+
+    render(
+      <FollowUpQuestions
+        conversationId="c1"
+        messageId="m2"
+        disabled
+        onAsk={vi.fn()}
+      />,
+    );
+
+    expect((await screen.findByRole('button', { name: 'What next?' }) as HTMLButtonElement).disabled)
+      .toBe(true);
+  });
 });

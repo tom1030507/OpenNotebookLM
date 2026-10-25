@@ -7,10 +7,11 @@ import useStore from '@/store/useStore';
 
 interface QuestionListProps {
   questions: string[];
+  disabled?: boolean;
   onAsk: (question: string) => void;
 }
 
-function QuestionList({ questions, onAsk }: QuestionListProps) {
+function QuestionList({ questions, disabled, onAsk }: QuestionListProps) {
   return (
     <ul className="flex flex-col gap-2 text-left">
       {questions.map((question) => (
@@ -18,7 +19,8 @@ function QuestionList({ questions, onAsk }: QuestionListProps) {
           <button
             type="button"
             onClick={() => onAsk(question)}
-            className="w-full flex items-start gap-2 px-3 py-2 text-left text-sm bg-[var(--card)] border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
+            disabled={disabled}
+            className="w-full flex items-start gap-2 px-3 py-2 text-left text-sm bg-[var(--card)] border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] disabled:opacity-50 disabled:cursor-not-allowed transition-base"
           >
             <MessageSquare className="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--muted-foreground)]" />
             <span>{question}</span>
@@ -33,11 +35,12 @@ interface ProjectOverviewProps {
   projectId: string;
   /** Changes whenever the set of ready sources does, which may regenerate the overview. */
   readySourceKey: string;
+  disabled?: boolean;
   onAsk: (question: string) => void;
 }
 
 /** The generated overview and starter questions; renders nothing until there are some. */
-export function ProjectOverview({ projectId, readySourceKey, onAsk }: ProjectOverviewProps) {
+export function ProjectOverview({ projectId, readySourceKey, disabled, onAsk }: ProjectOverviewProps) {
   const [overview, setOverview] = useState<{ text: string | null; questions: string[] }>({
     text: null,
     questions: [],
@@ -75,7 +78,7 @@ export function ProjectOverview({ projectId, readySourceKey, onAsk }: ProjectOve
         <p className="text-sm leading-relaxed mb-4">{overview.text}</p>
       )}
       {overview.questions.length > 0 && (
-        <QuestionList questions={overview.questions} onAsk={onAsk} />
+        <QuestionList questions={overview.questions} disabled={disabled} onAsk={onAsk} />
       )}
     </div>
   );
@@ -85,6 +88,7 @@ interface FollowUpQuestionsProps {
   conversationId: string;
   /** The answer the questions follow; a new answer fetches new ones. */
   messageId: string;
+  disabled?: boolean;
   onAsk: (question: string) => void;
 }
 
@@ -92,6 +96,7 @@ interface FollowUpQuestionsProps {
 export function FollowUpQuestions({
   conversationId,
   messageId,
+  disabled,
   onAsk,
 }: FollowUpQuestionsProps) {
   const [questions, setQuestions] = useState<string[]>([]);
@@ -114,7 +119,7 @@ export function FollowUpQuestions({
   return (
     <div data-testid="follow-up-questions" className="pl-11">
       <p className="text-xs text-[var(--muted-foreground)] mb-2">Follow-up questions</p>
-      <QuestionList questions={questions} onAsk={onAsk} />
+      <QuestionList questions={questions} disabled={disabled} onAsk={onAsk} />
     </div>
   );
 }
