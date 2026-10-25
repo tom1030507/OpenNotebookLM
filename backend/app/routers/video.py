@@ -10,9 +10,12 @@ loop that stalls every other request for the whole call, `/healthz` included,
 which the compose healthcheck gives ten seconds. FastAPI runs a sync handler in
 its threadpool, which is where blocking work belongs.
 """
+import re
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 import structlog
 
@@ -20,7 +23,8 @@ from app.db.database import get_db
 from app.db.models import User
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_documents, require_project
-from app.schemas import SourceSelection, VideoSummaryResponse
+from app.schemas import SourceSelection, VideoSummaryPptxRequest, VideoSummaryResponse
+from app.services.slides_export import render_video_summary_pptx
 from app.services.video_summary import VideoSummaryService
 
 # Every route below requires a signed-in caller. Declaring that on the
@@ -84,3 +88,41 @@ def project_video_summary(
         document_ids = require_documents(db, selection.document_ids, current_user)
 
     return service.generate(db, project, document_ids)
+
+
+@router.post("/projects/{project_id}/video-summary/pptx")
+def export_project_video_summary_pptx(
+    project_id: str,
+    request: VideoSummaryPptxRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Export the scenes already shown in Studio as a PowerPoint.
+
+    Args:
+        project_id: Project to resolve through the current user's ownership.
+        request: Bounded scene script to render without another model call.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        The PowerPoint bytes with a safe project-based download filename.
+    """
+    project = require_project(db, project_id, current_user)
+    document_ids = [scene.document_id for scene in request.scenes if scene.document_id]
+    if document_ids:
+        require_documents(db, document_ids, current_user)
+
+    filename = re.sub(r'[\\/<>:"|?*\x00-\x1f\x7f]+', "_", project.name).strip(" .")
+    filename = "%s.pptx" % (filename or "video-summary")
+
+    return Response(
+        content=render_video_summary_pptx(request.scenes),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ),
+        headers={
+            "Content-Disposition": "attachment; filename*=utf-8''%s"
+            % quote(filename, safe=""),
+        },
+    )

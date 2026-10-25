@@ -177,6 +177,41 @@ describe('API client', () => {
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
   });
 
+  it('exports the current video summary scenes as a PowerPoint blob', async () => {
+    const scenes = [{
+      id: 'title',
+      kind: 'title' as const,
+      headline: 'Research',
+      bullets: ['Finding'],
+      narration: 'Narration.',
+      document_id: null,
+      source_label: null,
+    }];
+    const fetchMock = vi.fn().mockResolvedValue(new Response('pptx bytes', {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const blob = await api.exportProjectVideoSummaryPptx('project-1', scenes);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/video-summary/pptx',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ scenes }),
+      }),
+    );
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Content-Type')).toBe(
+      'application/json',
+    );
+    expect(blob.type).toBe(
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    );
+    await expect(blob.text()).resolves.toBe('pptx bytes');
+  });
+
   it('fetches the complete document after a file upload', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

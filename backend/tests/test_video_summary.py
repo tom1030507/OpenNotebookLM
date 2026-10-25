@@ -6,9 +6,11 @@ module-level service would point at a local provider and every request here
 would open a socket to it.
 """
 import inspect
+from io import BytesIO
 
 import pytest
 from fastapi import FastAPI
+from pptx import Presentation
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -158,6 +160,82 @@ def test_the_script_closes_on_a_recap(two_projects_with_own_documents):
 
     assert body["scenes"][-1]["kind"] == "closing"
     assert body["scenes"][-1]["bullets"] == ["Only In A"]
+
+
+def test_the_existing_script_exports_as_a_powerpoint_without_regeneration(
+    two_projects_with_own_documents,
+):
+    """The slides and speaker notes come from the scene script the dialog has."""
+    with TestingSessionLocal() as db:
+        project = db.query(Project).filter(Project.id == "project-a").one()
+        project.name = "../Project A?."
+        db.commit()
+
+    scenes = [
+        {
+            "id": "title",
+            "kind": "title",
+            "headline": "A prepared title",
+            "bullets": ["Prepared bullet"],
+            "narration": "Prepared narration.",
+            "document_id": None,
+            "source_label": None,
+        },
+        {
+            "id": "closing",
+            "kind": "closing",
+            "headline": "A prepared close",
+            "bullets": [],
+            "narration": "Prepared closing narration.",
+            "document_id": None,
+            "source_label": None,
+        },
+    ]
+
+    response = client.post(
+        "/api/projects/project-a/video-summary/pptx",
+        json={"scenes": scenes},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+    assert response.headers["content-disposition"] == (
+        "attachment; filename*=utf-8''_Project%20A_.pptx"
+    )
+    presentation = Presentation(BytesIO(response.content))
+    assert len(presentation.slides) == 2
+    first_slide = presentation.slides[0]
+    assert first_slide.shapes.title.text == "A prepared title"
+    assert first_slide.placeholders[1].text == "Prepared bullet"
+    assert "Prepared narration." in first_slide.notes_slide.notes_text_frame.text
+    assert presentation.slides[1].shapes.title.text == "A prepared close"
+
+
+def test_powerpoint_export_rejects_malformed_scene_bullets():
+    """The file endpoint accepts only the bounded scene shape we generate."""
+    scenes = [
+        {
+            "id": "title",
+            "kind": "title",
+            "headline": "Title",
+            "bullets": ["one", "two", "three", "four", "five"],
+            "narration": "Narration.",
+        },
+        {
+            "id": "closing",
+            "kind": "closing",
+            "headline": "Close",
+            "bullets": [],
+            "narration": "Closing.",
+        },
+    ]
+
+    assert client.post(
+        "/api/projects/project-a/video-summary/pptx",
+        json={"scenes": scenes},
+    ).status_code == 422
 
 
 def test_every_scene_has_narration(two_projects_with_own_documents):

@@ -486,6 +486,75 @@ class TestVideoSummaryIsolation:
         assert response.status_code == 200
         assert response.json()["scenes"][0]["headline"] == ALICE_PROJECT
 
+    def test_exporting_someone_elses_video_summary_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        scenes = [
+            {
+                "id": "title", "kind": "title", "headline": "Title",
+                "bullets": [], "narration": "Narration.",
+            },
+            {
+                "id": "closing", "kind": "closing", "headline": "Close",
+                "bullets": [], "narration": "Closing.",
+            },
+        ]
+
+        response = env.bob.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": scenes},
+        )
+
+        assert response.status_code == 404
+
+    def test_your_own_video_summary_can_be_exported(self, env):
+        project_id = make_project(env.alice)
+        scenes = [
+            {
+                "id": "title", "kind": "title", "headline": "Title",
+                "bullets": [], "narration": "Narration.",
+            },
+            {
+                "id": "closing", "kind": "closing", "headline": "Close",
+                "bullets": [], "narration": "Closing.",
+            },
+        ]
+
+        response = env.alice.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": scenes},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
+
+    def test_exporting_a_foreign_source_scene_is_not_found(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.bob_user, title="Bob's source")
+        scenes = [
+            {
+                "id": "title", "kind": "title", "headline": "Title",
+                "bullets": [], "narration": "Narration.",
+            },
+            {
+                "id": "doc-1", "kind": "source", "headline": "Source",
+                "bullets": [], "narration": "Source narration.",
+                "document_id": document_id,
+            },
+            {
+                "id": "closing", "kind": "closing", "headline": "Close",
+                "bullets": [], "narration": "Closing.",
+            },
+        ]
+
+        response = env.alice.post(
+            "/api/projects/%s/video-summary/pptx" % project_id,
+            json={"scenes": scenes},
+        )
+
+        assert response.status_code == 404
+
 
 class TestNoteIsolation:
     """Notes follow the project that holds them."""

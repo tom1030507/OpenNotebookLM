@@ -888,6 +888,20 @@ const api = {
     );
   },
 
+  exportProjectVideoSummaryPptx(
+    projectId: string,
+    scenes: VideoScene[],
+  ): Promise<Blob> {
+    return requestDetachedExportBlob(
+      `/projects/${projectId}/video-summary/pptx`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenes }),
+      },
+    );
+  },
+
   exportProjectSummary(projectId: string, documentIds?: string[]): Promise<Blob> {
     return requestDetachedExportBlob(
       `/export/project/${projectId}/summary`,

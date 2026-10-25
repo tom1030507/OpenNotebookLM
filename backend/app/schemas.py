@@ -436,6 +436,66 @@ class VideoScene(BaseModel):
     source_label: Optional[str] = None
 
 
+MAX_VIDEO_SUMMARY_PPTX_SCENES = MAX_DOCUMENT_SELECTION + 2
+MAX_VIDEO_SUMMARY_PPTX_TEXT_CHARS = 500_000
+
+
+class VideoSummaryPptxScene(VideoScene):
+    """A bounded video scene accepted by the PowerPoint export endpoint."""
+
+    model_config = {"extra": "forbid"}
+
+    id: str = Field(..., min_length=1, max_length=128)
+    headline: str = Field(..., min_length=1, max_length=500)
+    bullets: List[str] = Field(default_factory=list, max_length=4)
+    narration: str = Field(..., min_length=1, max_length=10_000)
+    document_id: Optional[str] = Field(None, max_length=128)
+    source_label: Optional[str] = Field(None, max_length=500)
+
+
+class VideoSummaryPptxRequest(BaseModel):
+    """The scenes already shown in the video summary dialog."""
+
+    model_config = {"extra": "forbid"}
+
+    scenes: List[VideoSummaryPptxScene] = Field(
+        ..., min_length=2, max_length=MAX_VIDEO_SUMMARY_PPTX_SCENES,
+    )
+
+    @field_validator("scenes")
+    @classmethod
+    def scenes_fit_one_summary(
+        cls,
+        scenes: List[VideoSummaryPptxScene],
+    ) -> List[VideoSummaryPptxScene]:
+        """Reject oversized or out-of-order scene lists at the export boundary.
+
+        Args:
+            scenes: Validated video summary scenes.
+
+        Returns:
+            The original scenes when they fit the generated-summary contract.
+        """
+        if scenes[0].kind != "title" or scenes[-1].kind != "closing":
+            raise ValueError("scenes must start with a title and end with a closing scene")
+        if any(scene.kind != "source" for scene in scenes[1:-1]):
+            raise ValueError("only source scenes may appear between the title and closing")
+        if any(not scene.document_id for scene in scenes[1:-1]):
+            raise ValueError("source scenes must include a document id")
+
+        text_chars = sum(
+            len(scene.headline)
+            + len(scene.narration)
+            + sum(len(bullet) for bullet in scene.bullets)
+            + len(scene.source_label or "")
+            for scene in scenes
+        )
+        if text_chars > MAX_VIDEO_SUMMARY_PPTX_TEXT_CHARS:
+            raise ValueError("scene text exceeds the PowerPoint export limit")
+
+        return scenes
+
+
 class VideoSummaryResponse(BaseModel):
     """Schema for a generated video summary script."""
 
