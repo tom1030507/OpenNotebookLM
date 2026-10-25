@@ -28,7 +28,7 @@ import DocumentPreview from '../DocumentPreview';
 import ProjectSearch from '../ProjectSearch';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
-import api, { Document, DocumentStatus, ProjectSourceGroup } from '@/lib/api';
+import api, { Citation, Document, DocumentStatus, ProjectSourceGroup } from '@/lib/api';
 import {
   closeAddSourcesAfterSuccessfulUpload,
   requestAddSources,
@@ -63,6 +63,7 @@ export default function SourcesPanel({
 }: SourcesPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
+  const [previewCitation, setPreviewCitation] = useState<Citation | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
@@ -135,6 +136,8 @@ export default function SourcesPanel({
     toggleSourceSelected,
     setAllSourcesSelected,
     setSourcesSelected,
+    citationPreview,
+    clearCitationPreview,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
   const canManageProject = currentProject?.role === 'owner';
@@ -235,11 +238,19 @@ export default function SourcesPanel({
     const document = documents.find((item) => item.id === pendingSearchPreview.documentId);
     if (document) {
       setPreviewDocument(document);
+      setPreviewCitation(null);
       setPendingSearchPreview(null);
     } else if (!loadingDocuments) {
       setPendingSearchPreview(null);
     }
   }, [currentProjectId, documents, loadingDocuments, pendingSearchPreview]);
+
+  useEffect(() => {
+    if (!citationPreview) return;
+    setPreviewDocument(citationPreview.document);
+    setPreviewCitation(citationPreview.citation);
+    clearCitationPreview();
+  }, [citationPreview, clearCitationPreview]);
 
   // Session counter so a stale upload can never close a dialog reopened after it.
   useEffect(() => {
@@ -524,7 +535,7 @@ export default function SourcesPanel({
         key={doc.id}
         // Rows, not bordered cards: a list of peers read as a stack of boxes.
         className="relative px-2 py-2 rounded-md hover:bg-[var(--muted)] transition-base cursor-pointer group"
-        onClick={() => setPreviewDocument(doc)}
+        onClick={() => { setPreviewCitation(null); setPreviewDocument(doc); }}
       >
         <div className="flex items-start gap-2.5">
           <input
@@ -573,7 +584,11 @@ export default function SourcesPanel({
         {/* Overlay actions save filename width until pointer or keyboard focus needs them. */}
         <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-[var(--muted)] pl-1 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100">
           <button
-            onClick={(event) => { event.stopPropagation(); setPreviewDocument(doc); }}
+            onClick={(event) => {
+              event.stopPropagation();
+              setPreviewCitation(null);
+              setPreviewDocument(doc);
+            }}
             className="p-1 hover:bg-[var(--card)] rounded"
             aria-label="Preview document"
             title="Preview document"
@@ -1082,7 +1097,8 @@ export default function SourcesPanel({
       {previewDocument && (
         <DocumentPreview
           document={previewDocument}
-          onClose={() => setPreviewDocument(null)}
+          citation={previewCitation ?? undefined}
+          onClose={() => { setPreviewDocument(null); setPreviewCitation(null); }}
         />
       )}
       {canManageProject && currentProject && (

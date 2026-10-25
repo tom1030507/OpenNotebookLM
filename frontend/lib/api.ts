@@ -175,8 +175,14 @@ export interface Conversation {
 
 export interface Citation extends Record<string, unknown> {
   source: string;
-  page?: number;
+  document_id?: string;
+  chunk_id?: string;
+  page?: number | null;
+  page_num?: number | null;
   text?: string;
+  timestamp?: number | null;
+  start_offset?: number | null;
+  end_offset?: number | null;
 }
 
 export type ReportFormat = 'briefing' | 'study_guide' | 'faq' | 'timeline' | 'custom';
@@ -485,12 +491,16 @@ interface BackendCitation extends Record<string, unknown> {
   title?: string;
   doc_id?: string;
   document_id?: string;
+  chunk_id?: string;
   document_title?: string;
-  page?: number;
-  page_num?: number;
+  page?: number | null;
+  page_num?: number | null;
   text?: string;
   text_snippet?: string;
   text_preview?: string;
+  timestamp?: number | null;
+  start_offset?: number | null;
+  end_offset?: number | null;
 }
 
 interface BackendMessage {
@@ -811,6 +821,7 @@ const resolveDocumentUrl = (document: BackendDocument): string | undefined => {
   }
 
   return document.source_type === 'pdf'
+    || ['mp3', 'm4a', 'wav', 'ogg', 'webm', 'flac'].includes(document.source_type)
     ? documentFileUrl(document.id)
     : undefined;
 };

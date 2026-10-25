@@ -40,7 +40,11 @@ def get_report_service(rag_service: Any = Depends(get_rag_service)) -> ReportSer
     return ReportService(rag_service)
 
 
-@router.post("/projects/{project_id}/report", response_model=ReportResponse)
+@router.post(
+    "/projects/{project_id}/report",
+    response_model=ReportResponse,
+    response_model_exclude_none=True,
+)
 def project_report(
     project_id: str,
     request: ReportRequest,

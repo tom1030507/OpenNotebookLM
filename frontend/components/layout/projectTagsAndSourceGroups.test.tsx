@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ProjectDialogProvider from '../ProjectDialogProvider';
+import MarkdownRenderer from '../MarkdownRenderer';
 import SourcesPanel from './SourcesPanel';
 import api, { type Document, type Project, type ProjectSourceGroup } from '@/lib/api';
 import useStore, { selectedSourceIds } from '@/store/useStore';
@@ -156,5 +157,39 @@ describe('project tags and source groups', () => {
     ));
     fireEvent.click(screen.getByRole('button', { name: 'Delete Read later' }));
     await waitFor(() => expect(api.deleteProjectSourceGroup).toHaveBeenCalledWith('one', 'group-1'));
+  });
+
+  it('opens a source at the cited passage when its inline citation is clicked', async () => {
+    const current = project('one');
+    const source = { ...document('article'), name: 'Source article', type: 'md' as const };
+    const citation = {
+      id: 1,
+      source: source.name,
+      document_id: source.id,
+      chunk_id: 'chunk-1',
+      start_offset: 8,
+      end_offset: 23,
+      text: 'Cited evidence.',
+    };
+    useStore.setState({
+      projects: [current],
+      currentProject: current,
+      documents: [source],
+    });
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Before.\nCited evidence.\nAfter.');
+    vi.spyOn(api, 'fetchDocumentGuide').mockResolvedValue({ summary: '', topics: [] });
+    render(
+      <>
+        <MarkdownRenderer content="Claim [Source 1]." citations={[citation]} />
+        <ProjectDialogProvider>
+          <SourcesPanel isAddSourcesOpen={false} onAddSourcesOpenChange={() => {}} />
+        </ProjectDialogProvider>
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview source 1' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Source article' })).toBeTruthy();
+    expect((await screen.findByText('Cited evidence.')).tagName).toBe('MARK');
   });
 });

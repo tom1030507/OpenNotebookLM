@@ -3,6 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Citation } from '@/lib/api';
+import useStore from '@/store/useStore';
 
 export default function InlineCitation({ id, citation }: { id: number; citation: Citation }) {
   const [open, setOpen] = useState(false);
@@ -90,7 +91,13 @@ export default function InlineCitation({ id, citation }: { id: number; citation:
         onMouseLeave={leave}
         onFocus={show}
         onBlur={() => { if (!hovered.current) setOpen(false); }}
-        onClick={show}
+        onClick={() => {
+          if (citation.chunk_id && useStore.getState().openCitationPreview(citation)) {
+            setOpen(false);
+          } else {
+            show();
+          }
+        }}
         className="inline rounded px-0.5 font-medium text-[var(--accent)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
       >
         [{id}]

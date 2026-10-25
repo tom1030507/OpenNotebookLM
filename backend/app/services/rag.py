@@ -647,6 +647,8 @@ class RAGService:
             "document_title": document_title or "Unknown",
             "text": chunk.text,
             "score": float(score),
+            "start_offset": chunk.start_offset,
+            "end_offset": chunk.end_offset,
             "metadata": {
                 "page_num": chunk.page_num,
                 "timestamp": chunk.ts_start,
@@ -947,6 +949,10 @@ Question: {query}
             
             if chunk["metadata"].get("section"):
                 source["section"] = chunk["metadata"]["section"]
+
+            for key in ("start_offset", "end_offset"):
+                if chunk.get(key) is not None:
+                    source[key] = chunk[key]
             
             sources.append(source)
         
