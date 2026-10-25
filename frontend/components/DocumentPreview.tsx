@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { 
   X, 
   Download, 
@@ -16,13 +16,14 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import api, { Document, SourceGuide } from '@/lib/api';
+import api, { Citation, Document, SourceGuide } from '@/lib/api';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import usePreviewSource from '@/hooks/usePreviewSource';
 import useStore from '@/store/useStore';
 
 interface DocumentPreviewProps {
   document: Document;
+  citation?: Citation;
   onClose: () => void;
 }
 
@@ -41,7 +42,7 @@ const EXTRACTED_TEXT_TYPES: Document['type'][] = [
   'mp3', 'm4a', 'wav', 'ogg', 'webm', 'flac', 'url',
 ];
 
-export default function DocumentPreview({ document, onClose }: DocumentPreviewProps) {
+export default function DocumentPreview({ document, citation, onClose }: DocumentPreviewProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [contentRequest, setContentRequest] = useState<ContentRequest | null>(null);
@@ -49,6 +50,8 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const [contentRefreshCount, setContentRefreshCount] = useState(0);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const citationMarkRef = useRef<HTMLElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const titleId = useId();
   // An uploaded file is behind the API's protected route, so its bytes arrive
   // as an object URL rather than as an address the browser can load directly.
@@ -94,6 +97,29 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const guideError = currentGuideRequest?.status === 'error'
     ? currentGuideRequest.message
     : undefined;
+  const citationRange = useCallback((text: string) => {
+    const start = citation?.start_offset;
+    const end = citation?.end_offset;
+    if (
+      typeof start !== 'number'
+      || typeof end !== 'number'
+      || !Number.isSafeInteger(start)
+      || !Number.isSafeInteger(end)
+      || start < 0
+      || start >= text.length
+      || end <= start
+    ) return null;
+    return { start, end: Math.min(end, text.length) };
+  }, [citation?.end_offset, citation?.start_offset]);
+  const renderHighlightedText = (text: string) => {
+    const range = citationRange(text);
+    if (!range) return text;
+    return <>
+      {text.slice(0, range.start)}
+      <mark ref={citationMarkRef}>{text.slice(range.start, range.end)}</mark>
+      {text.slice(range.end)}
+    </>;
+  };
 
   useEffect(() => {
     if (!shouldRequestContent) {
@@ -132,6 +158,24 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     document.status,
     shouldRequestContent,
   ]);
+
+  useEffect(() => {
+    if (content === undefined || !citationRange(content)) return;
+    citationMarkRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [citationRange, content]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    const timestamp = citation?.timestamp;
+    if (!audio || typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return;
+    const seek = () => { audio.currentTime = Math.max(0, timestamp); };
+    if (audio.readyState >= 1) {
+      seek();
+      return;
+    }
+    audio.addEventListener('loadedmetadata', seek, { once: true });
+    return () => audio.removeEventListener('loadedmetadata', seek);
+  }, [citation?.timestamp, document.id, preview.src]);
 
   useEffect(() => {
     if (document.status !== 'ready') {
@@ -290,7 +334,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
       return (
         <div className="p-6 overflow-y-auto h-full">
           <pre className="whitespace-pre-wrap text-sm font-mono">
-            {content}
+            {renderHighlightedText(content)}
           </pre>
         </div>
       );
@@ -343,11 +387,23 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
       case 'pdf':
         if (preview.src) {
           return (
-            <iframe
-              src={preview.src}
-              className="w-full h-full"
-              title={document.name}
-            />
+            <div className="h-full min-h-0 flex flex-col">
+              {(citation?.page != null || citation?.text) && (
+                <div className="shrink-0 border-b border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm">
+                  {citation?.page != null && (
+                    <p className="text-xs text-[var(--muted-foreground)]">Page {citation.page}</p>
+                  )}
+                  {citation?.text && <p className="mt-1"><mark>{citation.text}</mark></p>}
+                </div>
+              )}
+              <iframe
+                src={citation?.page != null
+                  ? `${preview.src}#page=${Math.max(1, Math.floor(citation.page))}`
+                  : preview.src}
+                className="w-full flex-1 min-h-0"
+                title={document.name}
+              />
+            </div>
           );
         }
         if (document.url && !preview.error) {
@@ -406,6 +462,16 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
           )?.[1];
 
           if (videoId) {
+            const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`);
+            if (
+              typeof citation?.timestamp === 'number'
+              && Number.isFinite(citation.timestamp)
+            ) {
+              embedUrl.searchParams.set(
+                'start',
+                String(Math.max(0, Math.floor(citation.timestamp))),
+              );
+            }
             return (
               <div className="h-full flex flex-col">
                 <div className="p-4 bg-[var(--card)] border-b border-[var(--border)] flex items-center gap-2">
@@ -421,7 +487,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
                 </div>
                 <div className="flex-1 bg-black flex items-center justify-center">
                   <iframe
-                    src={`https://www.youtube.com/embed/${videoId}`}
+                    src={embedUrl.toString()}
                     className="w-full max-w-4xl aspect-video"
                     title={document.name}
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -432,7 +498,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
                   <div className="p-4 bg-[var(--card)] border-t border-[var(--border)]">
                     <h4 className="font-medium mb-2 text-sm">Transcript:</h4>
                     <pre className="whitespace-pre-wrap text-xs text-[var(--muted-foreground)] max-h-32 overflow-y-auto">
-                      {document.content}
+                      {renderHighlightedText(document.content)}
                     </pre>
                   </div>
                 )}
@@ -441,6 +507,27 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
           }
         }
         break;
+
+      case 'mp3':
+      case 'm4a':
+      case 'wav':
+      case 'ogg':
+      case 'webm':
+      case 'flac':
+        return (
+          <div className="h-full min-h-0 flex flex-col gap-3 p-4">
+            {preview.src ? (
+              <audio ref={audioRef} src={preview.src} controls preload="metadata" className="w-full shrink-0" />
+            ) : (
+              <p className="shrink-0 text-sm text-[var(--muted-foreground)]" role={preview.error ? 'alert' : 'status'}>
+                {preview.error || 'Loading audio preview...'}
+              </p>
+            )}
+            <div className="min-h-0 flex-1">
+              {renderExtractedContent()}
+            </div>
+          </div>
+        );
 
       case 'text':
       case 'docx':

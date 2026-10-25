@@ -462,6 +462,12 @@ def test_dense_search_accepts_numpy_and_hidden_nearest_does_not_consume_top_k(db
 
 def test_hydrate_fetches_ordered_metadata_with_one_joined_select(db) -> None:
     """Candidate hydration cannot regress to chunk/document N+1 queries."""
+    chunk = db.get(Chunk, "b-best")
+    chunk.start_offset = 12
+    chunk.end_offset = 28
+    chunk.page_num = 3
+    chunk.ts_start = 31.25
+    db.commit()
     statements = []
 
     def record_select(_connection, _cursor, statement, _parameters, _context, _many):
@@ -476,6 +482,10 @@ def test_hydrate_fetches_ordered_metadata_with_one_joined_select(db) -> None:
 
     assert [payload["chunk_id"] for payload in payloads] == ["b-best", "a-best"]
     assert [payload["document_title"] for payload in payloads] == ["B", "A"]
+    assert payloads[0]["start_offset"] == 12
+    assert payloads[0]["end_offset"] == 28
+    assert payloads[0]["metadata"]["page_num"] == 3
+    assert payloads[0]["metadata"]["timestamp"] == 31.25
     assert len(statements) == 1
 
 

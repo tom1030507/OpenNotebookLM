@@ -872,7 +872,11 @@ describe('API client', () => {
         citations: [{
           document_id: 'document-1',
           document_title: 'Research paper',
+          chunk_id: 'chunk-1',
           page_num: 4,
+          timestamp: 18.5,
+          start_offset: 12,
+          end_offset: 28,
           text_preview: 'Evidence',
         }],
         citation_checks: [{
@@ -896,7 +900,11 @@ describe('API client', () => {
         text: 'Evidence',
         document_id: 'document-1',
         document_title: 'Research paper',
+        chunk_id: 'chunk-1',
         page_num: 4,
+        timestamp: 18.5,
+        start_offset: 12,
+        end_offset: 28,
         text_preview: 'Evidence',
       }],
       citation_checks: [{

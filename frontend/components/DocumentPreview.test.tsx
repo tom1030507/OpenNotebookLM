@@ -4,7 +4,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import api, { type Document, type Project } from '@/lib/api';
+import api, { type Citation, type Document, type Project } from '@/lib/api';
 import useStore, { selectedSourceIds } from '@/store/useStore';
 import DocumentPreview from './DocumentPreview';
 
@@ -247,6 +247,132 @@ describe('DocumentPreview', () => {
         .getAttribute('href'),
     ).toBe('https://example.com/article');
     expect(screen.queryByTitle('Example article')).toBeNull();
+  });
+
+  it.each(['md', 'url'] as const)(
+    'scrolls to and highlights the cited range in %s sources',
+    async (sourceType) => {
+    const document = await loadDocument({
+      source_type: sourceType,
+      source_url: sourceType === 'url'
+        ? 'https://example.com/article'
+        : 'https://example.com/article.md',
+      title: 'Example article',
+    });
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('First\n\nCited passage here.\n\nLast');
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const citation: Citation = {
+      source: 'Example article',
+      document_id: 'document-1',
+      start_offset: 7,
+      end_offset: 26,
+    };
+
+    render(<DocumentPreview document={document} citation={citation} onClose={() => {}} />);
+
+    const mark = await screen.findByText('Cited passage here.');
+    expect(mark.tagName).toBe('MARK');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+    },
+  );
+
+  it('opens older PDF citations on their page and shows the cited text', async () => {
+    const document = await loadDocument({
+      source_type: 'pdf',
+      source_url: 'https://example.com/paper.pdf',
+      title: 'Paper',
+    });
+    const citation: Citation = {
+      source: 'Paper',
+      document_id: 'document-1',
+      page: 3,
+      text: 'Evidence on page three.',
+    };
+
+    const { container } = render(
+      <DocumentPreview document={document} citation={citation} onClose={() => {}} />,
+    );
+
+    expect(container.querySelector('iframe')?.getAttribute('src'))
+      .toBe('https://example.com/paper.pdf#page=3');
+    expect(screen.getByText('Evidence on page three.').tagName).toBe('MARK');
+  });
+
+  it('seeks YouTube previews to the cited timestamp', async () => {
+    const document = await loadDocument({
+      source_type: 'youtube',
+      source_url: 'https://www.youtube.com/watch?v=video-123',
+      title: 'Lecture',
+    });
+
+    const { container } = render(
+      <DocumentPreview
+        document={document}
+        citation={{ source: 'Lecture', timestamp: 32.7 }}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('iframe')?.getAttribute('src'))
+      .toBe('https://www.youtube.com/embed/video-123?start=32');
+  });
+
+  it('seeks an uploaded audio source to the cited timestamp', async () => {
+    const document = await loadDocument({
+      source_type: 'mp3' as Document['type'],
+      source_url: 'uploads/document-1_lecture.mp3',
+      title: 'Lecture',
+    });
+    const fetchFile = vi.spyOn(api, 'fetchDocumentFile').mockResolvedValue(
+      new Blob(['audio'], { type: 'audio/mpeg' }),
+    );
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Transcript excerpt.');
+    stubObjectUrls();
+
+    const { container } = render(
+      <DocumentPreview
+        document={document}
+        citation={{ source: 'Lecture', timestamp: 42 }}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('audio')).not.toBeNull());
+    const player = container.querySelector('audio');
+    expect(player).not.toBeNull();
+    Object.defineProperty(player, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+
+    fireEvent.loadedMetadata(player!);
+
+    await waitFor(() => expect(player?.currentTime).toBe(42));
+    expect(fetchFile).toHaveBeenCalledWith('document-1');
+  });
+
+  it('keeps older text citations readable when passage offsets are missing', async () => {
+    const document = await loadDocument({
+      source_type: 'txt',
+      source_url: 'uploads/document-1_notes.txt',
+      title: 'Notes',
+    });
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Legacy source content');
+
+    const { container } = render(
+      <DocumentPreview
+        document={document}
+        citation={{ source: 'Notes', document_id: 'document-1', text: 'Older excerpt.' }}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText('Legacy source content')).toBeTruthy();
+    expect(container.querySelector('mark')).toBeNull();
   });
 
   it('shows the guide and drafts a question scoped to its source', async () => {

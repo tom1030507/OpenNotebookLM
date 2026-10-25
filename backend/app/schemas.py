@@ -716,6 +716,11 @@ class ReportCitation(BaseModel):
     document_id: str
     source: str
     text: str
+    chunk_id: Optional[str] = None
+    page: Optional[int] = None
+    timestamp: Optional[float] = None
+    start_offset: Optional[int] = None
+    end_offset: Optional[int] = None
 
 
 class ReportResponse(BaseModel):

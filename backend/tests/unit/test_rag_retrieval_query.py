@@ -211,6 +211,29 @@ def service():
 class TestConversationRetrievalQuery:
     """Retrieval searches the question; the model still sees the transcript."""
 
+    def test_citations_keep_chunk_offsets_and_media_location(self, service):
+        instance, _, _ = service
+        rag = real_rag_module()
+        chunk = types.SimpleNamespace(
+            id="chunk-1",
+            document_id="document-1",
+            text="A cited passage.",
+            page_num=3,
+            ts_start=31.25,
+            start_offset=12,
+            end_offset=28,
+            meta_json={},
+            heading_path=None,
+        )
+
+        payload = rag.RAGService._chunk_payload(chunk, "Research", 0.9)
+        citation = instance._format_sources([payload])[0]
+
+        assert citation["start_offset"] == 12
+        assert citation["end_offset"] == 28
+        assert citation["page_num"] == 3
+        assert citation["timestamp"] == 31.25
+
     def test_retrieval_uses_the_current_question(self, db, service):
         instance, embeddings, _ = service
         question = "And what does the feed-forward layer contribute?"

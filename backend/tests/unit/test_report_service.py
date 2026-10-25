@@ -124,8 +124,43 @@ def test_report_service_maps_only_rag_citations_to_renderer_shape():
             "document_id": "doc-1",
             "source": "Rainfall study",
             "text": "Rainfall increased in the western region.",
+            "chunk_id": "chunk-1",
         }],
     }
+
+
+def test_report_service_keeps_citation_passage_location():
+    rag = RecordingRAGService({
+        "answer": "The result changed [Source 1].",
+        "sources": [{
+            "id": 1,
+            "document_id": "doc-1",
+            "document_title": "Rainfall study",
+            "chunk_id": "chunk-1",
+            "text_preview": "Rainfall increased in the western region.",
+            "page_num": 3,
+            "timestamp": 31.25,
+            "start_offset": 12,
+            "end_offset": 28,
+            "score": 0.9,
+        }],
+    })
+
+    result = ReportService(rag).generate(
+        object(), "project-a", "briefing", None, ["doc-1"],
+    )
+
+    assert result["citations"] == [{
+        "id": 1,
+        "document_id": "doc-1",
+        "source": "Rainfall study",
+        "text": "Rainfall increased in the western region.",
+        "chunk_id": "chunk-1",
+        "page": 3,
+        "timestamp": 31.25,
+        "start_offset": 12,
+        "end_offset": 28,
+    }]
 
 
 def test_report_service_preserves_empty_rag_result_without_fabricating_citations():

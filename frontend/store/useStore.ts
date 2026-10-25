@@ -3,6 +3,7 @@ import { devtools, persist } from 'zustand/middleware';
 import api from '@/lib/api';
 import type {
   Conversation,
+  Citation,
   Document,
   Message,
   MessageRating,
@@ -39,6 +40,7 @@ interface AppState {
   sidebarOpen: boolean;
   studioOpen: boolean;
   pendingMindMapQuestion: { projectId: string; question: string } | null;
+  citationPreview: { document: Document; citation: Citation } | null;
 
   // Preferences
   /** Whether finishing a source announces itself. Read by useDocumentStatusWatch. */
@@ -115,6 +117,8 @@ interface AppState {
   toggleStudio: () => void;
   draftMindMapQuestion: (projectId: string, question: string) => void;
   consumeMindMapQuestion: (projectId: string) => string | null;
+  openCitationPreview: (citation: Citation) => boolean;
+  clearCitationPreview: () => void;
 
   // Actions - Preferences
   setNotifyOnProcessingComplete: (enabled: boolean) => void;
@@ -291,6 +295,7 @@ const initialState = {
   sidebarOpen: true,
   studioOpen: true,
   pendingMindMapQuestion: null,
+  citationPreview: null,
   notifyOnProcessingComplete: true,
 };
 
@@ -345,6 +350,7 @@ const useStore = create<AppState>()(
               loadingProjects: false,
               ...(!currentProject || projectChanged ? {
                 pendingMindMapQuestion: null,
+                citationPreview: null,
                 documents: [],
                 conversations: [],
                 currentConversation: null,
@@ -374,6 +380,7 @@ const useStore = create<AppState>()(
           set({
             currentProject: project,
             pendingMindMapQuestion: null,
+            citationPreview: null,
             loadingProjects: false,
             documents: [],
             conversations: [],
@@ -1068,6 +1075,17 @@ const useStore = create<AppState>()(
           return pendingMindMapQuestion.question;
         },
 
+        openCitationPreview: (citation) => {
+          const document = get().documents.find(
+            (item) => item.id === citation.document_id,
+          );
+          if (!document) return false;
+          set({ citationPreview: { document, citation } });
+          return true;
+        },
+
+        clearCitationPreview: () => set({ citationPreview: null }),
+
         // Preferences
         setNotifyOnProcessingComplete: (enabled) => {
           set({ notifyOnProcessingComplete: enabled });
@@ -1081,6 +1099,7 @@ const useStore = create<AppState>()(
             projects: [],
             currentProject: null,
             pendingMindMapQuestion: null,
+            citationPreview: null,
             loadingProjects: false,
             documents: [],
             loadingDocuments: false,

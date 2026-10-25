@@ -85,15 +85,22 @@ class ReportService:
             retrieval_query=retrieval_query,
             allowed_document_ids=document_ids,
         )
+        citations = []
+        for source in result.get("sources", []):
+            citation = {
+                "id": source["id"],
+                "document_id": source["document_id"],
+                "source": source["document_title"],
+                "text": source["text_preview"],
+            }
+            for key in ("chunk_id", "timestamp", "start_offset", "end_offset"):
+                if source.get(key) is not None:
+                    citation[key] = source[key]
+            if source.get("page_num") is not None:
+                citation["page"] = source["page_num"]
+            citations.append(citation)
+
         return {
             "markdown": result.get("answer", ""),
-            "citations": [
-                {
-                    "id": source["id"],
-                    "document_id": source["document_id"],
-                    "source": source["document_title"],
-                    "text": source["text_preview"],
-                }
-                for source in result.get("sources", [])
-            ],
+            "citations": citations,
         }

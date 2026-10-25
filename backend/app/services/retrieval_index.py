@@ -614,6 +614,8 @@ class RetrievalIndex:
                 "document_id": chunk.document_id,
                 "document_title": document_title or "Unknown",
                 "text": chunk.text,
+                "start_offset": chunk.start_offset,
+                "end_offset": chunk.end_offset,
                 "metadata": {
                     "page_num": chunk.page_num,
                     "timestamp": chunk.ts_start,
