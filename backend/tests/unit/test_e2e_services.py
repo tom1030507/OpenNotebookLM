@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import get_settings
 from app.db.models import Base, Chunk, Document, Embedding
 from app.routers.ingest import get_document_service
 from app.routers.query import get_rag_service
@@ -399,6 +400,10 @@ def test_fast_overrides_select_the_deterministic_service_graph(monkeypatch):
     rag_service = application.dependency_overrides[get_rag_service]()
     assert isinstance(
         document_service.embedding_service, DeterministicEmbeddingService
+    )
+    assert (
+        document_service.embedding_service.dimensions
+        == get_settings().emb_dimension
     )
     assert document_service.embedding_service is rag_service.embedding_service
     assert isinstance(document_service.url_adapter, FixedURLAdapter)

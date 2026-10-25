@@ -6,7 +6,7 @@ from app.config import get_settings
 from app.lifecycle import lifespan
 from app.routers import (
     auth, projects, ingest, query, export, health, files, mindmap, video,
-    audio_overview, notes,
+    audio_overview, notes, study,
 )
 from app.routers import project_overview
 from app.api import cache
@@ -55,6 +55,7 @@ app.include_router(mindmap.router, prefix="/api", tags=["mindmap"])
 app.include_router(video.router, prefix="/api", tags=["video summary"])
 app.include_router(audio_overview.router, prefix="/api", tags=["audio overview"])
 app.include_router(notes.router, prefix="/api", tags=["notes"])
+app.include_router(study.router, prefix="/api", tags=["study tools"])
 app.include_router(project_overview.router, prefix="/api", tags=["project overview"])
 app.include_router(cache.router)  # Cache management endpoints
 

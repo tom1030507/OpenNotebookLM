@@ -23,6 +23,7 @@ import NotesSection from './NotesSection';
 const MindMapDialog = React.lazy(() => import('@/components/MindMapDialog'));
 const VideoSummaryDialog = React.lazy(() => import('@/components/VideoSummaryDialog'));
 const AudioOverviewDialog = React.lazy(() => import('@/components/AudioOverviewDialog'));
+const StudyToolsDialog = React.lazy(() => import('@/components/StudyToolsDialog'));
 
 interface ProjectResult<T> {
   projectId: string;
@@ -90,6 +91,13 @@ export default function StudioPanel({
   const [mindMap, setMindMap] = useState<ProjectResult<MindMap> | null>(null);
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
   const [videoSummary, setVideoSummary] = useState<ProjectResult<VideoSummary> | null>(null);
+  const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
+  const [studyDialog, setStudyDialog] = useState<{
+    projectId: string;
+    mode: 'flashcards' | 'quiz';
+    documentIds: string[];
+  } | null>(null);
+  const moreOptionsRef = useRef<HTMLButtonElement>(null);
   const [audioOverviewCapability, setAudioOverviewCapability] = useState<{
     projectId: string;
     enabled: boolean;
@@ -148,6 +156,8 @@ export default function StudioPanel({
     setReport(null);
     setReportSaveState('idle');
     setVideoSummary(null);
+    setStudyDialog(null);
+    setIsMoreOptionsOpen(false);
     setIsAudioOverviewOpen(false);
     setReportError('');
   }, [currentProject?.id]);
@@ -316,6 +326,19 @@ export default function StudioPanel({
     return undefined;
   };
 
+  const openStudyTools = (mode: 'flashcards' | 'quiz') => {
+    if (!currentProject) return;
+    const state = useStore.getState();
+    const selected = selectedSourceIds(state);
+    const documentIds = state.documents
+      .filter((document) => document.status === 'ready'
+        && (!selected || selected.includes(document.id)))
+      .map((document) => document.id);
+    setIsMoreOptionsOpen(false);
+    moreOptionsRef.current?.focus();
+    setStudyDialog({ projectId: currentProject.id, mode, documentIds });
+  };
+
   // A video summary of nothing is two empty slides, so the panel says so
   // instead of playing them. The project's own `document_count` is a snapshot
   // from the last project fetch and goes stale the moment a source is added or
@@ -332,6 +355,9 @@ export default function StudioPanel({
     : null;
   const currentVideoSummary = videoSummary !== null && videoSummary.projectId === currentProject?.id
     ? videoSummary.value
+    : null;
+  const currentStudyDialog = studyDialog?.projectId === currentProject?.id
+    ? studyDialog
     : null;
 
   // A reading already under way stays stoppable after its sources are cleared.
@@ -566,22 +592,43 @@ export default function StudioPanel({
             </section>
           )}
 
-          {/* More Options */}
-          <button
-            disabled
-            aria-label={`More options (${availabilityLabel})`}
-            className="w-full mt-4 p-3 text-sm text-[var(--muted-foreground)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-0.5"
-          >
-            <span className="flex items-center gap-2">
-              <span className="truncate">More options</span>
-              <ChevronDown className="w-4 h-4 shrink-0" />
-            </span>
-            {/* The note used to live in the accessible name only, to keep it
-                from wrapping in the bounded Studio track — which left a sighted
-                reader with a greyed control and no reason for it. On its own
-                line it fits without pushing the label into a wrap. */}
-            <span className="truncate text-xs">{availabilityLabel}</span>
-          </button>
+          <div className="relative mt-4">
+            <button
+              ref={moreOptionsRef}
+              type="button"
+              disabled={!currentProject || loadingDocuments}
+              aria-label="More options"
+              aria-expanded={isMoreOptionsOpen}
+              aria-controls="studio-study-tools-menu"
+              onClick={() => setIsMoreOptionsOpen(!isMoreOptionsOpen)}
+              className="w-full rounded-lg p-3 text-sm text-[var(--muted-foreground)] flex flex-col items-center justify-center gap-0.5 hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <span className="flex items-center gap-2">
+                <span className="truncate">More options</span>
+                <ChevronDown className="w-4 h-4 shrink-0" />
+              </span>
+              <span className="truncate text-xs">
+                {!currentProject ? 'Select a project first'
+                  : loadingDocuments ? 'Loading sources…' : 'Flashcards and practice quiz'}
+              </span>
+            </button>
+            <div
+              id="studio-study-tools-menu"
+              role="group"
+              aria-label="Study tools"
+              hidden={!isMoreOptionsOpen}
+              className="absolute inset-x-0 top-full z-10 mt-1 rounded-lg border border-[var(--border)] bg-[var(--popover)] p-1 shadow-lg"
+            >
+              <button type="button" onClick={() => openStudyTools('flashcards')}
+                className="w-full rounded px-3 py-2 text-left text-sm hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]">
+                Flashcards
+              </button>
+              <button type="button" onClick={() => openStudyTools('quiz')}
+                className="w-full rounded px-3 py-2 text-left text-sm hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]">
+                Practice quiz
+              </button>
+            </div>
+          </div>
 
           <NotesSection projectId={currentProject?.id ?? null} />
 
@@ -614,6 +661,20 @@ export default function StudioPanel({
               `${currentVideoSummary.project_name} video summary`, {
                 studio_kind: 'video_summary', payload_json: currentVideoSummary,
               }) : undefined}
+          />
+        </React.Suspense>
+      )}
+      {currentStudyDialog && (
+        <React.Suspense fallback={<StudioDialogFallback />}>
+          <StudyToolsDialog
+            key={`${currentStudyDialog.projectId}-${currentStudyDialog.mode}`}
+            projectId={currentStudyDialog.projectId}
+            mode={currentStudyDialog.mode}
+            documentIds={currentStudyDialog.documentIds}
+            onClose={() => {
+              setStudyDialog(null);
+              setIsMoreOptionsOpen(false);
+            }}
           />
         </React.Suspense>
       )}

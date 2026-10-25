@@ -220,6 +220,39 @@ class FixedURLAdapter:
         }
 
 
+class DeterministicStudyLLM:
+    """Return source-indexed study examples for browser E2E workflows."""
+
+    def generate(self, prompt: str, **kwargs) -> dict[str, Any]:
+        """Return one stable card or quiz question for the controlled URL source.
+
+        Args:
+            prompt: Study prompt; its mode selects the fixture response.
+            **kwargs: Accepted for the production LLM interface.
+
+        Returns:
+            A production-shaped JSON-mode response.
+        """
+        del kwargs
+        if "Create concise question-and-answer flashcards." in prompt:
+            text = (
+                '{"flashcards":[{"front":"What is the observatory access code?",'
+                '"back":"ORBIT-7319","source_index":1}]}'
+            )
+        else:
+            text = (
+                '{"questions":[{"question":"Which code opens the observatory?",'
+                '"options":["ORBIT-0000","ORBIT-7319","ORBIT-73190","Unknown"],'
+                '"answer_index":1,"explanation":"The source lists ORBIT-7319 as the code.",'
+                '"source_index":1}]}'
+            )
+        return {
+            "text": text,
+            "model": "e2e-study-v1",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
+
 class FixedYouTubeAdapter:
     """Return a controlled transcript without contacting YouTube."""
 

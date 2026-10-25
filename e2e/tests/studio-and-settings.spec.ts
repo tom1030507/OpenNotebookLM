@@ -116,6 +116,58 @@ test('explores a mind map and brings a question back to mobile chat', async ({ a
   expect(queryRequests).toEqual([]);
 });
 
+test('studies selected sources with flashcards and a scored quiz', async ({ api, page }, testInfo) => {
+  const { project, documentId } = await setupReadyUrlWorkspace(api, page, testInfo, 'study-tools');
+  const studio = page.getByRole('complementary', { name: 'Studio' });
+
+  await studio.getByRole('button', { name: 'More options', exact: true }).click();
+  await page.getByRole('group', { name: 'Study tools' })
+    .getByRole('button', { name: 'Flashcards', exact: true }).click();
+  const cards = page.getByRole('dialog', { name: 'Flashcards' });
+  await expect(cards).toBeVisible();
+  await cards.getByLabel('Number of cards').fill('5');
+  await cards.getByLabel('Focus (optional)').fill('access code');
+  const cardsResponse = page.waitForResponse(
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/flashcards`
+      && response.request().method() === 'POST',
+  );
+  await cards.getByRole('button', { name: 'Generate flashcards', exact: true }).click();
+  const cardResponse = await cardsResponse;
+  expect(cardResponse.status()).toBe(200);
+  expect(cardResponse.request().postDataJSON()).toEqual({
+    document_ids: [documentId], count: 5, focus: 'access code',
+  });
+  await expect(cards).toContainText('What is the observatory access code?');
+  await cards.getByRole('button', { name: 'Flip card' }).click();
+  await expect(cards).toContainText('ORBIT-7319');
+  await cards.getByRole('button', { name: 'Preview source 1' }).click();
+  await expect(page.getByRole('tooltip')).toContainText('E2E Observatory Field Notes');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toBeHidden();
+  await expect(cards).toBeVisible();
+  await cards.getByRole('button', { name: 'Got it' }).click();
+  await expect(cards).toContainText('Got it: 1 · Again: 0');
+  await cards.getByRole('button', { name: 'Close study tools' }).click();
+
+  await studio.getByRole('button', { name: 'More options', exact: true }).click();
+  await page.getByRole('group', { name: 'Study tools' })
+    .getByRole('button', { name: 'Practice quiz', exact: true }).click();
+  const quiz = page.getByRole('dialog', { name: 'Practice quiz' });
+  const quizResponsePromise = page.waitForResponse(
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/quiz`
+      && response.request().method() === 'POST',
+  );
+  await quiz.getByRole('button', { name: 'Generate quiz', exact: true }).click();
+  const quizResponse = await quizResponsePromise;
+  expect(quizResponse.status()).toBe(200);
+  expect(quizResponse.request().postDataJSON()).toEqual({ document_ids: [documentId], count: 10 });
+  await expect(quiz).toContainText('Which code opens the observatory?');
+  await quiz.getByRole('radio', { name: 'ORBIT-7319', exact: true }).check();
+  await quiz.getByRole('button', { name: 'Check answer' }).click();
+  await expect(quiz).toContainText('The source lists ORBIT-7319 as the code.');
+  await expect(quiz).toContainText('Final score: 1 / 1');
+});
+
 test('downloads a Markdown project report', async ({ api, page }, testInfo) => {
   const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'report');
   const endpoint = `${runtime.browserApiUrl}/export/project/${project.id}/summary`;
