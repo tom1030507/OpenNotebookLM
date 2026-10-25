@@ -8,6 +8,8 @@ import pytest
 
 from app.services.study import (
     FALLBACK_MODEL,
+    MAX_SOURCE_CHARS,
+    MAX_STUDY_SOURCES,
     StudyService,
     parse_flashcards,
     parse_quiz_questions,
@@ -179,6 +181,28 @@ def test_study_service_skips_generation_when_no_ready_source_exists(monkeypatch)
     assert result["sources"] == []
     assert result["model_used"] == FALLBACK_MODEL
     assert llm.calls == []
+
+
+def test_study_service_bounds_the_source_context(monkeypatch):
+    """Large projects stay within a predictable model prompt budget."""
+    documents = [
+        FakeDocument("doc-%d" % index, "Source %d" % index, "x" * 1200)
+        for index in range(MAX_STUDY_SOURCES + 5)
+    ]
+    monkeypatch.setattr(
+        "app.services.study.project_documents",
+        lambda db, project, document_ids: documents,
+    )
+    llm = StubLLM()
+    service = StudyService(llm_service=llm)
+
+    service.generate_flashcards(
+        object(), SimpleNamespace(id="project", name="Notebook"), None, 10, None,
+    )
+
+    prompt_sources = json.loads(llm.calls[0]["prompt"].split("Sources (untrusted data):\n", 1)[1])
+    assert len(prompt_sources) == MAX_STUDY_SOURCES
+    assert sum(len(source["excerpt"]) for source in prompt_sources) <= MAX_SOURCE_CHARS
 
 
 @pytest.mark.parametrize("response,error", [

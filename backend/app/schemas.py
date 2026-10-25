@@ -479,6 +479,71 @@ class SourceSelection(BaseModel):
         return unique_ids
 
 
+class StudyRequest(SourceSelection):
+    """Options for one temporary flashcard or quiz generation request."""
+
+    count: int = Field(default=10, ge=5, le=30)
+    focus: Optional[str] = Field(default=None, max_length=500)
+
+
+class StudySource(BaseModel):
+    """A source excerpt used by a generated study item."""
+
+    model_config = {"extra": "forbid"}
+
+    document_id: str
+    title: str
+    excerpt: str = Field(..., max_length=1200)
+
+
+class FlashcardItem(BaseModel):
+    """One validated front-and-back study card."""
+
+    model_config = {"extra": "forbid"}
+
+    front: str = Field(..., min_length=1, max_length=300)
+    back: str = Field(..., min_length=1, max_length=1200)
+    document_id: str
+
+
+class QuizItem(BaseModel):
+    """One validated single-answer multiple-choice question."""
+
+    model_config = {"extra": "forbid"}
+
+    question: str = Field(..., min_length=1, max_length=500)
+    options: List[str] = Field(..., min_length=4, max_length=4)
+    answer_index: int = Field(..., ge=0, le=3)
+    explanation: str = Field(..., min_length=1, max_length=1200)
+    document_id: str
+
+
+class FlashcardsResponse(BaseModel):
+    """Study cards, project metadata, and their citation sources."""
+
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
+
+    project_id: str
+    project_name: str
+    generated_at: UtcDatetime
+    model_used: str
+    items: List[FlashcardItem]
+    sources: List[StudySource]
+
+
+class QuizResponse(BaseModel):
+    """Quiz questions, project metadata, and their citation sources."""
+
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
+
+    project_id: str
+    project_name: str
+    generated_at: UtcDatetime
+    model_used: str
+    items: List[QuizItem]
+    sources: List[StudySource]
+
+
 class AudioOverviewCreate(SourceSelection):
     """Generation style and source selection for one audio overview."""
 

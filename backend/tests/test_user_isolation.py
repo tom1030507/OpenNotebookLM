@@ -17,6 +17,7 @@ import uuid
 from types import ModuleType
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -51,11 +52,13 @@ sys.modules["app.services.rag"] = rag_module
 from app.main import app as production_app  # noqa: E402
 from app.routers.mindmap import get_mindmap_service  # noqa: E402
 from app.routers.video import get_video_summary_service  # noqa: E402
+from app.routers.study import get_study_service  # noqa: E402
 from app.routers.project_overview import get_project_overview_service  # noqa: E402
 from app.routers.audio_overview import get_audio_overview_worker  # noqa: E402
 from app.services.project_overview import ProjectOverviewService  # noqa: E402
 from app.services.mindmap import MindMapService  # noqa: E402
 from app.services.video_summary import VideoSummaryService  # noqa: E402
+from app.services.study import StudyService  # noqa: E402
 from conftest import OfflineLLM, authenticated_client  # noqa: E402
 
 MISSING_ID = str(uuid.uuid4())
@@ -117,6 +120,9 @@ def env():
     # The video summary asks the same configured LLM to write its narration.
     production_app.dependency_overrides[get_video_summary_service] = (
         lambda: VideoSummaryService(llm_service=OfflineLLM())
+    )
+    production_app.dependency_overrides[get_study_service] = (
+        lambda: StudyService(llm_service=OfflineLLM())
     )
     production_app.dependency_overrides[get_project_overview_service] = (
         lambda: ProjectOverviewService(llm_service=OfflineLLM())
@@ -1157,6 +1163,31 @@ class TestSharedStudioIsolation:
         assert rejected.status_code == 404
 
 
+class TestStudyIsolation:
+    """Study generation can read only a visible project and its linked sources."""
+
+    def test_flashcards_and_quiz_require_project_visibility(self, env):
+        project_id = make_project(env.alice)
+
+        for mode in ("flashcards", "quiz"):
+            path = "/api/projects/%s/%s" % (project_id, mode)
+            assert env.bob.post(path, json={"count": 5}).status_code == 404
+            assert TestClient(production_app).post(path, json={"count": 5}).status_code == 401
+
+    def test_flashcards_and_quiz_reject_documents_outside_project(self, env):
+        project_id = make_project(env.alice)
+        unlinked = make_document(env.session, env.alice_user, "Unlinked source")
+        foreign = make_document(env.session, env.bob_user, "Private source")
+
+        for mode in ("flashcards", "quiz"):
+            path = "/api/projects/%s/%s" % (project_id, mode)
+            for document_id in (unlinked, foreign):
+                response = env.alice.post(
+                    path, json={"document_ids": [document_id], "count": 5},
+                )
+                assert response.status_code == 404
+
+
 class TestVideoSummaryIsolation:
     """A video summary narrates every source in a project, so it is scoped too."""
 
@@ -1331,6 +1362,8 @@ class TestNoteIsolation:
 SELECTION_ROUTES = [
     "/api/projects/%s/mindmap",
     "/api/projects/%s/video-summary",
+    "/api/projects/%s/flashcards",
+    "/api/projects/%s/quiz",
     "/api/export/project/%s/summary",
 ]
 

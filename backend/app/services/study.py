@@ -14,6 +14,8 @@ from app.services.source_digest import document_excerpt, load_json_object, proje
 logger = structlog.get_logger()
 
 MAX_STUDY_ITEMS = 30
+MAX_STUDY_SOURCES = 24
+MAX_SOURCE_CHARS = 18_000
 MAX_REPLY_CHARS = 200_000
 MAX_FRONT_CHARS = 300
 MAX_BACK_CHARS = 1_200
@@ -237,7 +239,7 @@ class StudyService:
         documents = [
             document for document in project_documents(db, project, document_ids)
             if document.status == "ready" and document_excerpt(document)
-        ]
+        ][:MAX_STUDY_SOURCES]
         items: List[Dict[str, Any]] = []
         model_used = FALLBACK_MODEL
         if documents:
@@ -287,11 +289,12 @@ class StudyService:
         Returns:
             A prompt with JSON-encoded source and focus values.
         """
+        excerpt_limit = min(1200, MAX_SOURCE_CHARS // max(1, len(documents)))
         sources = [
             {
                 "source_index": index,
                 "title": document.title,
-                "excerpt": document_excerpt(document),
+                "excerpt": document_excerpt(document)[:excerpt_limit],
             }
             for index, document in enumerate(documents, start=1)
         ]
