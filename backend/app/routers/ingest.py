@@ -67,11 +67,20 @@ def get_upload_config() -> UploadConfigResponse:
     Returns:
         Effective file extensions and the maximum upload size in megabytes.
     """
+    effective_overlap = settings.chunk_overlap
+    # The packer cannot carry a full chunk as overlap into the next chunk.
+    if effective_overlap <= 0 or effective_overlap >= settings.chunk_size:
+        effective_overlap = 0
+
     return UploadConfigResponse(
         allowed_file_types=sorted(
             extension.lstrip(".") for extension in _configured_upload_extensions()
         ),
         max_file_size_mb=settings.max_file_size_mb,
+        max_text_characters=(
+            settings.max_chunks_per_doc
+            * max(1, settings.chunk_size - effective_overlap)
+        ),
     )
 
 

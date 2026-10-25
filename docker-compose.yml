@@ -106,6 +106,7 @@ services:
       dockerfile: Dockerfile
       args:
         BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
+        MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
     container_name: opennotebook-frontend
     ports:
       - "3000:3000"

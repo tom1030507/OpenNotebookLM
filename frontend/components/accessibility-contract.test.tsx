@@ -76,6 +76,7 @@ beforeEach(() => {
   vi.spyOn(api, 'getUploadConfig').mockResolvedValue({
     allowed_file_types: ['pdf', 'txt', 'md'],
     max_file_size_mb: 50,
+    max_text_characters: 462000,
   });
 });
 
@@ -588,7 +589,7 @@ describe('workspace accessibility contract', () => {
     fireEvent.change(fileInput, {
       target: { files: [new File(['pdf'], 'paper.pdf', { type: 'application/pdf' })] },
     });
-    expect(screen.getByRole('button', { name: 'Remove file' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Remove file' })).toBeTruthy();
   });
 
   it('names the sources project selector', () => {

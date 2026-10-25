@@ -1824,7 +1824,8 @@ def test_chunk_ceiling_failure_keeps_actionable_metadata(tmp_path):
                 "chunk_count": 1001,
                 "max_chunks": 1000,
                 "action": (
-                    "Reduce the source size or increase CHUNK_SIZE before retrying."
+                    "Split it into smaller sources or ask your administrator to "
+                    "raise the per-source chunk limit."
                 ),
             }
             assert db.query(Chunk).count() == 0

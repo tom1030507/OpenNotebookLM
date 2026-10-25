@@ -97,6 +97,7 @@ beforeEach(() => {
   vi.spyOn(api, 'getUploadConfig').mockResolvedValue({
     allowed_file_types: ['pdf', 'txt', 'md'],
     max_file_size_mb: 50,
+    max_text_characters: 462000,
   });
   useStore.setState({
     projects: [currentProject],
@@ -191,12 +192,13 @@ describe('Add Sources controls', () => {
     const input = screen.getByLabelText('browse') as HTMLInputElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     const files = [
-      new File(['First source'], 'first.txt', { type: 'text/plain' }),
-      new File(['Second source'], 'second.txt', { type: 'text/plain' }),
+      new File(['First source'], 'first.pdf', { type: 'application/pdf' }),
+      new File(['Second source'], 'second.pdf', { type: 'application/pdf' }),
     ];
     fireEvent.change(input, { target: { files } });
 
     expect(input.multiple).toBe(true);
+    await screen.findByText('Selected Files:');
     fireEvent.click(screen.getByRole('button', { name: 'Upload 2 file(s)' }));
     await waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(2));
     expect(uploadDocument).toHaveBeenNthCalledWith(1, 'project-1', files[0]);

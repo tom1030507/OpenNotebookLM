@@ -105,6 +105,9 @@ def test_upload_config_reports_effective_runtime_limits(monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="user")
     monkeypatch.setattr(ingest.settings, "allowed_file_types", "PDF, .txt, docx, exe")
     monkeypatch.setattr(ingest.settings, "max_file_size_mb", 23)
+    monkeypatch.setattr(ingest.settings, "chunk_size", 512)
+    monkeypatch.setattr(ingest.settings, "chunk_overlap", 50)
+    monkeypatch.setattr(ingest.settings, "max_chunks_per_doc", 1000)
 
     response = TestClient(app).get("/api/upload-config")
 
@@ -112,7 +115,16 @@ def test_upload_config_reports_effective_runtime_limits(monkeypatch):
     assert response.json() == {
         "allowed_file_types": ["docx", "pdf", "txt"],
         "max_file_size_mb": 23,
+        "max_text_characters": 462000,
     }
+
+
+def test_upload_config_ignores_overlap_that_cannot_fit_a_next_chunk(monkeypatch):
+    monkeypatch.setattr(ingest.settings, "chunk_size", 512)
+    monkeypatch.setattr(ingest.settings, "chunk_overlap", 512)
+    monkeypatch.setattr(ingest.settings, "max_chunks_per_doc", 1000)
+
+    assert ingest.get_upload_config().max_text_characters == 512000
 
 
 def test_upload_route_rejects_oversized_content_length_before_service(monkeypatch):

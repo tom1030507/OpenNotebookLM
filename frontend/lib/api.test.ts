@@ -19,8 +19,12 @@ afterEach(() => {
 
 
 describe('API client', () => {
-  it('fetches the runtime upload formats and file size limit', async () => {
-    const config = { allowed_file_types: ['pdf', 'md'], max_file_size_mb: 23 };
+  it('fetches the runtime upload formats and limits', async () => {
+    const config = {
+      allowed_file_types: ['pdf', 'md'],
+      max_file_size_mb: 23,
+      max_text_characters: 462000,
+    };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(config));
     vi.stubGlobal('fetch', fetchMock);
 

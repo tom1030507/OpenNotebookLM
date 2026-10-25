@@ -14,7 +14,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import api, { type UploadConfig } from '@/lib/api';
-import { getUploadFileError } from '@/lib/uploadValidation';
+import { getTextContentError, getUploadFileError } from '@/lib/uploadValidation';
 
 interface FileUploadProps {
   onUpload: (files: File[] | string[]) => Promise<void>;
@@ -39,7 +39,9 @@ export default function FileUpload({
   const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube' | 'text'>('file');
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
   const uploadInFlightRef = useRef(false);
+  const validatingFilesRef = useRef(false);
   const allowedFileTypes = uploadConfig?.allowed_file_types ?? [];
   const canUploadFiles = Boolean(uploadConfig && allowedFileTypes.length > 0);
 
@@ -56,7 +58,9 @@ export default function FileUpload({
   }, []);
 
   const startUpload = () => {
-    if (isUploading || uploadInFlightRef.current) return false;
+    if (
+      isUploading || isValidating || validatingFilesRef.current || uploadInFlightRef.current
+    ) return false;
 
     uploadInFlightRef.current = true;
     setIsUploading(true);
@@ -80,36 +84,46 @@ export default function FileUpload({
     setIsDragging(false);
   }, []);
 
-  const validateAndAddFiles = (newFiles: File[]) => {
+  const validateAndAddFiles = async (newFiles: File[]) => {
+    if (validatingFilesRef.current) return;
     if (!canUploadFiles || !uploadConfig) {
       setErrors(['Upload settings are unavailable. Please try again.']);
       return;
     }
 
-    const errors: string[] = [];
-    const validFiles: File[] = [];
+    validatingFilesRef.current = true;
+    setIsValidating(true);
+    try {
+      const errors: string[] = [];
+      const validFiles: File[] = [];
+      const candidateFiles = multiple ? newFiles : newFiles.slice(0, 1);
 
-    const candidateFiles = multiple ? newFiles : newFiles.slice(0, 1);
-
-    candidateFiles.forEach(file => {
-      const error = getUploadFileError(
-        file,
-        uploadConfig.max_file_size_mb,
-        files.map(existingFile => existingFile.name),
-        allowedFileTypes,
-      );
-      if (error) {
-        errors.push(error);
-        return;
+      for (const file of candidateFiles) {
+        const error = await getUploadFileError(
+          file,
+          uploadConfig.max_file_size_mb,
+          files.map(existingFile => existingFile.name),
+          allowedFileTypes,
+          uploadConfig.max_text_characters,
+        );
+        if (error) {
+          errors.push(error);
+        } else {
+          validFiles.push(file);
+        }
       }
 
-      validFiles.push(file);
-    });
-
-    setErrors(errors);
-    if (validFiles.length > 0) {
-      const newFileList = multiple ? [...files, ...validFiles] : validFiles;
-      setFiles(newFileList);
+      setErrors(errors);
+      if (validFiles.length > 0) {
+        setFiles((currentFiles) => multiple
+          ? [...currentFiles, ...validFiles]
+          : validFiles);
+      }
+    } catch {
+      setErrors(['Could not read the selected text file. Please try again.']);
+    } finally {
+      validatingFilesRef.current = false;
+      setIsValidating(false);
     }
   };
 
@@ -118,13 +132,14 @@ export default function FileUpload({
     setIsDragging(false);
 
     const droppedFiles = Array.from(e.dataTransfer.files);
-    validateAndAddFiles(droppedFiles);
+    void validateAndAddFiles(droppedFiles);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
-      validateAndAddFiles(selectedFiles);
+      e.target.value = '';
+      void validateAndAddFiles(selectedFiles);
     }
   };
 
@@ -165,6 +180,12 @@ export default function FileUpload({
 
     if (!uploadConfig) {
       setErrors(['Upload settings are unavailable. Please try again.']);
+      return;
+    }
+
+    const textError = getTextContentError(textInput, uploadConfig.max_text_characters);
+    if (textError) {
+      setErrors([textError]);
       return;
     }
 
@@ -303,7 +324,7 @@ export default function FileUpload({
           />
           <button
             onClick={() => void handleTextSubmit()}
-            disabled={!textTitle.trim() || !textInput.trim() || !uploadConfig || isUploading}
+            disabled={!textTitle.trim() || !textInput.trim() || !uploadConfig || isUploading || isValidating}
             className="px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Add text
@@ -333,7 +354,7 @@ export default function FileUpload({
                 className="hidden"
                 accept={allowedFileTypes.map((extension) => `.${extension}`).join(',')}
                 multiple={multiple}
-                disabled={!canUploadFiles}
+                disabled={!canUploadFiles || isValidating}
                 onChange={handleFileInput}
               />
             </label>
@@ -344,12 +365,17 @@ export default function FileUpload({
           >
             {uploadConfig
               ? allowedFileTypes.length > 0
-                ? `Supported file types: ${allowedFileTypes.map((extension) => `.${extension}`).join(', ')} · Maximum file size: ${uploadConfig.max_file_size_mb}MB`
+                ? `Supported file types: ${allowedFileTypes.map((extension) => `.${extension}`).join(', ')} · Maximum file size: ${uploadConfig.max_file_size_mb}MB · Plain text sources: about ${uploadConfig.max_text_characters.toLocaleString()} characters per source`
                 : 'No file formats are enabled.'
               : uploadConfigFailed
                 ? 'Upload settings are unavailable. Please try again.'
                 : 'Loading upload settings…'}
           </p>
+          {isValidating && (
+            <p className="text-sm text-[var(--muted-foreground)]" role="status">
+              Checking text source length…
+            </p>
+          )}
         </div>
       )}
 
@@ -429,7 +455,7 @@ export default function FileUpload({
       {(files.length > 0 || (urlInput && (uploadType === 'url' || uploadType === 'youtube'))) && (
         <button
           onClick={handleUploadFiles}
-          disabled={isUploading}
+          disabled={isUploading || isValidating}
           className="mt-4 w-full px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isUploading ? (

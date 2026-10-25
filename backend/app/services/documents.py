@@ -31,7 +31,11 @@ from app.adapters.office import (
 from app.adapters.audio import AudioAdapter, InvalidAudioFileError
 from app.adapters.ocr import InvalidImageError, OCRAdapter
 from app.config import get_settings
-from app.services.chunking import ChunkingService, ChunkLimitExceededError
+from app.services.chunking import (
+    CHUNK_LIMIT_ACTION,
+    ChunkingService,
+    ChunkLimitExceededError,
+)
 from app.services.document_files import UPLOAD_DIR
 from app.services.retrieval_index import get_retrieval_index
 from app.services.ingestion_jobs import (
@@ -427,9 +431,10 @@ class DocumentService:
         Returns:
             The status the document ended up in.
         """
-        action = "Reduce the source size or increase CHUNK_SIZE before retrying."
+        action = CHUNK_LIMIT_ACTION
         message = (
-            f"Document produced {chunk_count} chunks, exceeding the limit of "
+            f"This source produced {chunk_count} chunks, exceeding the "
+            "per-source limit of "
             f"{self.max_chunks_per_doc}. {action}"
         )
 

@@ -39,6 +39,10 @@ LINE_JOIN = "\n"
 # sixteen units per allowed output character covers those constant passes while
 # preventing whitespace or metadata-only input from bypassing the chunk limit.
 SOURCE_SCAN_BUDGET_FACTOR = 16
+CHUNK_LIMIT_ACTION = (
+    "Split it into smaller sources or ask your administrator to raise the "
+    "per-source chunk limit."
+)
 
 
 class ChunkLimitExceededError(ValueError):

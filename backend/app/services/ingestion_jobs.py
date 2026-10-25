@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import structlog
 
 from app.db.models import Chunk, Document, IngestionJob
-from app.services.chunking import ChunkLimitExceededError
+from app.services.chunking import CHUNK_LIMIT_ACTION, ChunkLimitExceededError
 from app.services.retrieval_index import get_retrieval_index
 from app.services.rate_limit import OperationLease
 from app.utils.time import utc_now
@@ -742,12 +742,12 @@ class IngestionJobWorker:
                             failed_job.document.status = "error"
                             failed_job.document.error_message = str(error)
                             if isinstance(error, ChunkLimitExceededError):
-                                action = (
-                                    "Reduce the source size or increase "
-                                    "CHUNK_SIZE before retrying."
-                                )
+                                action = CHUNK_LIMIT_ACTION
                                 failed_job.document.error_message = (
-                                    "%s. %s" % (error, action)
+                                    f"This source produced at least "
+                                    f"{error.chunk_count} chunks, exceeding the "
+                                    f"per-source limit of {error.max_chunks}. "
+                                    f"{action}"
                                 )
                                 failed_job.document.meta_json = {
                                     **(failed_job.document.meta_json or {}),

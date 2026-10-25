@@ -14,8 +14,9 @@ from app.services.documents import ChunkLimitPersistenceError, DocumentService
 
 DOCUMENT_ID = "document-1"
 LIMIT_MESSAGE = (
-    "Document produced 1001 chunks, exceeding the limit of 1000. "
-    "Reduce the source size or increase CHUNK_SIZE before retrying."
+    "This source produced 1001 chunks, exceeding the per-source limit of 1000. "
+    "Split it into smaller sources or ask your administrator to raise the "
+    "per-source chunk limit."
 )
 
 
@@ -144,7 +145,10 @@ def test_one_thousand_and_one_chunks_fail_before_embedding_and_are_removed(db) -
             "code": "chunk_limit_exceeded",
             "chunk_count": 1_001,
             "max_chunks": 1_000,
-            "action": "Reduce the source size or increase CHUNK_SIZE before retrying.",
+            "action": (
+                "Split it into smaller sources or ask your administrator to "
+                "raise the per-source chunk limit."
+            ),
         },
     }
     assert embedder.calls == 0

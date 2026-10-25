@@ -265,6 +265,7 @@ class UploadConfigResponse(BaseModel):
     """Runtime file constraints advertised to the source upload form."""
     allowed_file_types: List[str]
     max_file_size_mb: int
+    max_text_characters: int
 
 
 class FileUploadResponse(BaseModel):

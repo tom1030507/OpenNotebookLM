@@ -748,7 +748,10 @@ def test_document_service_records_live_ceiling_and_cleans_old_index(
         "code": "chunk_limit_exceeded",
         "chunk_count": 3,
         "max_chunks": 2,
-        "action": "Reduce the source size or increase CHUNK_SIZE before retrying.",
+        "action": (
+            "Split it into smaller sources or ask your administrator to raise "
+            "the per-source chunk limit."
+        ),
     }
     assert new_chunk_adds == []
     assert embedder.calls == 0
