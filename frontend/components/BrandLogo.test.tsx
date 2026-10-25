@@ -84,7 +84,7 @@ describe('BrandLogo', () => {
       (stop) => stop.getAttribute('stop-color'),
     );
 
-    expect(stops).toEqual(['var(--primary)', 'var(--accent)']);
+    expect(stops).toEqual(['var(--brand-from)', 'var(--brand-to)']);
   });
 
   /**

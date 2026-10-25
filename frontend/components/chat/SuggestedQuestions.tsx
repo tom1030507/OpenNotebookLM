@@ -18,9 +18,9 @@ function QuestionList({ questions, onAsk }: QuestionListProps) {
           <button
             type="button"
             onClick={() => onAsk(question)}
-            className="w-full flex items-start gap-2 px-3 py-2 text-sm bg-[var(--card)] border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
+            className="w-full flex items-start gap-2 px-3 py-2 text-left text-sm bg-[var(--card)] border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base"
           >
-            <MessageSquare className="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--primary)]" />
+            <MessageSquare className="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--muted-foreground)]" />
             <span>{question}</span>
           </button>
         </li>

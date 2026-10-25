@@ -87,21 +87,19 @@ export default function ProjectDialog({ isOpen, onClose, project = null }: Proje
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-[var(--background)] rounded-lg w-full max-w-md"
+        className="bg-[var(--popover)] border border-[var(--border)] shadow-xl rounded-lg w-full max-w-md"
       >
         <div className="flex items-center justify-between p-6 border-b border-[var(--border)]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-[var(--primary)] bg-opacity-10 flex items-center justify-center">
-              <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
-            </div>
-            <h2 id={titleId} className="text-lg font-semibold">
+          <div className="flex items-center gap-2">
+            <FolderPlus className="w-4 h-4 text-[var(--muted-foreground)]" aria-hidden="true" />
+            <h2 id={titleId} className="text-base font-semibold">
               {project ? 'Edit Project' : 'Create New Project'}
             </h2>
           </div>
@@ -119,9 +117,9 @@ export default function ProjectDialog({ isOpen, onClose, project = null }: Proje
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-              <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+            <div className="p-4 bg-[var(--error-bg)] border border-[var(--error)] rounded-lg flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-[var(--error)]" />
+              <p className="text-sm text-[var(--error)]">{error}</p>
             </div>
           )}
 
@@ -135,7 +133,7 @@ export default function ProjectDialog({ isOpen, onClose, project = null }: Proje
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder={'Leave blank to name it from your sources'}
-              className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+              className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
               ref={nameInputRef}
               disabled={isCreating}
             />
@@ -151,7 +149,7 @@ export default function ProjectDialog({ isOpen, onClose, project = null }: Proje
               onChange={(event) => setDescription(event.target.value)}
               placeholder={'Optional project description'}
               rows={3}
-              className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base resize-none"
+              className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base resize-none"
               disabled={isCreating}
             />
           </div>
@@ -167,7 +165,7 @@ export default function ProjectDialog({ isOpen, onClose, project = null }: Proje
                   value={coverEmoji}
                   onChange={(event) => setCoverEmoji(event.target.value)}
                   disabled={isCreating}
-                  className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg"
+                  className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg"
                 >
                   {PROJECT_COVER_EMOJIS.map((emoji) => <option key={emoji} value={emoji}>{emoji}</option>)}
                 </select>
@@ -181,7 +179,7 @@ export default function ProjectDialog({ isOpen, onClose, project = null }: Proje
                   value={coverColor}
                   onChange={(event) => setCoverColor(event.target.value)}
                   disabled={isCreating}
-                  className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg"
+                  className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg"
                 >
                   <option value="">{'Default'}</option>
                   {PROJECT_COVER_COLORS.map((color) => <option key={color.id} value={color.id}>{color.label}</option>)}

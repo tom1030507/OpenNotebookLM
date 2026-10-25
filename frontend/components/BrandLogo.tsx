@@ -12,10 +12,11 @@ interface BrandLogoProps extends React.SVGProps<SVGSVGElement> {
  * replaces arrived as a 97 KB PNG behind an `<image href>`, which cost a
  * request in all five places this renders and could not follow the theme.
  *
- * There is deliberately no tile behind it. The marks paint from `--primary`
- * and `--accent` themselves, so one drawing sits on the nav, the login page
+ * There is deliberately no tile behind it. The marks paint from `--brand-from`
+ * and `--brand-to` themselves, so one drawing sits on the nav, the login page
  * and a chat bubble without a hard-coded light card propping it up in dark
- * mode.
+ * mode. They are brand tokens rather than `--primary`, which is near-black in
+ * the interface and would turn the mark grey.
  */
 export default function BrandLogo({ label, ...props }: BrandLogoProps) {
   // Several marks share a page — the chat welcome, the streaming row, the nav —
@@ -45,8 +46,8 @@ export default function BrandLogo({ label, ...props }: BrandLogoProps) {
           y2="24"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="var(--primary)" />
-          <stop offset="1" stopColor="var(--accent)" />
+          <stop offset="0" stopColor="var(--brand-from)" />
+          <stop offset="1" stopColor="var(--brand-to)" />
         </linearGradient>
       </defs>
 

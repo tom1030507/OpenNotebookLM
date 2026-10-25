@@ -2,24 +2,28 @@
 
 import React, { useState } from 'react';
 import { 
-  MessageSquare, 
   Plus, 
   Trash2, 
   Edit2, 
   Check, 
   X,
-  Clock,
-  ChevronDown,
-  ChevronRight
 } from 'lucide-react';
 import useStore from '@/store/useStore';
 import { parseApiTimestamp } from '@/lib/datetime';
 import { formatDistanceToNow } from 'date-fns';
 
-export default function ConversationList() {
+interface ConversationListProps {
+  /**
+   * Set when the list shares the desktop sidebar with Sources. It then sizes to
+   * its content (capped by its slot) instead of filling a column of its own,
+   * so collapsing it hands the height back to Sources.
+   */
+  embedded?: boolean;
+}
+
+export default function ConversationList({ embedded = false }: ConversationListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [isCollapsed, setIsCollapsed] = useState(false);
   
   const {
     conversations,
@@ -126,50 +130,33 @@ export default function ConversationList() {
   }
 
   return (
-    <div className="w-full min-w-0 overflow-hidden bg-[var(--sidebar-bg)] border-l border-[var(--border)] flex flex-col h-full">
+    <div
+      className={`w-full min-w-0 overflow-hidden bg-[var(--sidebar-bg)] flex flex-col ${
+        embedded ? 'min-h-0 max-h-full' : 'h-full border-l border-[var(--border)]'
+      }`}
+    >
       {/* Header */}
-      <div className="p-4 border-b border-[var(--sidebar-border)]">
-        <div className="flex items-center justify-between mb-3">
-          <div className="min-w-0 flex items-center gap-2">
-            <button
-              onClick={() => setIsCollapsed(!isCollapsed)}
-              aria-controls="conversation-panel-content"
-              aria-expanded={!isCollapsed}
-              aria-label={isCollapsed ? 'Expand conversations' : 'Collapse conversations'}
-              title={isCollapsed ? 'Expand conversations' : 'Collapse conversations'}
-              className="p-1 hover:bg-[var(--muted)] rounded transition-base"
-            >
-              {isCollapsed ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-            <h3 className="truncate text-sm font-medium">Conversations</h3>
-          </div>
-          {/* Only while collapsed. Expanded, the labelled button below is the
-              same action, and two controls a few pixels apart read as two. */}
-          {isCollapsed && (
-            <button
-              onClick={handleNewConversation}
-              aria-label="New Conversation"
-              title="New Conversation"
-              className="p-1 hover:bg-[var(--muted)] rounded transition-base"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-
-        {!isCollapsed && (
+      <div className="px-4 py-3">
+        <div className="flex items-center justify-between">
+          {/* No collapse toggle. In the sidebar, collapsing hid the whole list
+              and dropped its header to the window's bottom edge, which read as
+              the conversations vanishing; in the drawer the list is the only
+              content, so collapsing emptied it. The list is capped by its slot
+              and scrolls instead. */}
+          <h3 className="truncate text-sm font-semibold">Conversations</h3>
+          {/* One quiet control in both states. Add Source and Send are the
+              screen's filled actions; a third black button here competed with
+              them for the first click. */}
           <button
             onClick={handleNewConversation}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base text-sm"
+            aria-label="New Conversation"
+            title="New Conversation"
+            className="flex items-center gap-1 h-7 px-2 text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
           >
-            <Plus className="w-4 h-4" />
-            <span>New Conversation</span>
+            <Plus className="w-3.5 h-3.5" />
+            <span>New</span>
           </button>
-        )}
+        </div>
       </div>
 
       {/* Conversations List */}
@@ -177,24 +164,18 @@ export default function ConversationList() {
         id="conversation-panel-content"
         role="region"
         aria-label="Conversations panel content"
-        hidden={isCollapsed}
-        className="flex-1 overflow-y-auto p-2"
+        className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
       >
           {Object.keys(groupedConversations).length === 0 ? (
-            <div className="text-center py-8">
-              <MessageSquare className="w-8 h-8 mx-auto mb-2 text-[var(--muted-foreground)]" />
-              <p className="text-xs text-[var(--muted-foreground)]">
-                No conversations yet
-              </p>
-              <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                Start a new chat to begin
-              </p>
+            <div className="px-2 py-2 text-xs text-[var(--muted-foreground)]">
+              <p>No conversations yet</p>
+              <p className="mt-0.5">Start a new chat to begin</p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {Object.entries(groupedConversations).map(([group, convs]) => (
                 <div key={group}>
-                  <h4 className="text-xs font-medium text-[var(--muted-foreground)] mb-2 px-2">
+                  <h4 className="text-xs text-[var(--muted-foreground)] mb-1 px-2">
                     {group}
                   </h4>
                   <div className="space-y-1">
@@ -217,14 +198,14 @@ export default function ConversationList() {
                                 if (e.key === 'Enter') handleSaveEdit();
                                 if (e.key === 'Escape') handleCancelEdit();
                               }}
-                              className="flex-1 px-2 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
+                              className="flex-1 px-2 py-1 text-xs bg-[var(--card)] border border-[var(--input)] rounded focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
                               autoFocus
                             />
                             <button
                               onClick={handleSaveEdit}
                               aria-label="Save conversation name"
                               title="Save conversation name"
-                              className="p-1 text-green-600 hover:bg-green-100 rounded"
+                              className="p-1 text-[var(--success)] hover:bg-[var(--muted)] rounded"
                             >
                               <Check className="w-3 h-3" />
                             </button>
@@ -232,7 +213,7 @@ export default function ConversationList() {
                               onClick={handleCancelEdit}
                               aria-label="Cancel rename"
                               title="Cancel rename"
-                              className="p-1 text-red-600 hover:bg-red-100 rounded"
+                              className="p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded"
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -240,17 +221,15 @@ export default function ConversationList() {
                         ) : (
                           <div
                             onClick={() => selectConversation(conv)}
-                            className="flex items-start gap-2 p-2 cursor-pointer"
+                            className="flex items-start gap-2 px-2 py-1 cursor-pointer"
                           >
-                            <MessageSquare className="w-4 h-4 mt-0.5 text-[var(--muted-foreground)] flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm truncate" title={conv.title}>
                                 {conv.title}
                               </p>
-                              <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1 mt-0.5">
-                                <Clock className="w-3 h-3 flex-shrink-0" />
-                                {/* One line: in a 184px panel "2 minutes ago"
-                                    otherwise wraps under the clock icon. */}
+                              <p className="text-xs text-[var(--muted-foreground)] flex items-center mt-0.5">
+                                {/* One line: in a narrow panel "2 minutes ago"
+                                    otherwise wraps. */}
                                 <span className="truncate">
                                   {formatDistanceToNow(parseApiTimestamp(conv.created_at), { addSuffix: true })}
                                 </span>
@@ -281,7 +260,7 @@ export default function ConversationList() {
                                   e.stopPropagation();
                                   handleDelete(conv.id);
                                 }}
-                                className="p-1 hover:bg-red-100 text-red-600 rounded"
+                                className="p-1 hover:bg-[var(--card)] text-[var(--error)] rounded"
                                 aria-label="Delete conversation"
                                 title="Delete conversation"
                               >

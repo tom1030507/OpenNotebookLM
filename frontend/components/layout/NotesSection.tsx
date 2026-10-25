@@ -18,7 +18,7 @@ interface Draft {
   content: string;
 }
 
-const inputClass = 'w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]';
+const inputClass = 'w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]';
 const actionClass = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--muted)] transition-base disabled:opacity-50';
 const EMPTY_NOTES: Note[] = [];
 
@@ -82,7 +82,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   };
 
   const editor = canEdit && draft && (
-    <div className="space-y-2 p-3 border border-[var(--border)] rounded-lg">
+    <div className="space-y-2 p-3 bg-[var(--card)] border border-[var(--border)] rounded-lg">
       <input
         aria-label="Note title"
         placeholder="Title"
@@ -120,7 +120,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     <>
     <section aria-label="Notes" className="mt-6">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium">Notes</h3>
+        <h3 className="text-sm font-semibold">Notes</h3>
         {canEdit && (
           <button
             type="button"
@@ -156,7 +156,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
           {notes.map((note) => (
             <li key={note.id}>
               {draft?.noteId === note.id ? editor : (
-                <div className="bg-[var(--secondary)] rounded-lg">
+                <div className="bg-[var(--card)] border border-[var(--border)] rounded-lg">
                   <div className="flex items-start">
                     <button
                       type="button"

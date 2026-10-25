@@ -117,14 +117,14 @@ export default function AudioOverviewDialog({
   };
 
   const dialog = (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-4">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg bg-[var(--background)]"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg border border-[var(--border)] bg-[var(--popover)] shadow-xl"
       >
         <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4">
           <div>
@@ -152,7 +152,7 @@ export default function AudioOverviewDialog({
                 <select
                   value={format}
                   onChange={(event) => setFormat(event.target.value as AudioOverviewFormat)}
-                  className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+                  className="rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2"
                 >
                   <option value="deep_dive">Deep dive</option>
                   <option value="brief">Brief</option>
@@ -165,7 +165,7 @@ export default function AudioOverviewDialog({
                 <select
                   value={length}
                   onChange={(event) => setLength(event.target.value as AudioOverviewLength)}
-                  className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+                  className="rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2"
                 >
                   <option value="short">Short</option>
                   <option value="default">Default</option>
@@ -180,13 +180,13 @@ export default function AudioOverviewDialog({
                 maxLength={500}
                 rows={2}
                 placeholder="A question or topic for the hosts to focus on"
-                className="resize-y rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+                className="resize-y rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2"
               />
             </label>
             <button
               type="submit"
               disabled={isSubmitting || isLoading}
-              className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] disabled:opacity-60"
             >
               {isSubmitting && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}
               Generate audio summary
@@ -200,7 +200,7 @@ export default function AudioOverviewDialog({
                 aria-label="Saved audio overview"
                 value={selectedId ?? ''}
                 onChange={(event) => setSelectedId(event.target.value)}
-                className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+                className="rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2"
               >
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -236,7 +236,7 @@ export default function AudioOverviewDialog({
               {selected.script.length > 0 && (
                 <ol aria-label="Audio transcript" className="space-y-3">
                   {selected.script.map((turn, index) => (
-                    <li key={`${selected.id}-${index}`} className="rounded-md bg-[var(--card)] p-3 text-sm">
+                    <li key={`${selected.id}-${index}`} className="rounded-md border border-[var(--border)] bg-[var(--card)] p-3 text-sm">
                       <span className="font-medium">Host {turn.speaker}</span>
                       <p className="mt-1 whitespace-pre-wrap">{turn.text}</p>
                     </li>
