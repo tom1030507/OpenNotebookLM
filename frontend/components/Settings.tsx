@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   X,
   Settings as SettingsIcon,
@@ -16,6 +16,7 @@ import {
   Loader2
 } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
+import api, { type PersonalAPIKey } from '@/lib/api';
 import useStore from '@/store/useStore';
 import {
   applyThemePreference,
@@ -45,6 +46,12 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [notifyOnComplete, setNotifyOnComplete] = useState(storedNotifyOnComplete);
   const [wasOpen, setWasOpen] = useState(isOpen);
   const [isSaving, setIsSaving] = useState(false);
+  const [personalApiKeys, setPersonalApiKeys] = useState<PersonalAPIKey[]>([]);
+  const [personalApiKeyName, setPersonalApiKeyName] = useState('');
+  const [newPersonalApiKey, setNewPersonalApiKey] = useState('');
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [apiKeyBusy, setApiKeyBusy] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState('');
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -64,6 +71,32 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     dialogRef,
     initialFocusRef: closeButtonRef,
   });
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'api') return;
+    let cancelled = false;
+    setApiKeysLoading(true);
+    setApiKeyError('');
+    api.listPersonalApiKeys()
+      .then((keys) => {
+        if (!cancelled) setPersonalApiKeys(keys);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setApiKeyError(error instanceof Error ? error.message : 'Could not load API keys.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setApiKeysLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) setNewPersonalApiKey('');
+  }, [isOpen]);
 
   // Seed the controls from the preferences in force every time the dialog
   // opens, so reopening shows what was saved rather than the defaults.
@@ -93,6 +126,44 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     }
 
     onClose();
+  };
+
+  const handleCreatePersonalApiKey = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = personalApiKeyName.trim();
+    if (!name || apiKeyBusy) return;
+    setApiKeyBusy(true);
+    setApiKeyError('');
+    try {
+      const created = await api.createPersonalApiKey(name);
+      setPersonalApiKeys((keys) => [{
+        id: created.id,
+        name: created.name,
+        created_at: created.created_at,
+        last_used_at: created.last_used_at,
+      }, ...keys]);
+      setNewPersonalApiKey(created.api_key);
+      setPersonalApiKeyName('');
+    } catch (error) {
+      setApiKeyError(error instanceof Error ? error.message : 'Could not create API key.');
+    } finally {
+      setApiKeyBusy(false);
+    }
+  };
+
+  const handleRevokePersonalApiKey = async (key: PersonalAPIKey) => {
+    if (apiKeyBusy) return;
+    setApiKeyBusy(true);
+    setApiKeyError('');
+    try {
+      await api.revokePersonalApiKey(key.id);
+      setPersonalApiKeys((keys) => keys.filter((item) => item.id !== key.id));
+      setNewPersonalApiKey('');
+    } catch (error) {
+      setApiKeyError(error instanceof Error ? error.message : 'Could not revoke API key.');
+    } finally {
+      setApiKeyBusy(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -253,6 +324,78 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
             {activeTab === 'api' && (
               <div className="space-y-6">
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Personal API keys</h4>
+                  <p className="text-xs text-[var(--muted-foreground)] mb-4">
+                    Use a key as a bearer token for scripts and agents. It shares
+                    this account&apos;s access and rate limits.
+                  </p>
+                  <form onSubmit={handleCreatePersonalApiKey} className="flex gap-2">
+                    <label className="sr-only" htmlFor="personal-api-key-name">
+                      API key name
+                    </label>
+                    <input
+                      id="personal-api-key-name"
+                      value={personalApiKeyName}
+                      onChange={(event) => setPersonalApiKeyName(event.target.value)}
+                      maxLength={100}
+                      required
+                      placeholder="Key name"
+                      className="min-w-0 flex-1 px-3 py-2 text-sm bg-[var(--card)] border border-[var(--border)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={apiKeyBusy || !personalApiKeyName.trim()}
+                      className="px-3 py-2 text-sm bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg disabled:opacity-50"
+                    >
+                      {apiKeyBusy ? 'Working...' : 'Create key'}
+                    </button>
+                  </form>
+
+                  {newPersonalApiKey && (
+                    <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+                      <p className="text-sm font-medium">Copy this key now. It will not be shown again.</p>
+                      <input
+                        type="text"
+                        readOnly
+                        aria-label="New personal API key"
+                        value={newPersonalApiKey}
+                        onFocus={(event) => event.currentTarget.select()}
+                        className="mt-2 w-full px-3 py-2 font-mono text-xs bg-[var(--background)] border border-[var(--border)] rounded-lg"
+                      />
+                    </div>
+                  )}
+
+                  {apiKeyError && <p role="alert" className="mt-3 text-sm text-[var(--error)]">{apiKeyError}</p>}
+                  <div className="mt-4 space-y-2">
+                    {apiKeysLoading ? (
+                      <p role="status" className="text-xs text-[var(--muted-foreground)]">Loading API keys...</p>
+                    ) : personalApiKeys.length === 0 ? (
+                      <p className="text-xs text-[var(--muted-foreground)]">No personal API keys.</p>
+                    ) : personalApiKeys.map((key) => (
+                      <div key={key.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] p-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{key.name}</p>
+                          <p className="text-xs text-[var(--muted-foreground)]">
+                            Created {new Date(key.created_at).toLocaleString()}
+                            {' · Last used '}
+                            {key.last_used_at ? new Date(key.last_used_at).toLocaleString() : 'Never'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={apiKeyBusy}
+                          aria-label={'Revoke API key ' + key.name}
+                          onClick={() => handleRevokePersonalApiKey(key)}
+                          className="shrink-0 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] disabled:opacity-50"
+                        >
+                          Revoke
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="p-4 bg-[var(--card)] rounded-lg border border-[var(--border)]">
                   <p className="text-sm mb-2">Model access is configured on the server.</p>
                   <p className="text-xs text-[var(--muted-foreground)]">

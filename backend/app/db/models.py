@@ -88,11 +88,36 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    api_keys = relationship(
+        "APIKey",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("idx_users_username", "username"),
         Index("idx_users_email", "email"),
     )
+
+
+class APIKey(Base):
+    """A hashed personal bearer credential owned by one account."""
+    __tablename__ = "api_keys"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name = Column(String(100), nullable=False)
+    key_hash = Column(String(64), unique=True, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    last_used_at = Column(UTCDateTime)
+
+    user = relationship("User", back_populates="api_keys")
+
+    __table_args__ = (Index("idx_api_keys_user_id", "user_id"),)
 
 
 class Document(Base):

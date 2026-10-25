@@ -9,6 +9,7 @@ import TopNav from './layout/TopNav';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
 import { initializeTheme, THEME_STORAGE_KEY } from '@/lib/theme';
+import api from '@/lib/api';
 
 // TopNav navigates on sign-out.
 vi.mock('next/navigation', () => ({
@@ -191,7 +192,74 @@ describe('settings that are presented as saveable', () => {
   });
 });
 
-describe('settings that cannot be honoured yet', () => {
+describe('settings with unavailable provider controls', () => {
+  it('offers personal API key management in the API Keys tab', () => {
+    render(<Settings isOpen onClose={() => {}} />);
+
+    openTab('API Keys');
+
+    expect(screen.getByRole('heading', { name: 'Personal API keys' })).toBeTruthy();
+  });
+
+  it('creates a key once, lists metadata, and revokes it', async () => {
+    vi.spyOn(api, 'listPersonalApiKeys').mockResolvedValue([]);
+    vi.spyOn(api, 'createPersonalApiKey').mockResolvedValue({
+      id: 'key-1',
+      name: 'nightly job',
+      api_key: 'onlm_once-only',
+      created_at: '2026-10-26T00:00:00+00:00',
+      last_used_at: null,
+    });
+    vi.spyOn(api, 'revokePersonalApiKey').mockResolvedValue();
+    render(<Settings isOpen onClose={() => {}} />);
+
+    openTab('API Keys');
+    fireEvent.change(await screen.findByLabelText('API key name'), {
+      target: { value: 'nightly job' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+
+    expect(await screen.findByLabelText('New personal API key')).toHaveProperty(
+      'value',
+      'onlm_once-only',
+    );
+    expect(screen.getByText('nightly job')).toBeTruthy();
+    expect(api.createPersonalApiKey).toHaveBeenCalledWith('nightly job');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke API key nightly job' }));
+
+    await waitFor(() => expect(api.revokePersonalApiKey).toHaveBeenCalledWith('key-1'));
+    expect(screen.queryByLabelText('New personal API key')).toBeNull();
+    await waitFor(() => expect(screen.queryByText('nightly job')).toBeNull());
+  });
+
+  it('hides the one-time secret when Settings closes', async () => {
+    vi.spyOn(api, 'listPersonalApiKeys').mockResolvedValue([]);
+    vi.spyOn(api, 'createPersonalApiKey').mockResolvedValue({
+      id: 'key-2',
+      name: 'backup job',
+      api_key: 'onlm_hidden-after-close',
+      created_at: '2026-10-26T00:00:00+00:00',
+      last_used_at: null,
+    });
+    render(<SettingsHarness />);
+    openTab('API Keys');
+    fireEvent.change(await screen.findByLabelText('API key name'), {
+      target: { value: 'backup job' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    expect(await screen.findByLabelText('New personal API key')).toHaveProperty(
+      'value',
+      'onlm_hidden-after-close',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    await screen.findByRole('heading', { name: 'Personal API keys' });
+
+    expect(screen.queryByLabelText('New personal API key')).toBeNull();
+  });
+
   it('disables the language, model, key and endpoint controls', () => {
     render(<Settings isOpen onClose={() => {}} />);
 

@@ -73,6 +73,33 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class PersonalAPIKeyCreate(BaseModel):
+    """Name a personal API key before its one-time creation."""
+    name: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, name: Any) -> Any:
+        """Reject blank names after trimming surrounding whitespace."""
+        return name.strip() if isinstance(name, str) else name
+
+
+class PersonalAPIKeyResponse(BaseModel):
+    """Metadata shown for a key without revealing its secret."""
+    id: str
+    name: str
+    created_at: UtcDatetime
+    last_used_at: Optional[UtcDatetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PersonalAPIKeyCreatedResponse(PersonalAPIKeyResponse):
+    """Metadata and the newly generated secret, returned once."""
+    api_key: str
+
+
 class DemoAccountResponse(BaseModel):
     """Schema for the demo credentials the sign-in page may offer.
 

@@ -70,6 +70,17 @@ export interface ProjectSearchResponse {
   projects: ProjectSearchProject[];
 }
 
+export interface PersonalAPIKey {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface PersonalAPIKeyCreated extends PersonalAPIKey {
+  api_key: string;
+}
+
 export type ProjectRole = 'owner' | 'editor' | 'viewer';
 
 export interface ProjectMember {
@@ -930,6 +941,23 @@ const api = {
   getAccount(accessToken: string): Promise<Account> {
     return requestJson<Account>('/auth/me', {
       headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  },
+
+  createPersonalApiKey(name: string): Promise<PersonalAPIKeyCreated> {
+    return requestJson<PersonalAPIKeyCreated>('/auth/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  },
+
+  listPersonalApiKeys(): Promise<PersonalAPIKey[]> {
+    return requestJson<PersonalAPIKey[]>('/auth/api-keys');
+  },
+
+  revokePersonalApiKey(keyId: string): Promise<void> {
+    return requestJson<void>('/auth/api-keys/' + encodeURIComponent(keyId), {
+      method: 'DELETE',
     });
   },
 

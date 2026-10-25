@@ -19,6 +19,36 @@ afterEach(() => {
 
 
 describe('API client', () => {
+  it('creates, lists, and revokes personal API keys', async () => {
+    const created = {
+      id: 'key-1',
+      name: 'nightly job',
+      api_key: 'onlm_once-only',
+      created_at: '2026-10-26T00:00:00+00:00',
+      last_used_at: null,
+    };
+    const listed = [{
+      id: created.id,
+      name: created.name,
+      created_at: created.created_at,
+      last_used_at: null,
+    }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(created, 201))
+      .mockResolvedValueOnce(jsonResponse(listed))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.createPersonalApiKey('nightly job')).resolves.toEqual(created);
+    await expect(api.listPersonalApiKeys()).resolves.toEqual(listed);
+    await expect(api.revokePersonalApiKey('key-1')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method || 'GET'])).toEqual([
+      ['/api/auth/api-keys', 'POST'],
+      ['/api/auth/api-keys', 'GET'],
+      ['/api/auth/api-keys/key-1', 'DELETE'],
+    ]);
+  });
+
   it('searches sources across visible projects', async () => {
     const response = {
       projects: [{
