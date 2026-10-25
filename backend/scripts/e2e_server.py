@@ -95,13 +95,16 @@ def install_fast_overrides(application: Any) -> None:
     from app.config import get_settings
     from app.routers.ingest import get_document_service
     from app.routers.query import get_rag_service
+    from app.routers.report import get_report_service
     from app.routers.study import get_study_service
     from app.services.chunking import ChunkingService
     from app.services.documents import DocumentService
     from app.services.llm import LLMService
     from app.services.rag import RAGService
+    from app.services.report import ReportService
     from app.services.study import StudyService
     from scripts.e2e_services import (
+        DeterministicReportLLM,
         DeterministicStudyLLM,
         DeterministicEmbeddingService,
         FixedURLAdapter,
@@ -122,6 +125,10 @@ def install_fast_overrides(application: Any) -> None:
         embedding_service=embedding,
         llm_service=LLMService(),
     )
+    report_service = ReportService(RAGService(
+        embedding_service=embedding,
+        llm_service=DeterministicReportLLM(),
+    ))
     study_service = StudyService(llm_service=DeterministicStudyLLM())
 
     def process_ingestion_job(db: Any, job: Any) -> str:
@@ -143,6 +150,7 @@ def install_fast_overrides(application: Any) -> None:
 
     application.dependency_overrides[get_document_service] = lambda: document_service
     application.dependency_overrides[get_rag_service] = lambda: rag_service
+    application.dependency_overrides[get_report_service] = lambda: report_service
     application.dependency_overrides[get_study_service] = lambda: study_service
     application.state.ingestion_job_processor = process_ingestion_job
 

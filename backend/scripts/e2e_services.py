@@ -253,6 +253,30 @@ class DeterministicStudyLLM:
         }
 
 
+class DeterministicReportLLM:
+    """Return a stable cited answer for the browser report workflow."""
+
+    def generate(self, prompt: str, **kwargs) -> dict[str, Any]:
+        """Return one report that cites the controlled source passage.
+
+        Args:
+            prompt: RAG prompt containing the selected source chunks.
+            **kwargs: Accepted for the production LLM interface.
+
+        Returns:
+            A production-shaped Markdown response.
+        """
+        del prompt, kwargs
+        return {
+            "text": (
+                "## Custom report\n\n"
+                "The observatory access code is ORBIT-7319. [Source 1]"
+            ),
+            "model": "e2e-report-v1",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
+
 class FixedYouTubeAdapter:
     """Return a controlled transcript without contacting YouTube."""
 
