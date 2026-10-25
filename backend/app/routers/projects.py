@@ -8,12 +8,13 @@ from app.db.database import get_db
 from app.schemas import (
     ChatSettings, ProjectCreate, ProjectUpdate, ProjectResponse, 
     ProjectListResponse, DocumentResponse, ProjectMemberCreate,
-    ProjectMemberUpdate, ProjectMemberResponse,
+    ProjectMemberUpdate, ProjectMemberResponse, ProjectAnalyticsResponse,
 )
 from app.db.models import User
 from app.services.projects import ProjectService
 from app.routers.auth import get_current_user
 from app.routers.ownership import project_role, require_document, require_project
+from app.services.project_analytics import get_project_analytics
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -114,6 +115,33 @@ async def get_project(
         conversation_count=getattr(project, 'conversation_count', 0),
         role=project_role(db, project, current_user),
     )
+
+
+@router.get(
+    "/projects/{project_id}/analytics",
+    response_model=ProjectAnalyticsResponse,
+)
+async def get_project_analytics_route(
+    project_id: str,
+    days: int = Query(7),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return owner-only project usage analytics.
+
+    Args:
+        project_id: Project id from the request.
+        days: Number of UTC calendar days to include.
+        db: Database session.
+        current_user: Signed-in project owner.
+
+    Returns:
+        Activity, rating, citation, and uncited-source summaries.
+    """
+    if days not in (7, 30, 90):
+        raise HTTPException(status_code=422, detail="days must be 7, 30, or 90")
+    require_project(db, project_id, current_user)
+    return get_project_analytics(db, project_id, current_user.id, days)
 
 
 @router.get(

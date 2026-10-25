@@ -21,6 +21,18 @@ export interface Project {
   cover_color?: string | null;
 }
 
+export type ProjectAnalyticsWindow = 7 | 30 | 90;
+
+export interface ProjectAnalytics {
+  days: ProjectAnalyticsWindow;
+  questions_by_day: { date: string; question_count: number }[];
+  conversation_count: number;
+  top_cited_sources: { document_id: string; title: string; citation_count: number }[];
+  ratings: { up: number; down: number; unrated: number };
+  recent_down_rated_questions: { question: string; answered_at: string }[];
+  uncited_sources: { document_id: string; title: string }[];
+}
+
 export type ProjectRole = 'owner' | 'editor' | 'viewer';
 
 export interface ProjectMember {
@@ -739,6 +751,15 @@ const api = {
 
   getProjectMembers(projectId: string): Promise<ProjectMember[]> {
     return requestJson<ProjectMember[]>(`/projects/${projectId}/members`);
+  },
+
+  getProjectAnalytics(
+    projectId: string,
+    days: ProjectAnalyticsWindow = 7,
+  ): Promise<ProjectAnalytics> {
+    return requestJson<ProjectAnalytics>(
+      `/projects/${projectId}/analytics?days=${days}`,
+    );
   },
 
   addProjectMember(

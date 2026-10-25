@@ -700,6 +700,49 @@ class NoteResponse(BaseModel):
 
 
 # Project overview schemas
+class ProjectAnalyticsDay(BaseModel):
+    """Question count for one UTC calendar day."""
+    date: str
+    question_count: int
+
+
+class ProjectAnalyticsSource(BaseModel):
+    """A currently linked source and its citation count."""
+    document_id: str
+    title: str
+    citation_count: int
+
+
+class ProjectAnalyticsRatings(BaseModel):
+    """Counts of rated and unrated assistant answers."""
+    up: int
+    down: int
+    unrated: int
+
+
+class ProjectAnalyticsRecentQuestion(BaseModel):
+    """An owner's question that received a recent down rating."""
+    question: str
+    answered_at: UtcDatetime
+
+
+class ProjectAnalyticsUncitedSource(BaseModel):
+    """A current project source with no citations in the selected window."""
+    document_id: str
+    title: str
+
+
+class ProjectAnalyticsResponse(BaseModel):
+    """Usage analytics for one project and a supported date window."""
+    days: Literal[7, 30, 90]
+    questions_by_day: List[ProjectAnalyticsDay]
+    conversation_count: int
+    top_cited_sources: List[ProjectAnalyticsSource]
+    ratings: ProjectAnalyticsRatings
+    recent_down_rated_questions: List[ProjectAnalyticsRecentQuestion]
+    uncited_sources: List[ProjectAnalyticsUncitedSource]
+
+
 class ProjectOverviewResponse(BaseModel):
     """Schema for a project's generated overview and suggested questions."""
     project_name: str
