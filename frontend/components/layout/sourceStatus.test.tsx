@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SourcesPanel from './SourcesPanel';
 import ProjectDialogProvider from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
-import type { Document, DocumentStatus, Project } from '@/lib/api';
+import api, { type Document, type DocumentStatus, type Project } from '@/lib/api';
 
 const project: Project = {
   id: 'project-1',
@@ -120,5 +120,70 @@ describe('source status', () => {
     expect(screen.getByRole('checkbox', {
       name: 'Use Example error in answers and Studio',
     })).toHaveProperty('disabled', true);
+  });
+
+  it('searches another project and opens the matching source preview', async () => {
+    const sharedProject: Project = {
+      ...project,
+      id: 'project-2',
+      name: 'Shared notebook',
+      role: 'viewer',
+    };
+    const sharedDocument: Document = {
+      id: 'shared-source',
+      name: 'Shared source',
+      type: 'url',
+      url: 'https://example.com/shared',
+      isOwnedByCaller: false,
+      meta: {},
+      status: 'ready',
+      created_at: '2026-08-13T00:00:00Z',
+      updated_at: '2026-08-13T00:00:00Z',
+      chunk_count: 1,
+    };
+    vi.spyOn(api, 'searchProjects').mockResolvedValue({
+      projects: [{
+        project_id: sharedProject.id,
+        project_name: sharedProject.name,
+        documents: [{
+          document_id: sharedDocument.id,
+          title: sharedDocument.name,
+          source_type: sharedDocument.type,
+          passages: [{
+            chunk_id: 'shared-chunk',
+            text: 'Enzymes are active in this passage.',
+            score: 0.8,
+            page_num: 4,
+            section: 'Methods',
+          }],
+        }],
+      }],
+    });
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Source content');
+    vi.spyOn(api, 'fetchDocumentGuide').mockResolvedValue({ summary: '', topics: [] });
+    useStore.setState({
+      projects: [project, sharedProject],
+      currentProject: project,
+      documents: [],
+      selectProject: (selected) => useStore.setState({
+        currentProject: selected,
+        documents: [sharedDocument],
+        loadingDocuments: false,
+      }),
+    });
+    renderPanel();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search across projects' }), {
+      target: { value: 'enzyme activity' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(await screen.findByText('Enzymes are active in this passage.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', {
+      name: /Open Shared source in Shared notebook:/,
+    }));
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(useStore.getState().currentProject?.id).toBe(sharedProject.id);
   });
 });
