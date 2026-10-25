@@ -17,10 +17,13 @@ an async one that blocks the loop is not.
 from functools import lru_cache
 from typing import Any, Literal, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, field_validator
 import structlog
+import json
 import uuid
 
 from app.config import Settings, get_settings
@@ -53,6 +56,29 @@ from app.services.rate_limit import (
 # mounted.
 router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = structlog.get_logger()
+
+
+class ClosingStreamingResponse(StreamingResponse):
+    """Close the sync event iterator and release its operation lease on exit."""
+
+    def __init__(self, content, lease, **kwargs):
+        self._content = content
+        self._lease = lease
+        super().__init__(content, **kwargs)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            try:
+                await run_in_threadpool(self._content.close)
+            finally:
+                self._lease.release()
+
+
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
 
 @lru_cache
 def get_rag_service() -> Any:
@@ -161,6 +187,50 @@ class MessageRatingRequest(BaseModel):
     rating: Optional[Literal["up", "down"]] = None
 
 
+def _resolve_query_scope(db, request, current_user):
+    """Resolve conversation, project, and source access before rate limits."""
+    project_id = request.project_id
+    conversation = None
+    if request.conversation_id:
+        conversation = require_conversation(db, request.conversation_id, current_user)
+        if project_id and conversation.project_id != project_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Conversation does not belong to the selected project",
+            )
+        project_id = project_id or conversation.project_id
+
+    if project_id:
+        require_project(db, project_id, current_user, min_role="viewer")
+        allowed_document_ids = owned_document_ids(
+            db, current_user, project_id=project_id
+        )
+        if request.document_ids is not None:
+            allowed_document_ids = require_documents(
+                db,
+                request.document_ids,
+                current_user,
+                project_id=project_id,
+            )
+    else:
+        allowed_document_ids = owned_document_ids(db, current_user)
+        if request.document_ids is not None:
+            allowed_document_ids = require_documents(
+                db, request.document_ids, current_user
+            )
+    return project_id, conversation, allowed_document_ids
+
+
+def _acquire_query_lease(settings, request_limiter, concurrency_limiter, user_id):
+    lease = UnlimitedConcurrencyLease()
+    if settings.rate_limit_enabled:
+        enforce_account_rate_limit(
+            request_limiter, "query", user_id, limit=30, window_seconds=60
+        )
+        lease = acquire_account_lease(concurrency_limiter, "query", user_id)
+    return lease
+
+
 @router.post(
     "/query",
     response_model=QueryResponse,
@@ -192,55 +262,13 @@ def query(
         # Resolve every ownership-bearing id before abuse controls. Otherwise a
         # depleted limiter would turn another account's normally indistinguishable
         # 404 into a 429 and reveal that the probed id follows a different path.
-        project_id = request.project_id
+        project_id, conversation, allowed_document_ids = _resolve_query_scope(
+            db, request, current_user
+        )
         conversation_id = request.conversation_id
-        conversation = None
-        if request.conversation_id:
-            conversation = require_conversation(db, request.conversation_id, current_user)
-
-            if (
-                project_id
-                and conversation.project_id != project_id
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Conversation does not belong to the selected project",
-                )
-            project_id = project_id or conversation.project_id
-
-        if project_id:
-            require_project(db, project_id, current_user, min_role="viewer")
-            allowed_document_ids = owned_document_ids(
-                db, current_user, project_id=project_id
-            )
-            if request.document_ids is not None:
-                allowed_document_ids = require_documents(
-                    db,
-                    request.document_ids,
-                    current_user,
-                    project_id=project_id,
-                )
-        else:
-            allowed_document_ids = owned_document_ids(db, current_user)
-            if request.document_ids is not None:
-                allowed_document_ids = require_documents(
-                    db, request.document_ids, current_user
-                )
-
-        lease = UnlimitedConcurrencyLease()
-        if settings.rate_limit_enabled:
-            enforce_account_rate_limit(
-                request_limiter,
-                "query",
-                current_user.id,
-                limit=30,
-                window_seconds=60,
-            )
-            lease = acquire_account_lease(
-                concurrency_limiter,
-                "query",
-                current_user.id,
-            )
+        lease = _acquire_query_lease(
+            settings, request_limiter, concurrency_limiter, current_user.id
+        )
         try:
             if conversation is not None:
                 # Process query with conversation context
@@ -311,6 +339,126 @@ def query(
     except Exception as e:
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/query/stream", response_class=StreamingResponse)
+def stream_query(
+    request: QueryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    rag_service: Any = Depends(get_rag_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
+    settings: Settings = Depends(get_settings),
+):
+    """Stream a grounded answer and save its completed conversation turn."""
+    lease = None
+    try:
+        project_id, conversation, allowed_document_ids = _resolve_query_scope(
+            db, request, current_user
+        )
+        conversation_id = request.conversation_id
+        new_conversation = conversation_id is None and project_id is not None
+        if new_conversation:
+            conversation_id = str(uuid.uuid4())
+        rag_conversation_id = conversation_id or str(uuid.uuid4())
+        persist = conversation is not None or new_conversation
+        lease = _acquire_query_lease(
+            settings, request_limiter, concurrency_limiter, current_user.id
+        )
+
+        def events():
+            rag_events = None
+            persist_started = False
+            completed = False
+            try:
+                rag_events = rag_service.stream_query_with_conversation(
+                    db=db,
+                    query=request.query,
+                    conversation_id=rag_conversation_id,
+                    project_id=project_id,
+                    top_k=request.top_k,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    include_sources=request.include_sources,
+                    allowed_document_ids=allowed_document_ids,
+                )
+                for event, payload in rag_events:
+                    if event == "delta":
+                        yield _sse("token", {"text": payload})
+                        continue
+                    if event != "complete":
+                        raise RuntimeError("Unexpected RAG streaming event")
+
+                    message_id = None
+                    if persist:
+                        persist_started = True
+                        if new_conversation:
+                            db.add(Conversation(
+                                id=conversation_id,
+                                project_id=project_id,
+                                user_id=current_user.id,
+                                title=request.query[:100],
+                            ))
+                        db.add(Message(
+                            id=str(uuid.uuid4()),
+                            conversation_id=conversation_id,
+                            role="user",
+                            text=request.query,
+                            citations_json=[],
+                        ))
+                        assistant = Message(
+                            id=str(uuid.uuid4()),
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            text=payload["answer"],
+                            citations_json=payload.get("sources", []),
+                            citation_checks_json=payload.get("citation_checks"),
+                            used_mode=payload.get("model_used"),
+                            token_count=payload.get("usage", {}).get("total_tokens"),
+                        )
+                        db.add(assistant)
+                        db.commit()
+                        message_id = assistant.id
+
+                    completed = True
+                    yield _sse("complete", {
+                        **payload,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                    })
+                    return
+
+                if not completed:
+                    raise RuntimeError("RAG stream ended before completion")
+            except Exception as error:
+                if persist_started:
+                    db.rollback()
+                logger.error("Streaming query failed", error=str(error))
+                yield _sse("error", {"detail": str(error)})
+            finally:
+                close = getattr(rag_events, "close", None)
+                if close:
+                    close()
+
+        return ClosingStreamingResponse(
+            events(),
+            lease,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except HTTPException:
+        if lease is not None:
+            lease.release()
+        raise
+    except Exception as error:
+        if lease is not None:
+            lease.release()
+        logger.error("Unable to start streaming query", error=str(error))
+        raise HTTPException(status_code=500, detail=str(error)) from error
 
 
 @router.post(

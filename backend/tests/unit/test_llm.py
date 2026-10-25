@@ -352,3 +352,184 @@ def test_refusal_does_not_masquerade_as_an_answer(
     result = service.generate(RAG_PROMPT)
 
     assert result["model"] == FALLBACK_MODEL
+
+
+def test_openai_stream_yields_deltas_and_final_usage(settings, monkeypatch, fake_openai):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+    service = LLMService()
+    stream = _FakeOpenAIStream([
+        _openai_chunk("Grounded "),
+        _openai_chunk("answer", usage=_openai_usage()),
+    ])
+    requests = []
+
+    def create(**kwargs):
+        requests.append(kwargs)
+        return stream
+
+    monkeypatch.setattr(service.provider._client.chat.completions, "create", create)
+
+    events = list(service.stream_generate("Question", system_prompt="System"))
+
+    assert events == [
+        ("delta", "Grounded "),
+        ("delta", "answer"),
+        ("complete", {
+            "text": "Grounded answer",
+            "model": "gpt-5.6",
+            "provider": "openai",
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+            },
+        }),
+    ]
+    assert requests[0]["stream"] is True
+    assert requests[0]["stream_options"] == {"include_usage": True}
+    assert requests[0]["messages"] == [
+        {"role": "system", "content": "System"},
+        {"role": "user", "content": "Question"},
+    ]
+    assert stream.closed
+
+
+def test_claude_stream_yields_deltas_and_final_usage(settings, monkeypatch, fake_anthropic):
+    monkeypatch.setattr(settings, "claude_api_key", "sk-ant-test")
+    service = LLMService()
+    stream = _FakeClaudeStream()
+    requests = []
+
+    def create_stream(**kwargs):
+        requests.append(kwargs)
+        return stream
+
+    monkeypatch.setattr(service.provider._client.messages, "stream", create_stream, raising=False)
+
+    events = list(service.stream_generate("Question", temperature=0.2, max_tokens=512))
+
+    assert events == [
+        ("delta", "Grounded "),
+        ("delta", "answer"),
+        ("complete", {
+            "text": "Grounded answer",
+            "model": "claude-opus-5",
+            "provider": "claude",
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+            },
+        }),
+    ]
+    assert "temperature" not in requests[0]
+    assert requests[0]["max_tokens"] == 2048
+    assert stream.closed
+
+
+def test_openai_stream_closes_when_consumer_cancels(settings, monkeypatch, fake_openai):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+    service = LLMService()
+    stream = _FakeOpenAIStream([_openai_chunk("first")])
+    monkeypatch.setattr(
+        service.provider._client.chat.completions,
+        "create",
+        lambda **kwargs: stream,
+    )
+
+    events = service.stream_generate("Question")
+    assert next(events) == ("delta", "first")
+    events.close()
+
+    assert stream.closed
+
+
+def test_claude_stream_closes_when_consumer_cancels(settings, monkeypatch, fake_anthropic):
+    monkeypatch.setattr(settings, "claude_api_key", "sk-ant-test")
+    service = LLMService()
+    stream = _FakeClaudeStream()
+    monkeypatch.setattr(
+        service.provider._client.messages,
+        "stream",
+        lambda **kwargs: stream,
+        raising=False,
+    )
+
+    events = service.stream_generate("Question")
+    assert next(events) == ("delta", "Grounded ")
+    events.close()
+
+    assert stream.closed
+
+
+def test_streaming_falls_back_to_one_generated_delta(settings):
+    service = LLMService()
+
+    class GenerateOnlyProvider:
+        name = "stub"
+        model = "stub-model"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, prompt, temperature, max_tokens, system_prompt):
+            self.calls += 1
+            return {
+                "text": "One complete answer",
+                "model": self.model,
+                "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+            }
+
+    provider = GenerateOnlyProvider()
+    service.provider = provider
+
+    events = list(service.stream_generate("Question"))
+
+    assert events == [
+        ("delta", "One complete answer"),
+        ("complete", {
+            "text": "One complete answer",
+            "model": "stub-model",
+            "provider": "stub",
+            "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+        }),
+    ]
+    assert provider.calls == 1
+
+
+class _FakeOpenAIStream:
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.closed = False
+
+    def __iter__(self):
+        return iter(self.chunks)
+
+    def close(self):
+        self.closed = True
+
+
+def _openai_chunk(text, usage=None):
+    choices = [] if text is None else [
+        types.SimpleNamespace(delta=types.SimpleNamespace(content=text))
+    ]
+    return types.SimpleNamespace(choices=choices, usage=usage, model=None)
+
+
+def _openai_usage():
+    return types.SimpleNamespace(prompt_tokens=11, completion_tokens=7, total_tokens=18)
+
+
+class _FakeClaudeStream:
+    def __init__(self):
+        self.closed = False
+        self.text_stream = iter(("Grounded ", "answer"))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.closed = True
+
+    def get_final_message(self):
+        return _fake_anthropic_response(text="Grounded answer")

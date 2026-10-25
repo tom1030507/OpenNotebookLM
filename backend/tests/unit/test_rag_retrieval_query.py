@@ -132,6 +132,7 @@ class RecordingLLMService:
 
     def __init__(self):
         self.calls = []
+        self.stream_calls = []
 
     def generate(self, prompt, temperature=0.7, max_tokens=512, system_prompt=None):
         """Record the call and return a fixed answer.
@@ -147,6 +148,18 @@ class RecordingLLMService:
         """
         self.calls.append({"prompt": prompt, "system_prompt": system_prompt})
         return {"text": "An answer.", "model": "test-model", "usage": {"total_tokens": 10}}
+
+    def stream_generate(self, prompt, temperature=0.7, max_tokens=512, system_prompt=None):
+        self.stream_calls.append({"prompt": prompt, "system_prompt": system_prompt})
+        text = "An answer [Source 1].[Source 9]"
+        yield "delta", "An answer "
+        yield "delta", "[Source 1].[Source 9]"
+        yield "complete", {
+            "text": text,
+            "model": "test-model",
+            "provider": "stub",
+            "usage": {"total_tokens": 10},
+        }
 
 
 @pytest.fixture
@@ -296,6 +309,137 @@ class TestOneOffQuery:
         result = instance.query(db=db, query="What is positional encoding?",
                                 include_sources=False, use_cache=False)
         assert result["sources"] == []
+
+
+class TestStreamingConversationQuery:
+    def test_closing_the_rag_stream_closes_the_llm_stream(self, db, service):
+        instance, _, _ = service
+
+        class ClosableLLM:
+            def __init__(self):
+                self.closed = False
+                self.events = None
+
+            def stream_generate(self, **_kwargs):
+                self.events = self._events()
+                return self.events
+
+            def _events(self):
+                try:
+                    yield "delta", "partial answer"
+                    yield "complete", {
+                        "text": "partial answer",
+                        "model": "test-model",
+                        "usage": {},
+                    }
+                finally:
+                    self.closed = True
+
+        llm = ClosableLLM()
+        instance.llm_service = llm
+        events = instance.stream_query_with_conversation(
+            db=db,
+            query="And what does the feed-forward layer contribute?",
+            conversation_id=CONVERSATION_ID,
+            use_cache=False,
+        )
+
+        assert next(events) == ("delta", "partial answer")
+        events.close()
+
+        assert llm.closed is True
+
+    def test_stream_uses_question_for_retrieval_and_normalizes_citations(
+        self, db, service, monkeypatch
+    ):
+        instance, embeddings, llm = service
+        module = real_rag_module()
+        checked = []
+        checks = [{"citation": "[Source 1]", "supported": True}]
+
+        def check_support(answer, chunks, embedding_service, threshold):
+            checked.append((answer, chunks, embedding_service, threshold))
+            return checks
+
+        monkeypatch.setattr(module.settings, "citation_check_enabled", True)
+        monkeypatch.setattr(module, "check_citation_support", check_support)
+
+        events = list(instance.stream_query_with_conversation(
+            db=db,
+            query="And what does the feed-forward layer contribute?",
+            conversation_id=CONVERSATION_ID,
+            use_cache=False,
+        ))
+
+        assert embeddings.queries == ["And what does the feed-forward layer contribute?"]
+        assert "Previous conversation" in llm.stream_calls[0]["prompt"]
+        assert events[:2] == [
+            ("delta", "An answer "),
+            ("delta", "[Source 1].[Source 9]"),
+        ]
+        complete = events[2][1]
+        assert events[2][0] == "complete"
+        assert complete["answer"] == "An answer [Source 1]."
+        assert complete["sources"][0]["id"] == 1
+        assert complete["sources"][0]["document_id"] == "document-1"
+        assert complete["chunks_used"] == 1
+        assert complete["model_used"] == "test-model"
+        assert complete["citation_checks"] == checks
+        assert checked[0][0] == "An answer [Source 1]."
+        assert len(db.query(Message).filter(
+            Message.conversation_id == CONVERSATION_ID).all()) == 4
+
+    def test_stream_without_relevant_sources_returns_one_complete_delta(
+        self, db, service
+    ):
+        instance, _, llm = service
+        instance._retrieve_chunks = lambda **_kwargs: []
+
+        events = list(instance.stream_query_with_conversation(
+            db=db, query="Unknown topic?", conversation_id=CONVERSATION_ID,
+            use_cache=False,
+        ))
+
+        expected = "I couldn't find any relevant information in the documents to answer your question."
+        assert events[0] == ("delta", expected)
+        assert events[1] == ("complete", {
+            "answer": expected,
+            "sources": [],
+            "chunks_used": 0,
+            "model_used": None,
+            "citation_checks": [],
+        })
+        assert llm.stream_calls == []
+
+    def test_stream_cache_hit_emits_cached_answer_without_retrieval(
+        self, db, service
+    ):
+        instance, embeddings, llm = service
+        module = real_rag_module()
+        cached = {
+            "answer": "Cached answer [Source 1].",
+            "sources": [],
+            "chunks_used": 1,
+            "model_used": "test-model",
+            "usage": {"total_tokens": 10},
+            "citation_checks": [],
+        }
+        cache = mock.Mock()
+        cache.get_cached_query.return_value = cached
+
+        with mock.patch.object(module, "cache_service", cache):
+            events = list(instance.stream_query_with_conversation(
+                db=db, query="A question with cached answer?",
+                conversation_id=CONVERSATION_ID,
+            ))
+
+        assert events == [
+            ("delta", cached["answer"]),
+            ("complete", cached),
+        ]
+        assert embeddings.queries == []
+        assert llm.stream_calls == []
+        cache.get_cached_query.assert_called_once()
 
     def test_include_sources_is_honoured_in_a_conversation(self, db, service):
         # It used to be dropped on both conversation branches, so turning it off

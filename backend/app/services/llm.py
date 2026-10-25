@@ -7,7 +7,7 @@ configured the service still answers, but extractively — see
 so callers can tell a real answer from a passage of the source text.
 """
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import structlog
 
@@ -227,6 +227,61 @@ class ClaudeProvider:
                 + response.usage.output_tokens,
             },
         }
+
+    def stream_generate(
+        self,
+        prompt: str,
+        temperature: float,
+        max_tokens: Optional[int],
+        system_prompt: Optional[str],
+    ) -> Iterator[Tuple[str, Any]]:
+        """Stream answer text and then return Claude's final usage metadata.
+
+        Args:
+            prompt: User prompt.
+            temperature: Ignored because Claude does not accept it here.
+            max_tokens: Output budget, or None for the configured Claude limit.
+            system_prompt: Optional system instructions.
+
+        Returns:
+            Delta events followed by a complete generation result.
+        """
+        budget = (
+            max_tokens if max_tokens is not None
+            else settings.claude_max_output_tokens
+        )
+        request: Dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": max(budget, settings.claude_min_max_tokens),
+            "output_config": {"effort": settings.claude_effort},
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system_prompt:
+            request["system"] = system_prompt
+
+        with self._client.messages.stream(**request) as stream:
+            text_parts = []
+            for text in stream.text_stream:
+                if text:
+                    text_parts.append(text)
+                    yield "delta", text
+
+            response = stream.get_final_message()
+            if response.stop_reason == "refusal":
+                raise RuntimeError("Claude declined to answer this request")
+
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            yield "complete", {
+                "text": "".join(text_parts),
+                "model": response.model,
+                "provider": self.name,
+                "usage": {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                },
+            }
 
 
 class TokenBudgetTooSmallError(RuntimeError):
@@ -452,6 +507,71 @@ class OpenAICompatibleProvider:
                 "prompt_tokens": usage.prompt_tokens if usage else 0,
                 "completion_tokens": usage.completion_tokens if usage else 0,
                 "total_tokens": usage.total_tokens if usage else 0,
+            },
+        }
+
+    def stream_generate(
+        self,
+        prompt: str,
+        temperature: float,
+        max_tokens: Optional[int],
+        system_prompt: Optional[str],
+    ) -> Iterator[Tuple[str, Any]]:
+        """Stream chat-completion deltas, usage, and the final text.
+
+        Args:
+            prompt: User prompt.
+            temperature: Sampling temperature.
+            max_tokens: Output budget, or None for the model's limit.
+            system_prompt: Optional system instructions.
+
+        Returns:
+            Delta events followed by a complete generation result.
+        """
+        messages: List[Dict[str, Any]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        request: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": self._budget(max_tokens, messages),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self.reasoning_format:
+            request["extra_body"] = {"reasoning_format": self.reasoning_format}
+
+        stream = self._create(request, max_tokens, messages)
+        text_parts = []
+        usage = None
+        model = self.model
+        try:
+            for chunk in stream:
+                if getattr(chunk, "model", None):
+                    model = chunk.model
+                if getattr(chunk, "usage", None):
+                    usage = chunk.usage
+                for choice in getattr(chunk, "choices", []):
+                    text = getattr(getattr(choice, "delta", None), "content", None)
+                    if text:
+                        text_parts.append(text)
+                        yield "delta", text
+        finally:
+            close = getattr(stream, "close", None)
+            if close:
+                close()
+
+        yield "complete", {
+            "text": "".join(text_parts),
+            "model": model,
+            "provider": self.name,
+            "usage": {
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                "completion_tokens": getattr(usage, "completion_tokens", 0),
+                "total_tokens": getattr(usage, "total_tokens", 0),
             },
         }
 
@@ -690,6 +810,44 @@ class LLMService:
                 "error": f"{type(e).__name__}: {e}",
             }
             return self._fallback_response(prompt)
+
+    def stream_generate(
+        self,
+        prompt: str,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = 512,
+        system_prompt: Optional[str] = None,
+    ) -> Iterator[Tuple[str, Any]]:
+        """Yield generated text deltas and a final generation result.
+
+        Args:
+            prompt: User prompt.
+            temperature: Sampling temperature, ignored by Claude.
+            max_tokens: Output budget.
+            system_prompt: Optional system instructions.
+
+        Returns:
+            Delta events followed by the complete result, including provider.
+        """
+        request = {
+            "prompt": prompt,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "system_prompt": system_prompt,
+        }
+        stream = getattr(self.provider, "stream_generate", None)
+        if callable(stream):
+            yield from stream(**request)
+            return
+
+        result = self.generate(**request)
+        yield "delta", result["text"]
+        provider = (
+            self.provider.name
+            if self.provider and result["model"] != FALLBACK_MODEL
+            else FALLBACK_MODEL
+        )
+        yield "complete", {**result, "provider": provider}
 
     def _fallback_response(self, prompt: str) -> Dict[str, Any]:
         """Generate a fallback response when LLM is not available.

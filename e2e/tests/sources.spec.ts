@@ -139,7 +139,7 @@ test('drafts a source-guide topic question with only that source selected', asyn
 
   const queryRequests: string[] = [];
   page.on('request', (request) => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/query')) {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/query/stream')) {
       queryRequests.push(request.url());
     }
   });
@@ -151,7 +151,7 @@ test('drafts a source-guide topic question with only that source selected', asyn
 
   const queryRequest = page.waitForRequest(
     (request) => request.method() === 'POST'
-      && new URL(request.url()).pathname.endsWith('/query'),
+      && new URL(request.url()).pathname.endsWith('/query/stream'),
   );
   await composer.press('Enter');
   expect((await queryRequest).postDataJSON().document_ids).toEqual([documentId]);

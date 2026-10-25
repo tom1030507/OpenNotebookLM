@@ -20,7 +20,7 @@ import {
 } from '@/components/desktopLayout';
 import MarkdownRenderer from '../MarkdownRenderer';
 import { requestAddSources } from '../sourceActions';
-import type { Message } from '@/lib/api';
+import type { Message, StreamQueryResponse } from '@/lib/api';
 import { citationId, referencedCitationIds } from '@/lib/citations';
 import BrandLogo from '../BrandLogo';
 import { useOptionalProjectDialog } from '../ProjectDialogProvider';
@@ -37,6 +37,8 @@ interface ChatAreaProps {
 interface PendingQuery {
   requestId: number;
   content: string;
+  answer: string;
+  complete: boolean;
   projectId: string;
   conversationId: string | null;
   error: string | null;
@@ -236,6 +238,7 @@ export default function ChatArea({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const composerGenerationRef = useRef(0);
+  const activeQueryControllerRef = useRef<AbortController | null>(null);
   const resizeComposer = useCallback(() => {
     const composer = composerRef.current;
     if (!composer) return;
@@ -284,6 +287,8 @@ export default function ChatArea({
     return () => window.removeEventListener('resize', resizeComposer);
   }, [resizeComposer]);
 
+  useEffect(() => () => activeQueryControllerRef.current?.abort(), []);
+
   useEffect(() => useStore.subscribe((state, previous) => {
     // Observe each transition so even a batched A → B → A cannot retain a
     // question from the previous project or signed-in account.
@@ -299,17 +304,22 @@ export default function ChatArea({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, pendingQuery?.answer]);
 
   const submitQuery = async (query: string) => {
     if (!currentProject || noSourcesSelected) return;
 
+    activeQueryControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeQueryControllerRef.current = controller;
     const composerGeneration = composerGenerationRef.current;
     const requestId = nextRequestIdRef.current + 1;
     nextRequestIdRef.current = requestId;
     setPendingQuery({
       requestId,
       content: query,
+      answer: '',
+      complete: false,
       projectId: currentProject.id,
       conversationId: currentConversation?.id ?? null,
       error: null,
@@ -317,15 +327,28 @@ export default function ChatArea({
     });
     
     try {
-      await sendQuery(query, false, (conversationId) => {
+      await sendQuery(query, true, (conversationId) => {
         setPendingQuery((pending) => (
           pending?.requestId === requestId
             ? { ...pending, conversationId }
             : pending
         ));
+      }, {
+        signal: controller.signal,
+        onToken: (token) => setPendingQuery((pending) => (
+          pending?.requestId === requestId
+            ? { ...pending, answer: pending.answer + token }
+            : pending
+        )),
+        onComplete: (response: StreamQueryResponse) => setPendingQuery((pending) => (
+          pending?.requestId === requestId
+            ? { ...pending, answer: response.answer, complete: true }
+            : pending
+        )),
       });
       setFollowUpConversationId(useStore.getState().currentConversation?.id ?? null);
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error('Failed to send query:', error);
       const message = error instanceof Error ? error.message : 'Unable to send the question.';
       setPendingQuery((pending) => (
@@ -347,6 +370,9 @@ export default function ChatArea({
         setInputValue((value) => value || query);
       }
     } finally {
+      if (activeQueryControllerRef.current === controller) {
+        activeQueryControllerRef.current = null;
+      }
       setPendingQuery((pending) => (
         pending?.requestId === requestId && !pending.error ? null : pending
       ));
@@ -416,6 +442,19 @@ export default function ChatArea({
     && pendingQuery.projectId === currentProject?.id
     && pendingQuery.conversationId === (currentConversation?.id ?? null);
   const isStreaming = pendingQueryIsActive && !pendingQuery.error;
+  const hasCompletedAnswer = pendingQueryIsActive
+    && pendingQuery?.complete === true
+    && messages.some((message) => (
+      message.role === 'assistant'
+      && message.conversation_id === pendingQuery.conversationId
+      && message.content === pendingQuery.answer
+    ));
+  const stopGenerating = () => {
+    if (!pendingQueryIsActive || !pendingQuery) return;
+    activeQueryControllerRef.current?.abort();
+    setInputValue(pendingQuery.content);
+    setPendingQuery(null);
+  };
 
   useEffect(() => {
     if (!pendingMindMapQuestion || !currentProject || !canChat || noSourcesSelected || isStreaming) return;
@@ -607,15 +646,31 @@ export default function ChatArea({
                 />
               )}
 
-              {isStreaming && (
+              {isStreaming && !hasCompletedAnswer && (
                 <div className="flex gap-3">
                   <BrandLogo className="w-8 h-8 flex-shrink-0" />
                   <div className="bg-[var(--card)] border border-[var(--border)] rounded-lg px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce" />
-                      <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce delay-100" />
-                      <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce delay-200" />
-                    </div>
+                    {pendingQuery.answer ? (
+                      <p aria-live="polite" className="text-sm whitespace-pre-wrap">
+                        {pendingQuery.answer}
+                      </p>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce" />
+                        <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce delay-100" />
+                        <div className="w-2 h-2 bg-[var(--muted-foreground)] rounded-full animate-bounce delay-200" />
+                      </div>
+                    )}
+                    {!pendingQuery.complete && (
+                      <button
+                        type="button"
+                        onClick={stopGenerating}
+                        aria-label="Stop generating answer"
+                        className="mt-2 text-xs underline underline-offset-2 text-[var(--muted-foreground)]"
+                      >
+                        Stop
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

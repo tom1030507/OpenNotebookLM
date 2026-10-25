@@ -1,5 +1,5 @@
 import { test, expect } from '../support/fixtures.js';
-import type { QueryResult } from '../support/api.js';
+import { completeStreamQuery } from '../support/api.js';
 import { runtime } from '../support/runtime.js';
 import { setupReadyUrlWorkspace, setupWorkspace } from '../support/ui.js';
 
@@ -17,13 +17,16 @@ test('answers from a ready source and persists messages and citation after reloa
 
   await page.getByPlaceholder('Ask anything about your sources...').fill(question);
   const queryResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.browserApiUrl}/query`
+    (response) => response.url() === `${runtime.browserApiUrl}/query/stream`
       && response.request().method() === 'POST',
   );
   await page.getByRole('button', { name: 'Send message' }).click();
   const rawResponse = await queryResponse;
   expect(rawResponse.status()).toBe(200);
-  const result = await rawResponse.json() as QueryResult;
+  const streamBody = await rawResponse.text();
+  expect(streamBody.indexOf('event: token')).toBeLessThan(streamBody.indexOf('event: complete'));
+  const result = completeStreamQuery(streamBody);
+  expect(result.message_id).not.toBeNull();
 
   expect(result.model_used).toBe('fallback');
   expect(result.answer).toContain('ORBIT-7319');
@@ -56,7 +59,7 @@ test('answers from a ready source and persists messages and citation after reloa
   const sourcesPanel = page.getByText('Sources:', { exact: true }).last().locator('..');
   await expect(sourcesPanel).toContainText('E2E Observatory Field Notes');
 
-  // The browser creates this shortened title before it issues /api/query.
+  // The browser creates this shortened title before it issues /api/query/stream.
   const conversationTitle = `${question.substring(0, 50)}...`;
   const listReloaded = page.waitForResponse(
     (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`

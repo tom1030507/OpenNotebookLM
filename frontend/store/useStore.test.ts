@@ -37,6 +37,7 @@ const apiMock = vi.hoisted(() => ({
   deleteConversation: vi.fn(),
   getMessages: vi.fn(),
   query: vi.fn(),
+  streamQuery: vi.fn(),
 }));
 
 
@@ -484,7 +485,7 @@ describe('application store', () => {
     vi.useRealTimers();
   });
 
-  it('uses the query endpoint and refreshes authoritative messages', async () => {
+  it('uses the JSON query endpoint and refreshes authoritative messages', async () => {
     useStore.setState({
       currentProject: project('project-1'),
       currentConversation: conversation('conversation-1', 'project-1'),
@@ -499,7 +500,7 @@ describe('application store', () => {
     });
     apiMock.getMessages.mockResolvedValue([authoritativeMessage]);
 
-    await useStore.getState().sendQuery('Question', true);
+    await useStore.getState().sendQuery('Question');
 
     expect(apiMock.query).toHaveBeenCalledWith({
       project_id: 'project-1',
@@ -508,6 +509,63 @@ describe('application store', () => {
     });
     expect(apiMock.getMessages).toHaveBeenCalledWith('conversation-1');
     expect(useStore.getState().messages).toEqual([authoritativeMessage]);
+  });
+
+  it('streams query tokens and refreshes authoritative messages', async () => {
+    const controller = new AbortController();
+    const onToken = vi.fn();
+    const onComplete = vi.fn();
+    useStore.setState({
+      currentProject: project('project-1'),
+      currentConversation: conversation('conversation-1', 'project-1'),
+    });
+    apiMock.getMessages.mockResolvedValue([authoritativeMessage]);
+
+    const response = {
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: null,
+      usage: {},
+      conversation_id: 'conversation-1',
+      message_id: 'message-1',
+    };
+    apiMock.streamQuery.mockImplementation(async (_request, signal, emitToken) => {
+      expect(signal).toBe(controller.signal);
+      emitToken('partial ');
+      return response;
+    });
+
+    await useStore.getState().sendQuery('Question', true, undefined, {
+      signal: controller.signal,
+      onToken,
+      onComplete,
+    });
+
+    expect(apiMock.streamQuery).toHaveBeenCalledWith({
+      project_id: 'project-1',
+      query: 'Question',
+      conversation_id: 'conversation-1',
+      document_ids: undefined,
+    }, controller.signal, onToken);
+    expect(onToken).toHaveBeenCalledWith('partial ');
+    expect(onComplete).toHaveBeenCalledWith(response);
+    expect(apiMock.query).not.toHaveBeenCalled();
+    expect(useStore.getState().messages).toEqual([authoritativeMessage]);
+  });
+
+  it('does not log a stopped stream as a query failure', async () => {
+    useStore.setState({
+      currentProject: project('project-1'),
+      currentConversation: conversation('conversation-1', 'project-1'),
+    });
+    const aborted = new DOMException('Aborted', 'AbortError');
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    apiMock.streamQuery.mockRejectedValue(aborted);
+
+    await expect(useStore.getState().sendQuery('Question', true)).rejects.toBe(aborted);
+
+    expect(logError).not.toHaveBeenCalled();
   });
 
   describe('source selection', () => {

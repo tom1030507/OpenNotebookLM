@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 import { test, expect } from '../support/fixtures.js';
-import type { JsonObject, JsonValue, QueryResult } from '../support/api.js';
+import { completeStreamQuery, type JsonObject, type JsonValue } from '../support/api.js';
 import { generatePdf } from '../support/pdf.js';
 import { runtime } from '../support/runtime.js';
 import { openAddSourceDialog, setupWorkspace, sourceRow } from '../support/ui.js';
@@ -101,13 +101,13 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   const question = 'What is the emergency observatory access identifier?';
   await page.getByPlaceholder('Ask anything about your sources...').fill(question);
   const queryResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.browserApiUrl}/query`
+    (response) => response.url() === `${runtime.browserApiUrl}/query/stream`
       && response.request().method() === 'POST',
   );
   await page.getByRole('button', { name: 'Send message' }).click();
   const rawResponse = await queryResponse;
   expect(rawResponse.status()).toBe(200);
-  const result = await rawResponse.json() as QueryResult;
+  const result = completeStreamQuery(await rawResponse.text());
 
   expect(result.model_used).toBe('fallback');
   expect(result.conversation_id).not.toBeNull();

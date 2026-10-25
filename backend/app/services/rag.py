@@ -4,7 +4,7 @@ import hashlib
 import re
 import unicodedata
 from time import perf_counter
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Iterator, List, Dict, Any, Optional, Tuple
 import structlog
 from sqlalchemy.orm import Session
 
@@ -183,57 +183,7 @@ class RAGService:
                 system_prompt=system_prompt
             )
             
-            # 4. Format response
-            # Keep the model's numbering: filtering Source 2 out must not turn
-            # Source 3 into a link to an unrelated passage. Dropped context is
-            # not evidence, even when a model invents a label for it.
-            # Providers may group citations despite the requested format. Expand
-            # those labels before validation so their evidence is not lost.
-            answer_text = SOURCE_GROUP.sub(
-                lambda match: "".join(
-                    f"[Source {number}]" for number in re.findall(r"\d+", match.group(1))
-                ),
-                answer["text"],
-            )
-            valid_source_ids = {
-                str(number): number for number in range(1, len(context_chunks) + 1)
-            }
-
-            def normalize_source_label(match):
-                if not include_sources:
-                    return ""
-                number = "".join(
-                    str(unicodedata.decimal(digit)) for digit in match.group(1)
-                ).lstrip("0")
-                source_id = valid_source_ids.get(number)
-                return f"[Source {source_id}]" if source_id is not None else ""
-
-            answer_text = SOURCE_LABEL.sub(
-                normalize_source_label,
-                answer_text,
-            )
-            cited_ids = {int(match.group(1)) for match in SOURCE_LABEL.finditer(answer_text)}
-            response = {
-                "answer": answer_text,
-                "sources": [
-                    source for source in self._format_sources(context_chunks)
-                    if source["id"] in cited_ids
-                ] if include_sources else [],
-                "chunks_used": len(context_chunks),
-                "model_used": answer["model"],
-                "usage": answer.get("usage", {})
-            }
-            if settings.citation_check_enabled:
-                try:
-                    response["citation_checks"] = check_citation_support(
-                        answer_text,
-                        context_chunks,
-                        self.embedding_service,
-                        settings.citation_check_threshold,
-                    )
-                except Exception as exc:
-                    # Embedding checks must not turn a usable answer into a failed query.
-                    logger.warning("Citation support check failed", error=str(exc))
+            response = self._format_answer(answer, context_chunks, include_sources)
             
             logger.info(
                 "RAG query completed",
@@ -271,6 +221,70 @@ class RAGService:
         except Exception as e:
             logger.error(f"RAG query failed: {e}")
             raise
+
+    def _format_answer(
+        self,
+        answer: Dict[str, Any],
+        context_chunks: List[Dict[str, Any]],
+        include_sources: bool,
+    ) -> Dict[str, Any]:
+        """Normalize citations and shape the public RAG result.
+
+        Args:
+            answer: Completed LLM result.
+            context_chunks: Passages included in the generated prompt.
+            include_sources: Whether citations should be kept in the answer.
+
+        Returns:
+            The response shared by JSON and streaming queries.
+        """
+        # Keep original numbering so a missing passage cannot redirect a citation.
+        # Expand grouped labels before validating the provider's citations.
+        answer_text = SOURCE_GROUP.sub(
+            lambda match: "".join(
+                f"[Source {number}]" for number in re.findall(r"\d+", match.group(1))
+            ),
+            answer["text"],
+        )
+        valid_source_ids = {
+            str(number): number for number in range(1, len(context_chunks) + 1)
+        }
+
+        def normalize_source_label(match):
+            if not include_sources:
+                return ""
+            number = "".join(
+                str(unicodedata.decimal(digit)) for digit in match.group(1)
+            ).lstrip("0")
+            source_id = valid_source_ids.get(number)
+            return f"[Source {source_id}]" if source_id is not None else ""
+
+        answer_text = SOURCE_LABEL.sub(normalize_source_label, answer_text)
+        cited_ids = {
+            int(match.group(1)) for match in SOURCE_LABEL.finditer(answer_text)
+        }
+        response = {
+            "answer": answer_text,
+            "sources": [
+                source for source in self._format_sources(context_chunks)
+                if source["id"] in cited_ids
+            ] if include_sources else [],
+            "chunks_used": len(context_chunks),
+            "model_used": answer["model"],
+            "usage": answer.get("usage", {}),
+        }
+        if settings.citation_check_enabled:
+            try:
+                response["citation_checks"] = check_citation_support(
+                    answer_text,
+                    context_chunks,
+                    self.embedding_service,
+                    settings.citation_check_threshold,
+                )
+            except Exception as exc:
+                # A failed support check must not discard a usable answer.
+                logger.warning("Citation support check failed", error=str(exc))
+        return response
     
     def _generate_cache_key(
         self,
@@ -1000,6 +1014,130 @@ Question: {query}
         if previous and previous.text:
             return previous.text + " " + query
         return query
+
+    def stream_query_with_conversation(
+        self,
+        db: Session,
+        query: str,
+        conversation_id: str,
+        project_id: Optional[str] = None,
+        top_k: Optional[int] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        include_sources: bool = True,
+        use_cache: bool = True,
+        allowed_document_ids: Optional[List[str]] = None,
+    ) -> Iterator[Tuple[str, Any]]:
+        """Stream a conversation answer without saving either message.
+
+        Args:
+            db: Database session.
+            query: Current user question.
+            conversation_id: Conversation used for prompt and follow-up context.
+            project_id: Optional project retrieval scope.
+            top_k: Maximum passages to retrieve.
+            temperature: LLM sampling temperature.
+            max_tokens: Maximum generated tokens.
+            include_sources: Whether to keep normalized citations.
+            use_cache: Whether to read and write the query cache.
+            allowed_document_ids: Hard limit on searchable documents.
+
+        Returns:
+            Delta events followed by the fully formatted RAG response.
+        """
+        conv_context = self.get_conversation_context(db, conversation_id)
+        enhanced_query = (
+            f"Previous conversation:\n{conv_context}\n\nCurrent question: {query}"
+            if conv_context else query
+        )
+        retrieval_query = self._retrieval_query(db, query, conversation_id)
+        project = db.get(Project, project_id) if project_id else None
+        system_prompt = self._system_prompt(
+            include_sources,
+            overview=is_overview_query(retrieval_query),
+            project=project,
+        )
+
+        cache_key = None
+        if use_cache and cache_service:
+            cache_key = self._generate_cache_key(
+                query=enhanced_query,
+                project_id=project_id,
+                top_k=top_k,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                include_sources=include_sources,
+                retrieval_query=retrieval_query,
+                allowed_document_ids=allowed_document_ids,
+                system_prompt=system_prompt,
+            )
+            cached_result = cache_service.get_cached_query(
+                project_id=project_id or "global",
+                query=cache_key,
+            )
+            if cached_result and (
+                not settings.citation_check_enabled
+                or "citation_checks" in cached_result
+            ):
+                yield "delta", cached_result["answer"]
+                yield "complete", cached_result
+                return
+
+        relevant_chunks = self._retrieve_chunks(
+            db=db,
+            query=retrieval_query,
+            project_id=project_id,
+            top_k=top_k,
+            allowed_document_ids=allowed_document_ids,
+        )
+        if not relevant_chunks:
+            response = {
+                "answer": "I couldn't find any relevant information in the documents to answer your question.",
+                "sources": [],
+                "chunks_used": 0,
+                "model_used": None,
+            }
+            if settings.citation_check_enabled:
+                response["citation_checks"] = []
+            yield "delta", response["answer"]
+            yield "complete", response
+            return
+
+        context, context_chunks = self._prepare_grounded_context(relevant_chunks)
+        prompt = self._build_prompt(enhanced_query, context, include_sources)
+        llm_events = self.llm_service.stream_generate(
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+        )
+        try:
+            for event, value in llm_events:
+                if event == "delta":
+                    yield event, value
+                    continue
+
+                response = self._format_answer(value, context_chunks, include_sources)
+                if use_cache and cache_service and (
+                    not settings.citation_check_enabled
+                    or "citation_checks" in response
+                ):
+                    cache_service.cache_query_result(
+                        project_id=project_id or "global",
+                        query=cache_key,
+                        result=response,
+                        ttl=3600,
+                    )
+                logger.info(
+                    "RAG streaming query completed",
+                    chunks_used=len(context_chunks),
+                    model=value["model"],
+                )
+                yield "complete", response
+        finally:
+            close = getattr(llm_events, "close", None)
+            if close:
+                close()
 
     def query_with_conversation(
         self,
