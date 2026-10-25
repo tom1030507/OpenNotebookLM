@@ -582,6 +582,7 @@ export default function SourcesPanel({
               </button>
             </div>
             <FileUpload
+              multiple
               onUpload={handleUpload}
               onUploadingChange={handleUploadingChange(modalSession)}
               onAddText={handleAddText}

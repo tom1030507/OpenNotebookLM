@@ -178,6 +178,26 @@ describe('Add Sources controls', () => {
     });
   });
 
+  it('selects and uploads multiple files from the Sources panel', async () => {
+    const uploadDocument = vi.fn(async () => undefined);
+    useStore.setState({ uploadDocument });
+    render(<SourceWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Source' }));
+    const input = screen.getByLabelText('browse') as HTMLInputElement;
+    const files = [
+      new File(['First source'], 'first.txt', { type: 'text/plain' }),
+      new File(['Second source'], 'second.txt', { type: 'text/plain' }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    expect(input.multiple).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Upload 2 file(s)' }));
+    await waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(2));
+    expect(uploadDocument).toHaveBeenNthCalledWith(1, 'project-1', files[0]);
+    expect(uploadDocument).toHaveBeenNthCalledWith(2, 'project-1', files[1]);
+  });
+
   it('keeps the dialog open and surfaces an error after a URL upload fails', async () => {
     useStore.setState({
       createDocument: async () => {
