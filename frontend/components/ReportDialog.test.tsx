@@ -15,10 +15,15 @@ const report = {
     text: 'Rainfall increased in the western region.',
   }],
 };
+let downloadedBlobs: Blob[] = [];
 
 beforeEach(() => {
+  downloadedBlobs = [];
   class TestURL extends URL {}
-  TestURL.createObjectURL = vi.fn(() => 'blob:report');
+  TestURL.createObjectURL = vi.fn((blob: Blob) => {
+    downloadedBlobs.push(blob);
+    return 'blob:report';
+  });
   TestURL.revokeObjectURL = vi.fn();
   vi.stubGlobal('URL', TestURL);
 });
@@ -86,9 +91,68 @@ describe('ReportDialog', () => {
     expect(clickedNames).toHaveLength(1);
     expect(clickedNames[0]).toMatch(/\.md$/);
     expect(clickedNames[0]).not.toMatch(/[\\/:*?"<>|\u0000-\u001f\u007f]/);
+    const reader = new FileReader();
+    const downloadedMarkdown = new Promise<string>((resolve, reject) => {
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+    });
+    reader.readAsText(downloadedBlobs[0]);
+    const expectedMarkdown = `${report.markdown}\n\n**Sources**\n\n- Rainfall study\n  - [1]\n    > Rainfall increased in the western region.`;
+    await expect(downloadedMarkdown).resolves.toBe(expectedMarkdown);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save report to notes' }));
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith(report.markdown));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expectedMarkdown));
+    expect(await screen.findByRole('button', { name: 'Saved to notes' })).toBeTruthy();
+  });
+
+  it('clears a generated report when its format changes', async () => {
+    vi.spyOn(api, 'fetchProjectReport').mockResolvedValue(report);
+    render(<ReportDialog projectId="project-1" projectName="Research" onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
+    expect(await screen.findByText('Generated report')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Report format'), { target: { value: 'faq' } });
+
+    expect(screen.queryByText('Generated report')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download Markdown' })).toBeNull();
+  });
+
+  it('clears a generated custom report when its instruction changes', async () => {
+    vi.spyOn(api, 'fetchProjectReport').mockResolvedValue(report);
+    render(<ReportDialog projectId="project-1" projectName="Research" onClose={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText('Report format'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText('Custom instructions'), { target: { value: 'First request' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
+    expect(await screen.findByText('Generated report')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Custom instructions'), { target: { value: 'Updated request' } });
+
+    expect(screen.queryByText('Generated report')).toBeNull();
+  });
+
+  it('locks report settings and generation while saving to notes', async () => {
+    vi.spyOn(api, 'fetchProjectReport').mockResolvedValue(report);
+    let finishSave!: () => void;
+    const onSave = vi.fn(() => new Promise<void>((resolve) => { finishSave = resolve; }));
+    render(<ReportDialog
+      projectId="project-1"
+      projectName="Research"
+      onClose={() => {}}
+      onSave={onSave}
+    />);
+
+    fireEvent.change(screen.getByLabelText('Report format'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText('Custom instructions'), { target: { value: 'Explain the finding' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
+    expect(await screen.findByText('Generated report')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save report to notes' }));
+
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy();
+    expect((screen.getByLabelText('Report format') as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Custom instructions') as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Generate report' }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    finishSave();
     expect(await screen.findByRole('button', { name: 'Saved to notes' })).toBeTruthy();
   });
 

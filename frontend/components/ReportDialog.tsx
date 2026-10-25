@@ -6,6 +6,7 @@ import { BookmarkPlus, Check, Download, Loader2, X } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import api from '@/lib/api';
 import type { ProjectReport, ReportFormat } from '@/lib/api';
+import { citationId } from '@/lib/citations';
 import MarkdownRenderer from './MarkdownRenderer';
 
 const FORMATS: { value: ReportFormat; title: string; description: string }[] = [
@@ -43,10 +44,30 @@ export default function ReportDialog({
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const selectedFormat = FORMATS.find((item) => item.value === format) ?? FORMATS[0];
   const noSources = documentIds?.length === 0;
+  const markdownWithSources = report?.citations.length
+    ? `${report.markdown.trimEnd()}\n\n**Sources**\n\n${report.citations.map((citation) => {
+      const id = citationId(citation);
+      const label = id === null ? 'Passage' : `[${id}]`;
+      const excerpt = citation.text?.replace(/\s+/g, ' ').trim();
+      return [
+        `- ${citation.source || 'Unknown source'}`,
+        `  - ${label}`,
+        ...(excerpt ? [`    > ${excerpt}`] : []),
+      ].join('\n');
+    }).join('\n')}`
+    : report?.markdown ?? '';
 
   useDialogFocus({ isOpen: true, onClose, dialogRef, initialFocusRef: closeRef });
 
   useEffect(() => () => { requestRun.current += 1; }, []);
+
+  const invalidateReport = () => {
+    requestRun.current += 1;
+    setIsGenerating(false);
+    setError('');
+    setReport(null);
+    setSaveState('idle');
+  };
 
   const generate = async () => {
     const run = requestRun.current + 1;
@@ -71,7 +92,7 @@ export default function ReportDialog({
 
   const download = () => {
     if (!report) return;
-    const blob = new Blob([report.markdown], { type: 'text/markdown;charset=utf-8' });
+    const blob = new Blob([markdownWithSources], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     const filename = projectName
@@ -88,12 +109,13 @@ export default function ReportDialog({
 
   const save = async () => {
     if (!onSave || !report) return;
+    const run = requestRun.current;
     setSaveState('saving');
     try {
-      await onSave(report.markdown);
-      setSaveState('saved');
+      await onSave(markdownWithSources);
+      if (requestRun.current === run) setSaveState('saved');
     } catch {
-      setSaveState('error');
+      if (requestRun.current === run) setSaveState('error');
     }
   };
 
@@ -128,7 +150,11 @@ export default function ReportDialog({
               <select
                 aria-label="Report format"
                 value={format}
-                onChange={(event) => setFormat(event.target.value as ReportFormat)}
+                disabled={saveState === 'saving'}
+                onChange={(event) => {
+                  invalidateReport();
+                  setFormat(event.target.value as ReportFormat);
+                }}
                 className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               >
                 {FORMATS.map((item) => (
@@ -147,7 +173,11 @@ export default function ReportDialog({
               <textarea
                 aria-label="Custom instructions"
                 value={instruction}
-                onChange={(event) => setInstruction(event.target.value)}
+                disabled={saveState === 'saving'}
+                onChange={(event) => {
+                  invalidateReport();
+                  setInstruction(event.target.value);
+                }}
                 maxLength={500}
                 rows={3}
                 placeholder="Describe the report you want"
@@ -168,7 +198,8 @@ export default function ReportDialog({
             <button
               type="button"
               onClick={generate}
-              disabled={isGenerating || noSources || (format === 'custom' && !instruction.trim())}
+              disabled={isGenerating || saveState === 'saving' || noSources
+                || (format === 'custom' && !instruction.trim())}
               className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:brightness-95 focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Generate report
