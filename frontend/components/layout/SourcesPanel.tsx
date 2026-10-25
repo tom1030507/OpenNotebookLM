@@ -12,6 +12,7 @@ import {
   Youtube,
   File as FileIcon,
   X,
+  Copy,
   Loader2,
   FolderOpen,
   Eye,
@@ -29,6 +30,8 @@ import {
   requestAddSources,
 } from '../sourceActions';
 import useDialogFocus from '@/hooks/useDialogFocus';
+import ProjectCover from '../ProjectCover';
+import { findProjectCoverColor, projectCoverStyle } from '@/lib/projectCover';
 
 // A source is only "Ready" once the backend can retrieve it, so the states
 // before that need names a reader recognises rather than the raw status word.
@@ -56,6 +59,8 @@ export default function SourcesPanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [projectActionError, setProjectActionError] = useState('');
   const [modalSession, setModalSession] = useState(0);
   const uploadCloseRef = useRef<HTMLButtonElement>(null);
   const uploadDialogRef = useRef<HTMLDivElement>(null);
@@ -90,6 +95,7 @@ export default function SourcesPanel({
     loadingDocuments,
     fetchProjects,
     selectProject,
+    duplicateProject,
     uploadDocument,
     createDocument,
     deleteDocument,
@@ -99,6 +105,20 @@ export default function SourcesPanel({
     setAllSourcesSelected,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
+
+  const handleDuplicateProject = async () => {
+    if (!currentProject || isDuplicating) return;
+    setIsDuplicating(true);
+    setProjectActionError('');
+    try {
+      const duplicate = await duplicateProject(currentProject.id);
+      if (duplicate) selectProject(duplicate);
+    } catch (error) {
+      setProjectActionError(error instanceof Error ? error.message : 'Failed to duplicate project');
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
 
   useEffect(() => {
     fetchProjects();
@@ -268,34 +288,72 @@ export default function SourcesPanel({
       <div className="px-4 pt-4 pb-3 border-b border-[var(--sidebar-border)]">
         <h2 className="pr-10 text-sm font-semibold mb-3">Sources</h2>
         
-        {/* Project selector and New Project share one row: stacked, the two
-            took 90px of a column that also has to hold the source list. */}
-        <div className="flex items-center gap-2 mb-2">
-          <select
-            aria-label={'Select a project'}
-            value={currentProject?.id || ''}
-            onChange={(e) => {
-              const project = projects.find(p => p.id === e.target.value);
-              if (project) selectProject(project);
-            }}
-            className="min-w-0 flex-1 h-9 px-2.5 bg-[var(--card)] border border-[var(--input)] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
-          >
-            <option value="">Select a project</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-          
-          <button
-            onClick={openProjectDialog}
-            aria-label="New Project"
-            title="New Project"
-            className="shrink-0 h-9 w-9 flex items-center justify-center border border-[var(--input)] bg-[var(--card)] rounded-md hover:bg-[var(--muted)] transition-base disabled:opacity-50"
-          >
-            <FolderOpen className="w-4 h-4" />
-          </button>
+        {/* Cover, project selector and New Project share one row; the project
+            actions sit under it as one quiet row. Stacked full-width buttons
+            took ~130px of a column that also has to hold the source list. */}
+        <div className="mb-2 space-y-1.5">
+          <div className="flex items-center gap-2">
+            {currentProject && (
+              <ProjectCover
+                emoji={currentProject.cover_emoji}
+                color={currentProject.cover_color}
+                className="w-9 h-9 text-base shrink-0"
+              />
+            )}
+            <select
+              aria-label={'Select a project'}
+              value={currentProject?.id || ''}
+              onChange={(e) => {
+                const project = projects.find(p => p.id === e.target.value);
+                if (project) selectProject(project);
+              }}
+              className="min-w-0 flex-1 h-9 px-2.5 bg-[var(--card)] border border-[var(--input)] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+            >
+              <option value="">Select a project</option>
+              {projects.map((project) => (
+                <option
+                  key={project.id}
+                  value={project.id}
+                  data-cover-color={findProjectCoverColor(project.cover_color)?.id}
+                  style={projectCoverStyle(project.cover_color)}
+                >
+                  {project.cover_emoji ? `${project.cover_emoji} ` : ''}{project.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => openProjectDialog()}
+              aria-label="New Project"
+              title="New Project"
+              className="shrink-0 h-9 w-9 flex items-center justify-center border border-[var(--input)] bg-[var(--card)] rounded-md hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+            >
+              <FolderOpen className="w-4 h-4" />
+            </button>
+          </div>
+          {currentProject && (
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => openProjectDialog(currentProject)}
+                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>Edit Project Cover</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateProject}
+                disabled={isDuplicating}
+                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+              >
+                {isDuplicating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{isDuplicating ? 'Duplicating...' : 'Duplicate Project'}</span>
+              </button>
+              {projectActionError && (
+                <p role="alert" className="w-full px-2 text-xs text-[var(--error)]">{projectActionError}</p>
+              )}
+            </div>
+          )}
         </div>
         
         {/* Add Source Button */}

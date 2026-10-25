@@ -16,6 +16,9 @@ from app.utils.time import as_utc
 # it serialise bare.
 UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
 
+PROJECT_COVER_EMOJIS = ("📚", "🧠", "🔬", "🌿", "🚀", "🎨", "💡", "🌊")
+PROJECT_COVER_COLORS = ("blue", "violet", "rose", "amber", "emerald", "teal", "slate")
+
 
 # Authentication schemas
 # email-validator is not installed, so the address is checked with a pattern
@@ -104,15 +107,56 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
     meta_json: Optional[Dict[str, Any]] = None
+    cover_emoji: Optional[str] = None
+    cover_color: Optional[str] = None
+
+    @field_validator("cover_emoji")
+    @classmethod
+    def validate_cover_emoji(cls, value: Optional[str]) -> Optional[str]:
+        """Restrict covers to the supported single-grapheme emoji set.
+
+        Args:
+            value: Emoji submitted by the caller.
+
+        Returns:
+            The supported emoji, or None to clear the cover.
+
+        Raises:
+            ValueError: If the emoji is not supported.
+        """
+        if value is not None and value not in PROJECT_COVER_EMOJIS:
+            raise ValueError("Unsupported project cover emoji")
+        return value
+
+    @field_validator("cover_color")
+    @classmethod
+    def validate_cover_color(cls, value: Optional[str]) -> Optional[str]:
+        """Restrict covers to the supported palette.
+
+        Args:
+            value: Palette name submitted by the caller.
+
+        Returns:
+            The supported color, or None for the neutral cover.
+
+        Raises:
+            ValueError: If the color is not supported.
+        """
+        if value is not None and value not in PROJECT_COVER_COLORS:
+            raise ValueError("Unsupported project cover color")
+        return value
 
 
 class ProjectResponse(ProjectBase):
     """Schema for project response."""
     id: str
+    name: str
     created_at: UtcDatetime
     updated_at: UtcDatetime
     document_count: int = 0
     conversation_count: int = 0
+    cover_emoji: Optional[str] = None
+    cover_color: Optional[str] = None
     
     class Config:
         from_attributes = True

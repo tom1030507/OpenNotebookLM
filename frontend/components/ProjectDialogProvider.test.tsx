@@ -9,6 +9,8 @@ import type { Project } from '@/lib/api';
 
 const apiMock = vi.hoisted(() => ({
   createProject: vi.fn(),
+  updateProject: vi.fn(),
+  duplicateProject: vi.fn(),
   getConversations: vi.fn(),
   getDocuments: vi.fn(),
   getProjects: vi.fn(),
@@ -37,6 +39,8 @@ const createdProject: Project = {
   updated_at: '2026-08-12T00:00:00Z',
   document_count: 0,
   conversation_count: 0,
+  cover_emoji: '📚',
+  cover_color: 'blue',
 };
 
 const deferred = <T,>() => {
@@ -79,6 +83,62 @@ beforeEach(() => {
     loadingMessages: false,
     sidebarOpen: true,
     studioOpen: true,
+  });
+});
+
+describe('project covers and duplication', () => {
+  it('edits a project cover through the shared project dialog', async () => {
+    const user = userEvent.setup();
+    const original = { ...createdProject, cover_emoji: '📚', cover_color: 'blue' } as Project;
+    const updated = { ...original, cover_emoji: '🧠', cover_color: 'violet' };
+    apiMock.getProjects.mockResolvedValue([original]);
+    apiMock.updateProject.mockResolvedValue(updated);
+    useStore.setState({ projects: [original], currentProject: original });
+    renderProjectCreationTriggers();
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Project Cover' }));
+    expect(screen.getByRole('dialog', { name: 'Edit Project' })).not.toBeNull();
+    await user.selectOptions(screen.getByLabelText('Cover emoji'), '🧠');
+    await user.selectOptions(screen.getByLabelText('Cover color'), 'violet');
+    await user.click(screen.getByRole('button', { name: 'Save Project' }));
+
+    await waitFor(() => expect(apiMock.updateProject).toHaveBeenCalledWith(original.id, {
+      cover_emoji: '🧠',
+      cover_color: 'violet',
+      description: original.description,
+    }));
+    expect(useStore.getState().currentProject?.cover_color).toBe('violet');
+  });
+
+  it('duplicates and selects the new project', async () => {
+    const user = userEvent.setup();
+    const original = { ...createdProject, cover_emoji: '📚', cover_color: 'blue' } as Project;
+    const duplicate = { ...original, id: 'project-copy', name: 'Research plan (copy)' };
+    apiMock.getProjects.mockResolvedValue([original]);
+    apiMock.duplicateProject.mockResolvedValue(duplicate);
+    useStore.setState({ projects: [original], currentProject: original });
+    renderProjectCreationTriggers();
+
+    await user.click(await screen.findByRole('button', { name: 'Duplicate Project' }));
+
+    await waitFor(() => expect(useStore.getState().currentProject?.id).toBe(duplicate.id));
+    expect(apiMock.duplicateProject).toHaveBeenCalledWith(original.id);
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(duplicate.id);
+  });
+
+  it('shows each project emoji and the selected cover in the project list', async () => {
+    const original = { ...createdProject, cover_emoji: '📚', cover_color: 'blue' } as Project;
+    apiMock.getProjects.mockResolvedValue([original]);
+    useStore.setState({ projects: [original], currentProject: original });
+    const { container } = renderProjectCreationTriggers();
+
+    expect(await screen.findByRole('option', { name: '📚 Research plan' })).not.toBeNull();
+    expect(screen.getAllByRole('img', { name: 'Project cover: 📚' }).some(
+      (cover) => cover.getAttribute('data-cover-color') === 'blue',
+    )).toBe(true);
+    const option = container.querySelector('option[value="project-created"]');
+    expect(option?.textContent).toContain('📚');
+    expect(option?.getAttribute('data-cover-color')).toBe('blue');
   });
 });
 

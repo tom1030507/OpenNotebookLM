@@ -2,22 +2,26 @@
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import ProjectDialog from './ProjectDialog';
+import type { Project } from '@/lib/api';
 
 interface ProjectDialogContextValue {
-  openProjectDialog: () => void;
+  openProjectDialog: (project?: Project) => void;
 }
 
 const ProjectDialogContext = createContext<ProjectDialogContextValue | null>(null);
 
 export default function ProjectDialogProvider({ children }: React.PropsWithChildren) {
   const [isOpen, setIsOpen] = useState(false);
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
 
-  const openProjectDialog = useCallback(() => {
+  const openProjectDialog = useCallback((project?: Project) => {
+    setProjectToEdit(project || null);
     setIsOpen(true);
   }, []);
 
   const closeProjectDialog = useCallback(() => {
     setIsOpen(false);
+    setProjectToEdit(null);
   }, []);
 
   const contextValue = useMemo(() => ({ openProjectDialog }), [openProjectDialog]);
@@ -25,7 +29,12 @@ export default function ProjectDialogProvider({ children }: React.PropsWithChild
   return (
     <ProjectDialogContext.Provider value={contextValue}>
       {children}
-      <ProjectDialog isOpen={isOpen} onClose={closeProjectDialog} />
+      <ProjectDialog
+        key={projectToEdit?.id || 'new'}
+        isOpen={isOpen}
+        onClose={closeProjectDialog}
+        project={projectToEdit}
+      />
     </ProjectDialogContext.Provider>
   );
 }

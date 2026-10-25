@@ -36,6 +36,8 @@ async def create_project(
             name=project.name,
             description=project.description,
             meta_json=project.meta_json,
+            cover_emoji=project.cover_emoji,
+            cover_color=project.cover_color,
             created_at=project.created_at,
             updated_at=project.updated_at,
             document_count=0,
@@ -67,6 +69,8 @@ async def list_projects(
                 name=p.name,
                 description=p.description,
                 meta_json=p.meta_json,
+                cover_emoji=p.cover_emoji,
+                cover_color=p.cover_color,
                 created_at=p.created_at,
                 updated_at=p.updated_at,
                 document_count=getattr(p, 'document_count', 0),
@@ -100,6 +104,8 @@ async def get_project(
         name=project.name,
         description=project.description,
         meta_json=project.meta_json,
+        cover_emoji=project.cover_emoji,
+        cover_color=project.cover_color,
         created_at=project.created_at,
         updated_at=project.updated_at,
         document_count=getattr(project, 'document_count', 0),
@@ -123,10 +129,50 @@ async def update_project(
         name=project.name,
         description=project.description,
         meta_json=project.meta_json,
+        cover_emoji=project.cover_emoji,
+        cover_color=project.cover_color,
         created_at=project.created_at,
         updated_at=project.updated_at,
         document_count=getattr(project, 'document_count', 0),
         conversation_count=getattr(project, 'conversation_count', 0)
+    )
+
+
+@router.post("/projects/{project_id}/duplicate", response_model=ProjectResponse)
+async def duplicate_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Duplicate one of the caller's projects.
+
+    Args:
+        project_id: Source project id.
+        db: Database session.
+        current_user: Signed-in project owner.
+
+    Returns:
+        The new project and its document/conversation counts.
+    """
+    source = require_project(db, project_id, current_user)
+    try:
+        duplicate = ProjectService.duplicate_project(db, source, current_user.id)
+    except Exception as e:
+        logger.error("Failed to duplicate project", project_id=project_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to duplicate project")
+
+    duplicate = ProjectService.get_project(db, duplicate.id)
+    return ProjectResponse(
+        id=duplicate.id,
+        name=duplicate.name,
+        description=duplicate.description,
+        meta_json=duplicate.meta_json,
+        cover_emoji=duplicate.cover_emoji,
+        cover_color=duplicate.cover_color,
+        created_at=duplicate.created_at,
+        updated_at=duplicate.updated_at,
+        document_count=getattr(duplicate, "document_count", 0),
+        conversation_count=getattr(duplicate, "conversation_count", 0),
     )
 
 

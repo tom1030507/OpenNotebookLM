@@ -25,6 +25,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { applyThemePreference, initializeTheme, type Theme } from '@/lib/theme';
 import { clearSession } from '@/lib/session';
 import BrandLogo from '@/components/BrandLogo';
+import ProjectCover from '@/components/ProjectCover';
 import {
   COMPACT_TOP_NAV_MEDIA_QUERY,
   TOP_NAV_ACTIONS,
@@ -145,7 +146,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
     'new-project': {
       label: 'New Project',
       icon: <FolderPlus className="w-4 h-4" />,
-      onSelect: openProjectDialog,
+      onSelect: () => openProjectDialog(),
     },
     export: {
       label: 'Export',
@@ -219,6 +220,13 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
 
         {/* Notebook Title — truncates so the controls keep their tap targets */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
+          {currentProject && (
+            <ProjectCover
+              emoji={currentProject.cover_emoji}
+              color={currentProject.cover_color}
+              className="w-7 h-7 text-sm shrink-0"
+            />
+          )}
           <h1 className="text-[15px] font-semibold text-[var(--foreground)] truncate">
             {displayedTitle}
           </h1>

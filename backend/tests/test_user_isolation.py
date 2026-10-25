@@ -755,6 +755,17 @@ class TestProjectOverviewIsolation:
             "/api/conversations/%s/follow-ups" % conversation_id).status_code == 200
 
 
+class TestProjectDuplicateIsolation:
+    """Duplication cannot be used to inspect or copy another account's project."""
+
+    def test_duplicating_someone_elses_project_is_not_found(self, env):
+        project_id = make_project(env.alice)
+
+        assert env.bob.post(
+            "/api/projects/%s/duplicate" % project_id).status_code == 404
+        assert env.bob.get("/api/projects").json()["projects"] == []
+
+
 class TestCacheIsolation:
     """Cache invalidation reports on activity, so it is scoped too."""
 

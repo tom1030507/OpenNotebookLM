@@ -121,6 +121,8 @@ ADDED_COLUMNS = (
     ("messages", "rating", "VARCHAR", None),
     ("projects", "overview_json", "JSON", None),
     ("projects", "auto_title", "BOOLEAN", None),
+    ("projects", "cover_emoji", "VARCHAR", None),
+    ("projects", "cover_color", "VARCHAR", None),
     ("notes", "studio_kind", "VARCHAR", None),
     ("notes", "payload_json", "JSON", None),
 )
