@@ -1,6 +1,11 @@
 import { test, expect } from '../support/fixtures.js';
 import { generatePdf } from '../support/pdf.js';
-import { openAddSourceDialog, setupWorkspace, sourceRow } from '../support/ui.js';
+import {
+  openAddSourceDialog,
+  setupReadyUrlWorkspace,
+  setupWorkspace,
+  sourceRow,
+} from '../support/ui.js';
 
 test('uploads, indexes, previews, and removes a PDF source', async ({ api, page }, testInfo) => {
   const { project } = await setupWorkspace(api, page, testInfo, 'pdf-source');
@@ -82,6 +87,27 @@ test('imports, searches, and removes a controlled URL source', async ({ api, pag
   await visibleRow.getByRole('button', { name: 'Delete document' }).click();
   expect((await removed).status()).toBe(200);
   await expect(sourceRow(page, title)).toHaveCount(0);
+});
+
+test('previews the indexed text for a controlled URL source', async ({ api, page }, testInfo) => {
+  const { documentId } = await setupReadyUrlWorkspace(api, page, testInfo, 'url-preview');
+  const title = 'E2E Observatory Field Notes';
+  const row = sourceRow(page, title);
+  const contentResponse = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/docs/${documentId}/content`)
+      && response.request().method() === 'GET',
+  );
+
+  await row.hover();
+  await row.getByRole('button', { name: 'Preview document' }).click();
+  expect((await contentResponse).status()).toBe(200);
+  const preview = page.getByRole('dialog', { name: title });
+  await expect(preview).toContainText('The observatory access code is ORBIT-7319.');
+  await expect(
+    preview.getByRole('link', { name: 'https://e2e.invalid/observatory' }),
+  ).toHaveAttribute('href', 'https://e2e.invalid/observatory');
+  await expect(preview.locator('iframe')).toHaveCount(0);
+  await preview.getByRole('button', { name: 'Close document preview dialog' }).click();
 });
 
 test('imports a controlled YouTube transcript and reaches ready', async ({ api, page }, testInfo) => {

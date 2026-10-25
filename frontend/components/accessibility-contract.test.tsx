@@ -646,17 +646,18 @@ describe('workspace accessibility contract', () => {
     expect(screen.getByRole('button', { name: 'Hide password' })).toBeTruthy();
   });
 
-  it('keeps the document preview frame inside the dialog tab cycle', () => {
+  it('keeps the original URL link inside the document preview tab cycle', () => {
     renderWorkspace(<DocumentPreview document={externalPreviewDocument} onClose={() => {}} />);
 
     const dialog = screen.getByRole('dialog', { name: 'External Accessibility Notes' });
-    const frame = dialog.querySelector('iframe');
+    const originalLink = screen.getByRole('link', { name: 'https://example.com' });
     const copyButton = screen.getByRole('button', { name: 'Copy content' });
 
     copyButton.focus();
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
 
-    expect(document.activeElement).toBe(frame);
+    expect(dialog.contains(originalLink)).toBe(true);
+    expect(document.activeElement).toBe(originalLink);
   });
 
   it('names conditional DocumentPreview external-link and Export close icon controls', () => {

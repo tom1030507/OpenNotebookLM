@@ -220,17 +220,23 @@ describe('DocumentPreview', () => {
     expect(fetchFile).not.toHaveBeenCalled();
   });
 
-  it('leaves an external URL source pointing at the external site', async () => {
+  it('previews indexed text for a URL source and keeps its original link', async () => {
     const document = await loadDocument({
       source_type: 'url',
       source_url: 'https://example.com/article',
       title: 'Example article',
     });
+    const fetchContent = vi.spyOn(api, 'fetchDocumentContent')
+      .mockResolvedValue('Indexed article text');
 
     render(<DocumentPreview document={document} onClose={() => {}} />);
 
-    expect(screen.getByTitle('Example article').getAttribute('src')).toBe(
-      'https://example.com/article',
-    );
+    expect(await screen.findByText('Indexed article text')).toBeTruthy();
+    expect(fetchContent).toHaveBeenCalledWith('document-1');
+    expect(
+      screen.getByRole('link', { name: 'https://example.com/article' })
+        .getAttribute('href'),
+    ).toBe('https://example.com/article');
+    expect(screen.queryByTitle('Example article')).toBeNull();
   });
 });

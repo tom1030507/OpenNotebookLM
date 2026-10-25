@@ -32,7 +32,7 @@ type ContentRequest =
 
 const EXTRACTED_TEXT_TYPES: Document['type'][] = [
   'docx', 'pptx', 'xlsx', 'epub', 'txt', 'md',
-  'mp3', 'm4a', 'wav', 'ogg', 'webm', 'flac',
+  'mp3', 'm4a', 'wav', 'ogg', 'webm', 'flac', 'url',
 ];
 
 export default function DocumentPreview({ document, onClose }: DocumentPreviewProps) {
@@ -175,6 +175,59 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     }
   };
 
+  const renderExtractedContent = () => {
+    if (content !== undefined) {
+      return (
+        <div className="p-6 overflow-y-auto h-full">
+          <pre className="whitespace-pre-wrap text-sm font-mono">
+            {content}
+          </pre>
+        </div>
+      );
+    }
+    if (contentLoading) {
+      return (
+        <div className="p-8 text-center" role="status">
+          <p className="text-[var(--muted-foreground)]">
+            Loading extracted text...
+          </p>
+        </div>
+      );
+    }
+    if (contentWaiting) {
+      return (
+        <div className="p-8 text-center">
+          <p className="text-[var(--muted-foreground)]" role="status">
+            Source is still processing.
+          </p>
+          <button
+            type="button"
+            className="mt-3 text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
+            onClick={() => setContentRefreshCount((count) => count + 1)}
+          >
+            Check for extracted text
+          </button>
+        </div>
+      );
+    }
+    if (contentError) {
+      return (
+        <div className="p-8 text-center">
+          <p className="text-[var(--muted-foreground)]" role="alert">
+            {contentError}
+          </p>
+        </div>
+      );
+    }
+    return (
+      <div className="p-8 text-center">
+        <p className="text-[var(--muted-foreground)]">
+          Content preview not available
+        </p>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (document.type) {
       case 'pdf':
@@ -214,9 +267,9 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         );
 
       case 'url':
-        if (document.url) {
-          return (
-            <div className="h-full flex flex-col">
+        return (
+          <div className="h-full flex flex-col">
+            {document.url && (
               <div className="p-4 bg-[var(--card)] border-b border-[var(--border)] flex items-center gap-2">
                 <Globe className="w-4 h-4 text-[var(--muted-foreground)]" />
                 <a
@@ -228,16 +281,12 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
                   {document.url}
                 </a>
               </div>
-              <iframe
-                src={document.url}
-                className="flex-1 w-full"
-                title={document.name}
-                sandbox="allow-same-origin allow-scripts"
-              />
+            )}
+            <div className="flex-1 min-h-0">
+              {renderExtractedContent()}
             </div>
-          );
-        }
-        break;
+          </div>
+        );
 
       case 'youtube':
         if (document.url) {
@@ -291,50 +340,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
       case 'txt':
       case 'md':
       default:
-        if (content !== undefined) {
-          return (
-            <div className="p-6 overflow-y-auto h-full">
-              <pre className="whitespace-pre-wrap text-sm font-mono">
-                {content}
-              </pre>
-            </div>
-          );
-        }
-        if (contentLoading) {
-          return (
-            <div className="p-8 text-center" role="status">
-              <p className="text-[var(--muted-foreground)]">
-                Loading extracted text...
-              </p>
-            </div>
-          );
-        }
-        if (contentWaiting) {
-          return (
-            <div className="p-8 text-center">
-              <p className="text-[var(--muted-foreground)]" role="status">
-                Source is still processing.
-              </p>
-              <button
-                type="button"
-                className="mt-3 text-sm text-[var(--foreground)] underline underline-offset-2 decoration-[var(--input)] hover:decoration-current"
-                onClick={() => setContentRefreshCount((count) => count + 1)}
-              >
-                Check for extracted text
-              </button>
-            </div>
-          );
-        }
-        if (contentError) {
-          return (
-            <div className="p-8 text-center">
-              <p className="text-[var(--muted-foreground)]" role="alert">
-                {contentError}
-              </p>
-            </div>
-          );
-        }
-        break;
+        return renderExtractedContent();
     }
 
     return (

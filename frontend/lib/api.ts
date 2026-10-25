@@ -854,7 +854,7 @@ const api = {
     return requestBlob(`/docs/${encodeURIComponent(documentId)}/file`);
   },
 
-  /** Read extracted source text on demand for an uploaded file preview. */
+  /** Read extracted source text on demand for a document preview. */
   async fetchDocumentContent(documentId: string): Promise<string> {
     const response = await requestJson<{ content: string }>(
       `/docs/${encodeURIComponent(documentId)}/content`,
