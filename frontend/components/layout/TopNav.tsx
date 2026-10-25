@@ -347,7 +347,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             </div>
           </dl>
           <p className="mt-4 text-xs text-[var(--muted-foreground)]">
-            This workspace runs in demo mode. Account details come from the browser session.
+            Signed in to this server. Your projects and sources are visible only to this account.
           </p>
         </TopNavInfoDialog>
       )}
@@ -356,13 +356,12 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
         <TopNavInfoDialog title="Help" onClose={() => setShowHelp(false)}>
           <ol className="space-y-2 text-sm list-decimal list-inside">
             <li>Create a project to hold related material.</li>
-            <li>Add sources: upload a supported file, or paste a web page or YouTube link.</li>
-            <li>Wait for a source to report Ready, then ask a question in the composer.</li>
-            <li>Export a conversation or a whole project from the toolbar.</li>
+            <li>Add sources: upload a file, paste text, or add a web page or YouTube link.</li>
+            <li>Wait for a source to report Ready, then ask a question; answers cite the passages they use.</li>
+            <li>Tick or untick sources to choose which ones answers and Studio draw on.</li>
+            <li>Use Studio for an audio summary, video summary, mind map or report, and Notes to keep answers.</li>
+            <li>Export the open conversation from the toolbar.</li>
           </ol>
-          <p className="mt-4 text-xs text-[var(--muted-foreground)]">
-            Studio outputs (audio, video, mind maps) are not available yet.
-          </p>
           <a
             href="https://github.com/tom1030507/OpenNotebookLM"
             target="_blank"

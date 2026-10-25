@@ -129,9 +129,11 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as SettingsTab)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-base ${
+                    // White pill on the grey sidebar: the hover tone sat one
+                    // step from the old selection fill and read as a second tab.
                     activeTab === tab.id
-                      ? 'bg-[var(--accent-bg)] text-[var(--foreground)] font-medium'
-                      : 'hover:bg-[var(--muted)]'
+                      ? 'bg-[var(--card)] text-[var(--foreground)] font-medium ring-1 ring-[var(--border)]'
+                      : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]'
                   }`}
                 >
                   <Icon className="w-4 h-4" />

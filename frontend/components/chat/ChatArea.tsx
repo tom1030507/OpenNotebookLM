@@ -62,8 +62,12 @@ function AnswerRating({ message }: { message: Message }) {
       message.rating === rating ? null : rating,
     ).catch((error) => console.error('Failed to rate answer:', error));
   };
-  const buttonClass = (active: boolean) => `p-1 rounded hover:bg-[var(--muted)] transition-base ${
-    active ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]'
+  // The chosen rating has to read at a glance in a near-black UI: a filled
+  // glyph on the selection tone, not just ink against grey.
+  const buttonClass = (active: boolean) => `p-1 rounded transition-base ${
+    active
+      ? 'bg-[var(--accent-bg)] text-[var(--foreground)]'
+      : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]'
   }`;
 
   return (
@@ -76,7 +80,7 @@ function AnswerRating({ message }: { message: Message }) {
         aria-pressed={message.rating === 'up'}
         className={buttonClass(message.rating === 'up')}
       >
-        <ThumbsUp className="w-3.5 h-3.5" />
+        <ThumbsUp className="w-3.5 h-3.5" fill={message.rating === 'up' ? 'currentColor' : 'none'} />
       </button>
       <button
         type="button"
@@ -86,7 +90,7 @@ function AnswerRating({ message }: { message: Message }) {
         aria-pressed={message.rating === 'down'}
         className={buttonClass(message.rating === 'down')}
       >
-        <ThumbsDown className="w-3.5 h-3.5" />
+        <ThumbsDown className="w-3.5 h-3.5" fill={message.rating === 'down' ? 'currentColor' : 'none'} />
       </button>
     </div>
   );

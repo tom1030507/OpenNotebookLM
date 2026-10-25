@@ -155,7 +155,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     {getFormatIcon(fmt)}
-                    <span className="font-medium uppercase text-sm">{fmt}</span>
+                    <span className="font-medium text-sm">{{ markdown: 'Markdown', json: 'JSON', txt: 'Plain text' }[fmt] ?? fmt}</span>
                   </div>
                   <p className="text-xs text-[var(--muted-foreground)]">
                     {getFormatDescription(fmt)}
