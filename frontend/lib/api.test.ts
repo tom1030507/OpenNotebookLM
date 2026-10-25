@@ -304,7 +304,7 @@ describe('API client', () => {
       request: () => api.fetchProjectSummaryText('project-1'),
     },
   ])('sends an explicit POST command for the $output', async ({ path, request }) => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({})));
     vi.stubGlobal('fetch', fetchMock);
 
     await request();
@@ -383,6 +383,23 @@ describe('API client', () => {
     const init = fetchMock.mock.calls[0][1];
     expect(JSON.parse(init.body)).toEqual({ document_ids: ['doc-1'] });
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+  });
+
+  it('sends reader options to each Studio generator', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({})));
+    vi.stubGlobal('fetch', fetchMock);
+    const options = { focus: 'methods', audience: 'beginner', length: 'short' } as const;
+
+    await api.fetchProjectMindMap('project-1', ['doc-1'], options);
+    await api.fetchProjectVideoSummary('project-1', ['doc-1'], options);
+    await api.fetchProjectReport('project-1', {
+      ...options, format: 'briefing', document_ids: ['doc-1'],
+    });
+    await api.fetchProjectSummaryText('project-1', ['doc-1'], options);
+
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(JSON.parse(init.body)).toMatchObject({ ...options, document_ids: ['doc-1'] });
+    }
   });
 
   it('fetches selected flashcards with count and focus', async () => {

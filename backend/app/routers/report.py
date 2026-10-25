@@ -88,6 +88,7 @@ def project_report(
             request.format,
             request.instruction,
             document_ids,
+            request,
         )
     finally:
         lease.release()

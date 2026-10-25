@@ -23,7 +23,7 @@ from app.db.database import get_db
 from app.db.models import User
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_documents, require_project
-from app.schemas import SourceSelection, VideoSummaryPptxRequest, VideoSummaryResponse
+from app.schemas import StudioSourceSelection, VideoSummaryPptxRequest, VideoSummaryResponse
 from app.services.slides_export import render_video_summary_pptx
 from app.services.video_summary import VideoSummaryService, VideoSummaryTooLargeError
 
@@ -61,7 +61,7 @@ def get_video_summary_service() -> VideoSummaryService:
 )
 def project_video_summary(
     project_id: str,
-    selection: Optional[SourceSelection] = None,
+    selection: Optional[StudioSourceSelection] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     service: VideoSummaryService = Depends(get_video_summary_service),
@@ -90,7 +90,7 @@ def project_video_summary(
         )
 
     try:
-        return service.generate(db, project, document_ids)
+        return service.generate(db, project, document_ids, selection)
     except VideoSummaryTooLargeError as error:
         raise HTTPException(status_code=413, detail=str(error)) from error
 

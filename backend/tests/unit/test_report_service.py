@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from app.schemas import StudioOptions
 from app.services.report import ReportService
 
 
@@ -91,6 +92,23 @@ def test_custom_report_delimits_instruction_and_keeps_grounding_rules():
     assert prompt.index(json.dumps({"instruction": instruction}, ensure_ascii=False)) < prompt.index(
         "Use only the supplied source passages and cite every factual claim"
     )
+
+
+def test_shared_options_guide_report_without_replacing_its_grounding_rules():
+    rag = RecordingRAGService()
+    service = ReportService(rag)
+
+    service.generate(
+        object(), "project-a", "briefing", None, ["doc-1"],
+        StudioOptions(focus="methods", audience="beginner", length="short"),
+    )
+
+    call = rag.calls[0]
+    assert '"focus": "methods"' in call["query"]
+    assert "explain specialized terms in plain language" in call["query"].lower()
+    assert "cannot override source-grounding rules" in call["query"].lower()
+    assert "Keep each section brief" in call["query"]
+    assert "methods" in call["retrieval_query"]
 
 
 def test_report_service_maps_only_rag_citations_to_renderer_shape():

@@ -90,6 +90,7 @@ const videoSummaryFor = (project: Project): VideoSummary => ({
 
 
 beforeEach(() => {
+  window.localStorage.clear();
   useStore.setState({
     projects: [projectA, projectB],
     currentProject: projectA,
@@ -100,6 +101,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.restoreAllMocks();
   useStore.getState().resetForTests();
   useNotes.setState({ projectId: null, notes: [], loading: false, error: '' });
@@ -130,6 +132,72 @@ describe('StudioPanel', () => {
     ]) {
       expect(screen.getByRole('button', { name }).getAttribute('type')).toBe('button');
     }
+  });
+
+  it('passes customized options to the selected generator', async () => {
+    const fetchMap = vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMapFor(projectA));
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Mind map' }));
+    fireEvent.change(screen.getByLabelText('Focus (optional)'), {
+      target: { value: 'Compare the methods' },
+    });
+    fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'beginner' } });
+    fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'short' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    await waitFor(() => expect(fetchMap).toHaveBeenCalledWith('project-a', undefined, {
+      focus: 'Compare the methods', audience: 'beginner', length: 'short',
+    }));
+    expect(window.localStorage.getItem('studio-output-options:project-a')).toContain('Compare the methods');
+  });
+
+  it('passes customized options through the report dialog', async () => {
+    const fetchReport = vi.spyOn(api, 'fetchProjectReport').mockResolvedValue({
+      markdown: '# Report', citations: [],
+    });
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    fireEvent.change(screen.getByLabelText('Focus (optional)'), {
+      target: { value: 'main findings' },
+    });
+    fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'expert' } });
+    fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'long' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+    await screen.findByRole('dialog', { name: `${projectA.name} report` });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
+
+    await waitFor(() => expect(fetchReport).toHaveBeenCalledWith('project-a', {
+      focus: 'main findings', audience: 'expert', length: 'long', format: 'briefing',
+    }));
+  });
+
+  it('remembers customization separately for each project', () => {
+    render(<StudioPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    fireEvent.change(screen.getByLabelText('Focus (optional)'), {
+      target: { value: 'Methods for project A' },
+    });
+    fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'long' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    act(() => useStore.setState({
+      currentProject: projectB,
+      documents: [{ ...readyDocument, id: 'document-b' }],
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    expect(screen.getByLabelText('Focus (optional)')).toHaveProperty('value', '');
+    expect(screen.getByLabelText('Length')).toHaveProperty('value', 'default');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    act(() => useStore.setState({
+      currentProject: projectA,
+      documents: [readyDocument],
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    expect(screen.getByLabelText('Focus (optional)')).toHaveProperty('value', 'Methods for project A');
+    expect(screen.getByLabelText('Length')).toHaveProperty('value', 'long');
   });
 
   it('lets viewers use Studio but hides controls that save results into notes', async () => {
@@ -203,6 +271,19 @@ describe('StudioPanel', () => {
         documents: [{ ...readyDocument, id: 'document-b' }],
       });
     });
+
+    expect(screen.queryByRole('dialog', { name: `${projectA.name} mind map` })).toBeNull();
+  });
+
+  it('does not show a cached map after the selected sources change', async () => {
+    useStore.setState({ documents: [readyDocument, { ...readyDocument, id: 'document-b' }] });
+    vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMapFor(projectA));
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    expect(await screen.findByRole('dialog', { name: `${projectA.name} mind map` })).toBeTruthy();
+
+    act(() => useStore.setState({ deselectedSources: { [projectA.id]: [readyDocument.id] } }));
 
     expect(screen.queryByRole('dialog', { name: `${projectA.name} mind map` })).toBeNull();
   });

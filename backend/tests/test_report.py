@@ -36,9 +36,11 @@ class StubReportService:
 
     def __init__(self):
         self.calls = []
+        self.options = []
 
-    def generate(self, db, project_id, report_format, instruction, document_ids):
+    def generate(self, db, project_id, report_format, instruction, document_ids, options=None):
         self.calls.append((project_id, report_format, instruction, document_ids))
+        self.options.append(options)
         return {
             "markdown": "# Report\n\nFinding [Source 1].",
             "citations": [{
@@ -93,6 +95,7 @@ def _delete_project(project_id="report-project"):
 
 def test_report_route_passes_format_instruction_and_owned_selection_to_service():
     service.calls.clear()
+    service.options.clear()
     _seed_project()
     try:
         response = client.post("/api/projects/report-project/report", json={
@@ -120,6 +123,7 @@ def test_report_route_passes_format_instruction_and_owned_selection_to_service()
 
 def test_report_route_scopes_omitted_selection_to_visible_project_documents():
     service.calls.clear()
+    service.options.clear()
     _seed_project()
     try:
         response = client.post("/api/projects/report-project/report", json={
@@ -131,6 +135,25 @@ def test_report_route_scopes_omitted_selection_to_visible_project_documents():
             "report-project", "briefing", None,
             ["report-document-a", "report-document-b"],
         )]
+    finally:
+        _delete_project()
+
+
+def test_report_route_passes_custom_reader_options_to_service():
+    service.options.clear()
+    _seed_project()
+    try:
+        response = client.post("/api/projects/report-project/report", json={
+            "format": "briefing",
+            "focus": "methods",
+            "audience": "beginner",
+            "length": "short",
+        })
+
+        assert response.status_code == 200, response.text
+        assert service.options[-1].focus == "methods"
+        assert service.options[-1].audience == "beginner"
+        assert service.options[-1].length == "short"
     finally:
         _delete_project()
 

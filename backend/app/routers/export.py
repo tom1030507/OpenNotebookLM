@@ -11,7 +11,7 @@ import structlog
 
 from app.db.database import get_db
 from app.db.models import User
-from app.schemas import SourceSelection
+from app.schemas import StudioSourceSelection
 from app.services.export import ExportService, MAX_BATCH_EXPORT_CONVERSATIONS
 from app.services.project_overview import (
     ProjectOverviewService,
@@ -148,7 +148,7 @@ async def export_project(
 @router.post("/export/project/{project_id}/summary")
 def export_project_summary(
     project_id: str,
-    selection: Optional[SourceSelection] = None,
+    selection: Optional[StudioSourceSelection] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     service: ProjectOverviewService = Depends(get_project_overview_service),
@@ -174,7 +174,7 @@ def export_project_summary(
         )
 
     try:
-        summary = service.summary(db, project, document_ids)
+        summary = service.summary(db, project, document_ids, selection)
         report = (
             f"# Project Summary: {project.name}\n\n"
             "## Overview\n\n"

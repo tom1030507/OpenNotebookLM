@@ -1468,7 +1468,9 @@ class TestReportIsolation:
             def __init__(self):
                 self.calls = []
 
-            def generate(self, db, project_id, report_format, instruction, document_ids):
+            def generate(
+                self, db, project_id, report_format, instruction, document_ids, options=None,
+            ):
                 self.calls.append((project_id, report_format, instruction, document_ids))
                 return {"markdown": "Report [Source 1].", "citations": []}
 
@@ -1616,7 +1618,7 @@ class TestSourceSelectionIsolation:
         service = ProjectOverviewService(llm_service=OfflineLLM())
         generated_titles = []
 
-        def generate(documents, _output_language="auto"):
+        def generate(documents, _output_language="auto", options=None):
             titles = [document.title for document in documents]
             generated_titles.append(titles)
             return {

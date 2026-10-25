@@ -13,9 +13,10 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.db.models import Project
+from app.schemas import StudioOptions
 from app.services.llm import FALLBACK_MODEL, LLMService
 from app.services.mindmap_sources import heading_paths, representative_excerpt
-from app.services.output_language import with_output_language
+from app.services.studio_options import with_studio_options
 # Reading a project's sources and naming what is in them is shared with the
 # video summary, which derives a different view from the same material. The
 # names are re-exported here because this module's callers and tests already
@@ -72,12 +73,19 @@ def _clean_text(value: Any, limit: int) -> Optional[str]:
     return " ".join(value.split())[:limit].strip() or None
 
 
-def parse_llm_tree(text: Any, documents: List[Any]) -> Optional[Dict[str, Any]]:
+def parse_llm_tree(
+    text: Any,
+    documents: List[Any],
+    max_nodes: int = MAX_MAP_NODES,
+    max_topic_depth: int = MAX_TOPIC_DEPTH,
+) -> Optional[Dict[str, Any]]:
     """Validate a model's recursive concept map and resolve its source indexes.
 
     Args:
         text: Untrusted model reply, optionally wrapped in prose or fences.
         documents: The eligible sources included in the prompt, in index order.
+        max_nodes: Maximum nodes to accept, including the root.
+        max_topic_depth: Maximum child depth below the root.
 
     Returns:
         A bounded API tree with server-created IDs, or None when no useful
@@ -86,7 +94,7 @@ def parse_llm_tree(text: Any, documents: List[Any]) -> Optional[Dict[str, Any]]:
     payload = _bounded_json(text)
     if not payload or not isinstance(payload.get("root"), dict):
         return None
-    remaining = MAX_MAP_NODES
+    remaining = max_nodes
 
     def visit(value: Any, path: str, depth: int) -> Optional[Dict[str, Any]]:
         nonlocal remaining
@@ -109,7 +117,7 @@ def parse_llm_tree(text: Any, documents: List[Any]) -> Optional[Dict[str, Any]]:
             "children": [],
         }
         children = value.get("children")
-        if depth < MAX_TOPIC_DEPTH and isinstance(children, list):
+        if depth < max_topic_depth and isinstance(children, list):
             for child in children:
                 if remaining <= 0 or len(node["children"]) >= MAX_TOPICS_PER_DOCUMENT:
                     break
@@ -217,6 +225,7 @@ class MindMapService:
         db: Session,
         project: Project,
         document_ids: Optional[List[str]] = None,
+        options: Optional[StudioOptions] = None,
     ) -> Dict[str, Any]:
         """Build the mind map for a project.
 
@@ -226,6 +235,7 @@ class MindMapService:
                 resolve the id through `routers.ownership` first.
             document_ids: Optional subset of the project's sources to map;
                 `None` maps all of them.
+            options: Optional focus, audience, and length guidance.
 
         Returns:
             The tree plus the metadata the API exposes: which model named the
@@ -236,10 +246,12 @@ class MindMapService:
             document for document in project_documents(db, project, document_ids)
             if document.status == "ready"
         ]
+        options = options or StudioOptions()
         root, model_used, source_count = self._build_tree_with_source_count(
             project.name,
             documents,
             getattr(project, "output_language", None) or "auto",
+            options,
         )
 
         return {
@@ -258,12 +270,14 @@ class MindMapService:
         project_name: str,
         documents: List[Any],
         output_language: str = "auto",
+        options: Optional[StudioOptions] = None,
     ) -> tuple[Dict[str, Any], str]:
         """Assemble a generated concept tree or a source-structure fallback.
 
         Args:
             project_name: Root label when the source structure supplies the map.
             documents: Ready, owned sources in stable project order.
+            options: Optional focus, audience, and length guidance.
 
         Returns:
             The root node, and what produced its topics — the model's name, or
@@ -272,25 +286,49 @@ class MindMapService:
             which two concurrent builds share.
         """
         root, model_used, _ = self._build_tree_with_source_count(
-            project_name, documents, output_language
+            project_name, documents, output_language, options
         )
         return root, model_used
 
     def _build_tree_with_source_count(
-        self, project_name: str, documents: List[Any], output_language: str = "auto",
+        self,
+        project_name: str,
+        documents: List[Any],
+        output_language: str = "auto",
+        options: Optional[StudioOptions] = None,
+        max_nodes: Optional[int] = None,
+        max_depth: Optional[int] = None,
     ) -> tuple[Dict[str, Any], str, int]:
         sampled_documents = documents[:MAX_SOURCE_DOCUMENTS]
-        root, model_used = self._generated_tree(sampled_documents, output_language)
+        options = options or StudioOptions()
+        selected_node_limit, selected_depth_limit = {
+            "short": (48, 2), "default": (MAX_MAP_NODES, MAX_TOPIC_DEPTH),
+            "long": (144, 4),
+        }[options.length]
+        max_nodes = max_nodes if max_nodes is not None else selected_node_limit
+        max_depth = max_depth if max_depth is not None else selected_depth_limit
+        root, model_used = self._generated_tree(
+            sampled_documents, output_language, options, max_nodes, max_depth
+        )
         if root:
             return root, model_used, len(sampled_documents)
         # shortcut: offline structure labels keep source wording; translate if
         # localized fallback maps become a requirement.
-        return self._structural_tree(project_name, documents), FALLBACK_MODEL, len(documents)
+        custom_limit = options.length != "default"
+        return self._structural_tree(
+            project_name,
+            documents,
+            max_topic_depth=max_depth,
+            max_total_nodes=max_nodes if custom_limit else None,
+        ), FALLBACK_MODEL, len(documents)
 
     def _generated_tree(
         self,
         documents: List[Any],
         output_language: str = "auto",
+        options: Optional[StudioOptions] = None,
+        max_nodes: int = MAX_MAP_NODES,
+        max_depth: int = MAX_TOPIC_DEPTH,
     ) -> tuple[Optional[Dict[str, Any]], str]:
         """Generate concepts, retrying unusable provider JSON at most once.
 
@@ -300,6 +338,9 @@ class MindMapService:
 
         Args:
             documents: The project's documents.
+            options: Optional reader guidance and requested length.
+            max_nodes: Maximum nodes to request and accept.
+            max_depth: Maximum topic levels to request and accept.
 
         Returns:
             The validated tree and model name, or None and `FALLBACK_MODEL`.
@@ -308,7 +349,7 @@ class MindMapService:
             return None, FALLBACK_MODEL
 
         try:
-            prompt = self._topic_prompt(documents, output_language)
+            prompt = self._topic_prompt(documents, output_language, options, max_nodes, max_depth)
             for attempt in range(2):
                 result = self.llm.generate(
                     prompt=prompt,
@@ -321,7 +362,7 @@ class MindMapService:
                 )
                 if not isinstance(result, dict):
                     return None, FALLBACK_MODEL
-                root = parse_llm_tree(result.get("text"), documents)
+                root = parse_llm_tree(result.get("text"), documents, max_nodes, max_depth)
                 model = result.get("model")
                 if root:
                     return root, model or FALLBACK_MODEL
@@ -354,7 +395,12 @@ class MindMapService:
         return None, FALLBACK_MODEL
 
     def _topic_prompt(
-        self, documents: List[Any], output_language: str = "auto"
+        self,
+        documents: List[Any],
+        output_language: str = "auto",
+        options: Optional[StudioOptions] = None,
+        max_nodes: int = MAX_MAP_NODES,
+        max_depth: int = MAX_TOPIC_DEPTH,
     ) -> str:
         """Compose the grounded prompt shared by generation and its one retry.
 
@@ -363,6 +409,9 @@ class MindMapService:
 
         Args:
             documents: The project's documents.
+            options: Optional reader guidance.
+            max_nodes: Maximum nodes to request.
+            max_depth: Maximum topic levels to request.
 
         Returns:
             The prompt.
@@ -378,6 +427,13 @@ class MindMapService:
                 )
             )
 
+        depth_rule = (
+            "- Add a third topic level only where it explains a useful relationship; "
+            "at most 3 topic levels, 6 children per node, 96 nodes total.\n"
+            if options is None or options.length == "default"
+            else "- Add topic levels only where useful; at most %d topic levels, "
+            "6 children per node, %d nodes total.\n"
+        )
         prompt = (
             "Create a concept mind map that explains what these sources teach.\n\n"
             "Rules:\n"
@@ -385,8 +441,7 @@ class MindMapService:
             "- Group by concepts, combining related ideas across sources.\n"
             "- Aim for 4-6 distinct main topics and 2-4 meaningful subtopics each. "
             "Use fewer if the evidence is sparse.\n"
-            "- Add a third topic level only where it explains a useful relationship; "
-            "at most 3 topic levels, 6 children per node, 96 nodes total.\n"
+            "%s"
             "- Labels are concise noun phrases, not isolated keywords. "
             "Use the sources' language.\n"
             "- Give each node a brief, source-grounded explanation in detail.\n"
@@ -400,15 +455,27 @@ class MindMapService:
             '"document_index":1,"children":[{"label":"Subconcept",'
             '"detail":"Explanation","document_index":1,"children":[]}]}]}}\n\n'
             "Sources:\n\n%s"
-        ) % "\n\n".join(sections)
-        return with_output_language(prompt, output_language)
+        ) % (
+            depth_rule % (max_depth, max_nodes)
+            if "%d" in depth_rule else depth_rule,
+            "\n\n".join(sections),
+        )
+        return with_studio_options(prompt, options, output_language)
 
-    def _structural_tree(self, project_name: str, documents: List[Any]) -> Dict[str, Any]:
+    def _structural_tree(
+        self,
+        project_name: str,
+        documents: List[Any],
+        max_topic_depth: int = MAX_TOPIC_DEPTH,
+        max_total_nodes: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Keep real heading ancestry when a model cannot supply concepts.
 
         Args:
             project_name: Fallback root label.
             documents: Ready, owned source documents.
+            max_topic_depth: Maximum topic levels below each source.
+            max_total_nodes: Optional total-tree ceiling for custom lengths.
 
         Returns:
             Every source as a document node, plus at most `MAX_FALLBACK_TOPICS`
@@ -416,8 +483,14 @@ class MindMapService:
         """
         root = {"id": "root", "label": _clean_text(project_name, MAX_LABEL_CHARS) or "Notebook",
                 "kind": "project", "detail": None, "document_id": None, "children": []}
-        remaining = MAX_FALLBACK_TOPICS
+        remaining = min(
+            MAX_FALLBACK_TOPICS,
+            max(0, max_total_nodes - 1) if max_total_nodes is not None else MAX_FALLBACK_TOPICS,
+        )
+        remaining_nodes = max_total_nodes - 1 if max_total_nodes is not None else None
         for position, document in enumerate(documents):
+            if remaining_nodes is not None and remaining_nodes <= 0:
+                break
             source = {
                 "id": "doc-%s" % document.id,
                 "label": _clean_text(document.title, MAX_LABEL_CHARS) or "Source",
@@ -425,6 +498,8 @@ class MindMapService:
                 "document_id": document.id, "children": [],
             }
             root["children"].append(source)
+            if remaining_nodes is not None:
+                remaining_nodes -= 1
             # Source nodes are never spent from the concept budget: users must
             # still be able to find their last source in a large notebook.
             available = max(1, remaining // (len(documents) - position)) if remaining else 0
@@ -435,7 +510,7 @@ class MindMapService:
                 paths = [[keyword] for keyword in topics_from_keywords(document_text(document))]
             for path in paths:
                 parent = source
-                for segment in path[:MAX_TOPIC_DEPTH]:
+                for segment in path[:max_topic_depth]:
                     label = _clean_text(segment, MAX_LABEL_CHARS)
                     if not label:
                         continue
@@ -443,6 +518,8 @@ class MindMapService:
                                   if node["label"] == label), None)
                     if child is None:
                         if available <= 0 or len(parent["children"]) >= MAX_TOPICS_PER_DOCUMENT:
+                            break
+                        if remaining_nodes is not None and remaining_nodes <= 0:
                             break
                         child = {
                             "id": "%s-%d" % (parent["id"], len(parent["children"])),
@@ -452,6 +529,8 @@ class MindMapService:
                         parent["children"].append(child)
                         available -= 1
                         remaining -= 1
+                        if remaining_nodes is not None:
+                            remaining_nodes -= 1
                     parent = child
         return root
 

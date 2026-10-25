@@ -4,11 +4,17 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
-import api, { type AudioOverview, type AudioOverviewFormat, type AudioOverviewLength } from '@/lib/api';
+import api, {
+  type AudioOverview,
+  type AudioOverviewFormat,
+  type AudioOverviewLength,
+  type StudioOutputOptions,
+} from '@/lib/api';
 
 interface AudioOverviewDialogProps {
   projectId: string;
   documentIds?: string[];
+  initialOptions?: StudioOutputOptions;
   onClose: () => void;
 }
 
@@ -22,14 +28,16 @@ const statusLabel: Record<AudioOverview['status'], string> = {
 export default function AudioOverviewDialog({
   projectId,
   documentIds,
+  initialOptions,
   onClose,
 }: AudioOverviewDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const [format, setFormat] = useState<AudioOverviewFormat>('deep_dive');
-  const [length, setLength] = useState<AudioOverviewLength>('default');
-  const [focus, setFocus] = useState('');
+  const [length, setLength] = useState<AudioOverviewLength>(initialOptions?.length ?? 'default');
+  const [audience, setAudience] = useState(initialOptions?.audience ?? 'general');
+  const [focus, setFocus] = useState(initialOptions?.focus ?? '');
   const [items, setItems] = useState<AudioOverview[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -104,6 +112,7 @@ export default function AudioOverviewDialog({
       const overview = await api.createAudioOverview(projectId, {
         format,
         length,
+        audience,
         focus: focus.trim() || null,
         ...(documentIds ? { document_ids: documentIds } : {}),
       });
@@ -146,7 +155,7 @@ export default function AudioOverviewDialog({
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
           <form onSubmit={generate} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1.5 text-sm">
                 Format
                 <select
@@ -169,6 +178,19 @@ export default function AudioOverviewDialog({
                 >
                   <option value="short">Short</option>
                   <option value="default">Default</option>
+                  <option value="long">Long</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm">
+                Audience
+                <select
+                  value={audience}
+                  onChange={(event) => setAudience(event.target.value as typeof audience)}
+                  className="rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2"
+                >
+                  <option value="general">General</option>
+                  <option value="beginner">Beginner</option>
+                  <option value="expert">Expert</option>
                 </select>
               </label>
             </div>

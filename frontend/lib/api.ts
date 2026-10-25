@@ -131,7 +131,16 @@ export interface Citation extends Record<string, unknown> {
 
 export type ReportFormat = 'briefing' | 'study_guide' | 'faq' | 'timeline' | 'custom';
 
-export interface ProjectReportRequest {
+export type StudioAudience = 'general' | 'beginner' | 'expert';
+export type StudioOutputLength = 'short' | 'default' | 'long';
+
+export interface StudioOutputOptions {
+  focus?: string | null;
+  audience?: StudioAudience;
+  length?: StudioOutputLength;
+}
+
+export interface ProjectReportRequest extends StudioOutputOptions {
   format: ReportFormat;
   instruction?: string;
   document_ids?: string[];
@@ -346,13 +355,12 @@ export type FlashcardsResponse = StudyResponse<Flashcard>;
 export type QuizResponse = StudyResponse<QuizQuestion>;
 
 export type AudioOverviewFormat = 'deep_dive' | 'brief' | 'critique' | 'debate';
-export type AudioOverviewLength = 'short' | 'default';
+export type AudioOverviewLength = StudioOutputLength;
 
-export interface AudioOverviewOptions {
+export interface AudioOverviewOptions extends StudioOutputOptions {
   document_ids?: string[];
   format: AudioOverviewFormat;
   length: AudioOverviewLength;
-  focus?: string | null;
 }
 
 export interface AudioOverviewTurn {
@@ -641,17 +649,23 @@ const guard = async (
 
 
 /**
- * A Studio generation request, scoped to `documentIds` when given. Without
- * them no body is sent, so the request is the one every source always made.
+ * A Studio generation request, scoped to `documentIds` or reader options when
+ * given. Without either, no body is sent and the request keeps its old shape.
  * The content type is explicit because the blob and text helpers do not set
  * one, and a bare string body would otherwise go out as text/plain.
  */
-const studioRequest = (documentIds?: string[]): RequestInit => (
-  documentIds
+const studioRequest = (
+  documentIds?: string[],
+  options?: StudioOutputOptions,
+): RequestInit => (
+  documentIds || options
     ? {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document_ids: documentIds }),
+      body: JSON.stringify({
+        ...(documentIds === undefined ? {} : { document_ids: documentIds }),
+        ...options,
+      }),
     }
     : { method: 'POST' }
 );
@@ -1149,17 +1163,25 @@ const api = {
     );
   },
 
-  fetchProjectMindMap(projectId: string, documentIds?: string[]): Promise<MindMap> {
+  fetchProjectMindMap(
+    projectId: string,
+    documentIds?: string[],
+    options?: StudioOutputOptions,
+  ): Promise<MindMap> {
     return requestJson<MindMap>(
       `/projects/${projectId}/mindmap`,
-      studioRequest(documentIds),
+      studioRequest(documentIds, options),
     );
   },
 
-  fetchProjectVideoSummary(projectId: string, documentIds?: string[]): Promise<VideoSummary> {
+  fetchProjectVideoSummary(
+    projectId: string,
+    documentIds?: string[],
+    options?: StudioOutputOptions,
+  ): Promise<VideoSummary> {
     return requestJson<VideoSummary>(
       `/projects/${projectId}/video-summary`,
-      studioRequest(documentIds),
+      studioRequest(documentIds, options),
     );
   },
 
@@ -1316,10 +1338,14 @@ const api = {
   },
 
   /** The same summary as text, for reading aloud rather than downloading. */
-  fetchProjectSummaryText(projectId: string, documentIds?: string[]): Promise<string> {
+  fetchProjectSummaryText(
+    projectId: string,
+    documentIds?: string[],
+    options?: StudioOutputOptions,
+  ): Promise<string> {
     return requestText(
       `/export/project/${projectId}/summary`,
-      studioRequest(documentIds),
+      studioRequest(documentIds, options),
     );
   },
 
