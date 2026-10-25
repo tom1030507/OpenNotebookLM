@@ -147,25 +147,37 @@ export default function NotesSection({ projectId }: { projectId: string | null }
             <li key={note.id}>
               {draft?.noteId === note.id ? editor : (
                 <div className="bg-[var(--secondary)] rounded-lg">
-                  <button
-                    type="button"
-                    aria-expanded={openId === note.id}
-                    onClick={() => setOpenId(openId === note.id ? null : note.id)}
-                    className="w-full p-3 text-left text-sm font-medium break-words"
-                  >
-                    {note.title}
-                    {note.origin === 'answer' && (
-                      <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
-                        Saved answer
-                      </span>
+                  <div className="flex items-start">
+                    <button
+                      type="button"
+                      aria-expanded={openId === note.id}
+                      onClick={() => setOpenId(openId === note.id ? null : note.id)}
+                      className="min-w-0 flex-1 p-3 text-left text-sm font-medium break-words"
+                    >
+                      {note.title}
+                      {note.origin === 'answer' && (
+                        <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                          Saved answer
+                        </span>
+                      )}
+                      {note.origin === 'studio' && (
+                        <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                          Studio · {note.studio_kind === 'mindmap' ? 'Mind map'
+                            : note.studio_kind === 'video_summary' ? 'Video summary' : 'Report'}
+                        </span>
+                      )}
+                    </button>
+                    {note.origin === 'studio' && note.studio_kind !== 'report' && (
+                      <button
+                        type="button"
+                        onClick={() => deleteNote(note)}
+                        aria-label={`Delete note ${note.title}`}
+                        className="shrink-0 self-stretch px-3 text-[var(--error)] hover:bg-[var(--muted)]"
+                      >
+                        <Trash2 aria-hidden="true" className="h-4 w-4" />
+                      </button>
                     )}
-                    {note.origin === 'studio' && (
-                      <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
-                        Studio · {note.studio_kind === 'mindmap' ? 'Mind map'
-                          : note.studio_kind === 'video_summary' ? 'Video summary' : 'Report'}
-                      </span>
-                    )}
-                  </button>
+                  </div>
                   {openId === note.id
                     && (note.origin !== 'studio' || note.studio_kind === 'report') && (
                     <div className="px-3 pb-3">

@@ -25,7 +25,11 @@ export default function SaveToNoteButton({ message }: { message: Message }) {
     state.projectId === projectId
     && state.notes.some((note) => note.source_message_id === message.id)
   ));
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const notesLoaded = useNotes((state) => (
+    state.projectId === projectId && !state.loading && !state.error
+  ));
+  const [savedFor, setSavedFor] = useState<{ projectId: string; messageId: string } | null>(null);
+  const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle');
 
   const save = async () => {
     if (!projectId) return;
@@ -38,13 +42,16 @@ export default function SaveToNoteButton({ message }: { message: Message }) {
         source_message_id: message.id,
       });
       useNotes.getState().upsert(note);
-      setState('saved');
+      setSavedFor({ projectId, messageId: message.id });
+      setState('idle');
     } catch {
       setState('error');
     }
   };
 
-  const visibleState = alreadySaved ? 'saved' : state;
+  const isSaved = alreadySaved || (!notesLoaded
+    && savedFor?.projectId === projectId && savedFor.messageId === message.id);
+  const visibleState = isSaved ? 'saved' : state;
   const label = {
     idle: 'Save to note',
     saving: 'Saving…',

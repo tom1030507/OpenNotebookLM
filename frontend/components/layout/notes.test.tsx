@@ -26,6 +26,7 @@ const note = (fields: Partial<Note>): Note => ({
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   useStore.getState().resetForTests();
   useNotes.setState({ projectId: null, notes: [], loading: false, error: '' });
@@ -95,6 +96,49 @@ describe('Studio notes', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('enables saving an answer again after its note is deleted', async () => {
+    const answer: Message = {
+      id: 'm2', conversation_id: 'c', role: 'assistant', content: 'Scattering [1].', created_at: '',
+    };
+    const saved = note({
+      title: 'Why is the sky blue?', origin: 'answer', source_message_id: 'm2',
+    });
+    vi.spyOn(api, 'listNotes').mockResolvedValue([saved]);
+    const remove = vi.spyOn(api, 'deleteNote').mockResolvedValue();
+    vi.stubGlobal('confirm', () => true);
+
+    useStore.setState({ currentProject: { id: 'project-1', name: 'P' } as Project });
+    render(<>
+      <NotesSection projectId="project-1" />
+      <SaveToNoteButton message={answer} />
+    </>);
+
+    expect(await screen.findByRole('button', { name: 'Saved to notes' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Why is the sky blue/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('project-1', saved.id));
+    expect(await screen.findByRole('button', { name: 'Save to note' })).toBeTruthy();
+  });
+
+  it.each(['mindmap', 'video_summary'] as const)(
+    'allows deleting a saved Studio %s note', async (kind) => {
+      const saved = note({
+        title: `Saved ${kind}`, origin: 'studio', studio_kind: kind,
+      });
+      vi.spyOn(api, 'listNotes').mockResolvedValue([saved]);
+      const remove = vi.spyOn(api, 'deleteNote').mockResolvedValue();
+      vi.stubGlobal('confirm', () => true);
+
+      render(<NotesSection projectId="project-1" />);
+      await screen.findByRole('button', { name: new RegExp(`^${saved.title}`) });
+      fireEvent.click(screen.getByRole('button', { name: `Delete note ${saved.title}` }));
+
+      await waitFor(() => expect(remove).toHaveBeenCalledWith('project-1', saved.id));
+      expect(useNotes.getState().notes).toEqual([]);
+    },
+  );
+
   it('opens a saved Studio report as Markdown', async () => {
     vi.spyOn(api, 'listNotes').mockResolvedValue([note({
       title: 'Saved report', content: '# Report\n\nSaved findings.',
@@ -138,7 +182,7 @@ describe('Studio notes', () => {
       const generateVideo = vi.spyOn(api, 'fetchProjectVideoSummary');
 
       render(<NotesSection projectId="project-1" />);
-      fireEvent.click(await screen.findByRole('button', { name: new RegExp(saved.title) }));
+      fireEvent.click(await screen.findByRole('button', { name: new RegExp(`^${saved.title}`) }));
 
       const title = kind === 'mindmap' ? 'Research mind map' : 'Research video summary';
       expect(await screen.findByRole('dialog', { name: title })).toBeTruthy();

@@ -1,18 +1,23 @@
 """Notes API: manual notes, saved answers, and their lifecycle."""
 from __future__ import annotations
 
+import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.database import get_db
-from app.db.models import Base, Conversation, Message, Note
+from app.db.database import create_database_engine, get_db
+from app.db.models import Base, Conversation, Message, Note, Project
 from app.routers import notes, projects
+from app.schemas import MindMapResponse, NoteCreate, NOTE_PAYLOAD_MAX_BYTES
+from app.services.notes import create_note
 from conftest import authorize
 
 
@@ -228,6 +233,92 @@ def test_oversized_studio_payload_is_rejected(client):
     })
 
     assert response.status_code == 413
+
+
+def test_studio_payload_is_bounded_after_schema_defaults_are_added(client):
+    api, _ = client
+    project_id = create_project(api)
+    payload = {
+        **MIND_MAP,
+        "project_id": project_id,
+        "root": {
+            **MIND_MAP["root"],
+            "children": [
+                {"id": "n", "label": "x", "kind": "topic"}
+                for _ in range(10_000)
+            ],
+        },
+    }
+    input_size = len(json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":")
+    ).encode())
+    stored_payload = MindMapResponse.model_validate(payload).model_dump(mode="json")
+    stored_size = len(json.dumps(
+        stored_payload, ensure_ascii=False, separators=(",", ":")
+    ).encode())
+    assert input_size < NOTE_PAYLOAD_MAX_BYTES < stored_size
+
+    response = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Expanded map", "studio_kind": "mindmap", "payload_json": payload,
+    })
+
+    assert response.status_code == 413
+
+
+def test_concurrent_saves_of_the_same_answer_return_one_note(tmp_path):
+    database_url = "sqlite:///%s" % (tmp_path / "notes.db")
+    engine = create_database_engine(database_url, echo=False)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    project_id, conversation_id, message_id = (str(uuid.uuid4()) for _ in range(3))
+    with session_factory() as db:
+        db.add_all([
+            Project(id=project_id, name="Research"),
+            Conversation(id=conversation_id, project_id=project_id, title="Chat"),
+            Message(
+                id=message_id, conversation_id=conversation_id,
+                role="assistant", text="Answer",
+            ),
+        ])
+        db.commit()
+
+    barrier = Barrier(2)
+    barrier_lock = Lock()
+    synchronized = 0
+
+    def synchronize_duplicate_lookups(
+        _conn, _cursor, statement, _parameters, _context, _many,
+    ):
+        nonlocal synchronized
+        if "FROM notes" not in statement or "source_message_id" not in statement:
+            return
+        with barrier_lock:
+            should_wait = synchronized < 2
+            synchronized += 1
+        if should_wait:
+            barrier.wait(timeout=5)
+
+    event.listen(engine, "before_cursor_execute", synchronize_duplicate_lookups)
+
+    def save_answer(title):
+        with session_factory() as db:
+            return create_note(db, Project(id=project_id, name="Research"), NoteCreate(
+                title=title, source_message_id=message_id,
+            )).id
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            note_ids = list(pool.map(save_answer, ["First", "Second"]))
+        with session_factory() as db:
+            count = db.query(Note).filter(
+                Note.project_id == project_id,
+                Note.source_message_id == message_id,
+            ).count()
+        assert note_ids[0] == note_ids[1]
+        assert count == 1
+    finally:
+        event.remove(engine, "before_cursor_execute", synchronize_duplicate_lookups)
+        engine.dispose()
 
 
 def test_studio_payload_must_belong_to_the_note_project(client):

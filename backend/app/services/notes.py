@@ -11,6 +11,7 @@ from typing import List
 
 from fastapi import HTTPException, status
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import Conversation, Message, Note, Project
@@ -85,7 +86,16 @@ def _studio_note_content_and_payload(
 
     if parsed.project_id != project.id:
         raise HTTPException(status_code=422, detail="Studio payload belongs to another project")
-    return "", parsed.model_dump(mode="json")
+    try:
+        payload = parsed.model_dump(mode="json")
+        stored_size = len(json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError):
+        raise HTTPException(status_code=422, detail="Invalid Studio payload")
+    if stored_size > NOTE_PAYLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Studio payload is too large")
+    return "", payload
 
 
 def list_notes(db: Session, project: Project) -> List[Note]:
@@ -201,8 +211,16 @@ def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
     elif data.payload_json is not None:
         raise HTTPException(status_code=422, detail="Studio kind is required")
 
+    note_id = str(uuid.uuid4())
+    if origin == ORIGIN_ANSWER:
+        # A stable primary key makes simultaneous retries collide at the database.
+        note_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "opennotebooklm/notes/%s/%s" % (project.id, data.source_message_id),
+        ))
+
     note = Note(
-        id=str(uuid.uuid4()),
+        id=note_id,
         project_id=project.id,
         title=data.title,
         content=content,
@@ -212,7 +230,18 @@ def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
         payload_json=payload_json,
     )
     db.add(note)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if origin == ORIGIN_ANSWER:
+            existing = db.query(Note).filter(
+                Note.project_id == project.id,
+                Note.source_message_id == data.source_message_id,
+            ).first()
+            if existing:
+                return existing
+        raise
     db.refresh(note)
     return note
 
