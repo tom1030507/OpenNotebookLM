@@ -22,7 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import get_db
-from app.db.models import AudioOverview, Base, Document, Project, User
+from app.db.models import AudioOverview, Base, Document, Project, ProjectMember, User
 
 # Retrieval and model inference are not what these tests exercise. Replacing the
 # RAG service before the app is imported keeps them in the minimal environment;
@@ -189,6 +189,182 @@ def make_conversation(client, project_id, title="Notes"):
         "/api/projects/%s/conversations" % project_id, json={"title": title})
     assert response.status_code in (200, 201), response.text
     return response.json()["id"]
+
+
+def grant_project_role(env, project_id, role):
+    """Give Bob a project role for an authorization test.
+
+    Args:
+        env: Two-account route-test environment.
+        project_id: Project Alice owns.
+        role: Viewer or editor role to grant.
+
+    Returns:
+        The stored membership.
+    """
+    membership = ProjectMember(
+        project_id=project_id,
+        user_id=env.bob_user.id,
+        role=role,
+    )
+    env.session.add(membership)
+    env.session.commit()
+    return membership
+
+
+class FakeDocumentService:
+    """No-op ingestion/deletion service for role checks."""
+
+    async def process_url(self, **kwargs):
+        """Return a queued record without network or extraction work."""
+        class QueuedDocument:
+            id = "queued-shared-document"
+            status = "queued"
+
+        return QueuedDocument()
+
+    def delete_document(self, db, document_id):
+        """Report success if a route reaches the deletion service."""
+        return True
+
+
+class TestSharedProjectSourceRoles:
+    """Shared roles govern project sources and related mutations."""
+
+    def test_viewer_can_read_project_source_and_file(self, env, tmp_path, monkeypatch):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.alice_user, source_type="pdf", content="Shared source text"
+        )
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        source_file = tmp_path / "shared.pdf"
+        source_file.write_bytes(b"shared pdf bytes")
+        monkeypatch.setattr(
+            "app.routers.files.resolve_stored_file", lambda _source_url: source_file
+        )
+
+        project = env.bob.get("/api/projects/%s" % project_id)
+        documents = env.bob.get("/api/projects/%s/documents" % project_id)
+
+        assert project.status_code == 200
+        assert project.json()["role"] == "viewer"
+        assert documents.status_code == 200
+        assert documents.json()[0]["id"] == document_id
+        assert env.bob.get(
+            "/api/projects/%s/chat-settings" % project_id
+        ).status_code == 200
+        assert env.bob.put(
+            "/api/projects/%s/chat-settings" % project_id,
+            json={"role": "learning_guide"},
+        ).status_code == 404
+        assert env.bob.get("/api/docs/%s" % document_id).status_code == 200
+        assert env.bob.get("/api/docs/%s/status" % document_id).status_code == 200
+        assert env.bob.get("/api/docs/%s/content" % document_id).json() == {
+            "content": "Shared source text"
+        }
+        file_response = env.bob.get("/api/docs/%s/file" % document_id)
+        assert file_response.status_code == 200
+        assert file_response.content == b"shared pdf bytes"
+
+    def test_editor_can_add_remove_own_source_and_ingest_but_viewer_cannot(
+        self, env, monkeypatch
+    ):
+        from app.routers.ingest import get_document_service
+
+        project_id = make_project(env.alice)
+        bob_document = make_document(env.session, env.bob_user, "Bob source")
+        alice_document = make_document(env.session, env.alice_user, "Alice source")
+        membership = grant_project_role(env, project_id, "viewer")
+        production_app.dependency_overrides[get_document_service] = lambda: FakeDocumentService()
+        upload_url = "/api/projects/%s/upload-url" % project_id
+        add_url = "/api/projects/%s/documents/%s"
+
+        assert env.bob.post(upload_url, json={"url": "https://example.com"}).status_code == 404
+        assert env.bob.post(add_url % (project_id, bob_document)).status_code == 404
+
+        membership.role = "editor"
+        env.session.commit()
+        upload = env.bob.post(upload_url, json={"url": "https://example.com"})
+        foreign_source = env.bob.post(add_url % (project_id, alice_document))
+        attached = env.bob.post(add_url % (project_id, bob_document))
+        removed = env.bob.delete(add_url % (project_id, bob_document))
+
+        assert upload.status_code == 200, upload.text
+        assert foreign_source.status_code == 404
+        assert attached.status_code == 200
+        assert removed.status_code == 200
+        assert env.bob.put(
+            "/api/projects/%s/chat-settings" % project_id,
+            json={"role": "learning_guide"},
+        ).status_code == 200
+
+    def test_editor_can_invalidate_shared_project_cache_but_viewer_cannot(
+        self, env, monkeypatch
+    ):
+        from app.services.cache import cache_service
+
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.alice_user)
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        membership = grant_project_role(env, project_id, "viewer")
+        monkeypatch.setattr(cache_service, "invalidate_project_cache", lambda _id: 1)
+        monkeypatch.setattr(cache_service, "invalidate_document_cache", lambda _id: 1)
+        project_cache = "/api/cache/invalidate/project/%s" % project_id
+        document_cache = "/api/cache/invalidate/document/%s" % document_id
+
+        assert env.bob.delete(project_cache).status_code == 404
+        assert env.bob.delete(document_cache).status_code == 404
+
+        membership.role = "editor"
+        env.session.commit()
+        assert env.bob.delete(project_cache).status_code == 200
+        assert env.bob.delete(document_cache).status_code == 200
+
+    def test_shared_editor_cannot_administer_project_or_mutate_owner_document(self, env):
+        from app.routers.ingest import get_document_service
+
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.alice_user)
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "editor")
+        production_app.dependency_overrides[get_document_service] = lambda: FakeDocumentService()
+
+        assert env.bob.put(
+            "/api/projects/%s" % project_id, json={"name": "Changed"}
+        ).status_code == 404
+        assert env.bob.post("/api/projects/%s/duplicate" % project_id).status_code == 404
+        assert env.bob.delete("/api/projects/%s" % project_id).status_code == 404
+        assert env.bob.put(
+            "/api/docs/%s" % document_id, json={"title": "Changed"}
+        ).status_code == 404
+        assert env.bob.delete("/api/docs/%s" % document_id).status_code == 404
+        assert env.alice.get("/api/docs/%s" % document_id).status_code == 200
+
+    def test_removing_membership_revokes_project_and_direct_source_access(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(env.session, env.alice_user)
+        assert env.alice.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        ).status_code == 200
+        grant_project_role(env, project_id, "viewer")
+        assert env.bob.get("/api/projects/%s" % project_id).status_code == 200
+        assert env.bob.get("/api/docs/%s/content" % document_id).status_code == 200
+
+        env.session.query(ProjectMember).filter_by(
+            project_id=project_id,
+            user_id=env.bob_user.id,
+        ).delete()
+        env.session.commit()
+
+        assert env.bob.get("/api/projects/%s" % project_id).status_code == 404
+        assert env.bob.get("/api/docs/%s/content" % document_id).status_code == 404
 
 
 class TestProjectIsolation:

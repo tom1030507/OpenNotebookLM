@@ -2,10 +2,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import structlog
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import User
+from app.db.models import Project, ProjectDocument, ProjectMember, User
 from app.services.cache import cache_service
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_document, require_project
@@ -45,7 +46,7 @@ async def invalidate_project_cache(
     Returns:
         Number of logical project cache scopes invalidated.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
 
     try:
         count = cache_service.invalidate_project_cache(project_id)
@@ -65,7 +66,7 @@ async def invalidate_document_cache(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CacheInvalidateResponse:
-    """Invalidate cached data for one document the caller owns.
+    """Invalidate cached data for a document the caller owns or edits through a project.
 
     Args:
         document_id: Document id to invalidate.
@@ -75,7 +76,24 @@ async def invalidate_document_cache(
     Returns:
         Number of logical document cache scopes invalidated.
     """
-    require_document(db, document_id, current_user)
+    document = require_document(db, document_id, current_user)
+    if document.user_id != current_user.id:
+        editable_link = db.query(ProjectDocument.project_id).join(
+            Project, Project.id == ProjectDocument.project_id
+        ).outerjoin(
+            ProjectMember, ProjectMember.project_id == Project.id
+        ).filter(
+            ProjectDocument.document_id == document_id,
+            or_(
+                Project.user_id == current_user.id,
+                and_(
+                    ProjectMember.user_id == current_user.id,
+                    ProjectMember.role == "editor",
+                ),
+            ),
+        ).first()
+        if editable_link is None:
+            raise HTTPException(status_code=404, detail="Document not found")
 
     try:
         count = cache_service.invalidate_document_cache(document_id)

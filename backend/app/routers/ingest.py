@@ -108,7 +108,7 @@ async def upload_file(
     Returns:
         Created document identifier and queued status.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
 
     declared_length = request.headers.get("Content-Length")
     if declared_length is not None:
@@ -229,7 +229,7 @@ async def upload_url(
     Returns:
         Created document identifier and queued status.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
     
     lease = _begin_ingestion(
         current_user.id,
@@ -286,7 +286,7 @@ async def upload_youtube(
     Returns:
         Created document identifier and queued status.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
     
     if not settings.enable_yt_transcription:
         raise HTTPException(
@@ -347,7 +347,7 @@ async def upload_text(
     Returns:
         Created document identifier and queued status.
     """
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
 
     lease = _begin_ingestion(
         current_user.id,
@@ -474,7 +474,11 @@ async def rename_document(
     """
     from app.services.documents import rename_document as rename
 
-    document = rename(db, require_document(db, doc_id, current_user), request.title)
+    document = rename(
+        db,
+        require_document(db, doc_id, current_user, owner_only=True),
+        request.title,
+    )
     return DocumentResponse(
         id=document.id,
         title=document.title,
@@ -497,7 +501,7 @@ async def delete_document(
     document_service: Any = Depends(get_document_service),
 ):
     """Delete one of the caller's documents."""
-    require_document(db, doc_id, current_user)
+    require_document(db, doc_id, current_user, owner_only=True)
     success = document_service.delete_document(db, doc_id)
     
     if not success:

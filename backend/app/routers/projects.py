@@ -98,7 +98,7 @@ async def get_project(
     current_user: User = Depends(get_current_user)
 ):
     """Get one of the caller's projects by ID."""
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="viewer")
     project = ProjectService.get_project(db, project_id)
     
     return ProjectResponse(
@@ -314,7 +314,7 @@ async def get_chat_settings(
     current_user: User = Depends(get_current_user)
 ):
     """Get the chat settings of one of the caller's projects."""
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="viewer")
     return ProjectService.get_chat_settings(project)
 
 
@@ -326,7 +326,7 @@ async def update_chat_settings(
     current_user: User = Depends(get_current_user)
 ):
     """Replace the chat settings of one of the caller's projects."""
-    project = require_project(db, project_id, current_user)
+    project = require_project(db, project_id, current_user, min_role="editor")
     return ProjectService.update_chat_settings(db, project, chat_settings)
 
 
@@ -339,7 +339,7 @@ async def get_project_documents(
     current_user: User = Depends(get_current_user)
 ):
     """Get documents in one of the caller's projects."""
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="viewer")
     
     documents = ProjectService.get_project_documents(db, project_id, skip=skip, limit=limit)
     
@@ -370,8 +370,8 @@ async def add_document_to_project(
     # Both ends are checked. Authorising only the project would let a caller
     # attach someone else's document to their own project and then read it
     # through the project's document list.
-    require_project(db, project_id, current_user)
-    require_document(db, document_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
+    require_document(db, document_id, current_user, owner_only=True)
 
     success = ProjectService.add_document_to_project(db, project_id, document_id)
     
@@ -389,7 +389,7 @@ async def remove_document_from_project(
     current_user: User = Depends(get_current_user)
 ):
     """Remove a document from one of the caller's projects."""
-    require_project(db, project_id, current_user)
+    require_project(db, project_id, current_user, min_role="editor")
     success = ProjectService.remove_document_from_project(db, project_id, document_id)
     
     if not success:
