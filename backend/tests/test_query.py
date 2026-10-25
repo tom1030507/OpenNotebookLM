@@ -105,6 +105,136 @@ def test_query_uses_maximum_output_budget_when_caller_omits_limit(monkeypatch):
     assert received_max_tokens == 8192
 
 
+def test_model_list_returns_server_choices(monkeypatch):
+    choices = [{"id": "local:llama3.2", "provider": "Ollama", "name": "llama3.2"}]
+    monkeypatch.setattr(query, "available_models", lambda: choices, raising=False)
+
+    response = query_client(monkeypatch, object()).get("/api/models")
+
+    assert response.status_code == 200
+    assert response.json() == choices
+
+
+def test_query_rejects_a_model_the_server_does_not_list(monkeypatch):
+    called = False
+
+    class RecordingRAG:
+        def query(self, **_kwargs):
+            nonlocal called
+            called = True
+            return QUERY_RESULT
+
+    monkeypatch.setattr(query, "is_model_available", lambda _model: False, raising=False)
+    response = query_client(monkeypatch, RecordingRAG()).post(
+        "/api/query", json={"query": "hello", "model": "openai:not-configured"}
+    )
+
+    assert response.status_code == 422
+    assert called is False
+
+
+def test_query_forwards_a_selected_model_to_rag(monkeypatch):
+    received = {}
+
+    class RecordingRAG:
+        def query(self, **kwargs):
+            received.update(kwargs)
+            return QUERY_RESULT
+
+    monkeypatch.setattr(query, "is_model_available", lambda _model: True, raising=False)
+    response = query_client(monkeypatch, RecordingRAG()).post(
+        "/api/query", json={"query": "hello", "model": "openai:gpt-5.6"}
+    )
+
+    assert response.status_code == 200
+    assert received["model"] == "openai:gpt-5.6"
+
+
+def test_query_uses_project_model_when_request_has_no_override(monkeypatch):
+    received = {}
+
+    class RecordingRAG:
+        def query_with_conversation(self, **kwargs):
+            received.update(kwargs)
+            return QUERY_RESULT
+
+    monkeypatch.setattr(
+        query,
+        "_resolve_query_scope",
+        lambda *_args: ("project-1", object(), []),
+    )
+    monkeypatch.setattr(query, "is_model_available", lambda _model: True, raising=False)
+    response = query_client(
+        monkeypatch,
+        RecordingRAG(),
+        database=SimpleNamespace(
+            get=lambda *_args: SimpleNamespace(chat_model="openai:project-default")
+        ),
+    ).post(
+        "/api/query",
+        json={
+            "query": "hello",
+            "project_id": "project-1",
+            "conversation_id": "conversation-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert received["model"] == "openai:project-default"
+
+
+def test_question_model_overrides_project_model(monkeypatch):
+    received = {}
+
+    class RecordingRAG:
+        def query_with_conversation(self, **kwargs):
+            received.update(kwargs)
+            return QUERY_RESULT
+
+    monkeypatch.setattr(
+        query,
+        "_resolve_query_scope",
+        lambda *_args: ("project-1", object(), []),
+    )
+    monkeypatch.setattr(query, "is_model_available", lambda _model: True, raising=False)
+    response = query_client(
+        monkeypatch,
+        RecordingRAG(),
+        database=SimpleNamespace(
+            get=lambda *_args: SimpleNamespace(chat_model="openai:project-default")
+        ),
+    ).post(
+        "/api/query",
+        json={
+            "query": "hello",
+            "project_id": "project-1",
+            "conversation_id": "conversation-1",
+            "model": "openai:question-override",
+        },
+    )
+
+    assert response.status_code == 200
+    assert received["model"] == "openai:question-override"
+
+
+def test_stream_query_forwards_a_selected_model_to_rag(monkeypatch):
+    received = {}
+
+    class RecordingRAG:
+        def stream_query_with_conversation(self, **kwargs):
+            received.update(kwargs)
+            yield "complete", QUERY_RESULT
+
+    monkeypatch.setattr(query, "is_model_available", lambda _model: True, raising=False)
+    response = query_client(monkeypatch, RecordingRAG()).post(
+        "/api/query/stream",
+        json={"query": "hello", "model": "openai:gpt-5.6"},
+    )
+
+    assert response.status_code == 200
+    assert received["model"] == "openai:gpt-5.6"
+
+
 def test_query_response_exposes_citation_checks_from_rag(monkeypatch):
     checks = [{
         "sentence_index": 2,
@@ -172,7 +302,9 @@ def test_project_conversation_query_scopes_selection_to_visible_project(monkeypa
             return QUERY_RESULT
 
     rag = RecordingRAG()
-    client = query_client(monkeypatch, rag)
+    client = query_client(
+        monkeypatch, rag, database=SimpleNamespace(get=lambda *_args: None)
+    )
     project_checks = []
     document_scopes = []
     conversation = SimpleNamespace(project_id="project-1")

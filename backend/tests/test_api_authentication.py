@@ -169,6 +169,7 @@ def test_the_app_actually_serves_the_routes_under_test():
     assert "/api/projects" in paths
     assert "/api/docs/{doc_id}/file" in paths
     assert "/api/query" in paths
+    assert "/api/models" in paths
     assert "/api/export/conversation/{conversation_id}" in paths
     assert "/api/cache/invalidate/project/{project_id}" in paths
     assert len(paths) > 20

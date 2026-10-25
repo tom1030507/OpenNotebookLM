@@ -1010,13 +1010,24 @@ describe('API client', () => {
       project_id: 'project-1',
       query: 'Question',
       conversation_id: 'conversation-1',
+      model: 'openai:gpt-5.6',
     })).resolves.toEqual(expect.objectContaining({ answer: 'Answer' }));
     expect(fetchMock.mock.calls[0][0]).toBe('/api/query');
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
       project_id: 'project-1',
       query: 'Question',
       conversation_id: 'conversation-1',
+      model: 'openai:gpt-5.6',
     });
+  });
+
+  it('loads the server model list', async () => {
+    const choices = [{ id: 'local:llama3.2', provider: 'Ollama', name: 'llama3.2' }];
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(choices));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getModels()).resolves.toEqual(choices);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/models');
   });
 
   it('parses split SSE query events and returns the completed answer', async () => {

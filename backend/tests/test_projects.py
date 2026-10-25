@@ -382,8 +382,9 @@ def test_project_cover_defaults_validates_and_persists():
     ).status_code == 422
 
 
-def test_duplicate_project_copies_owned_data_but_not_conversations():
+def test_duplicate_project_copies_owned_data_but_not_conversations(monkeypatch):
     """A duplicate owns its links and notes without cloning conversations."""
+    monkeypatch.setattr(projects, "is_model_available", lambda _model: True, raising=False)
     original = client.post(
         "/api/projects",
         json={"name": "Notebook", "description": "Summary", "meta_json": {"nested": {"key": "value"}}},
@@ -391,7 +392,7 @@ def test_duplicate_project_copies_owned_data_but_not_conversations():
     client.put(
         f"/api/projects/{original['id']}/chat-settings",
         json={"role": "custom", "instructions": "Be concise", "answer_length": "longer",
-              "output_language": "ja"},
+              "output_language": "ja", "model": "openai:gpt-5.6"},
     )
 
     with TestingSessionLocal() as db:
@@ -439,7 +440,7 @@ def test_duplicate_project_copies_owned_data_but_not_conversations():
     assert duplicate["meta_json"] == {"nested": {"key": "value"}}
     assert client.get(f"/api/projects/{duplicate['id']}/chat-settings").json() == {
         "role": "custom", "instructions": "Be concise", "answer_length": "longer",
-        "output_language": "ja",
+        "output_language": "ja", "model": "openai:gpt-5.6",
     }
     with TestingSessionLocal() as db:
         copied = db.get(Project, duplicate["id"])
@@ -477,7 +478,7 @@ def test_duplicate_project_copies_owned_data_but_not_conversations():
     assert client.get(f"/api/projects/{original['id']}").json()["name"] == "Notebook"
     assert client.get(f"/api/projects/{original['id']}/chat-settings").json() == {
         "role": "custom", "instructions": "Be concise", "answer_length": "longer",
-        "output_language": "ja",
+        "output_language": "ja", "model": "openai:gpt-5.6",
     }
     assert "copy-own-document" in {
         document["id"] for document in client.get(
@@ -553,14 +554,16 @@ def test_chat_settings_default_until_set():
     assert response.status_code == 200
     assert response.json() == {
         "role": "default", "instructions": "", "answer_length": "default",
-        "output_language": "auto"}
+        "output_language": "auto", "model": None}
 
 
-def test_chat_settings_persist():
+def test_chat_settings_persist(monkeypatch):
     """Saved chat settings are what the project reads back."""
+    monkeypatch.setattr(projects, "is_model_available", lambda _model: True, raising=False)
     project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
     settings = {"role": "custom", "instructions": "Answer as a terse reviewer.",
-                "answer_length": "shorter", "output_language": "zh-Hant"}
+                "answer_length": "shorter", "output_language": "zh-Hant",
+                "model": "openai:gpt-5.6"}
 
     assert client.put(
         f"/api/projects/{project_id}/chat-settings", json=settings).json() == settings
@@ -579,11 +582,27 @@ def test_chat_settings_reject_unknown_values_and_long_instructions():
     assert client.get(url).json()["role"] == "default"
 
 
-def test_chat_settings_update_from_older_client_preserves_output_language():
+def test_chat_settings_rejects_an_unlisted_model(monkeypatch):
+    project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
+    monkeypatch.setattr(projects, "is_model_available", lambda _model: False, raising=False)
+
+    response = client.put(
+        f"/api/projects/{project_id}/chat-settings",
+        json={"model": "openai:not-configured"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_chat_settings_update_from_older_client_preserves_newer_fields(monkeypatch):
     project_id = client.post("/api/projects", json={"name": "Chat"}).json()["id"]
     url = f"/api/projects/{project_id}/chat-settings"
+    monkeypatch.setattr(projects, "is_model_available", lambda _model: True, raising=False)
 
-    assert client.put(url, json={"output_language": "fr"}).status_code == 200
+    assert client.put(
+        url, json={"output_language": "fr", "model": "openai:gpt-5.6"}
+    ).status_code == 200
     assert client.put(url, json={"answer_length": "longer"}).status_code == 200
 
     assert client.get(url).json()["output_language"] == "fr"
+    assert client.get(url).json()["model"] == "openai:gpt-5.6"

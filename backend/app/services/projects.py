@@ -148,6 +148,7 @@ class ProjectService:
             chat_instructions=project.chat_instructions,
             answer_length=project.answer_length,
             output_language=project.output_language or "auto",
+            chat_model=project.chat_model,
             cover_emoji=ProjectService.default_cover_emoji(duplicate_id),
         )
         links = [
@@ -706,6 +707,7 @@ class ProjectService:
             instructions=project.chat_instructions or "",
             answer_length=project.answer_length or "default",
             output_language=project.output_language or "auto",
+            model=project.chat_model,
         )
 
     @staticmethod
@@ -725,6 +727,8 @@ class ProjectService:
         project.chat_role = chat_settings.role
         project.chat_instructions = chat_settings.instructions
         project.answer_length = chat_settings.answer_length
+        if "model" in chat_settings.model_fields_set:
+            project.chat_model = chat_settings.model
         output_language = (
             chat_settings.output_language
             if "output_language" in chat_settings.model_fields_set

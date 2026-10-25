@@ -116,6 +116,13 @@ export interface ChatSettings {
   instructions: string;
   answer_length: AnswerLength;
   output_language: OutputLanguage;
+  model: string | null;
+}
+
+export interface LLMModel {
+  id: string;
+  provider: string;
+  name: string;
 }
 
 export type DocumentStatus = 'queued' | 'processing' | 'transcribing' | 'ready' | 'error';
@@ -284,6 +291,7 @@ export interface QueryRequest {
   project_id: string;
   query: string;
   conversation_id?: string;
+  model?: string;
   /** Omitted to use every source in the project. */
   document_ids?: string[];
 }
@@ -1131,6 +1139,10 @@ const api = {
 
   getChatSettings(projectId: string): Promise<ChatSettings> {
     return requestJson<ChatSettings>(`/projects/${projectId}/chat-settings`);
+  },
+
+  getModels(): Promise<LLMModel[]> {
+    return requestJson<LLMModel[]>('/models');
   },
 
   updateChatSettings(projectId: string, settings: ChatSettings): Promise<ChatSettings> {

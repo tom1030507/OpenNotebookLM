@@ -20,7 +20,7 @@ import {
 } from '@/components/desktopLayout';
 import MarkdownRenderer from '../MarkdownRenderer';
 import { requestAddSources } from '../sourceActions';
-import type { Message, StreamQueryResponse } from '@/lib/api';
+import api, { type LLMModel, type Message, type StreamQueryResponse } from '@/lib/api';
 import { citationId, referencedCitationIds } from '@/lib/citations';
 import BrandLogo from '../BrandLogo';
 import { useOptionalProjectDialog } from '../ProjectDialogProvider';
@@ -231,6 +231,8 @@ export default function ChatArea({
   const [inputValue, setInputValue] = useState('');
   const [pendingQuery, setPendingQuery] = useState<PendingQuery | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(false);
+  const [availableModels, setAvailableModels] = useState<LLMModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState('');
   // Follow-ups cost a model call, so they are offered for answers given in this
   // session rather than regenerated every time an old conversation is opened.
   const [followUpConversationId, setFollowUpConversationId] = useState<string | null>(null);
@@ -295,8 +297,17 @@ export default function ChatArea({
     if (state.currentProject?.id !== previous.currentProject?.id) {
       composerGenerationRef.current += 1;
       setInputValue('');
+      setSelectedModel('');
     }
   }), []);
+
+  useEffect(() => {
+    let active = true;
+    api.getModels()
+      .then((models) => { if (active) setAvailableModels(models); })
+      .catch(() => { if (active) setAvailableModels([]); });
+    return () => { active = false; };
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -335,6 +346,7 @@ export default function ChatArea({
         ));
       }, {
         signal: controller.signal,
+        model: selectedModel || undefined,
         onToken: (token) => setPendingQuery((pending) => (
           pending?.requestId === requestId
             ? { ...pending, answer: pending.answer + token }
@@ -766,6 +778,26 @@ export default function ChatArea({
               )}
             </button>
           </div>
+
+          {availableModels.length > 0 && (
+            <label className="mt-2 flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+              <span>Question model</span>
+              <select
+                aria-label="Question model"
+                value={selectedModel}
+                onChange={(event) => setSelectedModel(event.target.value)}
+                disabled={!currentProject || isStreaming}
+                className="max-w-full px-2 py-1 bg-[var(--card)] border border-[var(--input)] rounded-md text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              >
+                <option value="">Project default (server default if unset)</option>
+                {availableModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.provider} · {model.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           
           {/* New Chat Button */}
           {messages.length > 0 && (

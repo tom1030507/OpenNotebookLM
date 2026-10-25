@@ -6,7 +6,9 @@ configured the service still answers, but extractively — see
 :meth:`LLMService._fallback_response` — and reports ``model`` as ``"fallback"``
 so callers can tell a real answer from a passage of the source text.
 """
+import json
 import re
+import urllib.request
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import structlog
@@ -165,12 +167,12 @@ class ClaudeProvider:
 
     name = "claude"
 
-    def __init__(self):
+    def __init__(self, model: Optional[str] = None):
         import anthropic  # imported lazily so the dep is optional at runtime
 
         self._anthropic = anthropic
         self._client = anthropic.Anthropic(api_key=settings.claude_api_key)
-        self.model = settings.claude_model
+        self.model = model or settings.claude_model
 
     def check(self) -> None:
         """Raise if the key or the configured model is not usable."""
@@ -630,8 +632,8 @@ class OpenAICompatibleProvider:
             return self._client.chat.completions.create(**request)
 
 
-def _build_provider():
-    """Build the provider named by settings, or the first one configured.
+def _build_provider(provider_name: Optional[str] = None, model: Optional[str] = None):
+    """Build the configured default provider or a selected configured provider.
 
     Returns None when nothing is configured — that is a normal state, not an
     error: the service falls back to extractive answers.
@@ -641,13 +643,25 @@ def _build_provider():
     if mode == "none":
         return None
 
-    if mode in ("claude", "cloud", "auto") and settings.claude_api_key:
-        return ClaudeProvider()
+    if provider_name is None:
+        if mode in ("claude", "cloud", "auto") and settings.claude_api_key:
+            provider_name = "claude"
+        elif mode in ("openai", "cloud", "auto") and settings.openai_api_key:
+            provider_name = "openai"
+        elif mode in ("local", "auto"):
+            provider_name = "local"
+        else:
+            return None
 
-    if mode in ("openai", "cloud", "auto") and settings.openai_api_key:
+    if provider_name == "claude" and mode in ("claude", "cloud", "auto"):
+        return ClaudeProvider(model) if settings.claude_api_key else None
+
+    if provider_name == "openai" and mode in ("openai", "cloud", "auto"):
+        if not settings.openai_api_key:
+            return None
         return OpenAICompatibleProvider(
             name="openai",
-            model=settings.openai_model,
+            model=model or settings.openai_model,
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
             reasoning_format=settings.openai_reasoning_format,
@@ -656,10 +670,10 @@ def _build_provider():
             max_request_tokens=settings.llm_max_request_tokens,
         )
 
-    if mode in ("local", "auto"):
+    if provider_name == "local" and mode in ("local", "auto"):
         return OpenAICompatibleProvider(
             name="local",
-            model=settings.ollama_model,
+            model=model or settings.ollama_model,
             api_key="not-needed",  # local servers ignore it
             base_url=settings.ollama_base_url,
             max_output_tokens=settings.llm_max_output_tokens,
@@ -667,6 +681,98 @@ def _build_provider():
         )
 
     return None
+
+
+def _ollama_model_names() -> List[str]:
+    """Read model ids currently exposed by the configured Ollama server."""
+    try:
+        url = f"{settings.ollama_base_url.rstrip('/')}/models"
+        with urllib.request.urlopen(url, timeout=1.5) as response:
+            payload = json.loads(response.read())
+        return sorted(
+            item["id"] for item in payload.get("data", []) if item.get("id")
+        )
+    except Exception as error:
+        logger.info(
+            "Could not list models from Ollama",
+            error_type=type(error).__name__,
+        )
+        return []
+
+
+def available_models() -> List[Dict[str, str]]:
+    """List configured cloud models and models currently pulled by Ollama.
+
+    Args:
+        None.
+
+    Returns:
+        Selectable model ids with provider and display name.
+    """
+    mode = (settings.llm_mode or "auto").lower()
+    models = []
+
+    if (
+        mode in ("claude", "cloud", "auto")
+        and settings.claude_api_key
+        and settings.claude_model
+    ):
+        models.append({
+            "id": f"claude:{settings.claude_model}",
+            "provider": "Claude",
+            "name": settings.claude_model,
+        })
+    if (
+        mode in ("openai", "cloud", "auto")
+        and settings.openai_api_key
+        and settings.openai_model
+    ):
+        models.append({
+            "id": f"openai:{settings.openai_model}",
+            "provider": "OpenAI",
+            "name": settings.openai_model,
+        })
+    if mode in ("local", "auto"):
+        models.extend(
+            {
+                "id": f"local:{name}",
+                "provider": "Ollama",
+                "name": name,
+            }
+            for name in _ollama_model_names()
+        )
+
+    return models
+
+
+def is_model_available(model_id: str) -> bool:
+    """Check a selected id against configured models and pulled Ollama models.
+
+    Args:
+        model_id: Provider-qualified id from `available_models`.
+
+    Returns:
+        Whether the server can currently use that model.
+    """
+    provider_name, separator, model_name = model_id.partition(":")
+    mode = (settings.llm_mode or "auto").lower()
+    if not separator or not model_name:
+        return False
+    if provider_name == "claude":
+        return (
+            mode in ("claude", "cloud", "auto")
+            and bool(settings.claude_api_key)
+            and model_name == settings.claude_model
+        )
+    if provider_name == "openai":
+        return (
+            mode in ("openai", "cloud", "auto")
+            and bool(settings.openai_api_key)
+            and model_name == settings.openai_model
+        )
+    if provider_name == "local":
+        return mode in ("local", "auto") and model_name in _ollama_model_names()
+    return False
 
 
 class LLMService:
@@ -755,6 +861,7 @@ class LLMService:
         max_tokens: Optional[int] = 512,
         system_prompt: Optional[str] = None,
         json_mode: bool = False,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate text using LLM.
 
@@ -769,12 +876,27 @@ class LLMService:
             system_prompt: Optional system prompt
             json_mode: Request JSON object syntax from OpenAI-compatible
                 providers. Claude and injected providers remain prompt-driven.
+            model: Optional provider-qualified id from `available_models`.
 
         Returns:
             Generated text and metadata. `model` is "fallback" when no provider
             produced the text.
         """
-        if not self.provider:
+        provider = self.provider
+        if model is not None:
+            provider_name, separator, model_name = model.partition(":")
+            if not separator or not provider_name or not model_name:
+                raise ValueError("Invalid model id")
+            if (
+                not provider
+                or provider.name != provider_name
+                or provider.model != model_name
+            ):
+                provider = _build_provider(provider_name, model_name)
+            if not provider:
+                raise ValueError("Selected model is no longer configured")
+
+        if not provider:
             return self._fallback_response(prompt)
 
         try:
@@ -784,13 +906,13 @@ class LLMService:
                 "max_tokens": max_tokens,
                 "system_prompt": system_prompt,
             }
-            if json_mode and isinstance(self.provider, OpenAICompatibleProvider):
+            if json_mode and isinstance(provider, OpenAICompatibleProvider):
                 request["json_mode"] = True
-            result = self.provider.generate(**request)
+            result = provider.generate(**request)
             record_llm_usage(result.get("usage"))
             logger.info(
                 "LLM generation completed",
-                provider=self.provider.name,
+                provider=provider.name,
                 model=result["model"],
                 tokens=result["usage"]["total_tokens"],
             )
@@ -800,14 +922,14 @@ class LLMService:
             # so a silent except here is how a broken provider stays invisible.
             logger.error(
                 "LLM generation failed; returning extractive fallback",
-                provider=self.provider.name,
-                model=self.provider.model,
+                provider=provider.name,
+                model=provider.model,
                 error_type=type(e).__name__,
                 error=str(e),
             )
             self._availability = {
-                "provider": self.provider.name,
-                "model": self.provider.model,
+                "provider": provider.name,
+                "model": provider.model,
                 "available": False,
                 "error": f"{type(e).__name__}: {e}",
             }
@@ -819,6 +941,7 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: Optional[int] = 512,
         system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Iterator[Tuple[str, Any]]:
         """Yield generated text deltas and a final generation result.
 
@@ -827,6 +950,7 @@ class LLMService:
             temperature: Sampling temperature, ignored by Claude.
             max_tokens: Output budget.
             system_prompt: Optional system instructions.
+            model: Optional provider-qualified id from `available_models`.
 
         Returns:
             Delta events followed by the complete result, including provider.
@@ -837,19 +961,32 @@ class LLMService:
             "max_tokens": max_tokens,
             "system_prompt": system_prompt,
         }
-        stream = getattr(self.provider, "stream_generate", None)
+        provider = self.provider
+        if model is not None:
+            provider_name, separator, model_name = model.partition(":")
+            if not separator or not provider_name or not model_name:
+                raise ValueError("Invalid model id")
+            if (
+                not provider
+                or provider.name != provider_name
+                or provider.model != model_name
+            ):
+                provider = _build_provider(provider_name, model_name)
+            if not provider:
+                raise ValueError("Selected model is no longer configured")
+        stream = getattr(provider, "stream_generate", None)
         if callable(stream):
             yield from stream(**request)
             return
 
-        result = self.generate(**request)
+        result = self.generate(**request, model=model)
         yield "delta", result["text"]
-        provider = (
-            self.provider.name
-            if self.provider and result["model"] != FALLBACK_MODEL
+        provider_name = (
+            provider.name
+            if provider and result["model"] != FALLBACK_MODEL
             else FALLBACK_MODEL
         )
-        yield "complete", {**result, "provider": provider}
+        yield "complete", {**result, "provider": provider_name}
 
     def _fallback_response(self, prompt: str) -> Dict[str, Any]:
         """Generate a fallback response when LLM is not available.

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import api, {
@@ -62,6 +63,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = () => undefined;
+  vi.spyOn(api, 'getModels').mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -197,6 +199,44 @@ describe('ChatArea', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Question' } });
 
     expect(screen.getByText('0 sources')).toBeTruthy();
+  });
+
+  it('sends the composer model override with the question', async () => {
+    const query = vi.spyOn(api, 'streamQuery').mockResolvedValue({
+      answer: 'Answer',
+      sources: [],
+      chunks_used: 0,
+      model_used: 'gpt-5.6',
+      usage: {},
+      conversation_id: 'conversation-1',
+      message_id: 'message-1',
+    });
+    vi.spyOn(api, 'getMessages').mockResolvedValue([]);
+    vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
+      project_name: project.name,
+      overview: null,
+      questions: [],
+    });
+    vi.spyOn(api, 'getModels').mockResolvedValue([
+      { id: 'openai:gpt-5.6', provider: 'OpenAI', name: 'gpt-5.6' },
+    ]);
+    useStore.setState({
+      currentProject: project,
+      projects: [project],
+      currentConversation: conversation('conversation-1', project.id),
+      documents: [readyDocument],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    await userEvent.selectOptions(
+      await screen.findByLabelText('Question model'),
+      'openai:gpt-5.6',
+    );
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Question' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    await waitFor(() => expect(query).toHaveBeenCalled());
+    expect(query.mock.calls[0][0]).toMatchObject({ model: 'openai:gpt-5.6' });
   });
 
   describe('mind map question handoff', () => {

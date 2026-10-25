@@ -624,7 +624,7 @@ describe('workspace accessibility contract', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'API Keys' }));
 
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
   });
 
   it('names the conversation list icon controls, including the rename lifecycle', () => {
