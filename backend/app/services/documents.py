@@ -45,6 +45,7 @@ from app.services.ingestion_jobs import (
     retain_enqueued_operation_lease,
 )
 from app.services.rate_limit import OperationLease, UnlimitedConcurrencyLease
+from app.services.source_digest import invalidate_source_guide
 from app.utils.time import utc_now_iso
 
 logger = structlog.get_logger()
@@ -172,6 +173,7 @@ def rename_document(db: Session, document: Document, title: str) -> Document:
             ]
     enqueue_reindex = title_changed and document.status == "ready"
     if enqueue_reindex:
+        invalidate_source_guide(document)
         enqueue_ingestion_job_with_result(
             db,
             document_id=document.id,
@@ -1371,6 +1373,7 @@ class DocumentService:
                 if document.title == indexed_title:
                     break
 
+            invalidate_source_guide(document)
             # The worker compares this snapshot against the latest rename while
             # it holds the queue's writer reservation before completing the job.
             payload["_indexed_title"] = indexed_title

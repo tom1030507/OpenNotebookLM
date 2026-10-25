@@ -132,6 +132,16 @@ export class E2EApi {
     return result.doc_id;
   }
 
+  async uploadText(projectId: string, title: string, text: string): Promise<string> {
+    const result = await this.json<{ doc_id: string }>(
+      await this.request.post(`${runtime.apiUrl}/projects/${projectId}/upload-text`, {
+        headers: this.authorization(),
+        data: { title, text },
+      }),
+    );
+    return result.doc_id;
+  }
+
   async documentStatus(documentId: string): Promise<DocumentStatus> {
     return this.json(await this.request.get(`${runtime.apiUrl}/docs/${documentId}/status`, {
       headers: this.authorization(),

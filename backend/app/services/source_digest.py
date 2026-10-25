@@ -47,6 +47,8 @@ WORD_PATTERN = re.compile(r"[A-Za-z][A-Za-z'-]{2,}")
 # Default width of a branch or a slide. Wider than this stops being readable,
 # and the prompt that asks for it stops being cheap.
 MAX_LABELS = 6
+MAX_GUIDE_SUMMARY_CHARS = 1200
+MAX_GUIDE_TOPIC_CHARS = 80
 
 
 def project_documents(
@@ -207,3 +209,67 @@ def load_json_object(text: str) -> Optional[Dict[str, Any]]:
             return payload
 
     return None
+
+
+def extractive_source_guide(document: Any) -> Dict[str, Any]:
+    """Build a short guide from the source's opening text and existing labels.
+
+    Args:
+        document: Ready source with extracted text and optional chunks.
+
+    Returns:
+        A summary and up to six topic labels, retaining source wording.
+    """
+    text = document_text(document)
+    body = re.sub(r"(?m)^\s*#{1,6}\s+[^\n]*(?:\n|$)", "", text)
+    sentences = [
+        " ".join(sentence.split())
+        for sentence in re.split(r"(?<=[.!?。！？])\s*", body)
+        if sentence.strip()
+    ]
+    summary = " ".join(sentences[:4])[:MAX_GUIDE_SUMMARY_CHARS].strip()
+    if not summary:
+        summary = str(document.title or "").strip()
+
+    topics = [
+        topic[:MAX_GUIDE_TOPIC_CHARS]
+        for topic in topics_from_headings(
+            getattr(chunk, "heading_path", None)
+            for chunk in (document.chunks or [])
+        )
+    ]
+    candidates = topics_from_keywords(text)
+    if len(topics) < 3:
+        candidates.extend(re.split(r"[，,、；;：:\n。！？!?]+", body))
+        candidates.append(str(document.title or ""))
+    for candidate in candidates:
+        if len(topics) >= MAX_LABELS:
+            break
+        topic = " ".join(candidate.split())[:MAX_GUIDE_TOPIC_CHARS].strip()
+        if topic and topic not in topics:
+            topics.append(topic)
+
+    # shortcut: sparse sources stay sparse; split or pad only if product guidance permits editorial edits.
+
+    return {"summary": summary, "topics": topics}
+
+
+def invalidate_source_guide(document: Document) -> None:
+    """Remove a guide made for an earlier source title or index.
+
+    Args:
+        document: Source whose guide is no longer current.
+
+    Returns:
+        None.
+    """
+    metadata = document.meta_json or {}
+    revision = metadata.get("source_guide_revision", 0)
+    if not isinstance(revision, int) or isinstance(revision, bool):
+        revision = 0
+    # Reassign so SQLAlchemy sees the JSON change and in-flight generation can
+    # detect invalidation even when the guide had not been cached yet.
+    document.meta_json = {
+        **{key: value for key, value in metadata.items() if key != "guide"},
+        "source_guide_revision": revision + 1,
+    }

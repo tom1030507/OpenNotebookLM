@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import api, { type Document } from '@/lib/api';
+import api, { type Document, type Project } from '@/lib/api';
+import useStore, { selectedSourceIds } from '@/store/useStore';
 import DocumentPreview from './DocumentPreview';
 
 
@@ -59,10 +60,18 @@ const stubObjectUrls = () => {
 
 afterEach(() => {
   cleanup();
+  useStore.getState().resetForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   Reflect.deleteProperty(URL, 'createObjectURL');
   Reflect.deleteProperty(URL, 'revokeObjectURL');
+});
+
+beforeEach(() => {
+  vi.spyOn(api, 'fetchDocumentGuide').mockResolvedValue({
+    summary: 'A short source summary.',
+    topics: [],
+  });
 });
 
 
@@ -238,5 +247,38 @@ describe('DocumentPreview', () => {
         .getAttribute('href'),
     ).toBe('https://example.com/article');
     expect(screen.queryByTitle('Example article')).toBeNull();
+  });
+
+  it('shows the guide and drafts a question scoped to its source', async () => {
+    const document = await loadDocument({
+      source_type: 'url',
+      source_url: 'https://example.com/article',
+      title: 'Example article',
+    });
+    const otherDocument = { ...document, id: 'document-2', name: 'Other article' };
+    const guide = {
+      summary: 'The source covers equipment. It also explains observations.',
+      topics: ['Equipment', 'Observations', 'Image backups'],
+    };
+    const fetchGuide = vi.mocked(api.fetchDocumentGuide).mockResolvedValue(guide);
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Article text');
+    useStore.setState({
+      currentProject: { id: 'project-1' } as Project,
+      documents: [document, otherDocument],
+    });
+    const onClose = vi.fn();
+
+    render(<DocumentPreview document={document} onClose={onClose} />);
+
+    expect(await screen.findByText(guide.summary)).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Equipment' }));
+
+    expect(selectedSourceIds(useStore.getState())).toEqual(['document-1']);
+    expect(useStore.getState().pendingMindMapQuestion).toEqual({
+      projectId: 'project-1',
+      question: 'What does this source say about Equipment?',
+    });
+    expect(fetchGuide).toHaveBeenCalledWith('document-1');
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

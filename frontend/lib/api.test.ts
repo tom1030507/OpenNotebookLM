@@ -905,6 +905,21 @@ describe('API client', () => {
     );
   });
 
+  it('fetches a source guide with the session token', async () => {
+    const guide = {
+      summary: 'The source covers equipment and observations.',
+      topics: ['Equipment', 'Observations', 'Image backups'],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(guide));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.fetchDocumentGuide('document/1')).resolves.toEqual(guide);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/docs/document%2F1/guide',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+  });
+
   it('reports the demo account the sign-in page may offer', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       enabled: true,

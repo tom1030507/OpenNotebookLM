@@ -16,9 +16,10 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import api, { Document } from '@/lib/api';
+import api, { Document, SourceGuide } from '@/lib/api';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import usePreviewSource from '@/hooks/usePreviewSource';
+import useStore from '@/store/useStore';
 
 interface DocumentPreviewProps {
   document: Document;
@@ -30,6 +31,11 @@ type ContentRequest =
   | { documentId: string; status: 'loaded'; content: string }
   | { documentId: string; status: 'error'; message: string };
 
+type GuideRequest =
+  | { documentId: string; status: 'loading' }
+  | { documentId: string; status: 'loaded'; guide: SourceGuide }
+  | { documentId: string; status: 'error'; message: string };
+
 const EXTRACTED_TEXT_TYPES: Document['type'][] = [
   'docx', 'pptx', 'xlsx', 'epub', 'txt', 'md',
   'mp3', 'm4a', 'wav', 'ogg', 'webm', 'flac', 'url',
@@ -39,6 +45,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [contentRequest, setContentRequest] = useState<ContentRequest | null>(null);
+  const [guideRequest, setGuideRequest] = useState<GuideRequest | null>(null);
   const [contentRefreshCount, setContentRefreshCount] = useState(0);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -54,6 +61,12 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
   const currentContentRequest = contentRequest?.documentId === document.id
     ? contentRequest
     : null;
+  const currentGuideRequest = guideRequest?.documentId === document.id
+    ? guideRequest
+    : null;
+  const guide = currentGuideRequest?.status === 'loaded'
+    ? currentGuideRequest.guide
+    : undefined;
   const fetchedContent = currentContentRequest?.status === 'loaded'
     ? currentContentRequest.content
     : undefined;
@@ -75,6 +88,12 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     && document.status !== 'error'
     && !contentLoading
     && !contentError;
+  const guideLoading = document.status === 'ready' && (
+    currentGuideRequest === null || currentGuideRequest.status === 'loading'
+  );
+  const guideError = currentGuideRequest?.status === 'error'
+    ? currentGuideRequest.message
+    : undefined;
 
   useEffect(() => {
     if (!shouldRequestContent) {
@@ -114,6 +133,34 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     shouldRequestContent,
   ]);
 
+  useEffect(() => {
+    if (document.status !== 'ready') {
+      return;
+    }
+
+    let cancelled = false;
+    setGuideRequest({ documentId: document.id, status: 'loading' });
+    api.fetchDocumentGuide(document.id)
+      .then((loadedGuide) => {
+        if (!cancelled) {
+          setGuideRequest({ documentId: document.id, status: 'loaded', guide: loadedGuide });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setGuideRequest({
+            documentId: document.id,
+            status: 'error',
+            message: error instanceof Error ? error.message : 'Could not load source guide.',
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [document.id, document.status]);
+
   useDialogFocus({
     isOpen: true,
     onClose,
@@ -150,6 +197,69 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     if (target) {
       window.open(target, '_blank');
     }
+  };
+
+  const handleAskAboutTopic = (topic: string) => {
+    const state = useStore.getState();
+    const projectId = state.currentProject?.id;
+    const source = state.documents.find((item) => item.id === document.id);
+    if (!projectId || document.status !== 'ready' || source?.status !== 'ready') {
+      return;
+    }
+
+    state.setAllSourcesSelected(projectId, false);
+    state.toggleSourceSelected(projectId, document.id);
+    state.draftMindMapQuestion(
+      projectId,
+      `What does this source say about ${topic}?`,
+    );
+    onClose();
+  };
+
+  const renderGuide = () => {
+    if (guide) {
+      return (
+        <section
+          aria-label="Source guide"
+          className="shrink-0 max-h-56 overflow-y-auto p-5 border-b border-[var(--border)] bg-[var(--card)]"
+        >
+          <h4 className="text-sm font-semibold">Summary</h4>
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">{guide.summary}</p>
+          {guide.topics.length > 0 && (
+            <div className="mt-3">
+              <h4 className="text-sm font-semibold">Key topics</h4>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {guide.topics.map((topic) => (
+                  <button
+                    key={topic}
+                    type="button"
+                    onClick={() => handleAskAboutTopic(topic)}
+                    className="rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--muted)]"
+                  >
+                    {topic}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      );
+    }
+    if (guideLoading) {
+      return (
+        <div className="shrink-0 px-5 py-3 text-sm text-[var(--muted-foreground)]" role="status">
+          Loading source guide...
+        </div>
+      );
+    }
+    if (guideError) {
+      return (
+        <div className="shrink-0 px-5 py-3 text-sm text-[var(--muted-foreground)]" role="alert">
+          {guideError}
+        </div>
+      );
+    }
+    return null;
   };
 
   const getIcon = () => {
@@ -449,8 +559,11 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          {renderContent()}
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {renderGuide()}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {renderContent()}
+          </div>
         </div>
 
         {/* Footer */}

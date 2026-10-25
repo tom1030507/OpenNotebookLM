@@ -60,6 +60,7 @@ from app.services.project_overview import ProjectOverviewService  # noqa: E402
 from app.services.mindmap import MindMapService  # noqa: E402
 from app.services.video_summary import VideoSummaryService  # noqa: E402
 from app.services.study import StudyService  # noqa: E402
+from app.services.llm import FALLBACK_MODEL, LLMService  # noqa: E402
 from conftest import OfflineLLM, authenticated_client  # noqa: E402
 
 MISSING_ID = str(uuid.uuid4())
@@ -695,6 +696,39 @@ class TestDocumentIsolation:
     def test_status_of_someone_elses_document_is_not_found(self, env):
         document_id = make_document(env.session, env.alice_user)
         assert env.bob.get("/api/docs/%s/status" % document_id).status_code == 404
+
+    def test_source_guide_answers_identically_for_another_user_and_missing_id(
+        self, env, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            LLMService,
+            "generate",
+            lambda self, prompt, **kwargs: {
+                "text": "No provider is configured.",
+                "model": FALLBACK_MODEL,
+                "usage": {},
+            },
+        )
+        document_id = make_document(
+            env.session,
+            env.alice_user,
+            title="Observatory notes",
+            source_type="text",
+            content=(
+                "The observatory checks equipment every night. "
+                "Operators record weather conditions. "
+                "The archive stores every image."
+            ),
+        )
+
+        theirs = env.bob.get("/api/docs/%s/guide" % document_id)
+        missing = env.bob.get("/api/docs/%s/guide" % MISSING_ID)
+        own = env.alice.get("/api/docs/%s/guide" % document_id)
+
+        assert theirs.status_code == missing.status_code == 404
+        assert theirs.json() == missing.json()
+        assert own.status_code == 200
+        assert len(own.json()["topics"]) >= 3
 
     def test_project_document_list_does_not_include_extracted_content(self, env):
         project_id = make_project(env.alice)

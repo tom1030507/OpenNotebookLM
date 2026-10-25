@@ -251,6 +251,12 @@ class DocumentContentResponse(BaseModel):
     content: str
 
 
+class SourceGuideResponse(BaseModel):
+    """Short summary and topics extracted from one source."""
+    summary: str
+    topics: List[str]
+
+
 class DocumentStatusResponse(BaseModel):
     """Schema for document status response."""
     id: str
