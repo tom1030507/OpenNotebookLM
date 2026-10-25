@@ -814,6 +814,27 @@ describe('API client', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual(payload);
   });
 
+  it('sends line-separated imports to the batch upload route', async () => {
+    const response = {
+      documents: [],
+      failures: [{ url: 'https://bad.example', message: 'Blocked URL' }],
+      truncated: false,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.uploadUrlBatch('project-1', [
+      'https://one.example',
+      'https://bad.example',
+    ])).resolves.toEqual(response);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/upload-batch');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ urls: ['https://one.example', 'https://bad.example'] }),
+    });
+  });
+
   it('sends pasted text to the upload-text route', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ doc_id: 'document-1', status: 'queued', message: 'ok' }))

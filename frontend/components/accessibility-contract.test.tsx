@@ -506,13 +506,13 @@ describe('workspace accessibility contract', () => {
     let resolveUpload: (response: Response) => void;
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();
-      if (url.includes('/upload-url')) {
+      if (url.includes('/upload-batch')) {
         return new Promise<Response>((resolve) => {
           resolveUpload = resolve;
         });
       }
-      if (url.includes('/docs/uploaded-document')) {
-        return fetchResponse({
+      if (url.includes('/projects/project-1/documents')) {
+        return fetchResponse([{
           id: 'uploaded-document',
           title: 'https://example.com',
           source_type: 'url',
@@ -523,7 +523,7 @@ describe('workspace accessibility contract', () => {
           created_at: '2026-08-12T00:00:00Z',
           updated_at: '2026-08-12T00:00:00Z',
           chunk_count: 0,
-        });
+        }]);
       }
       return fetchResponse([]);
     }));
@@ -542,7 +542,11 @@ describe('workspace accessibility contract', () => {
     await waitFor(() => expect(
       screen.getByRole('button', { name: 'Close add sources dialog' }).hasAttribute('disabled'),
     ).toBe(true));
-    resolveUpload!(fetchResponse({ doc_id: 'uploaded-document', status: 'queued', message: 'accepted' }));
+    resolveUpload!(fetchResponse({
+      documents: [{ doc_id: 'uploaded-document', status: 'queued', message: 'accepted' }],
+      failures: [],
+      truncated: false,
+    }));
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull());
     expect(useStore.getState().currentProject).toBe(project);

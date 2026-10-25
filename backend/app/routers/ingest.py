@@ -10,6 +10,7 @@ import requests
 from app.db.database import get_db
 from app.schemas import (
     FileUploadResponse, UploadConfigResponse, URLUploadRequest, YouTubeUploadRequest,
+    URLBatchUploadRequest, URLBatchUploadResponse,
     DocumentResponse, DocumentContentResponse, DocumentStatusResponse, TextUploadRequest,
     DocumentUpdateRequest, SourceGuideResponse,
     WebDiscoveryRequest, WebDiscoveryResponse,
@@ -33,6 +34,7 @@ from app.services.rate_limit import (
 )
 from app.utils.network import UnsafeURLError, validate_http_url_syntax
 from app.services.projects import ProjectService
+from app.services.batch_ingestion import process_url_batch
 from app.services.web_discovery import WebSearchService
 
 # Every route below requires a signed-in caller. Declaring that on the
@@ -460,6 +462,48 @@ async def upload_youtube(
                     youtube_url=request.youtube_url,
                     error=str(e))
         raise HTTPException(status_code=500, detail="YouTube processing failed")
+
+
+@router.post(
+    "/projects/{project_id}/upload-batch",
+    response_model=URLBatchUploadResponse,
+)
+async def upload_url_batch(
+    project_id: str,
+    request: URLBatchUploadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    document_service: Any = Depends(get_document_service),
+    request_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    concurrency_limiter: ConcurrencyLimiter = Depends(get_concurrency_limiter),
+) -> URLBatchUploadResponse:
+    """Queue safe website URLs and YouTube playlist entries independently.
+
+    Args:
+        project_id: Project receiving the sources.
+        request: One or more URLs pasted into the source dialog.
+        db: Database session.
+        current_user: Authenticated caller.
+        document_service: Service that creates durable ingestion jobs.
+        request_limiter: Per-account ingestion rate limiter.
+        concurrency_limiter: Per-account active-operation limiter.
+
+    Returns:
+        Documents queued successfully, per-URL failures, and any cap notice.
+    """
+    require_project(db, project_id, current_user, min_role="editor")
+
+    return await process_url_batch(
+        urls=request.urls,
+        db=db,
+        project_id=project_id,
+        user_id=current_user.id,
+        document_service=document_service,
+        request_limiter=request_limiter,
+        concurrency_limiter=concurrency_limiter,
+        rate_limit_enabled=settings.rate_limit_enabled,
+        youtube_transcription_enabled=settings.enable_yt_transcription,
+    )
 
 
 @router.post("/projects/{project_id}/upload-text", response_model=FileUploadResponse)

@@ -15,7 +15,7 @@ import ChatArea from './chat/ChatArea';
 import StudioPanel from './layout/StudioPanel';
 import SourcesPanel from './layout/SourcesPanel';
 import TopNav from './layout/TopNav';
-import api, { type Project } from '@/lib/api';
+import api, { type Project, type URLBatchUploadResponse } from '@/lib/api';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
 
@@ -101,6 +101,11 @@ beforeEach(() => {
     search_enabled: false,
   });
   vi.spyOn(api, 'getProjectSourceGroups').mockResolvedValue([]);
+  vi.spyOn(api, 'uploadUrlBatch').mockResolvedValue({
+    documents: [],
+    failures: [],
+    truncated: false,
+  });
   useStore.setState({
     projects: [currentProject],
     currentProject,
@@ -108,6 +113,7 @@ beforeEach(() => {
     messages: [],
     loadingDocuments: false,
     fetchProjects: async () => undefined,
+    refreshDocuments: async () => undefined,
     createDocument: async () => undefined,
     uploadDocument: async () => undefined,
   });
@@ -208,11 +214,7 @@ describe('Add Sources controls', () => {
   });
 
   it('keeps the dialog open and surfaces an error after a URL upload fails', async () => {
-    useStore.setState({
-      createDocument: async () => {
-        throw new Error('Upload failed');
-      },
-    });
+    vi.spyOn(api, 'uploadUrlBatch').mockRejectedValue(new Error('Upload failed'));
     render(<SourceWorkspace />);
     openUrlUploader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
@@ -222,8 +224,8 @@ describe('Add Sources controls', () => {
   });
 
   it('keeps a busy modal non-dismissible until its upload settles', async () => {
-    const upload = deferred<void>();
-    useStore.setState({ createDocument: async () => upload.promise });
+    const upload = deferred<URLBatchUploadResponse>();
+    vi.spyOn(api, 'uploadUrlBatch').mockReturnValue(upload.promise);
     render(<SourceWorkspace />);
     openUrlUploader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
@@ -237,7 +239,7 @@ describe('Add Sources controls', () => {
     expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
 
     await act(async () => {
-      upload.resolve();
+      upload.resolve({ documents: [], failures: [], truncated: false });
       await upload.promise;
     });
     await waitFor(() => {
@@ -246,8 +248,8 @@ describe('Add Sources controls', () => {
   });
 
   it('does not let a stale upload completion close a newly opened dialog', async () => {
-    const firstUpload = deferred<void>();
-    useStore.setState({ createDocument: async () => firstUpload.promise });
+    const firstUpload = deferred<URLBatchUploadResponse>();
+    vi.spyOn(api, 'uploadUrlBatch').mockReturnValue(firstUpload.promise);
     render(<ReopenableSourcesPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'URL' }));
@@ -261,35 +263,32 @@ describe('Add Sources controls', () => {
     expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
 
     await act(async () => {
-      firstUpload.resolve();
+      firstUpload.resolve({ documents: [], failures: [], truncated: false });
       await firstUpload.promise;
     });
     expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
   });
 
-  it('submits one URL upload after rapid Enter and Add interactions while the button becomes busy', async () => {
-    const upload = deferred<void>();
+  it('submits one URL upload after rapid Add interactions while the button becomes busy', async () => {
+    const upload = deferred<URLBatchUploadResponse>();
     let uploadRequests = 0;
-    useStore.setState({
-      createDocument: async () => {
-        uploadRequests += 1;
-        return upload.promise;
-      },
+    vi.spyOn(api, 'uploadUrlBatch').mockImplementation(() => {
+      uploadRequests += 1;
+      return upload.promise;
     });
     render(<SourceWorkspace />);
-    const urlInput = openUrlUploader();
+    openUrlUploader();
     const addButton = screen.getByRole('button', { name: 'Add' });
 
     await act(async () => {
-      fireEvent.keyDown(urlInput, { key: 'Enter' });
       fireEvent.click(addButton);
-      fireEvent.keyDown(urlInput, { key: 'Enter' });
+      fireEvent.click(addButton);
     });
 
     expect(uploadRequests).toBe(1);
     expect((addButton as HTMLButtonElement).disabled).toBe(true);
     await act(async () => {
-      upload.resolve();
+      upload.resolve({ documents: [], failures: [], truncated: false });
       await upload.promise;
     });
     await waitFor(() => {

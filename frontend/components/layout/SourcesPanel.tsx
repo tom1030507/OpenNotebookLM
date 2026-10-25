@@ -275,19 +275,23 @@ export default function SourcesPanel({
 
     const projectId = currentProject.id;
     const uploadSession = modalSession;
+    if (items.length > 0 && typeof items[0] === 'string') {
+      const result = await api.uploadUrlBatch(projectId, items as string[]);
+      await refreshDocuments(projectId);
+      if (!result.failures.length && !result.truncated) {
+        if (
+          modalSessionRef.current === uploadSession
+          && isAddSourcesOpenRef.current
+        ) {
+          onAddSourcesOpenChange(false);
+        }
+      }
+      return result;
+    }
+
     await closeAddSourcesAfterSuccessfulUpload(async () => {
       for (const item of items) {
-        if (item instanceof File) {
-          await uploadDocument(projectId, item);
-        } else {
-          // Handle URL or YouTube link
-          const isYouTube = item.includes('youtube.com') || item.includes('youtu.be');
-          await createDocument(projectId, {
-            name: item,
-            type: isYouTube ? 'youtube' : 'url',
-            url: item,
-          });
-        }
+        await uploadDocument(projectId, item as File);
       }
     }, () => {
       if (

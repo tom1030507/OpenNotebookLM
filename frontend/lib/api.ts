@@ -486,10 +486,16 @@ interface BackendDocument {
   last_sync_changed?: boolean | null;
 }
 
-interface FileUploadResponse {
+export interface FileUploadResponse {
   doc_id: string;
   status: DocumentStatus;
   message: string;
+}
+
+export interface URLBatchUploadResponse {
+  documents: FileUploadResponse[];
+  failures: Array<{ url: string; message: string }>;
+  truncated: boolean;
 }
 
 interface BackendConversation {
@@ -1225,6 +1231,13 @@ const api = {
       `/projects/${projectId}/upload`,
       { method: 'POST', body: formData },
     ));
+  },
+
+  uploadUrlBatch(projectId: string, urls: string[]): Promise<URLBatchUploadResponse> {
+    return requestJson<URLBatchUploadResponse>(
+      `/projects/${projectId}/upload-batch`,
+      { method: 'POST', body: JSON.stringify({ urls }) },
+    );
   },
 
   createDocument(projectId: string, data: CreateDocumentInput): Promise<Document> {
