@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
 import StudioPanel from './StudioPanel';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
@@ -33,19 +34,21 @@ const source: Document = {
   chunk_count: 3,
 };
 
+const result = {
+  markdown: '# Briefing\n\nRainfall increased [Source 1].',
+  citations: [{ id: 1, document_id: 'doc-1', source: 'Example Domain', text: 'Rainfall evidence.' }],
+};
 
 beforeEach(() => {
   useStore.setState({
     currentProject: project,
     projects: [project],
-    // The project has two sources, so the list the panel reads holds two.
     documents: [source, { ...source, id: 'doc-2', name: 'Rainfall report' }],
   });
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:report'),
-    revokeObjectURL: vi.fn(),
-  });
+  class TestURL extends URL {}
+  TestURL.createObjectURL = vi.fn(() => 'blob:report');
+  TestURL.revokeObjectURL = vi.fn();
+  vi.stubGlobal('URL', TestURL);
 });
 
 afterEach(() => {
@@ -56,41 +59,38 @@ afterEach(() => {
 });
 
 describe('Studio report', () => {
-  it('downloads a project summary when a project is selected', async () => {
-    const blob = { text: async () => '# Summary' } as Blob;
-    const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue(blob);
-    const clicks: string[] = [];
-    const realCreate = document.createElement.bind(document);
-    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
-      const el = realCreate(tag) as HTMLElement;
-      if (tag === 'a') {
-        (el as HTMLAnchorElement).click = () => clicks.push((el as HTMLAnchorElement).download);
-      }
-      return el;
+  it('opens a format picker and displays cited Markdown with a download action', async () => {
+    const spy = vi.spyOn(api, 'fetchProjectReport').mockResolvedValue(result);
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click(
+      this: HTMLAnchorElement,
+    ) {
+      downloads.push(this.download);
     });
-
     render(<StudioPanel />);
 
-    const report = screen.getByRole('button', { name: 'Report' });
-    expect((report as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    expect(await screen.findByRole('dialog', { name: 'Research notes report' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
 
-    fireEvent.click(report);
-
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
-    await waitFor(() => expect(clicks.length).toBe(1));
-    expect(clicks[0]).toMatch(/Research notes/);
+    expect(await screen.findByRole('button', { name: 'Preview source 1' })).toBeTruthy();
+    expect(spy).toHaveBeenCalledWith('project-1', { format: 'briefing' });
+    fireEvent.click(screen.getByRole('button', { name: 'Download Markdown' }));
+    expect(downloads).toEqual(['Research notes-report.md']);
   });
 
   it('reports on the selected sources only', async () => {
-    const spy = vi.spyOn(api, 'exportProjectSummary').mockResolvedValue({
-      text: async () => '#',
-    } as Blob);
+    const spy = vi.spyOn(api, 'fetchProjectReport').mockResolvedValue(result);
     useStore.getState().toggleSourceSelected('project-1', 'doc-2');
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    await screen.findByRole('dialog', { name: 'Research notes report' });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', ['doc-1']));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', {
+      format: 'briefing', document_ids: ['doc-1'],
+    }));
   });
 
   it('keeps the report action unavailable with no source selected', () => {
@@ -107,28 +107,52 @@ describe('Studio report', () => {
     expect((screen.getByRole('button', { name: /^Report/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('announces while the report is being generated', async () => {
-    vi.spyOn(api, 'exportProjectSummary').mockReturnValue(new Promise(() => undefined));
-    render(<StudioPanel />);
-
-    const report = screen.getByRole('button', { name: 'Report' });
-    fireEvent.click(report);
-
-    await waitFor(() => expect(report.getAttribute('title')).toBe('Generating report…'));
-    const hintId = report.getAttribute('aria-describedby');
-    expect(hintId && document.getElementById(hintId)?.textContent).toBe('Generating report…');
-  });
-
-  it('surfaces a failure without leaving the button stuck', async () => {
-    vi.spyOn(api, 'exportProjectSummary').mockRejectedValue(new Error('nope'));
+  it('announces report generation and allows the dialog to close', async () => {
+    vi.spyOn(api, 'fetchProjectReport').mockReturnValue(new Promise(() => undefined));
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    await screen.findByRole('dialog', { name: 'Research notes report' });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
 
-    expect(await screen.findByText(/could not be generated/i)).toBeTruthy();
-    await waitFor(() => expect(
-      (screen.getByRole('button', { name: 'Report' }) as HTMLButtonElement).disabled,
-    ).toBe(false));
+    expect(await screen.findByRole('status', { name: 'Generating report' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close report dialog' }));
+    expect(screen.queryByRole('dialog', { name: 'Research notes report' })).toBeNull();
+  });
+
+  it('surfaces a generation failure inside the dialog', async () => {
+    vi.spyOn(api, 'fetchProjectReport').mockRejectedValue(new Error('nope'));
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    await screen.findByRole('dialog', { name: 'Research notes report' });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/could not be generated/i);
+  });
+
+  it('does not display a report after switching projects mid-generation', async () => {
+    let resolve!: (value: typeof result) => void;
+    const pending = new Promise<typeof result>((done) => { resolve = done; });
+    vi.spyOn(api, 'fetchProjectReport').mockReturnValue(pending);
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    await screen.findByRole('dialog', { name: 'Research notes report' });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
+    flushSync(() => {
+      useStore.setState({
+        currentProject: { ...project, id: 'project-2', name: 'Other project' },
+        documents: [{ ...source, id: 'doc-3' }],
+      });
+    });
+    expect(screen.queryByRole('dialog', { name: 'Research notes report' })).toBeNull();
+
+    await act(async () => {
+      resolve({ ...result, markdown: '# Stale report' });
+      await pending;
+    });
+    expect(screen.queryByText('Stale report')).toBeNull();
   });
 
   it('leaves an output the browser cannot produce disabled', async () => {

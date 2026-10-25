@@ -280,6 +280,33 @@ describe('API client', () => {
     }));
   });
 
+  it('generates a report with its format, instruction, and selected sources', async () => {
+    const response = {
+      markdown: '# FAQ\n\nAnswer [Source 1].',
+      citations: [{
+        id: 1, document_id: 'doc-1', source: 'Paper', text: 'Supporting excerpt.',
+      }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.fetchProjectReport('project-1', {
+      format: 'custom',
+      instruction: 'Focus on the main finding',
+      document_ids: ['doc-1'],
+    })).resolves.toEqual(response);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/report');
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        format: 'custom',
+        instruction: 'Focus on the main finding',
+        document_ids: ['doc-1'],
+      }),
+    }));
+  });
+
   it.each([
     { output: 'mind map', request: () => api.fetchProjectMindMap('project-1', ['doc-1']) },
     { output: 'video summary', request: () => api.fetchProjectVideoSummary('project-1', ['doc-1']) },
