@@ -13,15 +13,16 @@ from sqlalchemy import update
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import AudioOverview, Project
+from app.schemas import StudioOptions
 from app.services.llm import LLMService
-from app.services.output_language import with_output_language
+from app.services.studio_options import with_studio_options
 from app.services.source_digest import document_excerpt, project_documents
 from app.utils.time import ordered_utc_now
 
 logger = structlog.get_logger()
 
 MAX_TURN_CHARS = 300
-MAX_TURNS = {"short": 4, "default": 8}
+MAX_TURNS = {"short": 4, "default": 8, "long": 12}
 SAMPLE_RATE = 24_000
 NO_SOURCE_TEXT_MESSAGE = "No source text is available for an audio overview."
 VOICE_BY_SPEAKER = {"A": "af_heart", "B": "am_adam"}
@@ -243,7 +244,7 @@ class AudioOverviewService:
         Args:
             project_name: Name shown to the hosts.
             documents: Already project-scoped source rows.
-            options: Validated style, length, and optional focus.
+            options: Validated style and shared focus, audience, and length.
 
         Returns:
             Alternating LLM turns, or single-voice extractive turns.
@@ -261,7 +262,11 @@ class AudioOverviewService:
             )
             for index, document in enumerate(documents, start=1)
         )
-        focus = (options.get("focus") or "").strip()
+        studio_options = StudioOptions(
+            focus=options.get("focus"),
+            audience=options.get("audience", "general"),
+            length=options.get("length", "default"),
+        )
         prompt = (
             "Project: %s\nFormat: %s\nLength: %s\n"
             "Focus: %s\n\n"
@@ -273,7 +278,7 @@ class AudioOverviewService:
             project_name,
             options.get("format", "deep_dive"),
             options.get("length", "default"),
-            focus or "(none)",
+            "(see reader guidance below)" if studio_options.focus else "(none)",
             max_turns,
             MAX_TURN_CHARS,
             sources,
@@ -285,7 +290,7 @@ class AudioOverviewService:
             "debate": "Let the hosts surface contrasting interpretations supported by the sources.",
         }.get(options.get("format"), "Explain the main ideas and how the sources connect.")
         prompt += "\nStyle guidance: %s" % format_guidance
-        prompt = with_output_language(prompt, output_language)
+        prompt = with_studio_options(prompt, studio_options, output_language)
 
         try:
             result = self.llm.generate(

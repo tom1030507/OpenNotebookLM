@@ -45,10 +45,11 @@ from app.schemas import (
     MAX_VIDEO_SUMMARY_PPTX_BULLET_CHARS,
     MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
     MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES,
+    StudioOptions,
     VideoSummaryPptxRequest,
 )
 from app.services.llm import FALLBACK_MODEL, LLMService
-from app.services.output_language import with_output_language
+from app.services.studio_options import with_studio_options
 from app.services.source_digest import (
     document_excerpt,
     document_text,
@@ -170,7 +171,11 @@ def estimate_seconds(narrations: Iterable[Optional[str]]) -> int:
     return int(round(total))
 
 
-def parse_llm_scenes(text: str, document_count: int) -> Dict[int, Dict[str, Any]]:
+def parse_llm_scenes(
+    text: str,
+    document_count: int,
+    max_sentences: int = 3,
+) -> Dict[int, Dict[str, Any]]:
     """Read a model's reply into written scenes keyed by document index.
 
     The reply is untrusted input: models wrap JSON in prose and code fences,
@@ -190,6 +195,7 @@ def parse_llm_scenes(text: str, document_count: int) -> Dict[int, Dict[str, Any]
         text: The model's raw reply.
         document_count: How many documents were asked about. Indexes are
             1-based and anything outside the range is dropped.
+        max_sentences: Maximum narration sentences to keep per scene.
 
     Returns:
         Written scenes by document index. Empty if the reply was unusable.
@@ -218,11 +224,14 @@ def parse_llm_scenes(text: str, document_count: int) -> Dict[int, Dict[str, Any]
         if not isinstance(narration, str) or not narration.strip():
             continue
 
+        narration = " ".join(narration.split())
+        sentences = SENTENCE_BREAK.split(narration)
+        narration = " ".join(sentences[:max_sentences])
         scenes[index] = {
             "headline": _clean_line(entry.get("headline")),
             "bullets": _clean_bullets(entry.get("bullets")),
             "narration": shorten(
-                " ".join(narration.split()),
+                narration,
                 MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
             ),
         }
@@ -317,6 +326,7 @@ class VideoSummaryService:
         db: Session,
         project: Project,
         document_ids: Optional[List[str]] = None,
+        options: Optional[StudioOptions] = None,
     ) -> Dict[str, Any]:
         """Build the video summary script for a project.
 
@@ -326,17 +336,21 @@ class VideoSummaryService:
                 problem — resolve the id through `routers.ownership` first.
             document_ids: Optional subset of the project's sources to cover;
                 `None` covers all of them.
+            options: Optional focus, audience, and length guidance.
 
         Returns:
             The scenes plus the metadata the API exposes: which model wrote
             them, when they were built, and how long they take to play.
         """
+        options = options or StudioOptions()
         documents = project_documents(
             db,
             project,
             document_ids,
-            limit=MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 1,
+            limit=6 if options.length == "short" else MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 1,
         )
+        if options.length == "short":
+            documents = documents[:6]
         if len(documents) > MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES:
             raise VideoSummaryTooLargeError(
                 "Video summaries support at most %d sources"
@@ -349,6 +363,7 @@ class VideoSummaryService:
             documents,
             generated_at,
             getattr(project, "output_language", None) or "auto",
+            options,
         )
         try:
             VideoSummaryPptxRequest(scenes=[
@@ -378,6 +393,7 @@ class VideoSummaryService:
         documents: List[Any],
         generated_at: datetime,
         output_language: str = "auto",
+        options: Optional[StudioOptions] = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Assemble the title, source and closing scenes.
 
@@ -385,6 +401,7 @@ class VideoSummaryService:
             project_name: Name of the project being summarised.
             documents: The project's documents, in the order to play them.
             generated_at: When the script was built, for the title card.
+            options: Optional reader guidance and requested length.
 
         Returns:
             The scenes in playback order, and what wrote the source ones — the
@@ -392,12 +409,19 @@ class VideoSummaryService:
             documents themselves. Returned together rather than recorded on the
             service, which two concurrent scripts share.
         """
-        written, model_used = self._written_scenes(documents, output_language)
+        options = options or StudioOptions()
+        max_sentences = {"short": 1, "default": 3, "long": 5}[options.length]
+        fallback_sentences = {
+            "short": 1, "default": MAX_BULLETS_PER_SCENE, "long": 5,
+        }[options.length]
+        written, model_used = self._written_scenes(
+            documents, output_language, options, max_sentences
+        )
 
         # shortcut: Static frames and offline extracts keep existing wording;
         # localize them if fixed-language fallback copy becomes required.
         source_scenes = [
-            self._source_scene(document, written.get(index))
+            self._source_scene(document, written.get(index), fallback_sentences)
             for index, document in enumerate(documents, start=1)
         ]
 
@@ -458,12 +482,14 @@ class VideoSummaryService:
         self,
         document: Any,
         written: Optional[Dict[str, Any]],
+        max_sentences: int = 3,
     ) -> Dict[str, Any]:
         """Compose one source's scene, written by the model or extracted.
 
         Args:
             document: The document this scene covers, with its chunks loaded.
             written: What the model wrote for it, or None to extract instead.
+            max_sentences: Maximum narration sentences to keep.
 
         Returns:
             The source scene.
@@ -480,6 +506,7 @@ class VideoSummaryService:
             headline = shorten(document.title)
             scene_bullets = bullets
             narration = self._extracted_narration(document, bullets, origin)
+            narration = " ".join(SENTENCE_BREAK.split(narration)[:max_sentences])
 
         return {
             # Namespaced by document id: two sources in one project can carry
@@ -607,11 +634,15 @@ class VideoSummaryService:
         self,
         documents: List[Any],
         output_language: str = "auto",
+        options: Optional[StudioOptions] = None,
+        max_sentences: int = 3,
     ) -> Tuple[Dict[int, Dict[str, Any]], str]:
         """Ask the model to write a scene for each document.
 
         Args:
             documents: The project's documents.
+            options: Optional reader guidance.
+            max_sentences: Maximum narration sentences to request and keep.
 
         Returns:
             Written scenes by 1-based document index, and the model name to
@@ -624,7 +655,7 @@ class VideoSummaryService:
 
         try:
             result = self.llm.generate(
-                prompt=self._script_prompt(documents, output_language),
+                prompt=self._script_prompt(documents, output_language, options, max_sentences),
                 temperature=0.3,
                 # As much as the model will give. A reasoning model spends this
                 # budget on thinking before it writes anything, and a script cut
@@ -649,7 +680,7 @@ class VideoSummaryService:
             )
             return {}, FALLBACK_MODEL
 
-        scenes = parse_llm_scenes(result.get("text", ""), len(documents))
+        scenes = parse_llm_scenes(result.get("text", ""), len(documents), max_sentences)
         if not scenes:
             logger.info(
                 "Video summary script came from document structure",
@@ -661,7 +692,11 @@ class VideoSummaryService:
         return scenes, result.get("model") or FALLBACK_MODEL
 
     def _script_prompt(
-        self, documents: List[Any], output_language: str = "auto"
+        self,
+        documents: List[Any],
+        output_language: str = "auto",
+        options: Optional[StudioOptions] = None,
+        max_sentences: int = 3,
     ) -> str:
         """Compose the single request that covers every document.
 
@@ -670,6 +705,8 @@ class VideoSummaryService:
 
         Args:
             documents: The project's documents.
+            options: Optional reader guidance.
+            max_sentences: Maximum narration sentences to request.
 
         Returns:
             The prompt.
@@ -683,18 +720,23 @@ class VideoSummaryService:
                 )
             )
 
+        narration_rule = {
+            "short": "one sentence",
+            "default": "two or three sentences",
+            "long": "four or five sentences",
+        }[(options or StudioOptions()).length]
         prompt = (
             "Write one slide of a spoken walkthrough for each source below.\n\n"
             "Rules:\n"
             "- headline: one clause naming what the source says, at most ten "
             "words.\n"
             "- bullets: at most %d, each at most twelve words.\n"
-            "- narration: two or three sentences to be read aloud over the "
+            "- narration: %s to be read aloud over the "
             "slide. Plain prose, no markup, no lists.\n"
             "- Use only the source's own content; do not invent findings.\n"
             "- Reply with exactly this JSON and nothing else:\n"
             '  {"scenes": [{"index": 1, "headline": "...", '
             '"bullets": ["..."], "narration": "..."}]}\n\n'
             "Sources:\n\n%s"
-        ) % (MAX_BULLETS_PER_SCENE, "\n\n".join(sections))
-        return with_output_language(prompt, output_language)
+        ) % (MAX_BULLETS_PER_SCENE, narration_rule, "\n\n".join(sections))
+        return with_studio_options(prompt, options, output_language)

@@ -76,19 +76,22 @@ describe('Studio audio overview', () => {
     const legacySpeech = vi.spyOn(api, 'fetchProjectSummaryText');
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Audio summary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Audio summary' }));
+    fireEvent.change(screen.getByLabelText('Focus (optional)'), { target: { value: 'methods' } });
+    fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'beginner' } });
+    fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'long' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
     await screen.findByRole('dialog', { name: 'Audio summary' });
     const generate = screen.getByRole('button', { name: 'Generate audio summary' });
     await waitFor(() => expect((generate as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'debate' } });
-    fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'short' } });
-    fireEvent.change(screen.getByLabelText(/Focus/), { target: { value: 'methods' } });
     fireEvent.click(generate);
 
     await waitFor(() => expect(api.createAudioOverview).toHaveBeenCalledWith('audio-project', {
       format: 'debate',
-      length: 'short',
+      length: 'long',
       focus: 'methods',
+      audience: 'beginner',
       document_ids: ['source-a'],
     }));
     await waitFor(() => expect(api.getAudioOverview).toHaveBeenCalledWith('audio-project', 'new-audio'), {

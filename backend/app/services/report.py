@@ -1,5 +1,7 @@
 import json
 
+from app.schemas import StudioOptions
+from app.services.studio_options import with_studio_options
 
 REPORT_FORMATS = {
     "briefing": (
@@ -34,7 +36,9 @@ class ReportService:
     def __init__(self, rag_service):
         self.rag_service = rag_service
 
-    def generate(self, db, project_id, report_format, instruction, document_ids):
+    def generate(
+        self, db, project_id, report_format, instruction, document_ids, options=None
+    ):
         """Generate a source-grounded Markdown report.
 
         Args:
@@ -43,10 +47,12 @@ class ReportService:
             report_format: One of the supported report formats.
             instruction: Optional user guidance for a custom report.
             document_ids: Optional document scope; an empty list searches nothing.
+            options: Optional focus, audience, and length guidance.
 
         Returns:
             Markdown and citations in the shape consumed by MarkdownRenderer.
         """
+        options = options or StudioOptions()
         title, outline, retrieval_query = REPORT_FORMATS[report_format]
         query = f"Create a {title} in Markdown.\n\nRequired outline:\n{outline}\n"
         if report_format == "custom":
@@ -55,11 +61,18 @@ class ReportService:
                 f"{json.dumps({'instruction': instruction}, ensure_ascii=False)}\n"
             )
             retrieval_query += f": {instruction}"
+        if options.focus:
+            retrieval_query += f": {options.focus}"
+        if options.length == "short":
+            query += "\nKeep each section brief and include only its essential points.\n"
+        elif options.length == "long":
+            query += "\nDevelop each section with deeper source-supported explanation.\n"
         query += (
             "\nUse only the supplied source passages and cite every factual claim "
             "with its [Source N] label. Do not invent facts or dates; state when "
             "the selected sources do not support a detail."
         )
+        query = with_studio_options(query, options, None)
 
         result = self.rag_service.query(
             db,

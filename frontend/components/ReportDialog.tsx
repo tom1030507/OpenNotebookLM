@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { BookmarkPlus, Check, Download, Loader2, X } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import api from '@/lib/api';
-import type { ProjectReport, ReportFormat } from '@/lib/api';
+import type { ProjectReport, ReportFormat, StudioOutputOptions } from '@/lib/api';
 import { citationId } from '@/lib/citations';
 import MarkdownRenderer from './MarkdownRenderer';
 
@@ -21,6 +21,7 @@ interface ReportDialogProps {
   projectId: string;
   projectName: string;
   documentIds?: string[];
+  options?: StudioOutputOptions;
   onClose: () => void;
   onSave?: (markdown: string) => Promise<void>;
 }
@@ -29,6 +30,7 @@ export default function ReportDialog({
   projectId,
   projectName,
   documentIds,
+  options,
   onClose,
   onSave,
 }: ReportDialogProps) {
@@ -78,6 +80,7 @@ export default function ReportDialog({
     setSaveState('idle');
     try {
       const result = await api.fetchProjectReport(projectId, {
+        ...options,
         format,
         ...(format === 'custom' ? { instruction: instruction.trim() } : {}),
         ...(documentIds === undefined ? {} : { document_ids: documentIds }),

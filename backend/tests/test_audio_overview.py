@@ -114,6 +114,7 @@ def test_create_persists_options_and_notifies_worker(audio_api):
         "format": "critique",
         "length": "short",
         "focus": "methods",
+        "audience": "general",
     }
     assert worker.notifications == 1
     with sessions() as db:

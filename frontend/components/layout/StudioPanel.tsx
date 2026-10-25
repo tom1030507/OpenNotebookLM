@@ -16,7 +16,12 @@ import {
 import useStore, { selectedSourceIds } from '@/store/useStore';
 import useNotes from '@/store/useNotes';
 import api, { ApiError } from '@/lib/api';
-import type { MindMap, StudioNoteKind, VideoSummary } from '@/lib/api';
+import type {
+  MindMap,
+  StudioNoteKind,
+  StudioOutputOptions,
+  VideoSummary,
+} from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking, summaryToSpeech } from '@/lib/speech';
 import NotesSection from './NotesSection';
 
@@ -29,8 +34,48 @@ const DataTableDialog = React.lazy(() => import('@/components/DataTableDialog'))
 
 interface ProjectResult<T> {
   projectId: string;
+  cacheKey: string;
+  options: StudioOutputOptions;
   value: T;
 }
+
+const STUDIO_OPTIONS_STORAGE_KEY = 'studio-output-options';
+const DEFAULT_STUDIO_OPTIONS: Required<StudioOutputOptions> = {
+  focus: null,
+  audience: 'general',
+  length: 'default',
+};
+
+const readStudioOptions = (projectId: string): Required<StudioOutputOptions> => {
+  try {
+    const saved = JSON.parse(
+      window.localStorage.getItem(`${STUDIO_OPTIONS_STORAGE_KEY}:${projectId}`) ?? 'null',
+    );
+    return {
+      focus: typeof saved?.focus === 'string' ? saved.focus.slice(0, 500) : null,
+      audience: ['general', 'beginner', 'expert'].includes(saved?.audience)
+        ? saved.audience
+        : 'general',
+      length: ['short', 'default', 'long'].includes(saved?.length)
+        ? saved.length
+        : 'default',
+    };
+  } catch {
+    return DEFAULT_STUDIO_OPTIONS;
+  }
+};
+
+const studioResultKey = (
+  projectId: string,
+  documentIds: string[] | undefined,
+  options: StudioOutputOptions | undefined,
+  languageRevision: number,
+) => JSON.stringify([
+  projectId,
+  documentIds ?? null,
+  options ?? DEFAULT_STUDIO_OPTIONS,
+  languageRevision,
+]);
 
 async function saveStudioNote(
   projectId: string,
@@ -68,6 +113,8 @@ interface StudioOption {
   action?: 'report' | 'audio' | 'mindmap' | 'video' | 'table';
 }
 
+type CustomizableStudioAction = Exclude<StudioOption['action'], 'table' | undefined>;
+
 interface StudioPanelProps {
   isCollapsed?: boolean;
   onCollapsedChange?: (isCollapsed: boolean) => void;
@@ -84,13 +131,17 @@ export default function StudioPanel({
   const currentProject = useStore((state) => state.currentProject);
   const canEditProject = currentProject?.role === 'owner' || currentProject?.role === 'editor';
   const documents = useStore((state) => state.documents);
+  const deselectedSources = useStore((state) => state.deselectedSources);
   const loadingDocuments = useStore((state) => state.loadingDocuments);
-  const noSourcesSelected = useStore((state) => selectedSourceIds(state)?.length === 0);
+  const noSourcesSelected = selectedSourceIds({
+    currentProject, documents, deselectedSources,
+  })?.length === 0;
   const [reportError, setReportError] = useState('');
   const [reportDialog, setReportDialog] = useState<{
     projectId: string;
     projectName: string;
     documentIds?: string[];
+    options?: StudioOutputOptions;
   } | null>(null);
   const [tableDialog, setTableDialog] = useState<{
     projectId: string;
@@ -103,12 +154,19 @@ export default function StudioPanel({
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
   const [videoSummary, setVideoSummary] = useState<ProjectResult<VideoSummary> | null>(null);
   const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
+  const [customizeAction, setCustomizeAction] = useState<CustomizableStudioAction | null>(null);
+  const [customizeProjectId, setCustomizeProjectId] = useState<string | null>(null);
+  const [customizeOptions, setCustomizeOptions] = useState<Required<StudioOutputOptions>>(DEFAULT_STUDIO_OPTIONS);
+  const [audioOverviewOptions, setAudioOverviewOptions] = useState<StudioOutputOptions>();
   const [studyDialog, setStudyDialog] = useState<{
     projectId: string;
     mode: 'flashcards' | 'quiz';
     documentIds: string[];
   } | null>(null);
   const moreOptionsRef = useRef<HTMLButtonElement>(null);
+  const focusId = useId();
+  const audienceId = useId();
+  const lengthId = useId();
   const [audioOverviewCapability, setAudioOverviewCapability] = useState<{
     projectId: string;
     enabled: boolean;
@@ -169,10 +227,13 @@ export default function StudioPanel({
     setStudyDialog(null);
     setIsMoreOptionsOpen(false);
     setIsAudioOverviewOpen(false);
+    setCustomizeAction(null);
+    setCustomizeProjectId(null);
+    setAudioOverviewOptions(undefined);
     setReportError('');
   }, [currentProject?.id, outputLanguageRevision]);
 
-  const playAudioSummary = async () => {
+  const playAudioSummary = async (options?: StudioOutputOptions) => {
     const operation = beginProjectOperation();
     if (!operation) return;
 
@@ -184,10 +245,11 @@ export default function StudioPanel({
     setReportError('');
 
     try {
-      const spoken = summaryToSpeech(await api.fetchProjectSummaryText(
-        operation.project.id,
-        selectedSourceIds(useStore.getState()),
-      ));
+      const documentIds = selectedSourceIds(useStore.getState());
+      const summary = options
+        ? await api.fetchProjectSummaryText(operation.project.id, documentIds, options)
+        : await api.fetchProjectSummaryText(operation.project.id, documentIds);
+      const spoken = summaryToSpeech(summary);
       if (!isCurrent()) return;
 
       setIsPreparingAudio(false);
@@ -212,9 +274,10 @@ export default function StudioPanel({
     setIsSpeaking(false);
   };
 
-  const openAudioOverview = async () => {
+  const openAudioOverview = async (options?: StudioOutputOptions) => {
     const operation = beginProjectOperation();
     if (!operation) return;
+    setAudioOverviewOptions(options);
     setIsCheckingAudioCapability(true);
     setReportError('');
     try {
@@ -225,7 +288,7 @@ export default function StudioPanel({
         setIsAudioOverviewOpen(true);
       } else if (speechSupported) {
         setIsCheckingAudioCapability(false);
-        await playAudioSummary();
+        await playAudioSummary(options);
       } else {
         setReportError('Audio playback is not supported in this browser.');
       }
@@ -238,20 +301,28 @@ export default function StudioPanel({
     }
   };
 
-  const buildMindMap = async () => {
+  const buildMindMap = async (options?: StudioOutputOptions) => {
     const operation = beginProjectOperation();
     if (!operation) return;
+    const documentIds = selectedSourceIds(useStore.getState());
+    const cacheKey = studioResultKey(
+      operation.project.id, documentIds, options, outputLanguageRevision,
+    );
 
     setIsBuildingMindMap(true);
     setReportError('');
 
     try {
-      const map = await api.fetchProjectMindMap(
-        operation.project.id,
-        selectedSourceIds(useStore.getState()),
-      );
+      const map = options
+        ? await api.fetchProjectMindMap(operation.project.id, documentIds, options)
+        : await api.fetchProjectMindMap(operation.project.id, documentIds);
       if (operation.isCurrent()) {
-        setMindMap({ projectId: operation.project.id, value: map });
+        setMindMap({
+          projectId: operation.project.id,
+          cacheKey,
+          options: options ?? DEFAULT_STUDIO_OPTIONS,
+          value: map,
+        });
       }
     } catch {
       if (operation.isCurrent()) {
@@ -262,20 +333,28 @@ export default function StudioPanel({
     }
   };
 
-  const playVideoSummary = async () => {
+  const playVideoSummary = async (options?: StudioOutputOptions) => {
     const operation = beginProjectOperation();
     if (!operation) return;
+    const documentIds = selectedSourceIds(useStore.getState());
+    const cacheKey = studioResultKey(
+      operation.project.id, documentIds, options, outputLanguageRevision,
+    );
 
     setIsPreparingVideo(true);
     setReportError('');
 
     try {
-      const summary = await api.fetchProjectVideoSummary(
-        operation.project.id,
-        selectedSourceIds(useStore.getState()),
-      );
+      const summary = options
+        ? await api.fetchProjectVideoSummary(operation.project.id, documentIds, options)
+        : await api.fetchProjectVideoSummary(operation.project.id, documentIds);
       if (operation.isCurrent()) {
-        setVideoSummary({ projectId: operation.project.id, value: summary });
+        setVideoSummary({
+          projectId: operation.project.id,
+          cacheKey,
+          options: options ?? DEFAULT_STUDIO_OPTIONS,
+          value: summary,
+        });
       }
     } catch (error) {
       if (operation.isCurrent()) {
@@ -290,12 +369,13 @@ export default function StudioPanel({
     }
   };
 
-  const openReport = () => {
+  const openReport = (options?: StudioOutputOptions) => {
     if (!currentProject) return;
     setReportDialog({
       projectId: currentProject.id,
       projectName: currentProject.name,
       documentIds: selectedSourceIds(useStore.getState()),
+      options,
     });
   };
 
@@ -308,15 +388,54 @@ export default function StudioPanel({
     });
   };
 
+  const openCustomize = (action: CustomizableStudioAction) => {
+    if (!currentProject) return;
+    setCustomizeProjectId(currentProject.id);
+    setCustomizeAction(action);
+    setCustomizeOptions(readStudioOptions(currentProject.id));
+  };
+
+  const updateCustomizeOptions = (changes: Partial<Required<StudioOutputOptions>>) => {
+    const next = { ...customizeOptions, ...changes };
+    setCustomizeOptions(next);
+    if (customizeProjectId) {
+      try {
+        window.localStorage.setItem(
+          `${STUDIO_OPTIONS_STORAGE_KEY}:${customizeProjectId}`,
+          JSON.stringify(next),
+        );
+      } catch {
+        // Private browsing can deny local storage; generation still uses the in-memory values.
+      }
+    }
+  };
+
+  const generateCustomized = () => {
+    if (!customizeAction || customizeProjectId !== currentProject?.id) return;
+    const options: StudioOutputOptions = {
+      ...customizeOptions,
+      focus: customizeOptions.focus?.trim() || null,
+    };
+    const action = customizeAction;
+    setCustomizeAction(null);
+    if (action === 'audio') void openAudioOverview(options);
+    else if (action === 'mindmap') void buildMindMap(options);
+    else if (action === 'video') void playVideoSummary(options);
+    else if (action === 'report') openReport(options);
+  };
+
   const optionAction = (option: StudioOption) => {
-    if (option.action === 'report') return openReport;
+    if (option.action === 'report') return () => openReport();
     if (option.action === 'table') return openTable;
-    if (option.action === 'mindmap') return buildMindMap;
-    if (option.action === 'video') return playVideoSummary;
+    if (option.action === 'mindmap') return () => buildMindMap();
+    if (option.action === 'video') return () => playVideoSummary();
     if (option.action === 'audio') {
-      if (!audioOverviewCapabilityKnown) return openAudioOverview;
-      if (audioOverviewTtsEnabled) return () => setIsAudioOverviewOpen(true);
-      return isSpeaking ? stopAudioSummary : playAudioSummary;
+      if (!audioOverviewCapabilityKnown) return () => openAudioOverview();
+      if (audioOverviewTtsEnabled) return () => {
+        setAudioOverviewOptions(undefined);
+        setIsAudioOverviewOpen(true);
+      };
+      return isSpeaking ? stopAudioSummary : () => playAudioSummary();
     }
     return undefined;
   };
@@ -342,13 +461,20 @@ export default function StudioPanel({
   const hasNoSources = !loadingDocuments && documents.length === 0;
   // Effects clear old output after commit, but this gate prevents an open A
   // dialog from being rendered during the B commit that triggered that effect.
+  const currentDocumentIds = selectedSourceIds(useStore.getState());
   const currentMindMap = mindMap !== null && mindMap.projectId === currentProject?.id
+    && mindMap.cacheKey === studioResultKey(
+      mindMap.projectId, currentDocumentIds, mindMap.options, outputLanguageRevision,
+    )
     ? mindMap.value
     : null;
   const currentReportDialog = reportDialog?.projectId === currentProject?.id
     ? reportDialog
     : null;
   const currentVideoSummary = videoSummary !== null && videoSummary.projectId === currentProject?.id
+    && videoSummary.cacheKey === studioResultKey(
+      videoSummary.projectId, currentDocumentIds, videoSummary.options, outputLanguageRevision,
+    )
     ? videoSummary.value
     : null;
   const currentStudyDialog = studyDialog?.projectId === currentProject?.id
@@ -475,6 +601,9 @@ export default function StudioPanel({
       icon: <Table className="w-5 h-5" />
     }
   ];
+  const customizedOption = studioOptions.find(
+    (option) => option.action === customizeAction,
+  );
 
   return (
     <aside
@@ -521,31 +650,104 @@ export default function StudioPanel({
             {studioOptions.map((option) => {
               const hint = optionHint(option);
               const hintId = `${optionHintIdPrefix}-${option.id}-hint`;
+              const action = option.action;
 
               return (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={optionAction(option)}
-                  disabled={optionDisabled(option)}
-                  aria-label={optionLabel(option)}
-                  aria-describedby={hintId}
-                  title={hint}
-                  className="w-full px-3 h-11 text-left hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] transition-base disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                >
-                  <div className="flex items-center gap-3">
+                <div key={option.id} className="flex min-w-0 items-stretch">
+                  <button
+                    type="button"
+                    onClick={optionAction(option)}
+                    disabled={optionDisabled(option)}
+                    aria-label={optionLabel(option)}
+                    aria-describedby={hintId}
+                    title={hint}
+                    className="flex h-11 min-w-0 flex-1 items-center gap-3 px-3 text-left hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] transition-base disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  >
                     <span className="flex shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
                       {optionIcon(option)}
                     </span>
-                    <h3 className="flex-1 truncate text-sm font-medium">
-                      {option.title}
-                    </h3>
-                  </div>
-                  <span id={hintId} className="sr-only">{hint}</span>
-                </button>
+                    <h3 className="truncate text-sm font-medium">{option.title}</h3>
+                    <span id={hintId} className="sr-only">{hint}</span>
+                  </button>
+                  {action && action !== 'table' && (
+                    <button
+                      type="button"
+                      aria-label={`Customize ${option.title}`}
+                      title={`Customize ${option.title}`}
+                      disabled={optionDisabled(option)}
+                      onClick={() => openCustomize(action)}
+                      className="shrink-0 border-l border-[var(--border)] px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Customize
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
+
+          {customizeAction && customizeProjectId === currentProject?.id && (
+            <form
+              role="dialog"
+                  aria-label={`Customize ${customizedOption?.title ?? 'Studio output'}`}
+              onSubmit={(event) => {
+                event.preventDefault();
+                generateCustomized();
+              }}
+              className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--popover)] p-3"
+            >
+              <label htmlFor={focusId} className="block text-sm font-medium">Focus (optional)</label>
+              <textarea
+                id={focusId}
+                value={customizeOptions.focus ?? ''}
+                onChange={(event) => updateCustomizeOptions({
+                  focus: event.target.value.slice(0, 500) || null,
+                })}
+                maxLength={500}
+                rows={2}
+                placeholder="Question or topic to focus on"
+                className="w-full resize-y rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-sm"
+              />
+              <label htmlFor={audienceId} className="block text-sm font-medium">Audience</label>
+              <select
+                id={audienceId}
+                value={customizeOptions.audience}
+                onChange={(event) => updateCustomizeOptions({
+                  audience: event.target.value as Required<StudioOutputOptions>['audience'],
+                })}
+                className="w-full rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-sm"
+              >
+                <option value="general">General</option>
+                <option value="beginner">Beginner</option>
+                <option value="expert">Expert</option>
+              </select>
+              <label htmlFor={lengthId} className="block text-sm font-medium">Length</label>
+              <select
+                id={lengthId}
+                value={customizeOptions.length}
+                onChange={(event) => updateCustomizeOptions({
+                  length: event.target.value as Required<StudioOutputOptions>['length'],
+                })}
+                className="w-full rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-sm"
+              >
+                <option value="short">Short</option>
+                <option value="default">Default</option>
+                <option value="long">Long</option>
+              </select>
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setCustomizeAction(null)}
+                  className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!customizedOption || optionDisabled(customizedOption)}
+                  className="rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-60">
+                  Generate
+                </button>
+              </div>
+            </form>
+          )}
 
           {reportError && (
             <p role="alert" className="mt-3 text-xs text-[var(--error)]">
@@ -620,6 +822,7 @@ export default function StudioPanel({
             projectId={currentReportDialog.projectId}
             projectName={currentReportDialog.projectName}
             documentIds={currentReportDialog.documentIds}
+            options={currentReportDialog.options}
             onClose={() => setReportDialog(null)}
             onSave={canEditProject ? (markdown) => saveStudioNote(
               currentReportDialog.projectId,
@@ -673,6 +876,7 @@ export default function StudioPanel({
           <AudioOverviewDialog
             projectId={currentProject.id}
             documentIds={selectedSourceIds(useStore.getState())}
+            initialOptions={audioOverviewOptions}
             onClose={() => setIsAudioOverviewOpen(false)}
           />
         </React.Suspense>

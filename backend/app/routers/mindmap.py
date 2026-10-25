@@ -20,7 +20,7 @@ from app.db.database import get_db
 from app.db.models import User
 from app.routers.auth import get_current_user
 from app.routers.ownership import require_documents, require_project
-from app.schemas import MindMapResponse, SourceSelection
+from app.schemas import MindMapResponse, StudioSourceSelection
 from app.services.mindmap import MindMapService
 
 # Every route below requires a signed-in caller. Declaring that on the
@@ -54,7 +54,7 @@ def get_mindmap_service() -> MindMapService:
 @router.post("/projects/{project_id}/mindmap", response_model=MindMapResponse)
 def project_mindmap(
     project_id: str,
-    selection: Optional[SourceSelection] = None,
+    selection: Optional[StudioSourceSelection] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     service: MindMapService = Depends(get_mindmap_service),
@@ -82,4 +82,4 @@ def project_mindmap(
             db, selection.document_ids, current_user, project_id=project_id
         )
 
-    return service.generate(db, project, document_ids)
+    return service.generate(db, project, document_ids, selection)

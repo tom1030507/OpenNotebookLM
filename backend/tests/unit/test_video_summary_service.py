@@ -16,6 +16,7 @@ import pytest
 from app.schemas import (
     MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS,
     MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES,
+    StudioOptions,
     VideoSummaryPptxRequest,
 )
 from app.services.video_summary import (
@@ -145,6 +146,16 @@ class TestParseLlmScenes:
         assert len(narration) <= MAX_VIDEO_SUMMARY_PPTX_NARRATION_CHARS
         assert narration.endswith("…")
 
+    def test_parser_caps_narration_to_the_requested_sentence_count(self):
+        reply = json.dumps({"scenes": [{
+            "index": 1,
+            "narration": "First source-grounded sentence. Second sentence. Third sentence.",
+        }]})
+
+        parsed = parse_llm_scenes(reply, 1, max_sentences=1)
+
+        assert parsed[1]["narration"] == "First source-grounded sentence."
+
 
 class TestEstimateSeconds:
     """Only used to draw the progress bar; playback is driven by the voice."""
@@ -245,6 +256,22 @@ class TestSkeleton:
         assert [scene["kind"] for scene in scenes] == [
             "title", "source", "source", "source", "closing",
         ]
+
+    def test_short_option_keeps_at_most_six_source_scenes(self, monkeypatch):
+        documents = [FakeDocument("d%d" % index, "Source %d" % index) for index in range(8)]
+        monkeypatch.setattr(
+            "app.services.video_summary.project_documents",
+            lambda *args, **kwargs: documents,
+        )
+        service = VideoSummaryService(llm_service=StubLLM("not json", model="fallback"))
+
+        result = service.generate(
+            None,
+            SimpleNamespace(id="project", name="Notebook", output_language="auto"),
+            options=StudioOptions(length="short"),
+        )
+
+        assert sum(scene["kind"] == "source" for scene in result["scenes"]) == 6
 
     def test_scene_ids_are_unique(self, service):
         """Two sources sharing a title must not share a scene id."""
@@ -548,6 +575,21 @@ class TestGeneratedScenes:
         assert len(stub.prompts) == 1
         assert "Alpha" in stub.prompts[0]
         assert "Beta" in stub.prompts[0]
+
+    def test_length_controls_narration_prompt_and_fallback(self):
+        stub = StubLLM("not json", model="fallback")
+        service = VideoSummaryService(llm_service=stub)
+        documents = [FakeDocument(
+            "d1", "Alpha", content="First sentence. Second sentence. Third sentence."
+        )]
+
+        scenes, _ = service.build_scenes(
+            "Notebook", documents, utc_now(), options=StudioOptions(length="short"),
+        )
+
+        source_scene = next(scene for scene in scenes if scene["kind"] == "source")
+        assert "narration: one sentence" in stub.prompts[0]
+        assert source_scene["narration"].count(".") <= 1
 
     def test_selected_output_language_reaches_the_model_prompt(self):
         stub = StubLLM('{"scenes": []}')

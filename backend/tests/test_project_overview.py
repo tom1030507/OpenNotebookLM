@@ -16,6 +16,7 @@ from app.db.database import get_db
 from app.db.models import (
     Base, Chunk, Conversation, Document, Message, Project, ProjectDocument,
 )
+from app.schemas import StudioOptions
 from app.routers import project_overview, projects
 from app.services.project_overview import ProjectOverviewService
 from conftest import OfflineLLM, authenticated_client, owner_id
@@ -169,6 +170,31 @@ def test_summary_reuses_the_overview_for_all_ready_sources(env):
 
     assert first == second == OVERVIEW_REPLY["overview"]
     assert len(llm.prompts) == 1
+
+
+def test_custom_summary_bypasses_and_preserves_the_default_overview_cache(env):
+    client, session_factory, llm = env
+    project_id = client.post("/api/projects", json={}).json()["id"]
+    add_source(session_factory, project_id)
+
+    with session_factory() as db:
+        project = db.get(Project, project_id)
+        service = ProjectOverviewService(llm_service=llm)
+        service.overview(db, project)
+        cached = json.loads(json.dumps(project.overview_json))
+
+        custom = service.summary(
+            db,
+            project,
+            options=StudioOptions(focus="methods", audience="expert", length="long"),
+        )
+
+        assert custom == OVERVIEW_REPLY["overview"]
+        assert project.overview_json == cached
+
+    assert len(llm.prompts) == 2
+    assert '"focus": "methods"' in llm.prompts[1]
+    assert "at most 8 sentences" in llm.prompts[1]
 
 
 def test_summary_for_a_source_subset_does_not_overwrite_the_project_overview(env):

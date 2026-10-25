@@ -507,7 +507,34 @@ class SourceSelection(BaseModel):
         return unique_ids
 
 
-class ReportRequest(SourceSelection):
+class StudioOptions(BaseModel):
+    """Shared reader guidance for one generated Studio output."""
+    model_config = {"extra": "forbid"}
+
+    focus: Optional[str] = Field(default=None, max_length=500)
+    audience: Literal["general", "beginner", "expert"] = "general"
+    length: Literal["short", "default", "long"] = "default"
+
+    @field_validator("focus")
+    @classmethod
+    def normalize_focus(cls, focus: Optional[str]) -> Optional[str]:
+        """Trim optional focus text and treat whitespace as omitted.
+
+        Args:
+            focus: User-provided source focus.
+
+        Returns:
+            Trimmed focus text, or None when blank.
+        """
+        return focus.strip() or None if focus is not None else None
+
+
+class StudioSourceSelection(SourceSelection, StudioOptions):
+    """Source selection and shared options for one Studio generation."""
+    model_config = {"extra": "forbid"}
+
+
+class ReportRequest(StudioSourceSelection):
     """Options for one source-grounded project report."""
     model_config = {"extra": "forbid"}
 
@@ -713,12 +740,10 @@ class QuizResponse(BaseModel):
     sources: List[StudySource]
 
 
-class AudioOverviewCreate(SourceSelection):
+class AudioOverviewCreate(StudioSourceSelection):
     """Generation style and source selection for one audio overview."""
 
     format: Literal["deep_dive", "brief", "critique", "debate"] = "deep_dive"
-    length: Literal["short", "default"] = "default"
-    focus: Optional[str] = Field(default=None, max_length=500)
 
 
 class AudioOverviewTurn(BaseModel):
