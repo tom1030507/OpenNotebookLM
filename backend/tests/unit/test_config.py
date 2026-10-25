@@ -198,6 +198,47 @@ def test_public_registration_defaults_to_development_only():
     assert Settings(app_env="production").allow_public_registration is False
 
 
+def test_web_search_is_off_by_default_and_enables_only_with_provider_settings(monkeypatch):
+    """Search stays hidden until the chosen provider has its required setting."""
+    for variable in (
+        "SEARCH_PROVIDER",
+        "SEARXNG_URL",
+        "BRAVE_SEARCH_API_KEY",
+        "TAVILY_API_KEY",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+    defaults = Settings(_env_file=None)
+    assert defaults.search_provider == "none"
+    assert defaults.search_enabled is False
+
+    searxng = Settings(
+        _env_file=None,
+        search_provider="searxng",
+        searxng_url="http://searxng:8080",
+    )
+    brave = Settings(
+        _env_file=None,
+        search_provider="brave",
+        brave_search_api_key="key",
+    )
+    tavily = Settings(
+        _env_file=None,
+        search_provider="tavily",
+        tavily_api_key="key",
+    )
+
+    assert searxng.search_enabled is True
+    assert brave.search_enabled is True
+    assert tavily.search_enabled is True
+    assert Settings(_env_file=None, search_provider="brave").search_enabled is False
+
+
+def test_web_search_rejects_unknown_provider():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, search_provider="unknown")
+
+
 def test_production_can_explicitly_enable_public_registration():
     """Operators retain an explicit opt-in for deployments that need signup."""
     settings = Settings(app_env="production", allow_public_registration=True)

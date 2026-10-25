@@ -790,6 +790,46 @@ class TestDocumentIsolation:
 class TestIngestIsolation:
     """You cannot add sources to a project that is not yours."""
 
+    def test_web_discovery_requires_editor_access(self, env):
+        from app.routers.ingest import get_web_search_service
+
+        project_id = make_project(env.alice)
+        calls = []
+
+        class SearchService:
+            enabled = True
+
+            def search(self, query, count):
+                calls.append((query, count))
+                return [{
+                    "title": "Result",
+                    "url": "https://example.com/result",
+                    "snippet": "Snippet",
+                }]
+
+        production_app.dependency_overrides[get_web_search_service] = SearchService
+
+        assert env.bob.post(
+            "/api/projects/%s/discover" % project_id,
+            json={"query": "topic"},
+        ).status_code == 404
+        membership = grant_project_role(env, project_id, "viewer")
+        assert env.bob.post(
+            "/api/projects/%s/discover" % project_id,
+            json={"query": "topic"},
+        ).status_code == 404
+        assert calls == []
+
+        membership.role = "editor"
+        env.session.commit()
+        response = env.bob.post(
+            "/api/projects/%s/discover" % project_id,
+            json={"query": "topic"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert calls == [("topic", 10)]
+
     def test_uploading_a_url_into_someone_elses_project_is_not_found(self, env):
         project_id = make_project(env.alice)
 

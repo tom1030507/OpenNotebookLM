@@ -1,5 +1,5 @@
 """Application configuration."""
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
@@ -119,6 +119,12 @@ class Settings(BaseSettings):
     url_connect_timeout_seconds: int = 5
     url_read_timeout_seconds: int = 30
     url_download_timeout_seconds: int = 30
+
+    # Optional server-side web search for discovering project sources.
+    search_provider: Literal["none", "searxng", "brave", "tavily"] = "none"
+    searxng_url: Optional[str] = None
+    brave_search_api_key: Optional[str] = None
+    tavily_api_key: Optional[str] = None
     
     # Security
     secret_key: str = "change-this-secret-key-in-production"
@@ -251,6 +257,20 @@ class Settings(BaseSettings):
     def max_file_size_bytes(self) -> int:
         """Convert MB to bytes."""
         return self.max_file_size_mb * 1024 * 1024
+
+    @property
+    def search_enabled(self) -> bool:
+        """Return whether the selected provider has its required setting.
+
+        Returns:
+            Whether the provider has a non-blank URL or API key.
+        """
+        value = {
+            "searxng": self.searxng_url,
+            "brave": self.brave_search_api_key,
+            "tavily": self.tavily_api_key,
+        }.get(self.search_provider)
+        return bool(value and value.strip())
 
 
 @lru_cache()

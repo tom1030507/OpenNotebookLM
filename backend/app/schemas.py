@@ -275,6 +275,7 @@ class UploadConfigResponse(BaseModel):
     allowed_file_types: List[str]
     max_file_size_mb: int
     max_text_characters: int
+    search_enabled: bool
 
 
 class FileUploadResponse(BaseModel):
@@ -309,6 +310,24 @@ def _not_blank(value: str) -> str:
     if not value:
         raise ValueError("must not be blank")
     return value
+
+
+class WebDiscoveryRequest(BaseModel):
+    """Search terms and result limit for project source discovery."""
+    query: Annotated[str, AfterValidator(_not_blank)] = Field(..., min_length=1, max_length=300)
+    count: int = Field(default=10, ge=1, le=20)
+
+
+class WebDiscoveryResult(BaseModel):
+    """One selectable web page returned by discovery."""
+    title: str
+    url: str
+    snippet: str
+
+
+class WebDiscoveryResponse(BaseModel):
+    """Search results that can be handed to the existing URL importer."""
+    results: List[WebDiscoveryResult]
 
 
 class TextUploadRequest(BaseModel):

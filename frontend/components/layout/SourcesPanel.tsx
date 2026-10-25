@@ -26,7 +26,7 @@ import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
-import { Document, DocumentStatus } from '@/lib/api';
+import api, { Document, DocumentStatus } from '@/lib/api';
 import {
   closeAddSourcesAfterSuccessfulUpload,
   requestAddSources,
@@ -584,6 +584,7 @@ export default function SourcesPanel({
             <FileUpload
               multiple
               onUpload={handleUpload}
+              onDiscover={(query) => api.discoverSources(currentProject.id, query)}
               onUploadingChange={handleUploadingChange(modalSession)}
               onAddText={handleAddText}
             />
