@@ -50,11 +50,22 @@ export interface ProjectMember {
 
 export type ChatRole = 'default' | 'learning_guide' | 'custom';
 export type AnswerLength = 'default' | 'longer' | 'shorter';
+export type OutputLanguage =
+  | 'auto'
+  | 'en'
+  | 'zh-Hant'
+  | 'zh-Hans'
+  | 'ja'
+  | 'ko'
+  | 'es'
+  | 'fr'
+  | 'de';
 
 export interface ChatSettings {
   role: ChatRole;
   instructions: string;
   answer_length: AnswerLength;
+  output_language: OutputLanguage;
 }
 
 export type DocumentStatus = 'queued' | 'processing' | 'transcribing' | 'ready' | 'error';

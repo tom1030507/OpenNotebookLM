@@ -309,7 +309,9 @@ class TestOneOffQuery:
         assert result["sources"] == []
 
 
-def chat_settings(role="default", instructions="", answer_length="default"):
+def chat_settings(
+    role="default", instructions="", answer_length="default", output_language=None
+):
     """A project stand-in carrying only the chat settings.
 
     Args:
@@ -321,7 +323,11 @@ def chat_settings(role="default", instructions="", answer_length="default"):
         An object shaped like the Project columns the prompt reads.
     """
     return types.SimpleNamespace(
-        chat_role=role, chat_instructions=instructions, answer_length=answer_length)
+        chat_role=role,
+        chat_instructions=instructions,
+        answer_length=answer_length,
+        output_language=output_language,
+    )
 
 
 class TestProjectChatSettings:
@@ -344,6 +350,15 @@ class TestProjectChatSettings:
             True, project=chat_settings("learning_guide", answer_length="shorter"))
         assert module.CHAT_ROLE_PROMPTS["learning_guide"] in prompt
         assert module.ANSWER_LENGTH_PROMPTS["shorter"] in prompt
+
+    def test_fixed_output_language_overrides_question_language(self, service):
+        instance, _, _ = service
+
+        prompt = instance._system_prompt(
+            True, project=chat_settings(output_language="zh-Hant")
+        )
+
+        assert "Write all generated output in Traditional Chinese." in prompt
 
     def test_custom_instructions_cannot_remove_citations(self, service):
         instance, _, _ = service

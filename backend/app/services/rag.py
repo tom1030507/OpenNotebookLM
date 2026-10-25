@@ -17,6 +17,7 @@ from app.services.overview import (
     overview_passage_text,
 )
 from app.services.llm import LLMService
+from app.services.output_language import with_output_language
 from app.services.retrieval_index import get_retrieval_index
 
 # Try to import cache service
@@ -863,7 +864,9 @@ class RAGService:
                 "only from the context"
                 + (" and cite the passages you used." if include_sources else ".")
             )
-        return base
+        return with_output_language(
+            base, getattr(project, "output_language", None)
+        )
 
     def _build_prompt(
         self,

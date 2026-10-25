@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Project
 from app.services.llm import FALLBACK_MODEL, LLMService
 from app.services.mindmap_sources import heading_paths, representative_excerpt
+from app.services.output_language import with_output_language
 # Reading a project's sources and naming what is in them is shared with the
 # video summary, which derives a different view from the same material. The
 # names are re-exported here because this module's callers and tests already
@@ -236,7 +237,9 @@ class MindMapService:
             if document.status == "ready"
         ]
         root, model_used, source_count = self._build_tree_with_source_count(
-            project.name, documents,
+            project.name,
+            documents,
+            getattr(project, "output_language", None) or "auto",
         )
 
         return {
@@ -254,6 +257,7 @@ class MindMapService:
         self,
         project_name: str,
         documents: List[Any],
+        output_language: str = "auto",
     ) -> tuple[Dict[str, Any], str]:
         """Assemble a generated concept tree or a source-structure fallback.
 
@@ -267,21 +271,26 @@ class MindMapService:
             structure. Returned together rather than recorded on the service,
             which two concurrent builds share.
         """
-        root, model_used, _ = self._build_tree_with_source_count(project_name, documents)
+        root, model_used, _ = self._build_tree_with_source_count(
+            project_name, documents, output_language
+        )
         return root, model_used
 
     def _build_tree_with_source_count(
-        self, project_name: str, documents: List[Any],
+        self, project_name: str, documents: List[Any], output_language: str = "auto",
     ) -> tuple[Dict[str, Any], str, int]:
         sampled_documents = documents[:MAX_SOURCE_DOCUMENTS]
-        root, model_used = self._generated_tree(sampled_documents)
+        root, model_used = self._generated_tree(sampled_documents, output_language)
         if root:
             return root, model_used, len(sampled_documents)
+        # shortcut: offline structure labels keep source wording; translate if
+        # localized fallback maps become a requirement.
         return self._structural_tree(project_name, documents), FALLBACK_MODEL, len(documents)
 
     def _generated_tree(
         self,
         documents: List[Any],
+        output_language: str = "auto",
     ) -> tuple[Optional[Dict[str, Any]], str]:
         """Generate concepts, retrying unusable provider JSON at most once.
 
@@ -299,7 +308,7 @@ class MindMapService:
             return None, FALLBACK_MODEL
 
         try:
-            prompt = self._topic_prompt(documents)
+            prompt = self._topic_prompt(documents, output_language)
             for attempt in range(2):
                 result = self.llm.generate(
                     prompt=prompt,
@@ -344,7 +353,9 @@ class MindMapService:
             return None, FALLBACK_MODEL
         return None, FALLBACK_MODEL
 
-    def _topic_prompt(self, documents: List[Any]) -> str:
+    def _topic_prompt(
+        self, documents: List[Any], output_language: str = "auto"
+    ) -> str:
         """Compose the grounded prompt shared by generation and its one retry.
 
         Each attempt covers the eligible sample together; a separate request
@@ -367,7 +378,7 @@ class MindMapService:
                 )
             )
 
-        return (
+        prompt = (
             "Create a concept mind map that explains what these sources teach.\n\n"
             "Rules:\n"
             "- Root: the actual subject, not a filename or the word Notebook.\n"
@@ -390,6 +401,7 @@ class MindMapService:
             '"detail":"Explanation","document_index":1,"children":[]}]}]}}\n\n'
             "Sources:\n\n%s"
         ) % "\n\n".join(sections)
+        return with_output_language(prompt, output_language)
 
     def _structural_tree(self, project_name: str, documents: List[Any]) -> Dict[str, Any]:
         """Keep real heading ancestry when a model cannot supply concepts.

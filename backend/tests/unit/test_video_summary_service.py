@@ -549,6 +549,17 @@ class TestGeneratedScenes:
         assert "Alpha" in stub.prompts[0]
         assert "Beta" in stub.prompts[0]
 
+    def test_selected_output_language_reaches_the_model_prompt(self):
+        stub = StubLLM('{"scenes": []}')
+        service = VideoSummaryService(llm_service=stub)
+
+        service.build_scenes(
+            "Notebook", [FakeDocument("d1", "Paper", content="Evidence.")],
+            utc_now(), output_language="es",
+        )
+
+        assert "Write all generated output in Spanish." in stub.prompts[0]
+
 
 # How long a thread in these tests waits for its counterpart before giving up.
 # Generous, because it is only ever reached when the interleaving under test has

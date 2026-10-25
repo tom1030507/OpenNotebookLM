@@ -30,6 +30,8 @@ import { FollowUpQuestions, ProjectOverview } from './SuggestedQuestions';
 
 interface ChatAreaProps {
   onAddSourcesOpenChange: (isOpen: boolean) => void;
+  outputLanguageRevision?: number;
+  onOutputLanguageChanged?: () => void;
 }
 
 interface PendingQuery {
@@ -219,7 +221,11 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
   );
 });
 
-export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
+export default function ChatArea({
+  onAddSourcesOpenChange,
+  outputLanguageRevision = 0,
+  onOutputLanguageChanged,
+}: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
   const [pendingQuery, setPendingQuery] = useState<PendingQuery | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(false);
@@ -506,6 +512,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
                 <ProjectOverview
                   projectId={currentProject.id}
                   readySourceKey={readyDocumentIds.sort().join(',')}
+                  outputLanguageRevision={outputLanguageRevision}
                   disabled={noSourcesSelected}
                   onAsk={(question) => void submitQuery(question)}
                 />
@@ -721,6 +728,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
         <ChatSettingsDialog
           projectId={currentProject.id}
           onClose={() => setShowChatSettings(false)}
+          onOutputLanguageChanged={onOutputLanguageChanged}
         />
       )}
     </div>

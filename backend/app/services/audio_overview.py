@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import AudioOverview, Project
 from app.services.llm import LLMService
+from app.services.output_language import with_output_language
 from app.services.source_digest import document_excerpt, project_documents
 from app.utils.time import ordered_utc_now
 
@@ -235,6 +236,7 @@ class AudioOverviewService:
         project_name: str,
         documents: List[Any],
         options: Dict[str, Any],
+        output_language: str = "auto",
     ) -> List[Dict[str, str]]:
         """Write dialogue from only the caller-selected source excerpts.
 
@@ -283,6 +285,7 @@ class AudioOverviewService:
             "debate": "Let the hosts surface contrasting interpretations supported by the sources.",
         }.get(options.get("format"), "Explain the main ideas and how the sources connect.")
         prompt += "\nStyle guidance: %s" % format_guidance
+        prompt = with_output_language(prompt, output_language)
 
         try:
             result = self.llm.generate(
@@ -301,6 +304,8 @@ class AudioOverviewService:
                 error=str(error),
             )
 
+        # shortcut: Extractive turns keep source language when the model is
+        # unavailable; add offline translation only if that becomes required.
         return self._fallback_script(documents, max_turns)
 
     @staticmethod
@@ -349,7 +354,12 @@ class AudioOverviewService:
             ):
                 raise ValueError("Selected project sources are no longer available")
 
-            script = self.build_script(project.name, documents, options)
+            script = self.build_script(
+                project.name,
+                documents,
+                options,
+                project.output_language or "auto",
+            )
             if not script:
                 raise ValueError(NO_SOURCE_TEXT_MESSAGE)
             updated = db.execute(

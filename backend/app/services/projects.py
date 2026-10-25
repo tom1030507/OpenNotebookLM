@@ -145,6 +145,7 @@ class ProjectService:
             chat_role=project.chat_role,
             chat_instructions=project.chat_instructions,
             answer_length=project.answer_length,
+            output_language=project.output_language or "auto",
             cover_emoji=ProjectService.default_cover_emoji(duplicate_id),
         )
         links = [
@@ -476,6 +477,7 @@ class ProjectService:
             role=project.chat_role or "default",
             instructions=project.chat_instructions or "",
             answer_length=project.answer_length or "default",
+            output_language=project.output_language or "auto",
         )
 
     @staticmethod
@@ -495,6 +497,14 @@ class ProjectService:
         project.chat_role = chat_settings.role
         project.chat_instructions = chat_settings.instructions
         project.answer_length = chat_settings.answer_length
+        output_language = (
+            chat_settings.output_language
+            if "output_language" in chat_settings.model_fields_set
+            else project.output_language or "auto"
+        )
+        if (project.output_language or "auto") != output_language:
+            project.overview_json = None
+        project.output_language = output_language
         db.commit()
         db.refresh(project)
 

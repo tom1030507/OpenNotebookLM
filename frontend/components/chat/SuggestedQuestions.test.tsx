@@ -60,6 +60,33 @@ describe('ProjectOverview', () => {
     await waitFor(() => expect(fetchOverview).toHaveBeenCalledWith('project-1'));
     expect(container.innerHTML).toBe('');
   });
+
+  it('reloads cached overview after the output language changes', async () => {
+    const fetchOverview = vi.spyOn(api, 'fetchProjectOverview')
+      .mockResolvedValueOnce({ project_name: 'Notes', overview: 'Old language', questions: [] })
+      .mockResolvedValueOnce({ project_name: 'Notes', overview: 'New language', questions: [] });
+    const { rerender } = render(
+      <ProjectOverview
+        projectId="project-1"
+        readySourceKey="doc-1"
+        outputLanguageRevision={0}
+        onAsk={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('Old language')).toBeTruthy();
+    rerender(
+      <ProjectOverview
+        projectId="project-1"
+        readySourceKey="doc-1"
+        outputLanguageRevision={1}
+        onAsk={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('New language')).toBeTruthy();
+    expect(fetchOverview).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('FollowUpQuestions', () => {

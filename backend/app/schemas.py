@@ -169,10 +169,13 @@ CHAT_INSTRUCTIONS_MAX_LENGTH = 2000
 
 
 class ChatSettings(BaseModel):
-    """How a project's chat answers: the role it plays and how long it runs."""
+    """How a project's answers are styled, sized, and written."""
     role: Literal["default", "learning_guide", "custom"] = "default"
     instructions: str = Field("", max_length=CHAT_INSTRUCTIONS_MAX_LENGTH)
     answer_length: Literal["default", "longer", "shorter"] = "default"
+    output_language: Literal[
+        "auto", "en", "zh-Hant", "zh-Hans", "ja", "ko", "es", "fr", "de"
+    ] = "auto"
 
 
 class ProjectListResponse(BaseModel):

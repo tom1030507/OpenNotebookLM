@@ -101,6 +101,21 @@ describe('Studio mind map', () => {
     expect(screen.getByText('Research notes mind map')).toBeTruthy();
   });
 
+  it('closes a cached map when the project output language changes', async () => {
+    const spy = vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMap());
+    const { rerender } = render(<StudioPanel outputLanguageRevision={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    await screen.findByRole('dialog');
+
+    rerender(<StudioPanel outputLanguageRevision={1} />);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    await screen.findByRole('dialog');
+
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
   it('draws a node for every source and topic', async () => {
     vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMap());
 
