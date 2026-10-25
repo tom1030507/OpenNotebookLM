@@ -418,7 +418,7 @@ export default function ChatArea({ onAddSourcesOpenChange }: ChatAreaProps) {
               <button
                 type="button"
                 onClick={!currentProject
-                  ? projectDialog?.openProjectDialog
+                  ? projectDialog ? () => projectDialog.openProjectDialog() : undefined
                   : hasDocuments
                     ? () => composerRef.current?.focus()
                     : handleRequestAddSources}

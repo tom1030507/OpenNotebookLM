@@ -16,6 +16,8 @@ export interface Project {
   updated_at: string;
   document_count: number;
   conversation_count: number;
+  cover_emoji?: string | null;
+  cover_color?: string | null;
 }
 
 export type ChatRole = 'default' | 'learning_guide' | 'custom';
@@ -726,6 +728,20 @@ const api = {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  },
+
+  updateProject(
+    projectId: string,
+    data: { name?: string; description?: string; cover_emoji?: string | null; cover_color?: string | null },
+  ): Promise<Project> {
+    return requestJson<Project>(`/projects/${projectId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  duplicateProject(projectId: string): Promise<Project> {
+    return requestJson<Project>(`/projects/${projectId}/duplicate`, { method: 'POST' });
   },
 
   async deleteProject(projectId: string): Promise<void> {

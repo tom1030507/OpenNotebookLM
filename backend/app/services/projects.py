@@ -1,4 +1,5 @@
 """Project CRUD service operations."""
+import copy
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -9,10 +10,16 @@ from app.db.models import (
     AudioOverview,
     Conversation,
     Document,
+    Note,
     Project,
     ProjectDocument,
 )
-from app.schemas import ChatSettings, ProjectCreate, ProjectUpdate
+from app.schemas import (
+    PROJECT_COVER_EMOJIS,
+    ChatSettings,
+    ProjectCreate,
+    ProjectUpdate,
+)
 
 logger = structlog.get_logger()
 
@@ -23,6 +30,20 @@ UNTITLED_PROJECT_NAME = "Untitled notebook"
 
 class ProjectService:
     """Service for project operations."""
+
+    @staticmethod
+    def default_cover_emoji(project_id: str) -> str:
+        """Choose a stable cover emoji from the project id.
+
+        Args:
+            project_id: UUID assigned to the project.
+
+        Returns:
+            One supported emoji, stable for this id.
+        """
+        return PROJECT_COVER_EMOJIS[
+            int(project_id.replace("-", ""), 16) % len(PROJECT_COVER_EMOJIS)
+        ]
     
     @staticmethod
     def create_project(db: Session, project_data: ProjectCreate, user_id: str) -> Project:
@@ -44,6 +65,7 @@ class ProjectService:
             name=project_data.name or UNTITLED_PROJECT_NAME,
             description=project_data.description,
             meta_json=project_data.meta_json or {},
+            cover_emoji=ProjectService.default_cover_emoji(project_id),
             auto_title=project_data.name is None,
         )
         
@@ -53,6 +75,74 @@ class ProjectService:
         
         logger.info("Project created", project_id=project_id, name=project.name)
         return project
+
+    @staticmethod
+    def duplicate_project(db: Session, project: Project, user_id: str) -> Project:
+        """Copy a project and its caller-owned sources and notes atomically.
+
+        Args:
+            db: Database session.
+            project: Source project, already checked for ownership.
+            user_id: Account that owns both the source and duplicate.
+
+        Returns:
+            The newly stored project.
+        """
+        documents = (
+            db.query(ProjectDocument.document_id)
+            .join(Document, Document.id == ProjectDocument.document_id)
+            .filter(
+                ProjectDocument.project_id == project.id,
+                Document.user_id == user_id,
+            )
+            .all()
+        )
+        notes = db.query(Note).filter(Note.project_id == project.id).all()
+        duplicate_id = str(uuid.uuid4())
+        duplicate = Project(
+            id=duplicate_id,
+            user_id=user_id,
+            name=f"{project.name} (copy)",
+            description=project.description,
+            meta_json=copy.deepcopy(project.meta_json or {}),
+            chat_role=project.chat_role,
+            chat_instructions=project.chat_instructions,
+            answer_length=project.answer_length,
+            cover_emoji=ProjectService.default_cover_emoji(duplicate_id),
+        )
+        links = [
+            ProjectDocument(project_id=duplicate_id, document_id=row.document_id)
+            for row in documents
+        ]
+        copied_notes = []
+        for note in notes:
+            payload = copy.deepcopy(note.payload_json)
+            if isinstance(payload, dict) and "project_id" in payload:
+                # Studio actions use this id for follow-up operations like export.
+                payload["project_id"] = duplicate_id
+                if "project_name" in payload:
+                    payload["project_name"] = duplicate.name
+            copied_notes.append(Note(
+                id=str(uuid.uuid4()),
+                project_id=duplicate_id,
+                title=note.title,
+                content=note.content,
+                origin=note.origin,
+                source_message_id=note.source_message_id,
+                studio_kind=note.studio_kind,
+                payload_json=payload,
+            ))
+
+        try:
+            db.add_all([duplicate, *links, *copied_notes])
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        db.refresh(duplicate)
+
+        logger.info("Project duplicated", source_project_id=project.id, project_id=duplicate_id)
+        return duplicate
     
     @staticmethod
     def get_project(db: Session, project_id: str) -> Optional[Project]:
@@ -139,6 +229,10 @@ class ProjectService:
             project.description = project_update.description
         if project_update.meta_json is not None:
             project.meta_json = project_update.meta_json
+        if "cover_emoji" in project_update.model_fields_set:
+            project.cover_emoji = project_update.cover_emoji
+        if "cover_color" in project_update.model_fields_set:
+            project.cover_color = project_update.cover_color
         
         db.commit()
         db.refresh(project)

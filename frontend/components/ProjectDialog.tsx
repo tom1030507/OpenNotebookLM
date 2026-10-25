@@ -1,28 +1,44 @@
 'use client';
 
-import React, { useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { AlertCircle, FolderPlus, Loader2, X } from 'lucide-react';
 import useStore from '@/store/useStore';
 import useDialogFocus from '@/hooks/useDialogFocus';
+import type { Project } from '@/lib/api';
+import { PROJECT_COVER_COLORS, PROJECT_COVER_EMOJIS } from '@/lib/projectCover';
 
 interface ProjectDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  project?: Project | null;
 }
 
-export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
+export default function ProjectDialog({ isOpen, onClose, project = null }: ProjectDialogProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [coverEmoji, setCoverEmoji] = useState<string>(PROJECT_COVER_EMOJIS[0]);
+  const [coverColor, setCoverColor] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const { createProject, selectProject } = useStore();
+  const { createProject, updateProject, selectProject } = useStore();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(project?.name || '');
+    setDescription(project?.description || '');
+    setCoverEmoji(project?.cover_emoji || PROJECT_COVER_EMOJIS[0]);
+    setCoverColor(project?.cover_color || '');
+    setError('');
+  }, [isOpen, project]);
 
   const handleClose = () => {
     setName('');
     setDescription('');
+    setCoverEmoji(PROJECT_COVER_EMOJIS[0]);
+    setCoverColor('');
     setError('');
     onClose();
   };
@@ -42,13 +58,22 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
     setError('');
 
     try {
-      const project = await createProject(
-        // Left blank, the project is titled from its sources once they are read.
-        name.trim() || undefined,
-        description.trim() || undefined,
-      );
-      if (!project) return;
-      selectProject(project);
+      if (project) {
+        await updateProject(project.id, {
+          ...(name.trim() && name.trim() !== project.name && { name: name.trim() }),
+          description: description.trim(),
+          cover_emoji: coverEmoji || null,
+          cover_color: coverColor || null,
+        });
+      } else {
+        const created = await createProject(
+          // Left blank, the project is titled from its sources once they are read.
+          name.trim() || undefined,
+          description.trim() || undefined,
+        );
+        if (!created) return;
+        selectProject(created);
+      }
       setName('');
       setDescription('');
       handleClose();
@@ -77,14 +102,14 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
               <FolderPlus className="w-5 h-5 text-[var(--primary)]" />
             </div>
             <h2 id={titleId} className="text-lg font-semibold">
-              {'Create New Project'}
+              {project ? 'Edit Project' : 'Create New Project'}
             </h2>
           </div>
           <button
             onClick={handleClose}
             type="button"
-            aria-label={'Close create project dialog'}
-            title={'Close create project dialog'}
+            aria-label={project ? 'Close edit project dialog' : 'Close create project dialog'}
+            title={project ? 'Close edit project dialog' : 'Close create project dialog'}
             disabled={isCreating}
             className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
           >
@@ -131,6 +156,40 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
             />
           </div>
 
+          {project && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="cover-emoji" className="block text-sm font-medium mb-2">
+                  {'Cover emoji'}
+                </label>
+                <select
+                  id="cover-emoji"
+                  value={coverEmoji}
+                  onChange={(event) => setCoverEmoji(event.target.value)}
+                  disabled={isCreating}
+                  className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg"
+                >
+                  {PROJECT_COVER_EMOJIS.map((emoji) => <option key={emoji} value={emoji}>{emoji}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="cover-color" className="block text-sm font-medium mb-2">
+                  {'Cover color'}
+                </label>
+                <select
+                  id="cover-color"
+                  value={coverColor}
+                  onChange={(event) => setCoverColor(event.target.value)}
+                  disabled={isCreating}
+                  className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg"
+                >
+                  <option value="">{'Default'}</option>
+                  {PROJECT_COVER_COLORS.map((color) => <option key={color.id} value={color.id}>{color.label}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+
           <div className="text-xs text-[var(--muted-foreground)]">
             <p>{'Projects help you organise your documents and conversations.'}</p>
             <p className="mt-1">{'You can add files, URLs, YouTube videos and more to a project.'}</p>
@@ -153,10 +212,10 @@ export default function ProjectDialog({ isOpen, onClose }: ProjectDialogProps) {
               {isCreating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>{'Creating...'}</span>
+                  <span>{project ? 'Saving...' : 'Creating...'}</span>
                 </>
               ) : (
-                <span>{'Create Project'}</span>
+                <span>{project ? 'Save Project' : 'Create Project'}</span>
               )}
             </button>
           </div>

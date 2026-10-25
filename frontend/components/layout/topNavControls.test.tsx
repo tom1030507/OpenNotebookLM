@@ -25,6 +25,8 @@ const project: Project = {
   updated_at: '2026-08-13T00:00:00Z',
   document_count: 1,
   conversation_count: 0,
+  cover_emoji: '📚',
+  cover_color: 'rose',
 };
 
 const processing: Document = {
@@ -97,6 +99,13 @@ afterEach(() => {
 });
 
 describe('TopNav controls that were previously inert', () => {
+  it('shows the project cover in the workspace header', () => {
+    renderTopNav();
+
+    expect(screen.getByRole('img', { name: 'Project cover: 📚' }).getAttribute('data-cover-color')).toBe('rose');
+    expect(screen.getByRole('heading', { name: 'Research notes' })).not.toBeNull();
+  });
+
   it('uses the shared OpenNotebookLM brand mark in the workspace header', () => {
     const { container } = renderTopNav();
 

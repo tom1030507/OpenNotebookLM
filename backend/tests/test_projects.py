@@ -1,13 +1,23 @@
 """Tests for project management API."""
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import get_db
-from app.db.models import Base, Document, ProjectDocument
+from app.db.models import (
+    Base,
+    Conversation,
+    Document,
+    Note,
+    Project,
+    ProjectDocument,
+    User,
+)
 from app.routers import projects
+from app.services.projects import ProjectService
+from app.schemas import PROJECT_COVER_COLORS, PROJECT_COVER_EMOJIS
 from conftest import authenticated_client
 
 
@@ -226,6 +236,173 @@ def test_pagination():
     assert response.status_code == 200
     data = response.json()
     assert data["page"] == 2
+
+
+def test_project_cover_defaults_validates_and_persists():
+    """New projects get a stable emoji, and updates reject unsupported covers."""
+    response = client.post("/api/projects", json={"name": "Covered"})
+
+    assert response.status_code == 200
+    project = response.json()
+    expected = PROJECT_COVER_EMOJIS[int(project["id"].replace("-", ""), 16) % len(PROJECT_COVER_EMOJIS)]
+    assert project["cover_emoji"] == expected
+    assert project["cover_color"] is None
+
+    saved = client.put(
+        f"/api/projects/{project['id']}",
+        json={"cover_emoji": PROJECT_COVER_EMOJIS[1], "cover_color": PROJECT_COVER_COLORS[0]},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["cover_emoji"] == PROJECT_COVER_EMOJIS[1]
+    assert saved.json()["cover_color"] == PROJECT_COVER_COLORS[0]
+    assert client.put(
+        f"/api/projects/{project['id']}", json={"cover_emoji": "📚hello"}
+    ).status_code == 422
+    assert client.put(
+        f"/api/projects/{project['id']}", json={"cover_color": "#ffffff"}
+    ).status_code == 422
+
+
+def test_duplicate_project_copies_owned_data_but_not_conversations():
+    """A duplicate owns its links and notes without cloning conversations."""
+    original = client.post(
+        "/api/projects",
+        json={"name": "Notebook", "description": "Summary", "meta_json": {"nested": {"key": "value"}}},
+    ).json()
+    client.put(
+        f"/api/projects/{original['id']}/chat-settings",
+        json={"role": "custom", "instructions": "Be concise", "answer_length": "longer"},
+    )
+
+    with TestingSessionLocal() as db:
+        project = db.get(Project, original["id"])
+        owner_id = project.user_id
+        foreign_owner = User(
+            id="foreign-owner",
+            username="foreign-owner",
+            email="foreign-owner@example.com",
+            hashed_password="unused",
+        )
+        own_document = Document(
+            id="copy-own-document", user_id=owner_id, title="Owned", source_type="pdf", status="ready"
+        )
+        foreign_document = Document(
+            id="copy-foreign-document", user_id=foreign_owner.id, title="Foreign", source_type="pdf", status="ready"
+        )
+        db.add_all([
+            foreign_owner,
+            own_document,
+            foreign_document,
+            ProjectDocument(project_id=project.id, document_id=own_document.id),
+            ProjectDocument(project_id=project.id, document_id=foreign_document.id),
+            Note(
+                id="copy-note",
+                project_id=project.id,
+                title="Saved",
+                content="Body",
+                origin="studio",
+                studio_kind="video_summary",
+                payload_json={"project_id": project.id, "project_name": project.name, "x": [1]},
+            ),
+            Conversation(id="copy-conversation", project_id=project.id, title="Chat"),
+        ])
+        project.overview_json = {"private": "generated overview"}
+        db.commit()
+
+    response = client.post(f"/api/projects/{original['id']}/duplicate")
+
+    assert response.status_code == 200, response.text
+    duplicate = response.json()
+    assert duplicate["id"] != original["id"]
+    assert duplicate["name"] == "Notebook (copy)"
+    assert duplicate["description"] == "Summary"
+    assert duplicate["meta_json"] == {"nested": {"key": "value"}}
+    assert client.get(f"/api/projects/{duplicate['id']}/chat-settings").json() == {
+        "role": "custom", "instructions": "Be concise", "answer_length": "longer"
+    }
+    with TestingSessionLocal() as db:
+        copied = db.get(Project, duplicate["id"])
+        assert copied.overview_json is None
+        assert {link.document_id for link in copied.documents} == {"copy-own-document"}
+        assert len(copied.notes) == 1
+        assert (copied.notes[0].title, copied.notes[0].content, copied.notes[0].payload_json) == (
+            "Saved", "Body", {
+                "project_id": duplicate["id"],
+                "project_name": duplicate["name"],
+                "x": [1],
+            }
+        )
+        assert copied.conversations == []
+        copied.notes[0].payload_json = {
+            **copied.notes[0].payload_json,
+            "x": [*copied.notes[0].payload_json["x"], 2],
+        }
+        db.commit()
+        assert db.get(Note, "copy-note").payload_json["x"] == [1]
+
+    changed = client.put(
+        f"/api/projects/{duplicate['id']}",
+        json={"name": "Independent copy", "meta_json": {"changed": True}},
+    )
+    assert changed.status_code == 200
+    client.put(
+        f"/api/projects/{duplicate['id']}/chat-settings",
+        json={"role": "default", "instructions": "", "answer_length": "shorter"},
+    )
+    assert client.delete(
+        f"/api/projects/{duplicate['id']}/documents/copy-own-document"
+    ).status_code == 200
+    assert client.get(f"/api/projects/{original['id']}").json()["name"] == "Notebook"
+    assert client.get(f"/api/projects/{original['id']}/chat-settings").json() == {
+        "role": "custom", "instructions": "Be concise", "answer_length": "longer"
+    }
+    assert "copy-own-document" in {
+        document["id"] for document in client.get(
+            f"/api/projects/{original['id']}/documents"
+        ).json()
+    }
+
+    assert client.delete(f"/api/projects/{duplicate['id']}").status_code == 200
+    with TestingSessionLocal() as db:
+        assert db.get(Document, "copy-own-document") is not None
+        assert db.get(Project, original["id"]) is not None
+        assert db.get(Note, "copy-note") is not None
+
+
+def test_duplicate_rolls_back_when_link_creation_fails():
+    """A failed association insert leaves no half-created project behind."""
+    original = client.post("/api/projects", json={"name": "Atomic"}).json()
+    with TestingSessionLocal() as db:
+        project = db.get(Project, original["id"])
+        document = Document(
+            id="atomic-document", user_id=project.user_id, title="Owned", source_type="pdf", status="ready"
+        )
+        db.add_all([document, ProjectDocument(project_id=project.id, document_id=document.id)])
+        db.commit()
+
+    def fail_link_insert(mapper, connection, link):
+        raise RuntimeError("simulated link failure")
+
+    event.listen(ProjectDocument, "before_insert", fail_link_insert)
+    try:
+        response = client.post(f"/api/projects/{original['id']}/duplicate")
+    finally:
+        event.remove(ProjectDocument, "before_insert", fail_link_insert)
+
+    assert response.status_code == 500
+    with TestingSessionLocal() as db:
+        assert db.query(Project).filter(Project.name == "Atomic (copy)").count() == 0
+
+
+def test_duplicate_preserves_suffix_for_max_length_project_name():
+    """A copied name retains the required suffix when the source is 200 chars."""
+    name = "x" * 200
+    original = client.post("/api/projects", json={"name": name}).json()
+
+    response = client.post(f"/api/projects/{original['id']}/duplicate")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == f"{name} (copy)"
 
 
 if __name__ == "__main__":
