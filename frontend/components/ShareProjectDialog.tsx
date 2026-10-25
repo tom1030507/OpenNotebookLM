@@ -18,6 +18,7 @@ export default function ShareProjectDialog({
 }: ShareProjectDialogProps) {
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [identity, setIdentity] = useState('');
+  const [identityType, setIdentityType] = useState<'username' | 'email'>('username');
   const [role, setRole] = useState<'viewer' | 'editor'>('viewer');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -60,7 +61,7 @@ export default function ShareProjectDialog({
     setError('');
     try {
       const member = await api.addProjectMember(project.id, {
-        ...(value.includes('@') ? { email: value } : { username: value }),
+        [identityType]: value,
         role,
       });
       setMembers((current) => [...current, member]);
@@ -132,7 +133,7 @@ export default function ShareProjectDialog({
             <label className="block text-sm font-medium" htmlFor="share-member-identity">
               Username or email
             </label>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
               <input
                 ref={identityRef}
                 id="share-member-identity"
@@ -140,13 +141,22 @@ export default function ShareProjectDialog({
                 onChange={(event) => setIdentity(event.target.value)}
                 autoComplete="off"
                 required
-                className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               />
+              <select
+                aria-label="Account identifier type"
+                value={identityType}
+                onChange={(event) => setIdentityType(event.target.value as 'username' | 'email')}
+                className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm"
+              >
+                <option value="username">Username</option>
+                <option value="email">Email</option>
+              </select>
               <select
                 aria-label="Role for new member"
                 value={role}
                 onChange={(event) => setRole(event.target.value as 'viewer' | 'editor')}
-                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm"
+                className="justify-self-start rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm"
               >
                 <option value="viewer">Viewer</option>
                 <option value="editor">Editor</option>
@@ -154,7 +164,7 @@ export default function ShareProjectDialog({
               <button
                 type="submit"
                 disabled={saving || !identity.trim()}
-                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm text-[var(--primary-foreground)] disabled:opacity-50"
+                className="justify-self-end rounded-lg bg-[var(--primary)] px-3 py-2 text-sm text-[var(--primary-foreground)] disabled:opacity-50"
               >
                 Add member
               </button>

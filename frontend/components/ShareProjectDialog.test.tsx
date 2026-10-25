@@ -61,6 +61,9 @@ describe('project sharing controls', () => {
     fireEvent.change(screen.getByLabelText('Username or email'), {
       target: { value: 'carol@example.com' },
     });
+    fireEvent.change(screen.getByLabelText('Account identifier type'), {
+      target: { value: 'email' },
+    });
     fireEvent.change(screen.getByLabelText('Role for new member'), {
       target: { value: 'editor' },
     });
@@ -83,6 +86,24 @@ describe('project sharing controls', () => {
     await act(async () => {
       rerender(<ShareProjectDialog project={project} isOpen={false} onClose={() => undefined} />);
     });
+  });
+
+  it('adds an account whose username contains @ as a username', async () => {
+    vi.spyOn(api, 'getProjectMembers').mockResolvedValue([owner]);
+    const add = vi.spyOn(api, 'addProjectMember').mockResolvedValue(carol);
+    render(<ShareProjectDialog project={project} isOpen onClose={() => undefined} />);
+
+    fireEvent.change(screen.getByLabelText('Username or email'), {
+      target: { value: 'target@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Account identifier type'), {
+      target: { value: 'username' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add member' }));
+
+    await waitFor(() => expect(add).toHaveBeenCalledWith(project.id, {
+      username: 'target@example.com', role: 'viewer',
+    }));
   });
 
   it('marks shared projects and shows the share button only to owners', () => {

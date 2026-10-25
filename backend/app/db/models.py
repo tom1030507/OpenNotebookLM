@@ -206,6 +206,8 @@ class ProjectDocument(Base):
     
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
+    # A linked source stays shared when its owner is later removed from the project.
+    shared_by_user_id = Column(String)
     added_at = Column(UTCDateTime, default=func.now())
     
     # Relationships

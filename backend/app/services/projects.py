@@ -36,14 +36,14 @@ class ProjectService:
 
     @staticmethod
     def project_document_query(db: Session, project_id: Optional[str] = None):
-        """Return linked sources owned by the project owner or a current member.
+        """Return linked sources authorized by the owner or a project member.
 
         Args:
             db: Database session.
             project_id: Optional project whose linked sources are being read.
 
         Returns:
-            A query of linked documents with a source owner authorized to share.
+            A query of linked documents the project may still read.
         """
         query = db.query(Document).join(
             ProjectDocument,
@@ -61,6 +61,7 @@ class ProjectService:
             or_(
                 Document.user_id == Project.user_id,
                 ProjectMember.user_id.isnot(None),
+                ProjectDocument.shared_by_user_id == Document.user_id,
             ),
         )
         if project_id is not None:
@@ -147,7 +148,11 @@ class ProjectService:
             cover_emoji=ProjectService.default_cover_emoji(duplicate_id),
         )
         links = [
-            ProjectDocument(project_id=duplicate_id, document_id=row.document_id)
+            ProjectDocument(
+                project_id=duplicate_id,
+                document_id=row.document_id,
+                shared_by_user_id=user_id,
+            )
             for row in documents
         ]
         copied_notes = []
@@ -568,7 +573,8 @@ class ProjectService:
         # Create link
         link = ProjectDocument(
             project_id=project_id,
-            document_id=document_id
+            document_id=document_id,
+            shared_by_user_id=document.user_id,
         )
         db.add(link)
         db.commit()

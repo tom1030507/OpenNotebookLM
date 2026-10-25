@@ -199,6 +199,31 @@ def test_non_owner_cannot_reach_any_member_route(sharing_env):
         assert response.status_code == 404, (method, response.text)
 
 
+@pytest.mark.parametrize("role", ["editor", "viewer"])
+def test_member_route_denials_match_missing_project(sharing_env, role):
+    project = make_project(sharing_env.owner)
+    sharing_env.session.add(ProjectMember(
+        project_id=project["id"], user_id=sharing_env.alice_user.id, role=role
+    ))
+    sharing_env.session.commit()
+    routes = [
+        ("get", "/members", None),
+        ("post", "/members", {"username": "missing-user", "role": "viewer"}),
+        ("patch", "/members/%s" % sharing_env.bob_user.id, {"role": "editor"}),
+        ("delete", "/members/%s" % sharing_env.bob_user.id, None),
+    ]
+    missing_project = "00000000-0000-0000-0000-000000000000"
+
+    for method, suffix, body in routes:
+        denied_path = "/api/projects/%s%s" % (project["id"], suffix)
+        missing_path = "/api/projects/%s%s" % (missing_project, suffix)
+        send = getattr(sharing_env.alice, method)
+        denied = send(denied_path) if body is None else send(denied_path, json=body)
+        missing = send(missing_path) if body is None else send(missing_path, json=body)
+        assert denied.status_code == missing.status_code == 404
+        assert denied.json() == missing.json()
+
+
 def test_shared_projects_are_unique_searchable_paginated_and_count_private_conversations(sharing_env):
     first = make_project(sharing_env.owner, "Research alpha", "shared research")
     second = make_project(sharing_env.owner, "Research beta", "shared research")

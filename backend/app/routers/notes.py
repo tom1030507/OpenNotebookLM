@@ -1,7 +1,7 @@
 """Notes router: create, list, edit and delete a project's notes."""
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -62,7 +62,14 @@ def create_note(
             Message.id == data.source_message_id
         ).scalar()
         if conversation_id:
-            require_conversation(db, conversation_id, current_user)
+            try:
+                require_conversation(db, conversation_id, current_user)
+            except HTTPException as error:
+                if error.status_code == 404:
+                    raise HTTPException(
+                        status_code=404, detail="Message not found"
+                    ) from error
+                raise
     return note_service.create_note(db, project, data)
 
 

@@ -279,6 +279,52 @@ class TestSharedProjectSourceRoles:
         assert exported.status_code == 200
         assert all(row["id"] != document_id for row in exported.json()["documents"])
 
+    def test_removing_source_owner_keeps_linked_source_in_project(self, env):
+        project_id = make_project(env.alice)
+        document_id = make_document(
+            env.session, env.bob_user, title="Bob source", content="Shared text"
+        )
+        grant_project_role(env, project_id, "editor")
+        attached = env.bob.post(
+            "/api/projects/%s/documents/%s" % (project_id, document_id)
+        )
+        assert attached.status_code == 200
+
+        removed = env.alice.delete(
+            "/api/projects/%s/members/%s" % (project_id, env.bob_user.id)
+        )
+
+        assert removed.status_code == 200
+        assert env.alice.get("/api/docs/%s/content" % document_id).json() == {
+            "content": "Shared text"
+        }
+        listed = env.alice.get("/api/projects/%s/documents" % project_id)
+        assert [row["id"] for row in listed.json()] == [document_id]
+        exported = env.alice.get("/api/export/project/%s?format=json" % project_id)
+        assert [row["id"] for row in exported.json()["documents"]] == [document_id]
+
+    def test_private_and_missing_answer_ids_have_the_same_note_error(self, env):
+        project_id = make_project(env.alice)
+        conversation_id = make_conversation(env.alice, project_id)
+        message = Message(
+            id=str(uuid.uuid4()), conversation_id=conversation_id,
+            role="assistant", text="Private answer",
+        )
+        env.session.add(message)
+        env.session.commit()
+        grant_project_role(env, project_id, "editor")
+        base = "/api/projects/%s/notes" % project_id
+
+        private = env.bob.post(base, json={
+            "title": "Private", "source_message_id": message.id,
+        })
+        missing = env.bob.post(base, json={
+            "title": "Missing", "source_message_id": "not-a-message",
+        })
+
+        assert private.status_code == missing.status_code == 404
+        assert private.json() == missing.json()
+
     def test_every_ingest_route_requires_editor_access(self, env, monkeypatch):
         from app.routers.ingest import get_document_service
 
@@ -821,6 +867,28 @@ class TestConversationIsolation:
             "query": "Try the revoked project again",
             "conversation_id": bob_conversation,
         }).status_code == 404
+
+    def test_legacy_conversations_are_listed_only_for_the_project_owner(self, env):
+        project_id = make_project(env.alice)
+        conversation = Conversation(
+            id=str(uuid.uuid4()), project_id=project_id,
+            user_id=None, title="Legacy owner chat",
+        )
+        env.session.add(conversation)
+        env.session.commit()
+        grant_project_role(env, project_id, "viewer")
+
+        owner_list = env.alice.get("/api/projects/%s/conversations" % project_id)
+        member_list = env.bob.get("/api/projects/%s/conversations" % project_id)
+
+        assert [row["id"] for row in owner_list.json()] == [conversation.id]
+        assert member_list.json() == []
+        assert env.alice.get(
+            "/api/conversations/%s" % conversation.id
+        ).status_code == 200
+        assert env.bob.get(
+            "/api/conversations/%s" % conversation.id
+        ).status_code == 404
 
 
 class TestQueryIsolation:

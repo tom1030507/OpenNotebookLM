@@ -170,6 +170,41 @@ def test_shared_documents_are_limited_to_the_project_and_revoked_immediately(db)
     assert revoked.value.status_code == 404
 
 
+def test_same_document_remains_visible_through_another_shared_project(db):
+    owner = _user(db, "owner")
+    editor = _user(db, "editor")
+    source_owner = _user(db, "source-owner")
+    first = _project(db, owner, "project-1")
+    second = _project(db, owner, "project-2")
+    _membership(db, first, editor, "editor")
+    _membership(db, second, editor, "viewer")
+    _membership(db, first, source_owner, "editor")
+    _membership(db, second, source_owner, "editor")
+    document = models.Document(
+        id="shared-twice", user_id=source_owner.id, title="Shared twice",
+        source_type="text", status="ready",
+    )
+    db.add(document)
+    db.flush()
+    db.add_all([
+        models.ProjectDocument(project_id=first.id, document_id=document.id),
+        models.ProjectDocument(project_id=second.id, document_id=document.id),
+    ])
+    db.flush()
+
+    db.query(models.ProjectMember).filter_by(
+        project_id=first.id, user_id=editor.id
+    ).delete()
+    db.flush()
+
+    assert ownership.require_document(db, document.id, editor).id == document.id
+    with pytest.raises(HTTPException):
+        ownership.require_document(db, document.id, editor, project_id=first.id)
+    assert ownership.require_document(
+        db, document.id, editor, project_id=second.id
+    ).id == document.id
+
+
 def test_only_conversation_creator_can_access_it_and_legacy_owner_is_preserved(db):
     assert "user_id" in models.Conversation.__table__.columns
     owner = _user(db, "owner")

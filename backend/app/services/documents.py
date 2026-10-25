@@ -679,7 +679,8 @@ class DocumentService:
             # Link to project
             project_doc = ProjectDocument(
                 project_id=project_id,
-                document_id=doc_id
+                document_id=doc_id,
+                shared_by_user_id=user_id,
             )
             db.add(project_doc)
             enqueue_result = enqueue_ingestion_job_with_result(
@@ -866,7 +867,8 @@ class DocumentService:
             # Link to project
             project_doc = ProjectDocument(
                 project_id=project_id,
-                document_id=doc_id
+                document_id=doc_id,
+                shared_by_user_id=user_id,
             )
             db.add(project_doc)
             enqueue_result = enqueue_ingestion_job_with_result(
@@ -1063,7 +1065,8 @@ class DocumentService:
             # Link to project
             project_doc = ProjectDocument(
                 project_id=project_id,
-                document_id=doc_id
+                document_id=doc_id,
+                shared_by_user_id=user_id,
             )
             db.add(project_doc)
             enqueue_result = enqueue_ingestion_job_with_result(
@@ -1251,7 +1254,11 @@ class DocumentService:
                 },
             )
             db.add(document)
-            db.add(ProjectDocument(project_id=project_id, document_id=doc_id))
+            db.add(ProjectDocument(
+                project_id=project_id,
+                document_id=doc_id,
+                shared_by_user_id=user_id,
+            ))
             payload = {"document_id": doc_id}
             enqueue_result = enqueue_ingestion_job_with_result(
                 db,
