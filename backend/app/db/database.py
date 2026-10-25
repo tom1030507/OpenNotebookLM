@@ -128,6 +128,7 @@ ADDED_COLUMNS = (
     ("projects", "chat_instructions", "TEXT", None),
     ("projects", "answer_length", "VARCHAR", None),
     ("projects", "output_language", "VARCHAR", None),
+    ("projects", "chat_model", "VARCHAR", None),
     ("messages", "rating", "VARCHAR", None),
     ("messages", "citation_checks_json", "JSON", None),
     ("conversations", "user_id", "VARCHAR", "idx_conversations_user_id"),

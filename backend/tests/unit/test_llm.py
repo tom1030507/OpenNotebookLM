@@ -1,6 +1,8 @@
 """Tests for provider selection and failure reporting in the LLM service."""
+import io
 import sys
 import types
+import urllib.request
 
 import pytest
 
@@ -87,6 +89,16 @@ def fake_openai(monkeypatch):
     class _FakeCompletions:
         def create(self, **kwargs):
             requests.append(kwargs)
+            if kwargs.get("stream"):
+                delta = types.SimpleNamespace(content="Answer")
+                choice = types.SimpleNamespace(delta=delta)
+                return [types.SimpleNamespace(
+                    model=kwargs["model"],
+                    usage=types.SimpleNamespace(
+                        prompt_tokens=11, completion_tokens=7, total_tokens=18
+                    ),
+                    choices=[choice],
+                )]
             return _fake_openai_response()
 
     class FakeOpenAI:
@@ -185,6 +197,62 @@ def test_openai_base_url_redirects_to_a_compatible_provider(
         "api_key": "gsk-test",
         "base_url": "https://api.groq.com/openai/v1",
     }
+
+
+def test_selected_model_is_sent_to_its_configured_provider(
+    settings, monkeypatch, fake_openai
+):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+
+    LLMService().generate(
+        "Question: what is the total?", model="openai:gpt-5.6-pro"
+    )
+
+    assert fake_openai.requests[-1]["model"] == "gpt-5.6-pro"
+
+
+def test_streaming_uses_the_selected_model(settings, monkeypatch, fake_openai):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+
+    events = list(LLMService().stream_generate(
+        "Question: what is the total?", model="openai:gpt-5.6-pro"
+    ))
+
+    assert fake_openai.requests[-1]["model"] == "gpt-5.6-pro"
+    assert events[0] == ("delta", "Answer")
+    assert events[-1][1]["model"] == "gpt-5.6-pro"
+
+
+def test_available_models_lists_configured_cloud_and_pulled_ollama_models(
+    settings, monkeypatch
+):
+    monkeypatch.setattr(settings, "claude_api_key", "sk-ant-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda request, timeout: io.BytesIO(
+            b'{"data":[{"id":"qwen:7b"},{"id":"llama3.2"}]}'
+        ),
+    )
+
+    assert llm_module.available_models() == [
+        {"id": "claude:claude-opus-5", "provider": "Claude", "name": "claude-opus-5"},
+        {"id": "openai:gpt-5.6", "provider": "OpenAI", "name": "gpt-5.6"},
+        {"id": "local:llama3.2", "provider": "Ollama", "name": "llama3.2"},
+        {"id": "local:qwen:7b", "provider": "Ollama", "name": "qwen:7b"},
+    ]
+
+
+def test_available_models_survives_an_unreachable_ollama_server(settings, monkeypatch):
+    monkeypatch.setattr(settings, "llm_mode", "local")
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("offline")),
+    )
+
+    assert llm_module.available_models() == []
 
 
 def test_empty_base_url_still_reaches_openai(settings, monkeypatch, fake_openai):

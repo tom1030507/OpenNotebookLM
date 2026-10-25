@@ -38,6 +38,7 @@ class Project(Base):
     chat_instructions = Column(Text)
     answer_length = Column(String)
     output_language = Column(String, default="auto")
+    chat_model = Column(String)
     cover_emoji = Column(String)
     cover_color = Column(String)
     # Generated overview and questions, keyed by source ids and output language.

@@ -175,6 +175,7 @@ class TestUpgrade:
             "projects.answer_length",
             "projects.auto_title",
             "projects.chat_instructions",
+            "projects.chat_model",
             "projects.chat_role",
             "projects.cover_color",
             "projects.cover_emoji",

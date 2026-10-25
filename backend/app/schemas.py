@@ -276,6 +276,7 @@ class ChatSettings(BaseModel):
     output_language: Literal[
         "auto", "en", "zh-Hant", "zh-Hans", "ja", "ko", "es", "fr", "de"
     ] = "auto"
+    model: Optional[str] = Field(None, max_length=300)
 
 
 class ProjectListResponse(BaseModel):

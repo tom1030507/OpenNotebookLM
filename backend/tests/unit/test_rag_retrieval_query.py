@@ -134,7 +134,9 @@ class RecordingLLMService:
         self.calls = []
         self.stream_calls = []
 
-    def generate(self, prompt, temperature=0.7, max_tokens=512, system_prompt=None):
+    def generate(
+        self, prompt, temperature=0.7, max_tokens=512, system_prompt=None, model=None
+    ):
         """Record the call and return a fixed answer.
 
         Args:
@@ -142,15 +144,22 @@ class RecordingLLMService:
             temperature: Unused.
             max_tokens: Unused.
             system_prompt: System turn.
+            model: Optional selected provider-qualified model id.
 
         Returns:
             A fixed generation result.
         """
-        self.calls.append({"prompt": prompt, "system_prompt": system_prompt})
+        self.calls.append({
+            "prompt": prompt, "system_prompt": system_prompt, "model": model,
+        })
         return {"text": "An answer.", "model": "test-model", "usage": {"total_tokens": 10}}
 
-    def stream_generate(self, prompt, temperature=0.7, max_tokens=512, system_prompt=None):
-        self.stream_calls.append({"prompt": prompt, "system_prompt": system_prompt})
+    def stream_generate(
+        self, prompt, temperature=0.7, max_tokens=512, system_prompt=None, model=None
+    ):
+        self.stream_calls.append({
+            "prompt": prompt, "system_prompt": system_prompt, "model": model,
+        })
         text = "An answer [Source 1].[Source 9]"
         yield "delta", "An answer "
         yield "delta", "[Source 1].[Source 9]"
@@ -560,6 +569,37 @@ class TestProjectChatSettings:
         assert module.CHAT_ROLE_PROMPTS["learning_guide"] in system_prompt
         assert module.ANSWER_LENGTH_PROMPTS["longer"] in system_prompt
 
+    def test_query_passes_the_selected_model_to_generation(self, db, service):
+        instance, _, llm = service
+        db.add(ProjectDocument(project_id=PROJECT_ID, document_id="document-1"))
+        db.commit()
+
+        instance.query(
+            db=db,
+            query="What is attention?",
+            project_id=PROJECT_ID,
+            model="openai:gpt-5.6-pro",
+            use_cache=False,
+        )
+
+        assert llm.calls[0]["model"] == "openai:gpt-5.6-pro"
+
+    def test_stream_passes_the_selected_model_to_generation(self, db, service):
+        instance, _, llm = service
+        db.add(ProjectDocument(project_id=PROJECT_ID, document_id="document-1"))
+        db.commit()
+
+        list(instance.stream_query_with_conversation(
+            db=db,
+            query="What is attention?",
+            conversation_id=CONVERSATION_ID,
+            project_id=PROJECT_ID,
+            model="openai:gpt-5.6-pro",
+            use_cache=False,
+        ))
+
+        assert llm.stream_calls[0]["model"] == "openai:gpt-5.6-pro"
+
     def test_changing_settings_changes_the_cache_key(self, service):
         instance, _, _ = service
         default = instance._generate_cache_key(
@@ -568,6 +608,14 @@ class TestProjectChatSettings:
             query="q", system_prompt=instance._system_prompt(
                 True, project=chat_settings(answer_length="shorter")))
         assert default != shorter
+
+    def test_changing_model_changes_the_cache_key(self, service):
+        instance, _, _ = service
+        default = instance._generate_cache_key(query="q")
+
+        selected = instance._generate_cache_key(query="q", model="openai:gpt-5.6-pro")
+
+        assert selected != default
 
     def test_changing_citation_threshold_changes_the_cache_key(self, service, monkeypatch):
         instance, _, _ = service

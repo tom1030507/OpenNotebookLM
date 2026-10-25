@@ -14,6 +14,7 @@ const apiMock = vi.hoisted(() => ({
   getConversations: vi.fn(),
   getDocuments: vi.fn(),
   getProjects: vi.fn(),
+  getModels: vi.fn(),
   getProjectSourceGroups: vi.fn(),
   getWatchedFolder: vi.fn(),
   setWatchedFolder: vi.fn(),
@@ -72,6 +73,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   apiMock.getProjects.mockResolvedValue([]);
+  apiMock.getModels.mockResolvedValue([]);
   apiMock.getProjectSourceGroups.mockResolvedValue([]);
   apiMock.getDocuments.mockResolvedValue([]);
   apiMock.getConversations.mockResolvedValue([]);

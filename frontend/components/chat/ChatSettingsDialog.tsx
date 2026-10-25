@@ -3,7 +3,13 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import api from '@/lib/api';
-import type { AnswerLength, ChatRole, ChatSettings, OutputLanguage } from '@/lib/api';
+import type {
+  AnswerLength,
+  ChatRole,
+  ChatSettings,
+  LLMModel,
+  OutputLanguage,
+} from '@/lib/api';
 import useDialogFocus from '@/hooks/useDialogFocus';
 
 // Matches CHAT_INSTRUCTIONS_MAX_LENGTH on the backend, which rejects longer text.
@@ -45,6 +51,7 @@ export default function ChatSettingsDialog({
   onOutputLanguageChanged,
 }: ChatSettingsDialogProps) {
   const [settings, setSettings] = useState<ChatSettings | null>(null);
+  const [models, setModels] = useState<LLMModel[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -53,6 +60,7 @@ export default function ChatSettingsDialog({
   const titleId = useId();
   const instructionsId = useId();
   const outputLanguageId = useId();
+  const modelId = useId();
 
   useDialogFocus({
     isOpen: true,
@@ -68,9 +76,16 @@ export default function ChatSettingsDialog({
       .then((loaded) => {
         if (!active) return;
         initialOutputLanguage.current = loaded.output_language ?? 'auto';
-        setSettings({ ...loaded, output_language: initialOutputLanguage.current });
+        setSettings({
+          ...loaded,
+          output_language: initialOutputLanguage.current,
+          model: loaded.model ?? null,
+        });
       })
       .catch(() => { if (active) setError('Could not load chat settings.'); });
+    api.getModels()
+      .then((available) => { if (active) setModels(available); })
+      .catch(() => { if (active) setModels([]); });
     return () => { active = false; };
   }, [projectId]);
 
@@ -121,7 +136,7 @@ export default function ChatSettingsDialog({
             </button>
           </div>
           <p className="text-sm text-[var(--muted-foreground)] mt-2">
-            Applies to every answer and Studio output in this project. Answers stay grounded in your sources and cite them.
+            Applies to every chat answer in this project. Answers stay grounded in your sources and cite them.
           </p>
         </div>
 
@@ -203,6 +218,30 @@ export default function ChatSettingsDialog({
                   Auto keeps the current behavior, matching the question or source language.
                 </p>
               </div>
+
+              {(models.length > 0 || settings.model) && (
+                <div>
+                  <label htmlFor={modelId} className="block text-sm font-medium mb-2">
+                    Default model
+                  </label>
+                  <select
+                    id={modelId}
+                    value={settings.model ?? ''}
+                    onChange={(event) => update({ model: event.target.value || null })}
+                    className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)] text-sm"
+                  >
+                    <option value="">Server default</option>
+                    {settings.model && !models.some((model) => model.id === settings.model) && (
+                      <option value={settings.model}>Unavailable: {settings.model}</option>
+                    )}
+                    {models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.provider} · {model.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <fieldset>
                 <legend className="text-sm font-medium mb-3">Answer length</legend>

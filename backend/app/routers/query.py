@@ -29,7 +29,7 @@ import uuid
 from app.config import Settings, get_settings
 from app.db.database import get_db
 from app.services.projects import ProjectService
-from app.db.models import Conversation, Message, User
+from app.db.models import Conversation, Message, Project, User
 from app.schemas import (
     ConversationResponse,
     MAX_DOCUMENT_SELECTION,
@@ -55,6 +55,7 @@ from app.services.rate_limit import (
     UnlimitedConcurrencyLease,
 )
 from app.services.global_search import search_visible_projects
+from app.services.llm import available_models, is_model_available
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -112,6 +113,7 @@ class QueryRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=8192, ge=1, le=8192)
     include_sources: bool = True
+    model: Optional[str] = Field(default=None, max_length=300)
     # Omitted means every owned source. An empty list is refused rather than
     # read as "no restriction", which would quietly search everything.
     document_ids: Optional[List[str]] = Field(
@@ -227,6 +229,26 @@ def _resolve_query_scope(db, request, current_user):
     return project_id, conversation, allowed_document_ids
 
 
+def _resolve_query_model(db, request, project_id):
+    """Resolve and validate a question override or its project's model.
+
+    Args:
+        db: Database session.
+        request: Validated query request.
+        project_id: Project id already checked for caller access.
+
+    Returns:
+        The effective model id, or None to use the server default.
+    """
+    model = request.model
+    if model is None and project_id:
+        project = db.get(Project, project_id)
+        model = project.chat_model if project else None
+    if model is not None and not is_model_available(model):
+        raise HTTPException(status_code=422, detail="Model is not available")
+    return model
+
+
 def _acquire_query_lease(settings, request_limiter, concurrency_limiter, user_id):
     lease = UnlimitedConcurrencyLease()
     if settings.rate_limit_enabled:
@@ -235,6 +257,19 @@ def _acquire_query_lease(settings, request_limiter, concurrency_limiter, user_id
         )
         lease = acquire_account_lease(concurrency_limiter, "query", user_id)
     return lease
+
+
+@router.get("/models")
+def list_models():
+    """List the models this server can currently use.
+
+    Args:
+        None.
+
+    Returns:
+        Configured cloud models and pulled Ollama models.
+    """
+    return available_models()
 
 
 @router.post("/search", response_model=ProjectSearchResponse)
@@ -310,6 +345,8 @@ def query(
         project_id, conversation, allowed_document_ids = _resolve_query_scope(
             db, request, current_user
         )
+        model = _resolve_query_model(db, request, project_id)
+        model_kwargs = {"model": model} if model is not None else {}
         conversation_id = request.conversation_id
         lease = _acquire_query_lease(
             settings, request_limiter, concurrency_limiter, current_user.id
@@ -326,7 +363,8 @@ def query(
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
                     include_sources=request.include_sources,
-                    allowed_document_ids=allowed_document_ids
+                    allowed_document_ids=allowed_document_ids,
+                    **model_kwargs,
                 )
             else:
                 # Create new conversation if project is specified
@@ -350,7 +388,8 @@ def query(
                         temperature=request.temperature,
                         max_tokens=request.max_tokens,
                         include_sources=request.include_sources,
-                        allowed_document_ids=allowed_document_ids
+                        allowed_document_ids=allowed_document_ids,
+                        **model_kwargs,
                     )
                 else:
                     result = rag_service.query(
@@ -361,7 +400,8 @@ def query(
                         temperature=request.temperature,
                         max_tokens=request.max_tokens,
                         include_sources=request.include_sources,
-                        allowed_document_ids=allowed_document_ids
+                        allowed_document_ids=allowed_document_ids,
+                        **model_kwargs,
                     )
         finally:
             lease.release()
@@ -402,6 +442,7 @@ def stream_query(
         project_id, conversation, allowed_document_ids = _resolve_query_scope(
             db, request, current_user
         )
+        model = _resolve_query_model(db, request, project_id)
         conversation_id = request.conversation_id
         new_conversation = conversation_id is None and project_id is not None
         if new_conversation:
@@ -427,6 +468,7 @@ def stream_query(
                     max_tokens=request.max_tokens,
                     include_sources=request.include_sources,
                     allowed_document_ids=allowed_document_ids,
+                    **({"model": model} if model is not None else {}),
                 )
                 for event, payload in rag_events:
                     if event == "delta":

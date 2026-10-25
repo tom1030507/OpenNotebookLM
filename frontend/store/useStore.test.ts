@@ -541,6 +541,7 @@ describe('application store', () => {
       signal: controller.signal,
       onToken,
       onComplete,
+      model: 'openai:gpt-5.6',
     });
 
     expect(apiMock.streamQuery).toHaveBeenCalledWith({
@@ -548,6 +549,7 @@ describe('application store', () => {
       query: 'Question',
       conversation_id: 'conversation-1',
       document_ids: undefined,
+      model: 'openai:gpt-5.6',
     }, controller.signal, onToken);
     expect(onToken).toHaveBeenCalledWith('partial ');
     expect(onComplete).toHaveBeenCalledWith(response);

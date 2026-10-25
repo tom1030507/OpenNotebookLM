@@ -20,6 +20,7 @@ from app.routers.auth import get_current_user
 from app.routers.ownership import project_role, require_document, require_project
 from app.services.project_analytics import get_project_analytics
 from app.services.watched_folders import resolve_watched_folder
+from app.services.llm import is_model_available
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -620,6 +621,12 @@ async def update_chat_settings(
 ):
     """Replace the chat settings of one of the caller's projects."""
     project = require_project(db, project_id, current_user, min_role="editor")
+    if (
+        "model" in chat_settings.model_fields_set
+        and chat_settings.model is not None
+        and not is_model_available(chat_settings.model)
+    ):
+        raise HTTPException(status_code=422, detail="Model is not available")
     return ProjectService.update_chat_settings(db, project, chat_settings)
 
 

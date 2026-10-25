@@ -260,7 +260,7 @@ describe('settings with unavailable provider controls', () => {
     expect(screen.queryByLabelText('New personal API key')).toBeNull();
   });
 
-  it('disables the language, model, key and endpoint controls', () => {
+  it('disables configured controls and removes the fake model selector', () => {
     render(<Settings isOpen onClose={() => {}} />);
 
     expect((screen.getByRole('combobox', { name: 'Language' }) as HTMLSelectElement).disabled)
@@ -268,8 +268,7 @@ describe('settings with unavailable provider controls', () => {
 
     openTab('API Keys');
 
-    expect((screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement).disabled)
-      .toBe(true);
+    expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
     expect((screen.getByLabelText('API Key') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText('Endpoint URL') as HTMLInputElement).disabled).toBe(true);
   });

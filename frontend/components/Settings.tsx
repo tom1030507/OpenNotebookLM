@@ -58,7 +58,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const languageSelectId = useId();
   const languageHintId = useId();
   const autoSaveHintId = useId();
-  const modelSelectId = useId();
   const apiKeyId = useId();
   const apiKeyHintId = useId();
   const endpointId = useId();
@@ -426,19 +425,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                       </p>
                     </div>
 
-                    <div>
-                      <label htmlFor={modelSelectId} className="block text-sm mb-2">Model</label>
-                      <select
-                        id={modelSelectId}
-                        disabled
-                        defaultValue="gpt-4"
-                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      >
-                        <option value="gpt-4">GPT-4</option>
-                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                      </select>
-                    </div>
                   </div>
                 </div>
 

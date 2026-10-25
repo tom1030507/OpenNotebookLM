@@ -109,6 +109,7 @@ interface AppState {
       signal?: AbortSignal;
       onToken?: (token: string) => void;
       onComplete?: (response: StreamQueryResponse) => void;
+      model?: string;
     },
   ) => Promise<void>;
   
@@ -1023,6 +1024,7 @@ const useStore = create<AppState>()(
               query,
               conversation_id: conversationId,
               document_ids: selectedSourceIds(get()),
+              ...(options?.model ? { model: options.model } : {}),
             };
             if (stream) {
               const response = await api.streamQuery(request, options?.signal, options?.onToken);

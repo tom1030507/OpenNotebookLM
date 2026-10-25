@@ -89,7 +89,8 @@ class RAGService:
         include_sources: bool = True,
         use_cache: bool = True,
         retrieval_query: Optional[str] = None,
-        allowed_document_ids: Optional[List[str]] = None
+        allowed_document_ids: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Process a query using RAG.
         
@@ -110,6 +111,7 @@ class RAGService:
                 so a question can never reach another account's chunks. An empty
                 list means nothing is searchable; None means no limit, which only
                 callers outside the request path (the eval harness) should use.
+            model: Optional validated provider-qualified model id.
 
         Returns:
             Query response with answer and sources
@@ -133,7 +135,8 @@ class RAGService:
                     include_sources=include_sources,
                     retrieval_query=retrieval_query,
                     allowed_document_ids=allowed_document_ids,
-                    system_prompt=system_prompt
+                    system_prompt=system_prompt,
+                    model=model,
                 )
                 
                 cached_result = cache_service.get_cached_query(
@@ -176,12 +179,15 @@ class RAGService:
             # 3. Generate answer using LLM
             prompt = self._build_prompt(query, context, include_sources)
             
-            answer = self.llm_service.generate(
+            generation = dict(
                 prompt=prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
             )
+            if model is not None:
+                generation["model"] = model
+            answer = self.llm_service.generate(**generation)
             
             response = self._format_answer(answer, context_chunks, include_sources)
             
@@ -205,7 +211,8 @@ class RAGService:
                     include_sources=include_sources,
                     retrieval_query=retrieval_query,
                     allowed_document_ids=allowed_document_ids,
-                    system_prompt=system_prompt
+                    system_prompt=system_prompt,
+                    model=model,
                 )
                 
                 cache_service.cache_query_result(
@@ -296,7 +303,8 @@ class RAGService:
         include_sources: bool = True,
         retrieval_query: Optional[str] = None,
         allowed_document_ids: Optional[List[str]] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> str:
         """Generate a unique cache key for the query.
         
@@ -310,6 +318,7 @@ class RAGService:
             system_prompt: Instructions the answer is generated under; a change
                 to the project's chat settings must not serve an answer
                 written under the old ones.
+            model: Selected provider-qualified model id, if any.
             
         Returns:
             Unique cache key
@@ -339,6 +348,8 @@ class RAGService:
             str(settings.citation_check_enabled),
             str(settings.citation_check_threshold),
         ]
+        if model is not None:
+            key_parts.extend(["model", model])
         key_string = "|".join(key_parts)
         
         # Generate a hash for the key
@@ -1033,6 +1044,7 @@ Question: {query}
         include_sources: bool = True,
         use_cache: bool = True,
         allowed_document_ids: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Iterator[Tuple[str, Any]]:
         """Stream a conversation answer without saving either message.
 
@@ -1047,6 +1059,7 @@ Question: {query}
             include_sources: Whether to keep normalized citations.
             use_cache: Whether to read and write the query cache.
             allowed_document_ids: Hard limit on searchable documents.
+            model: Optional validated provider-qualified model id.
 
         Returns:
             Delta events followed by the fully formatted RAG response.
@@ -1076,6 +1089,7 @@ Question: {query}
                 retrieval_query=retrieval_query,
                 allowed_document_ids=allowed_document_ids,
                 system_prompt=system_prompt,
+                model=model,
             )
             cached_result = cache_service.get_cached_query(
                 project_id=project_id or "global",
@@ -1111,12 +1125,15 @@ Question: {query}
 
         context, context_chunks = self._prepare_grounded_context(relevant_chunks)
         prompt = self._build_prompt(enhanced_query, context, include_sources)
-        llm_events = self.llm_service.stream_generate(
+        generation = dict(
             prompt=prompt,
             temperature=temperature,
             max_tokens=max_tokens,
             system_prompt=system_prompt,
         )
+        if model is not None:
+            generation["model"] = model
+        llm_events = self.llm_service.stream_generate(**generation)
         try:
             for event, value in llm_events:
                 if event == "delta":
@@ -1156,7 +1173,8 @@ Question: {query}
         max_tokens: int = 512,
         include_sources: bool = True,
         use_cache: bool = True,
-        allowed_document_ids: Optional[List[str]] = None
+        allowed_document_ids: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Process a query with conversation context.
         
@@ -1170,6 +1188,7 @@ Question: {query}
             max_tokens: Maximum tokens in response
             include_sources: Whether to include source citations
             allowed_document_ids: Hard limit on searchable documents; see `query`
+            model: Optional validated provider-qualified model id.
 
         Returns:
             Query response with conversation awareness
@@ -1201,7 +1220,8 @@ Current question: {query}"""
             include_sources=include_sources,
             use_cache=use_cache,
             retrieval_query=self._retrieval_query(db, query, conversation_id),
-            allowed_document_ids=allowed_document_ids
+            allowed_document_ids=allowed_document_ids,
+            **({"model": model} if model is not None else {}),
         )
         
         # Save to conversation
