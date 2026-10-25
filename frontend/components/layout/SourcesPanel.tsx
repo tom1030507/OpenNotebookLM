@@ -12,6 +12,7 @@ import {
   Youtube,
   File as FileIcon,
   X,
+  Copy,
   Loader2,
   FolderOpen,
   Eye,
@@ -29,6 +30,8 @@ import {
   requestAddSources,
 } from '../sourceActions';
 import useDialogFocus from '@/hooks/useDialogFocus';
+import ProjectCover from '../ProjectCover';
+import { findProjectCoverColor, projectCoverStyle } from '@/lib/projectCover';
 
 // A source is only "Ready" once the backend can retrieve it, so the states
 // before that need names a reader recognises rather than the raw status word.
@@ -56,6 +59,8 @@ export default function SourcesPanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [projectActionError, setProjectActionError] = useState('');
   const [modalSession, setModalSession] = useState(0);
   const uploadCloseRef = useRef<HTMLButtonElement>(null);
   const uploadDialogRef = useRef<HTMLDivElement>(null);
@@ -90,6 +95,7 @@ export default function SourcesPanel({
     loadingDocuments,
     fetchProjects,
     selectProject,
+    duplicateProject,
     uploadDocument,
     createDocument,
     deleteDocument,
@@ -99,6 +105,20 @@ export default function SourcesPanel({
     setAllSourcesSelected,
   } = useStore();
   const { openProjectDialog } = useProjectDialog();
+
+  const handleDuplicateProject = async () => {
+    if (!currentProject || isDuplicating) return;
+    setIsDuplicating(true);
+    setProjectActionError('');
+    try {
+      const duplicate = await duplicateProject(currentProject.id);
+      if (duplicate) selectProject(duplicate);
+    } catch (error) {
+      setProjectActionError(error instanceof Error ? error.message : 'Failed to duplicate project');
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
 
   useEffect(() => {
     fetchProjects();
@@ -270,30 +290,68 @@ export default function SourcesPanel({
         
         {/* Project Selector */}
         <div className="space-y-2 mb-3">
-          <select
-            aria-label={'Select a project'}
-            value={currentProject?.id || ''}
-            onChange={(e) => {
-              const project = projects.find(p => p.id === e.target.value);
-              if (project) selectProject(project);
-            }}
-            className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
-          >
-            <option value="">Select a project</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            {currentProject && (
+              <ProjectCover
+                emoji={currentProject.cover_emoji}
+                color={currentProject.cover_color}
+                className="w-10 h-10 text-lg"
+              />
+            )}
+            <select
+              aria-label={'Select a project'}
+              value={currentProject?.id || ''}
+              onChange={(e) => {
+                const project = projects.find(p => p.id === e.target.value);
+                if (project) selectProject(project);
+              }}
+              className="min-w-0 flex-1 px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
+            >
+              <option value="">Select a project</option>
+              {projects.map((project) => (
+                <option
+                  key={project.id}
+                  value={project.id}
+                  data-cover-color={findProjectCoverColor(project.cover_color)?.id}
+                  style={projectCoverStyle(project.cover_color)}
+                >
+                  {project.cover_emoji ? `${project.cover_emoji} ` : ''}{project.name}
+                </option>
+              ))}
+            </select>
+          </div>
           
           <button
-            onClick={openProjectDialog}
+            onClick={() => openProjectDialog()}
             className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
           >
             <FolderOpen className="w-4 h-4" />
             <span className="text-sm">New Project</span>
           </button>
+          {currentProject && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => openProjectDialog(currentProject)}
+                className="flex items-center justify-center gap-2 py-2 px-3 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base"
+              >
+                <Pencil className="w-4 h-4" />
+                <span className="text-sm">Edit Project Cover</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateProject}
+                disabled={isDuplicating}
+                className="flex items-center justify-center gap-2 py-2 px-3 border border-[var(--border)] rounded-lg hover:bg-[var(--card)] transition-base disabled:opacity-50"
+              >
+                {isDuplicating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
+                <span className="text-sm">{isDuplicating ? 'Duplicating...' : 'Duplicate Project'}</span>
+              </button>
+              {projectActionError && (
+                <p role="alert" className="col-span-2 text-xs text-red-600 dark:text-red-400">{projectActionError}</p>
+              )}
+            </div>
+          )}
         </div>
         
         {/* Add Source Button */}

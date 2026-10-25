@@ -61,6 +61,31 @@
   --sidebar-border: #3c4043;
 }
 
+.project-cover {
+  background-color: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.project-cover[data-cover-color] {
+  background-color: var(--cover-light-background);
+  color: var(--cover-light-foreground);
+}
+
+option[data-cover-color] {
+  background-color: var(--cover-light-background);
+  color: var(--cover-light-foreground);
+}
+
+[data-theme='dark'] .project-cover[data-cover-color] {
+  background-color: var(--cover-dark-background);
+  color: var(--cover-dark-foreground);
+}
+
+[data-theme='dark'] option[data-cover-color] {
+  background-color: var(--cover-dark-background);
+  color: var(--cover-dark-foreground);
+}
+
 .theme-icon--sun {
   display: none;
 }

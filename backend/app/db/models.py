@@ -36,6 +36,8 @@ class Project(Base):
     chat_role = Column(String)
     chat_instructions = Column(Text)
     answer_length = Column(String)
+    cover_emoji = Column(String)
+    cover_color = Column(String)
     # Generated overview and suggested questions, plus the source ids they were
     # generated from so a changed source set is noticed. See services.project_overview.
     overview_json = Column(JSON)

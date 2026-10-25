@@ -41,6 +41,13 @@ interface AppState {
   fetchProjects: () => Promise<void>;
   selectProject: (project: Project) => void;
   createProject: (name?: string, description?: string) => Promise<Project | null>;
+  updateProject: (id: string, data: {
+    name?: string;
+    description?: string;
+    cover_emoji?: string | null;
+    cover_color?: string | null;
+  }) => Promise<Project | null>;
+  duplicateProject: (id: string) => Promise<Project | null>;
   deleteProject: (id: string) => Promise<void>;
   
   // Actions - Documents
@@ -379,6 +386,40 @@ const useStore = create<AppState>()(
             return project;
           } catch (error) {
             if (isCurrentAccount()) console.error('Failed to create project:', error);
+            throw error;
+          }
+        },
+
+        updateProject: async (id, data) => {
+          const epoch = accountEpoch;
+          try {
+            const project = await api.updateProject(id, data);
+            if (accountEpoch !== epoch) return null;
+            advanceReadGeneration('projects');
+            set((state) => ({
+              projects: state.projects.map((item) => item.id === id ? project : item),
+              currentProject: state.currentProject?.id === id ? project : state.currentProject,
+            }));
+            return project;
+          } catch (error) {
+            if (accountEpoch === epoch) console.error('Failed to update project:', error);
+            throw error;
+          }
+        },
+
+        duplicateProject: async (id) => {
+          const epoch = accountEpoch;
+          try {
+            const project = await api.duplicateProject(id);
+            if (accountEpoch !== epoch) return null;
+            advanceReadGeneration('projects');
+            set((state) => ({
+              projects: [...state.projects, project],
+              loadingProjects: false,
+            }));
+            return project;
+          } catch (error) {
+            if (accountEpoch === epoch) console.error('Failed to duplicate project:', error);
             throw error;
           }
         },
