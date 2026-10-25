@@ -98,6 +98,51 @@ describe('ChatArea', () => {
     expect(useStore.getState().messages).toEqual([]);
   });
 
+  it('resizes the composer for multiline input and keeps the source badge clear', () => {
+    useStore.setState({
+      currentProject: project,
+      projects: [project],
+      documents: [readyDocument],
+    });
+    vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
+      project_name: project.name,
+      overview: null,
+      questions: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+    const composer = screen.getByRole('textbox') as HTMLTextAreaElement;
+    let scrollHeight = 80;
+    Object.defineProperty(composer, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+
+    fireEvent.change(composer, { target: { value: 'First line\nSecond line' } });
+
+    expect(composer.style.height).toBe('80px');
+    expect(composer.style.overflowY).toBe('hidden');
+    expect(composer.className).toContain('pr-20');
+    expect(composer.className).toContain('min-h-[4.5rem]');
+
+    scrollHeight = 100;
+    fireEvent.resize(window);
+
+    expect(composer.style.height).toBe('100px');
+
+    scrollHeight = 220;
+    fireEvent.change(composer, { target: { value: 'A'.repeat(500) } });
+
+    expect(composer.style.height).toBe('160px');
+    expect(composer.style.overflowY).toBe('auto');
+
+    scrollHeight = 60;
+    fireEvent.change(composer, { target: { value: '' } });
+
+    expect(composer.style.height).toBe('60px');
+    expect(composer.style.overflowY).toBe('hidden');
+    expect(composer.className).not.toContain('pr-20');
+  });
+
   describe('mind map question handoff', () => {
     beforeEach(() => {
       useStore.setState({
