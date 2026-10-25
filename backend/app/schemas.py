@@ -411,6 +411,24 @@ class YouTubeUploadRequest(BaseModel):
     title: Optional[str] = None
 
 
+class URLBatchUploadRequest(BaseModel):
+    """URLs submitted together from the source dialog."""
+    urls: List[str] = Field(..., min_length=1, max_length=50)
+
+
+class URLBatchUploadFailure(BaseModel):
+    """One URL that could not be added by a batch upload."""
+    url: str
+    message: str
+
+
+class URLBatchUploadResponse(BaseModel):
+    """Per-source result for a URL or playlist batch."""
+    documents: List[FileUploadResponse] = Field(default_factory=list)
+    failures: List[URLBatchUploadFailure] = Field(default_factory=list)
+    truncated: bool = False
+
+
 def _not_blank(value: str) -> str:
     """Strip a required string and refuse one that is only whitespace.
 

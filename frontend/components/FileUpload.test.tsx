@@ -83,6 +83,34 @@ describe('FileUpload', () => {
     await waitFor(() => expect(onUpload).toHaveBeenCalledWith(['https://one.example/page']));
   });
 
+  it('imports URLs line by line and keeps only failed sources for retry', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      allowed_file_types: ['pdf'],
+      max_file_size_mb: 23,
+      max_text_characters: 462000,
+    })));
+    const onUpload = vi.fn().mockResolvedValue({
+      documents: [{ doc_id: 'doc-1', status: 'queued', message: 'added' }],
+      failures: [{ url: 'https://bad.example/page', message: 'Blocked URL' }],
+      truncated: false,
+    });
+    render(<FileUpload onUpload={onUpload} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'URL' }));
+    const textarea = screen.getByLabelText('Source URLs') as HTMLTextAreaElement;
+    fireEvent.change(textarea, {
+      target: { value: 'https://good.example/page\nhttps://bad.example/page' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    expect(await screen.findByText('https://bad.example/page: Blocked URL')).toBeTruthy();
+    expect(onUpload).toHaveBeenCalledWith([
+      'https://good.example/page',
+      'https://bad.example/page',
+    ]);
+    expect(textarea.value).toBe('https://bad.example/page');
+  });
+
   it('shows the server detail when a file upload fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       allowed_file_types: ['pdf'],

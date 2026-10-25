@@ -56,16 +56,30 @@ test('uploads, indexes, previews, and removes a PDF source', async ({ api, page 
 test('imports, searches, and removes a controlled URL source', async ({ api, page }, testInfo) => {
   const { project } = await setupWorkspace(api, page, testInfo, 'url-source');
   const dialog = await openAddSourceDialog(page);
+  const safeUrl = 'https://1.1.1.1/observatory';
+  const blockedUrl = 'http://127.0.0.1/blocked';
   await dialog.getByRole('button', { name: 'URL', exact: true }).click();
-  await dialog.getByPlaceholder('Enter website URL...').fill('https://e2e.invalid/observatory');
+  await dialog.getByLabel('Source URLs').fill(`${safeUrl}\n${blockedUrl}`);
   const importResponse = page.waitForResponse(
-    (response) => response.url().endsWith(`/api/projects/${project.id}/upload-url`)
+    (response) => response.url().endsWith(`/api/projects/${project.id}/upload-batch`)
       && response.request().method() === 'POST',
   );
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   const imported = await importResponse;
   expect(imported.status()).toBe(200);
-  const { doc_id: documentId } = await imported.json() as { doc_id: string };
+  const { documents, failures } = await imported.json() as {
+    documents: Array<{ doc_id: string }>;
+    failures: Array<{ url: string; message: string }>;
+  };
+  const documentId = documents[0].doc_id;
+  expect(failures).toEqual([{
+    url: blockedUrl,
+    message: 'URL destination must be globally routable',
+  }]);
+  await expect(dialog.getByLabel('Source URLs')).toHaveValue(blockedUrl);
+  await expect(dialog.getByText(`${blockedUrl}: URL destination must be globally routable`))
+    .toBeVisible();
+  await dialog.getByRole('button', { name: 'Close add sources dialog' }).click();
 
   await api.waitForDocumentReady(documentId);
   const title = 'E2E Observatory Field Notes';
@@ -165,13 +179,16 @@ test('imports a controlled YouTube transcript and reaches ready', async ({ api, 
     'https://www.youtube.com/watch?v=e2eOrbit7319',
   );
   const importResponse = page.waitForResponse(
-    (response) => response.url().endsWith(`/api/projects/${project.id}/upload-youtube`)
+    (response) => response.url().endsWith(`/api/projects/${project.id}/upload-batch`)
       && response.request().method() === 'POST',
   );
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   const imported = await importResponse;
   expect(imported.status()).toBe(200);
-  const { doc_id: documentId } = await imported.json() as { doc_id: string };
+  const { documents } = await imported.json() as {
+    documents: Array<{ doc_id: string }>;
+  };
+  const documentId = documents[0].doc_id;
 
   await api.waitForDocumentReady(documentId);
   const row = sourceRow(page, 'YouTube: e2eOrbit7319');

@@ -13,11 +13,15 @@ import {
   FileText,
   Loader2,
 } from 'lucide-react';
-import api, { type UploadConfig, type WebDiscoveryResult } from '@/lib/api';
+import api, {
+  type UploadConfig,
+  type URLBatchUploadResponse,
+  type WebDiscoveryResult,
+} from '@/lib/api';
 import { getTextContentError, getUploadFileError } from '@/lib/uploadValidation';
 
 interface FileUploadProps {
-  onUpload: (files: File[] | string[]) => Promise<void>;
+  onUpload: (files: File[] | string[]) => Promise<void | URLBatchUploadResponse>;
   multiple?: boolean;
   onUploadingChange?: (isUploading: boolean) => void;
   onAddText?: (title: string, text: string) => Promise<void>;
@@ -79,6 +83,30 @@ export default function FileUpload({
     uploadInFlightRef.current = false;
     setIsUploading(false);
     onUploadingChange?.(false);
+  };
+
+  const applyBatchResult = (
+    result: void | URLBatchUploadResponse,
+  ) => {
+    if (!result) {
+      setErrors([]);
+      return [];
+    }
+    const failedUrls = result.failures.map((failure) => failure.url);
+    setErrors([
+      ...result.failures.map((failure) => `${failure.url}: ${failure.message}`),
+      ...(result.truncated ? ['The import was limited to 50 sources. Some playlist entries were not added.'] : []),
+    ]);
+    return failedUrls;
+  };
+
+  const getEnteredUrls = () => {
+    const urls = urlInput.split(/\r?\n/).map((url) => url.trim()).filter(Boolean);
+    if (!urls.length || urls.length > 50) {
+      setErrors([urls.length ? 'Please enter no more than 50 URLs per import.' : 'Please enter at least one URL']);
+      return null;
+    }
+    return urls;
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -157,24 +185,14 @@ export default function FileUpload({
   const handleUrlSubmit = async () => {
     if (isUploading || uploadInFlightRef.current) return;
 
-    if (!urlInput.trim()) {
-      setErrors(['Please enter a valid URL']);
-      return;
-    }
-
-    try {
-      new URL(urlInput);
-    } catch {
-      setErrors(['Please enter a valid URL']);
-      return;
-    }
+    const urls = getEnteredUrls();
+    if (!urls) return;
 
     if (!startUpload()) return;
 
     try {
-      await onUpload([urlInput]);
-      setUrlInput('');
-      setErrors([]);
+      const result = await onUpload(urls);
+      setUrlInput(applyBatchResult(result).join('\n'));
     } catch (error) {
       setErrors([error instanceof Error ? error.message : 'Upload failed. Please check the URL and try again.']);
     } finally {
@@ -233,9 +251,10 @@ export default function FileUpload({
   const handleImportDiscovered = async () => {
     if (!selectedUrls.length || !startUpload()) return;
     try {
-      await onUpload(selectedUrls);
-      setSelectedUrls([]);
-      setDiscoverResults([]);
+      const result = await onUpload(selectedUrls);
+      const failedUrls = applyBatchResult(result);
+      setSelectedUrls(failedUrls);
+      if (!failedUrls.length) setDiscoverResults([]);
     } catch (error) {
       setErrors([error instanceof Error ? error.message : 'Import failed. Please try again.']);
     } finally {
@@ -246,10 +265,14 @@ export default function FileUpload({
   const handleUploadFiles = async () => {
     if (isUploading || uploadInFlightRef.current) return;
 
-    if (files.length === 0 && !urlInput) {
+    if (files.length === 0 && !urlInput.trim()) {
       setErrors(['Please select files or enter a URL']);
       return;
     }
+    const urls = uploadType === 'url' || uploadType === 'youtube'
+      ? getEnteredUrls()
+      : [];
+    if (!urls) return;
 
     if (!startUpload()) return;
 
@@ -257,11 +280,11 @@ export default function FileUpload({
       if (uploadType === 'file' && files.length > 0) {
         await onUpload(files);
         setFiles([]);
-      } else if ((uploadType === 'url' || uploadType === 'youtube') && urlInput) {
-        await onUpload([urlInput]);
-        setUrlInput('');
+        setErrors([]);
+      } else if ((uploadType === 'url' || uploadType === 'youtube') && urlInput.trim()) {
+        const result = await onUpload(urls);
+        setUrlInput(applyBatchResult(result).join('\n'));
       }
-      setErrors([]);
     } catch (error) {
       setErrors([error instanceof Error ? error.message : 'Upload failed. Please try again.']);
     } finally {
@@ -500,24 +523,20 @@ export default function FileUpload({
       {/* URL Input Area */}
       {(uploadType === 'url' || uploadType === 'youtube') && (
         <div className="border border-[var(--input)] rounded-lg p-4">
-          <div className="flex gap-2">
-            <input
-              type="text"
+          <div className="space-y-2">
+            <textarea
+              aria-label="Source URLs"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder={
-                uploadType === 'youtube'
-                  ? 'Enter YouTube URL...'
-                  : 'Enter website URL...'
-              }
-              className="flex-1 px-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:border-[var(--ring)]"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void handleUrlSubmit();
-                }
-              }}
+              placeholder={uploadType === 'youtube'
+                ? 'Enter YouTube URL...'
+                : 'Enter website URL...'}
+              rows={4}
+              className="w-full px-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:border-[var(--ring)]"
             />
+            <p className="text-xs text-[var(--muted-foreground)]">
+              Enter one URL per line. Playlists import up to 50 videos.
+            </p>
             <button
               onClick={() => void handleUrlSubmit()}
               disabled={!urlInput.trim() || isUploading}
@@ -570,7 +589,7 @@ export default function FileUpload({
       )}
 
       {/* Upload Button */}
-      {(files.length > 0 || (urlInput && (uploadType === 'url' || uploadType === 'youtube'))) && (
+      {(files.length > 0 || (urlInput.trim() && (uploadType === 'url' || uploadType === 'youtube'))) && (
         <button
           onClick={handleUploadFiles}
           disabled={isUploading || isValidating}
@@ -584,7 +603,7 @@ export default function FileUpload({
           ) : (
             <>
               <Upload className="w-4 h-4" />
-              Upload {uploadType === 'file' ? `${files.length} file(s)` : 'URL'}
+              Upload {uploadType === 'file' ? `${files.length} file(s)` : 'URLs'}
             </>
           )}
         </button>

@@ -412,6 +412,10 @@ class TestSharedProjectSourceRoles:
         project_id = make_project(env.alice)
         production_app.dependency_overrides[get_document_service] = lambda: FakeDocumentService()
         monkeypatch.setattr("app.routers.ingest.settings.enable_yt_transcription", True)
+        monkeypatch.setattr(
+            "app.services.batch_ingestion.validate_public_http_url",
+            lambda url: url,
+        )
 
         def upload_statuses(client):
             base = "/api/projects/%s" % project_id
@@ -429,19 +433,23 @@ class TestSharedProjectSourceRoles:
                     json={"youtube_url": "https://www.youtube.com/watch?v=video"},
                 ).status_code,
                 client.post(
+                    "%s/upload-batch" % base,
+                    json={"urls": ["https://example.com"]},
+                ).status_code,
+                client.post(
                     "%s/upload-text" % base,
                     json={"title": "Shared notes", "text": "Source text"},
                 ).status_code,
             ]
 
-        assert upload_statuses(env.bob) == [404, 404, 404, 404]
+        assert upload_statuses(env.bob) == [404, 404, 404, 404, 404]
         membership = grant_project_role(env, project_id, "viewer")
-        assert upload_statuses(env.bob) == [404, 404, 404, 404]
+        assert upload_statuses(env.bob) == [404, 404, 404, 404, 404]
 
         membership.role = "editor"
         env.session.commit()
-        assert upload_statuses(env.bob) == [200, 200, 200, 200]
-        assert upload_statuses(env.alice) == [200, 200, 200, 200]
+        assert upload_statuses(env.bob) == [200, 200, 200, 200, 200]
+        assert upload_statuses(env.alice) == [200, 200, 200, 200, 200]
 
     def test_viewer_can_read_project_source_and_file(self, env, tmp_path, monkeypatch):
         project_id = make_project(env.alice)
@@ -911,6 +919,13 @@ class TestIngestIsolation:
             json={"url": "https://example.com"})
 
         assert response.status_code == 404
+
+        batch_response = env.bob.post(
+            "/api/projects/%s/upload-batch" % project_id,
+            json={"urls": ["https://example.com"]},
+        )
+
+        assert batch_response.status_code == 404
 
     def test_uploading_a_video_into_someone_elses_project_is_not_found(self, env):
         project_id = make_project(env.alice)
