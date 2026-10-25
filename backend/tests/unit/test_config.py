@@ -198,6 +198,18 @@ def test_public_registration_defaults_to_development_only():
     assert Settings(app_env="production").allow_public_registration is False
 
 
+def test_admin_email_allowlist_and_cost_estimate_parse():
+    """Operators can configure normalized admin addresses and the blended rate."""
+    settings = Settings(
+        _env_file=None,
+        admin_emails=" Admin@example.com, second@example.com ",
+        estimated_cost_per_1k_tokens_usd=0.004,
+    )
+
+    assert settings.admin_emails_list == ["admin@example.com", "second@example.com"]
+    assert settings.estimated_cost_per_1k_tokens_usd == 0.004
+
+
 def test_web_search_is_off_by_default_and_enables_only_with_provider_settings(monkeypatch):
     """Search stays hidden until the chosen provider has its required setting."""
     for variable in (

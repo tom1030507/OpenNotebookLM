@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 import structlog
 
 from app.config import get_settings
+from app.services.admin_usage import record_llm_usage
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -786,6 +787,7 @@ class LLMService:
             if json_mode and isinstance(self.provider, OpenAICompatibleProvider):
                 request["json_mode"] = True
             result = self.provider.generate(**request)
+            record_llm_usage(result.get("usage"))
             logger.info(
                 "LLM generation completed",
                 provider=self.provider.name,

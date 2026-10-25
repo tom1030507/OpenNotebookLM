@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.models import AudioOverview, Project
 from app.schemas import StudioOptions
 from app.services.llm import LLMService
+from app.services.admin_usage import capture_llm_usage
 from app.services.studio_options import with_studio_options
 from app.services.source_digest import document_excerpt, project_documents
 from app.utils.time import ordered_utc_now
@@ -359,12 +360,13 @@ class AudioOverviewService:
             ):
                 raise ValueError("Selected project sources are no longer available")
 
-            script = self.build_script(
-                project.name,
-                documents,
-                options,
-                project.output_language or "auto",
-            )
+            with capture_llm_usage() as usage:
+                script = self.build_script(
+                    project.name,
+                    documents,
+                    options,
+                    project.output_language or "auto",
+                )
             if not script:
                 raise ValueError(NO_SOURCE_TEXT_MESSAGE)
             updated = db.execute(
@@ -373,7 +375,11 @@ class AudioOverviewService:
                     AudioOverview.id == overview_id,
                     AudioOverview.status == "running",
                 )
-                .values(script_json=script, updated_at=ordered_utc_now())
+                .values(
+                    script_json=script,
+                    token_count=usage.token_count,
+                    updated_at=ordered_utc_now(),
+                )
             )
             db.commit()
             if updated.rowcount != 1:

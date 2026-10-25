@@ -8,6 +8,7 @@ import structlog
 from app.config import get_settings
 from app.db.database import SessionLocal, init_db
 from app.services.auth import get_auth_service
+from app.services.admin_usage import sync_admin_users
 from app.services.bootstrap import ensure_demo_account
 from app.services.audio_overview_jobs import AudioOverviewWorker
 from app.services.ingestion_jobs import IngestionJobWorker
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
             email=settings.demo_email,
             password=settings.demo_password,
         )
+        sync_admin_users(db, settings.admin_emails_list)
     if demo_account is not None:
         # Warning, not info: this deployment publishes working credentials on
         # its sign-in page, and that belongs somewhere an operator will see it.

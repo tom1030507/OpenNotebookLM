@@ -140,6 +140,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 720
     allow_public_registration: Optional[bool] = None
+    # Removing an address from this list on restart revokes its admin role.
+    admin_emails: str = ""
+    estimated_cost_per_1k_tokens_usd: float = Field(default=0.002, ge=0)
 
     # A demo account the deployment keeps present so a fresh database is not a
     # locked door. Its credentials are published on the sign-in page, so any
@@ -255,6 +258,22 @@ class Settings(BaseSettings):
     def allowed_file_types_list(self) -> List[str]:
         """Parse allowed file types from comma-separated string."""
         return [ext.strip() for ext in self.allowed_file_types.split(",")]
+
+    @property
+    def admin_emails_list(self) -> List[str]:
+        """Return normalized configured admin addresses.
+
+        Args:
+            None.
+
+        Returns:
+            Lowercase, whitespace-trimmed addresses from `ADMIN_EMAILS`.
+        """
+        return [
+            email.strip().casefold()
+            for email in self.admin_emails.split(",")
+            if email.strip()
+        ]
     
     @property
     def max_file_size_bytes(self) -> int:

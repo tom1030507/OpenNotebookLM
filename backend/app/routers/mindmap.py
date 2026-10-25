@@ -22,6 +22,7 @@ from app.routers.auth import get_current_user
 from app.routers.ownership import require_documents, require_project
 from app.schemas import MindMapResponse, StudioSourceSelection
 from app.services.mindmap import MindMapService
+from app.services.admin_usage import track_studio_generation
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -82,4 +83,5 @@ def project_mindmap(
             db, selection.document_ids, current_user, project_id=project_id
         )
 
-    return service.generate(db, project, document_ids, selection)
+    with track_studio_generation(db, current_user.id):
+        return service.generate(db, project, document_ids, selection)

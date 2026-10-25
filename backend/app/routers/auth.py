@@ -123,6 +123,7 @@ async def register(
     user_data: UserRegister,
     db: Session = Depends(get_db),
     auth_service: AuthService = Depends(get_auth_service),
+    settings: Settings = Depends(get_settings),
 ):
     """Register a new account when public enrollment is enabled.
 
@@ -130,17 +131,23 @@ async def register(
         user_data: Validated username, email, and password.
         db: Database session.
         auth_service: Account/password service.
+        settings: Configured administrator email allowlist.
 
     Returns:
         Created account without password material.
     """
     try:
-        return auth_service.register_user(
+        user = auth_service.register_user(
             db,
             username=user_data.username,
             email=user_data.email,
             password=user_data.password,
         )
+        if user.email.casefold() in settings.admin_emails_list:
+            user.is_admin = True
+            db.commit()
+            db.refresh(user)
+        return user
     except DuplicateUserError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except ValueError as exc:

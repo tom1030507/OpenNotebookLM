@@ -1180,6 +1180,49 @@ class ProjectAnalyticsResponse(BaseModel):
     uncited_sources: List[ProjectAnalyticsUncitedSource]
 
 
+class AdminUsageDay(BaseModel):
+    """Distinct active accounts on one UTC calendar date or week."""
+    date: str
+    user_count: int
+
+
+class AdminUsageWeek(BaseModel):
+    """Distinct active accounts in a UTC week beginning on Monday."""
+    week_start: str
+    user_count: int
+
+
+class AdminUsageUser(BaseModel):
+    """One account's usage in the window and current source storage snapshot."""
+    user_id: Optional[str] = None
+    username: str
+    email: Optional[str] = None
+    queries: int
+    studio_generations: int
+    tokens: int
+    estimated_cost_usd: float
+    storage_bytes: int
+
+
+class AdminUsageTotals(BaseModel):
+    """Server-wide totals; storage bytes are a current snapshot."""
+    users: int
+    queries: int
+    studio_generations: int
+    tokens: int
+    estimated_cost_usd: float
+    storage_bytes: int
+
+
+class AdminUsageResponse(BaseModel):
+    """Server-wide account activity and usage available to administrators."""
+    days: Literal[7, 30, 90]
+    active_users_by_day: List[AdminUsageDay]
+    active_users_by_week: List[AdminUsageWeek]
+    totals: AdminUsageTotals
+    users: List[AdminUsageUser]
+
+
 class ProjectOverviewResponse(BaseModel):
     """Schema for a project's generated overview and suggested questions."""
     project_name: str
