@@ -296,6 +296,45 @@ describe('API client', () => {
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
   });
 
+  it('fetches selected flashcards with count and focus', async () => {
+    const options = { document_ids: ['doc-1'], count: 7, focus: 'key ideas' };
+    const response = {
+      project_id: 'project-1', project_name: 'Research',
+      generated_at: '2026-10-25T00:00:00Z', model_used: 'test-model',
+      items: [{ front: 'Term', back: 'Meaning', document_id: 'doc-1' }],
+      sources: [{ document_id: 'doc-1', title: 'Paper', excerpt: 'Source excerpt.' }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.fetchProjectFlashcards('project-1', options)).resolves.toEqual(response);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/flashcards');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(options);
+  });
+
+  it('fetches selected quiz questions with count and focus', async () => {
+    const options = { document_ids: ['doc-1'], count: 9, focus: 'definitions' };
+    const response = {
+      project_id: 'project-1', project_name: 'Research',
+      generated_at: '2026-10-25T00:00:00Z', model_used: 'test-model',
+      items: [{
+        question: 'Which term?', options: ['A', 'B', 'C', 'D'], answer_index: 1,
+        explanation: 'The source says B.', document_id: 'doc-1',
+      }],
+      sources: [{ document_id: 'doc-1', title: 'Paper', excerpt: 'Source excerpt.' }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.fetchProjectQuiz('project-1', options)).resolves.toEqual(response);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/quiz');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(options);
+  });
+
   it('exports the current video summary scenes as a PowerPoint blob', async () => {
     const scenes = [{
       id: 'title',

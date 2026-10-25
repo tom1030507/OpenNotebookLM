@@ -81,6 +81,7 @@ export default function useDialogFocus({
       if (dialogStack.at(-1) !== dialogId) return;
 
       if (event.key === 'Escape' && dismissibleRef.current) {
+        if (event.defaultPrevented) return;
         event.preventDefault();
         onCloseRef.current();
         return;

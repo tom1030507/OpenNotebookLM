@@ -14,6 +14,7 @@ import SourcesPanel from './layout/SourcesPanel';
 import ProjectDialog from './ProjectDialog';
 import Settings from './Settings';
 import ProjectDialogProvider from './ProjectDialogProvider';
+import StudyToolsDialog from './StudyToolsDialog';
 import useStore from '@/store/useStore';
 import api from '@/lib/api';
 import LoginPage from '@/app/login/page';
@@ -226,6 +227,22 @@ describe('workspace accessibility contract', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('gives study tools a named modal and closes it with Escape', () => {
+    const onClose = vi.fn();
+    render(<StudyToolsDialog
+      projectId="project-1"
+      mode="flashcards"
+      documentIds={[]}
+      onClose={onClose}
+    />);
+
+    const dialog = screen.getByRole('dialog', { name: 'Flashcards' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('keeps settings open while saving when Escape is pressed', () => {

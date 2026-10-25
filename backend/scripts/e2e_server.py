@@ -92,19 +92,25 @@ def install_fast_overrides(application: Any) -> None:
         None.
     """
     from app.adapters.pdf import PDFAdapter
+    from app.config import get_settings
     from app.routers.ingest import get_document_service
     from app.routers.query import get_rag_service
+    from app.routers.study import get_study_service
     from app.services.chunking import ChunkingService
     from app.services.documents import DocumentService
     from app.services.llm import LLMService
     from app.services.rag import RAGService
+    from app.services.study import StudyService
     from scripts.e2e_services import (
+        DeterministicStudyLLM,
         DeterministicEmbeddingService,
         FixedURLAdapter,
         FixedYouTubeAdapter,
     )
 
-    embedding = DeterministicEmbeddingService()
+    embedding = DeterministicEmbeddingService(
+        dimensions=get_settings().emb_dimension
+    )
     document_service = DocumentService(
         chunking_service=ChunkingService(),
         embedding_service=embedding,
@@ -116,6 +122,7 @@ def install_fast_overrides(application: Any) -> None:
         embedding_service=embedding,
         llm_service=LLMService(),
     )
+    study_service = StudyService(llm_service=DeterministicStudyLLM())
 
     def process_ingestion_job(db: Any, job: Any) -> str:
         """Run durable E2E jobs through the deterministic document graph.
@@ -136,6 +143,7 @@ def install_fast_overrides(application: Any) -> None:
 
     application.dependency_overrides[get_document_service] = lambda: document_service
     application.dependency_overrides[get_rag_service] = lambda: rag_service
+    application.dependency_overrides[get_study_service] = lambda: study_service
     application.state.ingestion_job_processor = process_ingestion_job
 
 

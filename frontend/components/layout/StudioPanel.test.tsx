@@ -106,6 +106,19 @@ afterEach(() => {
 });
 
 describe('StudioPanel', () => {
+  it('opens flashcards and quiz from More options', async () => {
+    render(<StudioPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /More options/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Flashcards' }));
+    expect(await screen.findByRole('dialog', { name: 'Flashcards' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close study tools' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /More options/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Practice quiz' }));
+    expect(await screen.findByRole('dialog', { name: 'Practice quiz' })).toBeTruthy();
+  });
+
   it('uses non-submit controls for every generation action', () => {
     render(<StudioPanel />);
 

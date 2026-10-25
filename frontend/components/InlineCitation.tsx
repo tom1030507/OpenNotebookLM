@@ -53,7 +53,10 @@ export default function InlineCitation({ id, citation }: { id: number; citation:
     if (!open) return;
     const dismiss = () => setOpen(false);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dismiss();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        dismiss();
+      }
     };
     const onPointerDown = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
@@ -63,12 +66,12 @@ export default function InlineCitation({ id, citation }: { id: number; citation:
       if (event.target instanceof Node && previewRef.current?.contains(event.target)) return;
       dismiss();
     };
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('resize', dismiss);
     window.addEventListener('scroll', onScroll, true);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('resize', dismiss);
       window.removeEventListener('scroll', onScroll, true);

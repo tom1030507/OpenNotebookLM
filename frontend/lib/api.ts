@@ -232,6 +232,44 @@ export interface VideoSummary {
   scenes: VideoScene[];
 }
 
+export interface StudyGenerationOptions {
+  document_ids?: string[];
+  count: number;
+  focus?: string;
+}
+
+export interface StudySource {
+  document_id: string;
+  title: string;
+  excerpt: string;
+}
+
+export interface Flashcard {
+  front: string;
+  back: string;
+  document_id: string;
+}
+
+export interface QuizQuestion {
+  question: string;
+  options: [string, string, string, string];
+  answer_index: number;
+  explanation: string;
+  document_id: string;
+}
+
+export interface StudyResponse<T> {
+  project_id: string;
+  project_name: string;
+  generated_at: string;
+  model_used: string;
+  items: T[];
+  sources: StudySource[];
+}
+
+export type FlashcardsResponse = StudyResponse<Flashcard>;
+export type QuizResponse = StudyResponse<QuizQuestion>;
+
 export type AudioOverviewFormat = 'deep_dive' | 'brief' | 'critique' | 'debate';
 export type AudioOverviewLength = 'short' | 'default';
 
@@ -1032,6 +1070,26 @@ const api = {
       `/projects/${projectId}/video-summary`,
       studioRequest(documentIds),
     );
+  },
+
+  fetchProjectFlashcards(
+    projectId: string,
+    options: StudyGenerationOptions,
+  ): Promise<FlashcardsResponse> {
+    return requestJson<FlashcardsResponse>(`/projects/${projectId}/flashcards`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
+  },
+
+  fetchProjectQuiz(
+    projectId: string,
+    options: StudyGenerationOptions,
+  ): Promise<QuizResponse> {
+    return requestJson<QuizResponse>(`/projects/${projectId}/quiz`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
   },
 
   listAudioOverviews(projectId: string): Promise<AudioOverviewList> {
