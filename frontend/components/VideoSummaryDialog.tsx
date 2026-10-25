@@ -4,6 +4,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Download,
+  Loader2,
   Pause,
   Play,
   SkipBack,
@@ -12,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
+import api from '@/lib/api';
 import type { VideoSummary } from '@/lib/api';
 import { isSpeechSupported, speakText, stopSpeaking } from '@/lib/speech';
 import {
@@ -63,6 +65,8 @@ export default function VideoSummaryDialog({
   const [withinScene, setWithinScene] = useState(0);
   const [narrating, setNarrating] = useState(() => isSpeechSupported());
   const [narrationFailed, setNarrationFailed] = useState(false);
+  const [isExportingPptx, setIsExportingPptx] = useState(false);
+  const [pptxError, setPptxError] = useState<string | null>(null);
 
   // Identifies the playback in progress. Anything that ends it retires the run,
   // so a promise or timer that settles afterwards cannot advance a scene the
@@ -70,7 +74,13 @@ export default function VideoSummaryDialog({
   // which would otherwise turn every pause into a skip.
   const run = useRef(0);
 
-  useDialogFocus({ isOpen: true, onClose, dialogRef, initialFocusRef: closeRef });
+  useDialogFocus({
+    isOpen: true,
+    onClose,
+    dismissible: !isExportingPptx,
+    dialogRef,
+    initialFocusRef: closeRef,
+  });
 
   const scene = scenes[index];
 
@@ -151,6 +161,29 @@ export default function VideoSummaryDialog({
     URL.revokeObjectURL(url);
   };
 
+  const downloadPptx = async () => {
+    setIsExportingPptx(true);
+    setPptxError(null);
+    try {
+      const blob = await api.exportProjectVideoSummaryPptx(summary.project_id, scenes);
+      const url = URL.createObjectURL(blob);
+      const filename = summary.project_name
+        .replace(/[\\/<>:"|?*\u0000-\u001f\u007f]+/g, '_')
+        .replace(/^[. ]+|[. ]+$/g, '') || 'video-summary';
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filename}.pptx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      setPptxError('Could not export the PowerPoint. Please try again.');
+    } finally {
+      setIsExportingPptx(false);
+    }
+  };
+
   // Portalled to the body rather than left inside the Studio panel. The mobile
   // Studio drawer slides in with a transform, and a transformed ancestor becomes
   // the containing block for `position: fixed` — which would pin this dialog to
@@ -184,17 +217,37 @@ export default function VideoSummaryDialog({
               <Download className="w-4 h-4" />
             </button>
             <button
+              type="button"
+              onClick={downloadPptx}
+              aria-label="Download .pptx"
+              title="Download .pptx"
+              disabled={isExportingPptx}
+              className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs hover:bg-[var(--muted)] disabled:opacity-50 rounded-lg transition-base"
+            >
+              {isExportingPptx
+                ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" />
+                : <Download aria-hidden="true" className="w-4 h-4" />}
+              <span>{isExportingPptx ? 'Preparing…' : 'Download .pptx'}</span>
+            </button>
+            <button
               ref={closeRef}
               type="button"
               onClick={onClose}
               aria-label="Close video summary dialog"
               title="Close video summary dialog"
+              disabled={isExportingPptx}
               className="p-2 hover:bg-[var(--muted)] rounded-lg transition-base"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
+
+        {pptxError && (
+          <p role="alert" className="px-4 pt-3 text-sm text-[var(--error)]">
+            {pptxError}
+          </p>
+        )}
 
         {!scene ? (
           <div className="p-6">
