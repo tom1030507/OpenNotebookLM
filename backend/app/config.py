@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     db_path: str = "./data/opennotebook.db"
     database_url: str = "sqlite:///./data/opennotebook.db"
     ingestion_worker_concurrency: int = Field(default=1, ge=1, le=16)
+    # Compose reads this same .env key; declare it so strict settings validation accepts it.
+    watched_folder_host_path: Optional[str] = None
     watched_folder_root: Optional[str] = None
     
     # Embedding
