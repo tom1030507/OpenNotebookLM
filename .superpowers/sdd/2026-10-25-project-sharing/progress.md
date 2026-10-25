@@ -1,0 +1,20 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-10-25-project-sharing.md
+
+Base: b1b0521 (origin/master after PR #140)
+
+Pre-flight: Task 1 produces ProjectMember, project_role/require_project, project-aware document helpers, and Conversation.user_id. Task 2 consumes role resolution for member operations and project response roles; Task 3 consumes project/document minimum roles; Task 4 consumes conversation/document scoping; Task 5 consumes project-scoped document selections; Task 6 consumes the role and member API; all interfaces align with the design. Task 3 and Task 5 both extend test_user_isolation.py sequentially; no conflicting implementation boundary.
+
+Ruling: Viewer writes return 404 — the issue permits 404 or 403 and the current ownership contract hides restricted resources — cost if wrong: callers cannot distinguish a role denial from a missing project.
+Ruling: Legacy Conversation.user_id=NULL belongs to the project's owner — only owners could create conversations before sharing — cost if wrong: legacy rows might be visible to the wrong account or disappear from the actual creator's history.
+Ruling: Direct document rename/delete remains document-owner-only; editors can add/remove links — the permission table grants source-link changes but not mutation of another account's document — cost if wrong: editors may need an explicit rename permission later.
+Ruling: Project exports are viewer-level and include linked source metadata, but no notes and only the caller's conversations — project contents are readable to all members while conversations are private — cost if wrong: export users may expect notes or shared conversation details, which this design intentionally withholds.
+Ruling: Cache invalidation requires editor role — it is a project-scoped side effect and viewers are read-only — cost if wrong: a viewer with a legitimate cache-recovery need must ask an editor.
+Ruling: Deleting a saved shared audio overview requires editor role; all roles may create and read Studio outputs — generation is part of Studio access, while deletion can remove a shared artifact — cost if wrong: viewers may expect to delete outputs they generated.
+
+Builder check: questioned export role/scope; resolved as above. Reviewer reported no other material planning questions.
+
+Baseline: frontend `npm test -- --run` 554 passed; `npm run lint` passed; `npm run build` and `npm run typecheck` passed. Backend full baseline first hit bind-mount permission (fixed with `--user 0:0`); the available image is missing `python-pptx==1.0.2` although it is in backend/requirements.txt. Retrying in a disposable container with that requirement installed.
+Backend baseline (complete): disposable `opennotebooklm-backend:issue-104-test` with the exact missing `python-pptx==1.0.2`, `kokoro==0.9.4`, `preshed==3.0.9`, and `en-core-web-sm==3.8.0` passed the existing full suite: 1180 passed, 2 skipped. The base image was stale; no repository fix is needed.
+
+Task 1: in_progress. RED verified after adding the ownership and schema-upgrade tests: 6 failed, 4 passed. Failures identify absent project role/model, document-scope parameters, conversation creator column, and the old-database migration.
+Task 1: complete (commits b1b0521..1d7c7f7, tests: docker run --rm -v /home/tom1030507/OpenNotebookLM/.worktrees/issue-104:/src -w /src/backend -e DB_PATH=/tmp/issue104-task1.db -e DATABASE_URL=sqlite:////tmp/issue104-task1.db --entrypoint sh opennotebooklm-backend:issue-104-test -lc 'python -m pytest tests/unit/test_project_ownership.py tests/unit/test_schema_upgrade.py -q -p no:cacheprovider' → 10 passed, 9 warnings in 0.84s)

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy import (
     Column, String, Integer, Text,
-    ForeignKey, JSON, Float, Boolean, LargeBinary, Index, text
+    ForeignKey, JSON, Float, Boolean, LargeBinary, Index, CheckConstraint, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -48,6 +48,11 @@ class Project(Base):
     # Relationships
     owner = relationship("User", back_populates="projects")
     documents = relationship("ProjectDocument", back_populates="project", cascade="all, delete-orphan")
+    members = relationship(
+        "ProjectMember",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
     conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="project", cascade="all, delete-orphan")
     audio_overviews = relationship(
@@ -76,6 +81,11 @@ class User(Base):
     # Relationships
     projects = relationship("Project", back_populates="owner")
     documents = relationship("Document", back_populates="owner")
+    project_memberships = relationship(
+        "ProjectMember",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("idx_users_username", "username"),
@@ -203,6 +213,35 @@ class ProjectDocument(Base):
     document = relationship("Document", back_populates="projects")
 
 
+class ProjectMember(Base):
+    """Account role for a project; the owner remains on `Project.user_id`."""
+    __tablename__ = "project_members"
+
+    project_id = Column(
+        String,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role = Column(String, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+
+    project = relationship("Project", back_populates="members")
+    user = relationship("User", back_populates="project_memberships")
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('viewer', 'editor')",
+            name="ck_project_members_role",
+        ),
+        Index("idx_project_members_user_id", "user_id"),
+    )
+
+
 class Chunk(Base):
     """Document chunk model."""
     __tablename__ = "chunks"
@@ -309,6 +348,8 @@ class Conversation(Base):
     
     id = Column(String, primary_key=True)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    # Null only on conversations created before shared-project access existed.
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
     title = Column(String)
     created_at = Column(UTCDateTime, default=func.now())
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
@@ -326,6 +367,7 @@ class Conversation(Base):
     
     __table_args__ = (
         Index("idx_conversations_project_id", "project_id"),
+        Index("idx_conversations_user_id", "user_id"),
     )
 
 

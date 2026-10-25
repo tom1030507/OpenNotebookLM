@@ -43,6 +43,15 @@ OLD_SCHEMA = (
     )
     """,
     """
+    CREATE TABLE conversations (
+        id VARCHAR NOT NULL PRIMARY KEY,
+        project_id VARCHAR NOT NULL,
+        title VARCHAR,
+        created_at DATETIME,
+        updated_at DATETIME
+    )
+    """,
+    """
     CREATE TABLE notes (
         id VARCHAR NOT NULL PRIMARY KEY,
         project_id VARCHAR NOT NULL,
@@ -74,6 +83,9 @@ def old_database(tmp_path):
     connection.execute(
         "INSERT INTO projects (id, name) VALUES ('project-1', 'Existing work')")
     connection.execute(
+        "INSERT INTO conversations (id, project_id, title)"
+        " VALUES ('conversation-1', 'project-1', 'Existing conversation')")
+    connection.execute(
         "INSERT INTO documents (id, title, source_type, status)"
         " VALUES ('document-1', 'Existing upload', 'pdf', 'ready')")
     connection.execute(
@@ -97,6 +109,7 @@ class TestUpgrade:
         added = ensure_added_columns(old_database)
 
         assert sorted(added) == [
+            "conversations.user_id",
             "documents.user_id",
             "notes.payload_json",
             "notes.studio_kind",
@@ -132,8 +145,11 @@ class TestUpgrade:
         with old_database.connect() as connection:
             rows = list(connection.exec_driver_sql(
                 "SELECT id, name, user_id FROM projects"))
+            conversations = list(connection.exec_driver_sql(
+                "SELECT id, project_id, user_id FROM conversations"))
 
         assert rows == [("project-1", "Existing work", None)]
+        assert conversations == [("conversation-1", "project-1", None)]
 
     def test_running_twice_changes_nothing(self, old_database):
         assert ensure_added_columns(old_database)
