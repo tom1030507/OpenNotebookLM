@@ -102,6 +102,48 @@ describe('Studio notes', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['legacy', [
+      '- [1] Physics handbook, page 12',
+      '  > At sea level, water boils at 100 C.',
+      '- [2] Unused source, page 1',
+      '- [5] Physics handbook, page 13',
+      '  > The pressure changes the boiling point.',
+      '- Older source, page 3',
+      '  > Older passage.',
+    ].join('\n')],
+    ['grouped', [
+      '- Physics handbook',
+      '  - [1], page 12',
+      '    > At sea level, water boils at 100 C.',
+      '  - [5], page 13',
+      '    > The pressure changes the boiling point.',
+      '- Unused source',
+      '  - [2], page 1',
+      '- Older source',
+      '  - Passage, page 3',
+      '    > Older passage.',
+    ].join('\n')],
+  ])('renders saved answer citations as previews from %s source lists', async (_format, sourceList) => {
+    const saved = note({
+      origin: 'answer',
+      content: `Scattering [Source 1] and [Source 5].\n\n**Sources**\n\n${sourceList}`,
+    });
+    vi.spyOn(api, 'listNotes').mockResolvedValue([saved]);
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /^First/ }));
+
+    expect(screen.getAllByRole('button', { name: 'Preview source 1' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Preview source 2' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Preview source 5' })).toBeNull();
+    expect(screen.getAllByText('Physics handbook')).toHaveLength(1);
+    expect(screen.queryByText('Unused source')).toBeNull();
+    expect(screen.getByText('Older passage.')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview source 2' })[0]);
+    expect(screen.getByRole('tooltip').textContent).toContain('The pressure changes the boiling point.');
+  });
+
   it('enables saving an answer again after its note is deleted', async () => {
     const answer: Message = {
       id: 'm2', conversation_id: 'c', role: 'assistant', content: 'Scattering [1].', created_at: '',

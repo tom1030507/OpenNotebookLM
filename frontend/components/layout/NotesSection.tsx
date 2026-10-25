@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
-import type { MindMap, Note, VideoSummary } from '@/lib/api';
+import type { Citation, MindMap, Note, VideoSummary } from '@/lib/api';
+import { citationId, referencedCitationIds, savedAnswerCitations } from '@/lib/citations';
 import useNotes from '@/store/useNotes';
 import useStore from '@/store/useStore';
 import MarkdownRenderer from '../MarkdownRenderer';
@@ -22,6 +23,56 @@ const inputClass = 'w-full px-3 py-2 bg-[var(--card)] border border-[var(--input
 const actionClass = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--muted)] transition-base disabled:opacity-50';
 const EMPTY_NOTES: Note[] = [];
 
+function savedAnswerView(note: Note) {
+  const sourceStart = note.content.lastIndexOf('\n\n**Sources**\n');
+  if (sourceStart < 0) return null;
+
+  const citations = savedAnswerCitations(note.content);
+  if (citations.length === 0) return null;
+
+  const answer = note.content.slice(0, sourceStart);
+  const referencedIds = referencedCitationIds(answer, citations);
+  const visibleCitations = citations.filter((citation) => {
+    const id = citationId(citation);
+    return referencedIds.size === 0 || id === null || referencedIds.has(id);
+  });
+  const citationLabels = new Map<number, number>();
+  if (referencedIds.size > 0) {
+    visibleCitations.forEach((citation) => {
+      const id = citationId(citation);
+      if (id !== null && !citationLabels.has(id)) {
+        citationLabels.set(id, citationLabels.size + 1);
+      }
+    });
+  }
+
+  const groups = new Map<string, { source: string; citations: Citation[] }>();
+  for (const citation of visibleCitations) {
+    const source = citation.source || 'Unknown source';
+    const key = String(citation.document_id || source);
+    const group = groups.get(key) ?? { source, citations: [] };
+    group.citations.push(citation);
+    groups.set(key, group);
+  }
+
+  const sourceLines = [...groups.values()].flatMap(({ source, citations: passages }) => [
+    `- ${source}`,
+    ...passages.flatMap((citation) => {
+      const id = citationId(citation);
+      const label = id === null ? 'Passage' : `[${id}]`;
+      const page = citation.page == null ? '' : `, page ${citation.page}`;
+      const excerpt = citation.text?.replace(/\s+/g, ' ').trim();
+      return [`  - ${label}${page}`, ...(excerpt ? [`    > ${excerpt}`] : [])];
+    }),
+  ]);
+
+  return {
+    content: `${answer}\n\n**Sources**\n\n${sourceLines.join('\n')}`,
+    citations: visibleCitations,
+    citationLabels,
+  };
+}
+
 export default function NotesSection({ projectId }: { projectId: string | null }) {
   const canEdit = useStore((state) => state.currentProject?.id === projectId
     && (state.currentProject.role === 'owner' || state.currentProject.role === 'editor'));
@@ -34,6 +85,8 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const answerNote = notes.find((note) => note.id === openId && note.origin === 'answer');
+  const answerView = answerNote ? savedAnswerView(answerNote) : null;
 
   useEffect(() => {
     void useNotes.getState().load(projectId);
@@ -191,7 +244,12 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                   {openId === note.id
                     && (note.origin !== 'studio' || note.studio_kind === 'report') && (
                     <div className="px-3 pb-3">
-                      <MarkdownRenderer content={note.content} className="text-sm" />
+                      <MarkdownRenderer
+                        content={answerView?.content ?? note.content}
+                        citations={answerView?.citations}
+                        citationLabels={answerView?.citationLabels}
+                        className="text-sm"
+                      />
                       {canEdit && (
                         <div className="flex justify-end gap-2 mt-2">
                           <button

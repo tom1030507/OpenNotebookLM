@@ -112,6 +112,29 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
     // evidence to the wrong claim, so retain those entries without a number.
     referencedIds.size === 0 || id === null || referencedIds.has(id)
   ));
+  const citationLabels = new Map<number, number>();
+  if (referencedIds.size > 0) {
+    citations.forEach(({ id }) => {
+      if (id !== null && !citationLabels.has(id)) {
+        citationLabels.set(id, citationLabels.size + 1);
+      }
+    });
+  }
+  const citationGroups = citations.reduce<Array<{
+    key: string;
+    source: string;
+    entries: typeof citations;
+  }>>((groups, entry) => {
+    const source = entry.citation.source || 'Unknown source';
+    const key = String(entry.citation.document_id || source);
+    let group = groups.find((candidate) => candidate.key === key);
+    if (!group) {
+      group = { key, source, entries: [] };
+      groups.push(group);
+    }
+    group.entries.push(entry);
+    return groups;
+  }, []);
 
   return (
     <div className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -135,6 +158,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
           <MarkdownRenderer
             content={message.content}
             citations={message.citations}
+            citationLabels={citationLabels}
             citationChecks={message.citation_checks}
           />
         ) : (
@@ -143,30 +167,37 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         {citations.length > 0 && (
           <div className="mt-3 pt-3 border-t border-[var(--border)]">
             <p className="text-xs opacity-70 mb-2">Sources: </p>
-            {citations.map(({ citation, id, index }) => {
-              const excerpt = citation.text?.replace(/\s+/g, ' ').trim();
-              const key = id === null ? `legacy-${index}` : `source-${id}`;
-              const label = (
-                <>
-                  {id !== null && <span className="font-medium mr-2 text-[var(--accent)]">[{id}]</span>}
-                  <span className="font-medium">{citation.source}</span>
-                  {citation.page != null && <span className="opacity-70"> - page {citation.page}</span>}
-                </>
-              );
+            {citationGroups.map(({ key, source, entries }) => (
+              <div key={key} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs break-words">
+                <p className="font-medium">{source}</p>
+                {entries.map(({ citation, id, index }) => {
+                  const excerpt = citation.text?.replace(/\s+/g, ' ').trim();
+                  const displayId = id === null ? null : citationLabels.get(id) ?? id;
+                  const label = (
+                    <>
+                      {displayId !== null && (
+                        <span className="font-medium mr-2 text-[var(--accent)]">[{displayId}]</span>
+                      )}
+                      {citation.page != null && <span className="opacity-70">page {citation.page}</span>}
+                      {displayId === null && citation.page == null && <span>Passage</span>}
+                    </>
+                  );
 
-              return excerpt ? (
-                <details key={key} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs break-words">
-                  <summary className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-[var(--ring)]">
-                    {label}
-                  </summary>
-                  <p className="mt-2 leading-relaxed text-[var(--muted-foreground)]">{excerpt}</p>
-                </details>
-              ) : (
-                <div key={key} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs break-words">
-                  {label}
-                </div>
-              );
-            })}
+                  return excerpt ? (
+                    <details key={id === null ? `legacy-${index}` : `source-${id}`} className="mt-1">
+                      <summary className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-[var(--ring)]">
+                        {label}
+                      </summary>
+                      <p className="mt-2 leading-relaxed text-[var(--muted-foreground)]">{excerpt}</p>
+                    </details>
+                  ) : (
+                    <div key={id === null ? `legacy-${index}` : `source-${id}`} className="mt-1">
+                      {label}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
         {message.role === 'assistant' && (

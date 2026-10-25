@@ -165,8 +165,9 @@ def test_saving_an_answer_keeps_its_citations(client):
     assert note["origin"] == "answer"
     assert note["source_message_id"] == message_id
     assert note["content"].startswith("Water boils at 100 C [1].")
-    assert "- [1] Physics handbook, page 12" in note["content"]
-    assert "> At sea level, water boils at 100 C." in note["content"]
+    assert "- Physics handbook" in note["content"]
+    assert "  - [1], page 12" in note["content"]
+    assert "    > At sea level, water boils at 100 C." in note["content"]
 
 
 @pytest.mark.parametrize(("kind", "payload"), [

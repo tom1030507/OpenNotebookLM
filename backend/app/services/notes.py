@@ -143,28 +143,35 @@ def format_answer(message: Message) -> str:
         message: Stored assistant message.
 
     Returns:
-        The answer text followed by a numbered source list, so the `[n]`
-        markers in the text still resolve once the note stands alone.
+        The answer text followed by passages grouped under their source title.
     """
     citations = message.citations_json or []
     if not citations:
         return message.text
 
     lines = [message.text.rstrip(), "", "**Sources**", ""]
+    groups = {}
     for citation in citations:
         title = (
             citation.get("document_title") or citation.get("source")
             or citation.get("title") or "Unknown source"
         )
-        label = "[%s] %s" % (citation["id"], title) if citation.get("id") else title
-        page = citation.get("page_num", citation.get("page"))
-        if page is not None:
-            label += ", page %s" % page
-        lines.append("- " + label)
-        excerpt = citation.get("text_preview") or citation.get("text") or ""
-        excerpt = re.sub(r"\s+", " ", excerpt).strip()
-        if excerpt:
-            lines.append("  > " + excerpt)
+        key = citation.get("document_id") or title
+        group = groups.setdefault(key, {"title": title, "citations": []})
+        group["citations"].append(citation)
+
+    for group in groups.values():
+        lines.append("- " + group["title"])
+        for citation in group["citations"]:
+            label = "[%s]" % citation["id"] if citation.get("id") else "Passage"
+            page = citation.get("page_num", citation.get("page"))
+            if page is not None:
+                label += ", page %s" % page
+            lines.append("  - " + label)
+            excerpt = citation.get("text_preview") or citation.get("text") or ""
+            excerpt = re.sub(r"\s+", " ", excerpt).strip()
+            if excerpt:
+                lines.append("    > " + excerpt)
     return "\n".join(lines)
 
 

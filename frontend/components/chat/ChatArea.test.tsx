@@ -289,11 +289,27 @@ describe('ChatArea', () => {
       ]);
 
       expect(screen.getByRole('button', { name: 'Preview source 1' }).textContent).toBe('[1]');
-      expect(screen.getByRole('button', { name: 'Preview source 5' }).textContent).toBe('[5]');
-      expect(screen.queryByText('[2]')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Preview source 2' }).textContent).toBe('[2]');
+      expect(screen.queryByRole('button', { name: 'Preview source 5' })).toBeNull();
       expect(screen.queryByText('Unused retrieval')).toBeNull();
       expect(screen.getByText('Method paper')).toBeTruthy();
       expect(screen.getByText('Results paper')).toBeTruthy();
+    });
+
+    it('groups passages by document and renumbers cited chunks without gaps', () => {
+      renderAnswer('The method [Source 1] improves the result [Source 5].', [
+        { id: 1, document_id: 'doc-1', source: 'Calvin cycle - Wikipedia', page: 2, text: 'The proposed method.' },
+        { id: 2, document_id: 'doc-2', source: 'Unused retrieval', page: 1, text: 'Unrelated context.' },
+        { id: 5, document_id: 'doc-1', source: 'Calvin cycle - Wikipedia', page: 3, text: 'The measured result.' },
+      ]);
+
+      expect(screen.getByRole('button', { name: 'Preview source 1' }).textContent).toBe('[1]');
+      expect(screen.getByRole('button', { name: 'Preview source 2' }).textContent).toBe('[2]');
+      expect(screen.queryByRole('button', { name: 'Preview source 5' })).toBeNull();
+      expect(screen.getAllByText('Calvin cycle - Wikipedia')).toHaveLength(1);
+      expect(screen.queryByText('Unused retrieval')).toBeNull();
+      expect(screen.getByText('The proposed method.')).toBeTruthy();
+      expect(screen.getByText('The measured result.')).toBeTruthy();
     });
 
     it('lets readers expand distinct excerpts from two chunks on the same page', () => {
@@ -317,8 +333,8 @@ describe('ChatArea', () => {
       expect(firstDisclosure?.open).toBe(true);
       expect(secondDisclosure?.open).toBe(false);
       expect(firstDisclosure?.textContent).toContain('[1]');
-      expect(secondDisclosure?.textContent).toContain('[5]');
-      expect(screen.getAllByText('Research paper')).toHaveLength(2);
+      expect(secondDisclosure?.textContent).toContain('[2]');
+      expect(screen.getAllByText('Research paper')).toHaveLength(1);
     });
 
     it('keeps unnumbered legacy sources without inventing a citation mapping', () => {
@@ -330,10 +346,11 @@ describe('ChatArea', () => {
       ]);
 
       expect(screen.getByText('Older source')).toBeTruthy();
+      expect(screen.getByText('Passage')).toBeTruthy();
       expect(screen.getByText('Legacy document')).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Preview source 5' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Preview source 1' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Preview source 5' })).toBeNull();
       expect(screen.queryByText('Unused numbered source')).toBeNull();
-      expect(screen.queryByText('[1]')).toBeNull();
       expect(screen.queryByText('[2]')).toBeNull();
       expect(screen.queryByText('[Source document-id]')).toBeNull();
     });
@@ -356,7 +373,7 @@ describe('ChatArea', () => {
         { id: 4, source: 'Results paper', page: 8, text: 'The measured result.' },
       ]);
       expect(screen.queryByText('Unused source')).toBeNull();
-      fireEvent.mouseEnter(screen.getByRole('button', { name: 'Preview source 4' }));
+      fireEvent.mouseEnter(screen.getByRole('button', { name: 'Preview source 1' }));
       expect(screen.getByRole('tooltip').textContent).toContain('The measured result.');
       expect(screen.getByRole('tooltip').textContent).toContain('Page 8');
     });

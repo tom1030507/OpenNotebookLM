@@ -45,6 +45,7 @@ interface MarkdownRendererProps {
   content: string;
   className?: string;
   citations?: Citation[];
+  citationLabels?: Map<number, number>;
   citationChecks?: CitationCheck[];
 }
 
@@ -52,6 +53,7 @@ export default function MarkdownRenderer({
   content,
   className = '',
   citations,
+  citationLabels,
   citationChecks,
 }: MarkdownRendererProps) {
   const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
@@ -76,6 +78,7 @@ export default function MarkdownRenderer({
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeCitations, {
           ids: new Set(citationsById.keys()),
+          citationLabels,
           citationChecks,
         }]]}
         components={{
@@ -130,7 +133,12 @@ export default function MarkdownRenderer({
         a({ href, children, node }) {
           const id = node?.properties['data-citation-id'];
           const citation = typeof id === 'number' ? citationsById.get(id) : undefined;
-          if (typeof id === 'number' && citation) return <InlineCitation id={id} citation={citation} />;
+          if (typeof id === 'number' && citation) {
+            return <InlineCitation
+              id={citationLabels?.get(id) ?? id}
+              citation={citation}
+            />;
+          }
           return (
             <a
               href={href}
