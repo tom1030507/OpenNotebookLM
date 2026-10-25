@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import NotificationProvider from "@/components/NotificationProvider";
 import { initializeTheme } from "@/lib/theme";
 import "./globals.css";
+import 'katex/dist/katex.min.css';
 
 const themeInitializationScript = `(${initializeTheme.toString()})();`;
 

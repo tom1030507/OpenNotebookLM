@@ -28,6 +28,7 @@ import {
 } from './theme';
 
 vi.mock('@/app/globals.css', () => ({}));
+vi.mock('katex/dist/katex.min.css', () => ({}));
 
 function setSystemPreference(prefersDark: boolean) {
   vi.stubGlobal('matchMedia', (query: string) => ({
