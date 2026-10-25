@@ -253,8 +253,9 @@ export default function SourcesPanel({
   };
 
   const deselected = (currentProject && deselectedSources[currentProject.id]) || [];
-  const selectedCount = documents.filter((doc) => !deselected.includes(doc.id)).length;
-  const allSelected = selectedCount === documents.length;
+  const selectableDocuments = documents.filter((doc) => doc.status !== 'error');
+  const selectedCount = selectableDocuments.filter((doc) => !deselected.includes(doc.id)).length;
+  const allSelected = selectedCount === selectableDocuments.length;
 
   // Filter documents based on search query
   const filteredDocuments = documents.filter(doc => 
@@ -425,6 +426,7 @@ export default function SourcesPanel({
                 <input
                   type="checkbox"
                   checked={allSelected}
+                  disabled={selectableDocuments.length === 0}
                   ref={(input) => {
                     if (input) input.indeterminate = selectedCount > 0 && !allSelected;
                   }}
@@ -432,7 +434,7 @@ export default function SourcesPanel({
                   className="h-4 w-4 accent-[var(--primary)]"
                 />
                 <span className="flex-1">Select all sources</span>
-                <span>{selectedCount} of {documents.length} selected</span>
+                <span>{selectedCount} of {selectableDocuments.length} selected</span>
               </label>
               {filteredDocuments.map((doc) => (
                 <div
@@ -445,7 +447,8 @@ export default function SourcesPanel({
                   <div className="flex items-start gap-2.5">
                     <input
                       type="checkbox"
-                      checked={!deselected.includes(doc.id)}
+                      checked={doc.status !== 'error' && !deselected.includes(doc.id)}
+                      disabled={doc.status === 'error'}
                       onChange={() => toggleSourceSelected(currentProject.id, doc.id)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`Use ${doc.name} in answers and Studio`}

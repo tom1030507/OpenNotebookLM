@@ -290,10 +290,11 @@ export const selectedSourceIds = (
   state: Pick<AppState, 'currentProject' | 'documents' | 'deselectedSources'>,
 ): string[] | undefined => {
   const deselected = state.deselectedSources[state.currentProject?.id ?? ''] ?? [];
-  const selected = state.documents
+  const selectable = state.documents.filter((doc) => doc.status !== 'error');
+  const selected = selectable
     .filter((doc) => !deselected.includes(doc.id))
     .map((doc) => doc.id);
-  return selected.length === state.documents.length ? undefined : selected;
+  return selected.length === selectable.length ? undefined : selected;
 };
 
 const useStore = create<AppState>()(
@@ -677,7 +678,9 @@ const useStore = create<AppState>()(
           set((state) => ({
             deselectedSources: {
               ...state.deselectedSources,
-              [projectId]: selected ? [] : state.documents.map((doc) => doc.id),
+              [projectId]: selected ? [] : state.documents
+                .filter((doc) => doc.status !== 'error')
+                .map((doc) => doc.id),
             },
           }));
         },

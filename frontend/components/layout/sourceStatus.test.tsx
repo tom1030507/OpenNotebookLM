@@ -24,7 +24,7 @@ const project: Project = {
 function documentWith(status: DocumentStatus, error_message?: string): Document {
   return {
     id: `document-${status}`,
-    name: 'Example Domain',
+    name: `Example ${status}`,
     type: 'url',
     isOwnedByCaller: true,
     url: 'https://example.com',
@@ -51,6 +51,7 @@ beforeEach(() => {
     currentProject: project,
     loadingDocuments: false,
     fetchDocuments: async () => undefined,
+    fetchProjects: async () => undefined,
   });
 });
 
@@ -101,5 +102,23 @@ describe('source status', () => {
     renderPanel();
 
     expect(screen.getByText('Failed')).toBeTruthy();
+  });
+
+  it('leaves failed sources unchecked and out of the selection count', () => {
+    useStore.setState({
+      documents: [documentWith('ready'), documentWith('error', 'No captions.')],
+    });
+    renderPanel();
+
+    expect(screen.getByText('1 of 1 selected')).toBeTruthy();
+    expect(screen.getByRole('checkbox', {
+      name: 'Use Example ready in answers and Studio',
+    })).toHaveProperty('checked', true);
+    expect(screen.getByRole('checkbox', {
+      name: 'Use Example error in answers and Studio',
+    })).toHaveProperty('checked', false);
+    expect(screen.getByRole('checkbox', {
+      name: 'Use Example error in answers and Studio',
+    })).toHaveProperty('disabled', true);
   });
 });

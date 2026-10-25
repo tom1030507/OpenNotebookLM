@@ -22,7 +22,7 @@ markitdown[docx,xlsx]==0.1.9
 python-pptx==1.0.2
 lxml==6.1.2
 readability-lxml==0.8.1
-youtube-transcript-api==0.6.1
+youtube-transcript-api==1.2.4
 yt-dlp==2026.8.19
 openai-whisper==20250625
 

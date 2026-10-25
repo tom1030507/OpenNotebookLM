@@ -556,6 +556,17 @@ describe('application store', () => {
       expect(selectedSourceIds(useStore.getState())).toBeUndefined();
     });
 
+    it('does not count failed sources as selected', () => {
+      useStore.setState({
+        documents: [document('ready'), { ...document('failed'), status: 'error' }],
+      });
+
+      expect(selectedSourceIds(useStore.getState())).toBeUndefined();
+
+      useStore.getState().toggleSourceSelected('project-1', 'ready');
+      expect(selectedSourceIds(useStore.getState())).toEqual([]);
+    });
+
     it('keeps each project its own selection', () => {
       useStore.getState().toggleSourceSelected('project-1', 'a');
       useStore.setState({ currentProject: project('project-2') });

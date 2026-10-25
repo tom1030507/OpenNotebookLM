@@ -96,7 +96,7 @@ describe('Studio audio overview', () => {
     });
     expect(await screen.findByText('The first host explains the source evidence.')).toBeTruthy();
     expect(screen.getByText('The second host connects the findings.')).toBeTruthy();
-    expect(screen.getByLabelText('Audio overview playback')).toBeTruthy();
+    expect(await screen.findByLabelText('Audio overview playback')).toBeTruthy();
     expect(legacySpeech).not.toHaveBeenCalled();
   });
 
