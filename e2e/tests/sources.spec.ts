@@ -47,7 +47,7 @@ test('uploads, indexes, previews, and removes a PDF source', async ({ api, page 
       && response.request().method() === 'DELETE',
   );
   await row.hover();
-  await row.getByRole('button', { name: 'Delete document' }).click();
+  await row.getByRole('button', { name: 'Remove source' }).click();
   expect((await removed).status()).toBe(200);
   await expect(sourceRow(page, filename)).toHaveCount(0);
   expect((await api.listProjectDocuments(project.id)).map((document) => document.id)).not.toContain(documentId);
@@ -84,7 +84,7 @@ test('imports, searches, and removes a controlled URL source', async ({ api, pag
       && response.request().method() === 'DELETE',
   );
   await visibleRow.hover();
-  await visibleRow.getByRole('button', { name: 'Delete document' }).click();
+  await visibleRow.getByRole('button', { name: 'Remove source' }).click();
   expect((await removed).status()).toBe(200);
   await expect(sourceRow(page, title)).toHaveCount(0);
 });
