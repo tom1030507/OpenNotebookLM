@@ -15,7 +15,7 @@ import ChatArea from './chat/ChatArea';
 import StudioPanel from './layout/StudioPanel';
 import SourcesPanel from './layout/SourcesPanel';
 import TopNav from './layout/TopNav';
-import type { Project } from '@/lib/api';
+import api, { type Project } from '@/lib/api';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
 
@@ -109,6 +109,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useStore.getState().resetForTests();
+  vi.restoreAllMocks();
 });
 
 
@@ -139,7 +140,8 @@ describe('Add Sources controls', () => {
     expect(screen.queryByRole('button', { name: 'Add Source' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Attach file' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Chat settings' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Edit Project Cover' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit Project' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Analytics' })).toBeNull();
     const editor = { ...currentProject, role: 'editor' as const };
@@ -147,7 +149,8 @@ describe('Add Sources controls', () => {
     rerender(<SourceWorkspace />);
     expect(screen.getByRole('button', { name: 'Add Source' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Chat settings' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Edit Project Cover' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit Project' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Analytics' })).toBeNull();
   });
@@ -263,6 +266,55 @@ describe('Add Sources controls', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Add Source' })).toBeNull();
     });
+  });
+});
+
+
+describe('project actions', () => {
+  it('does not delete a project when confirmation is cancelled', () => {
+    const confirmDelete = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
+    render(<SourceWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+
+    expect(confirmDelete).toHaveBeenCalledWith(
+      'Delete "Research notes" and all its sources, conversations, notes, and generated outputs? This cannot be undone.',
+    );
+    expect(deleteProject).not.toHaveBeenCalled();
+    expect(useStore.getState().currentProject).toEqual(currentProject);
+  });
+
+  it('deletes the selected project after confirmation and leaves the other project selectable', async () => {
+    const otherProject = { ...currentProject, id: 'project-2', name: 'Other project' };
+    useStore.setState({ projects: [currentProject, otherProject] });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
+    render(<SourceWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledWith(currentProject.id));
+    expect(useStore.getState().projects).toEqual([otherProject]);
+    expect(useStore.getState().currentProject).toBeNull();
+    expect((screen.getByLabelText('Select a project') as HTMLSelectElement).value).toBe('');
+    expect(screen.getByRole('option', { name: otherProject.name })).not.toBeNull();
+  });
+
+  it('keeps the project and shows an error when deletion fails', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const deleteProject = vi.spyOn(api, 'deleteProject').mockRejectedValue(
+      new Error('Delete request failed'),
+    );
+    render(<SourceWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+
+    expect(await screen.findByRole('alert')).not.toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe('Delete request failed');
+    expect(deleteProject).toHaveBeenCalledWith(currentProject.id);
+    expect(useStore.getState().currentProject).toEqual(currentProject);
   });
 });
 

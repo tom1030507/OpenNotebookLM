@@ -20,6 +20,7 @@ import {
   PanelLeftOpen,
   Pencil,
   BarChart3,
+  Trash2,
 } from 'lucide-react';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
@@ -62,6 +63,7 @@ export default function SourcesPanel({
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [projectActionError, setProjectActionError] = useState('');
   const [modalSession, setModalSession] = useState(0);
@@ -99,6 +101,7 @@ export default function SourcesPanel({
     fetchProjects,
     selectProject,
     duplicateProject,
+    deleteProject,
     uploadDocument,
     createDocument,
     deleteDocument,
@@ -113,7 +116,7 @@ export default function SourcesPanel({
     || currentProject?.role === 'editor';
 
   const handleDuplicateProject = async () => {
-    if (!currentProject || isDuplicating) return;
+    if (!currentProject || isDuplicating || isDeletingProject) return;
     setIsDuplicating(true);
     setProjectActionError('');
     try {
@@ -123,6 +126,24 @@ export default function SourcesPanel({
       setProjectActionError(error instanceof Error ? error.message : 'Failed to duplicate project');
     } finally {
       setIsDuplicating(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!currentProject || !canManageProject || isDeletingProject) return;
+    const projectId = currentProject.id;
+    if (!confirm(
+      `Delete "${currentProject.name}" and all its sources, conversations, notes, and generated outputs? This cannot be undone.`,
+    )) return;
+
+    setIsDeletingProject(true);
+    setProjectActionError('');
+    try {
+      await deleteProject(projectId);
+    } catch (error) {
+      setProjectActionError(error instanceof Error ? error.message : 'Failed to delete project');
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -343,15 +364,16 @@ export default function SourcesPanel({
               <button
                 type="button"
                 onClick={() => openProjectDialog(currentProject)}
-                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base"
+                disabled={isDeletingProject}
+                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
               >
                 <Pencil className="w-3.5 h-3.5" />
-                <span>Edit Project Cover</span>
+                <span>Edit Project</span>
               </button>
               <button
                 type="button"
                 onClick={handleDuplicateProject}
-                disabled={isDuplicating}
+                disabled={isDuplicating || isDeletingProject}
                 className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
               >
                 {isDuplicating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
@@ -359,8 +381,18 @@ export default function SourcesPanel({
               </button>
               <button
                 type="button"
+                onClick={handleDeleteProject}
+                disabled={isDeletingProject || isDuplicating}
+                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--error)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+              >
+                {isDeletingProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{isDeletingProject ? 'Deleting...' : 'Delete Project'}</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsAnalyticsOpen(true)}
-                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base"
+                disabled={isDeletingProject}
+                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
               >
                 <BarChart3 className="w-3.5 h-3.5" />
                 <span>Analytics</span>
