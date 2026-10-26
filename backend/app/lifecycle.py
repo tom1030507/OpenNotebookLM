@@ -1,4 +1,5 @@
 """Application startup and shutdown resource management."""
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,8 +14,47 @@ from app.services.bootstrap import ensure_demo_account
 from app.services.audio_overview_jobs import AudioOverviewWorker
 from app.services.ingestion_jobs import IngestionJobWorker
 from app.services.watched_folders import WatchedFolderWorker
+from app.services.trash import purge_expired_trash
 
 logger = structlog.get_logger()
+TRASH_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+async def _purge_trash(session_factory, retention_days: int) -> None:
+    """Run hard deletion outside the event loop and keep startup available on errors.
+
+    Args:
+        session_factory: Factory for database sessions.
+        retention_days: Number of days deleted items remain restorable.
+
+    Returns:
+        None.
+    """
+    try:
+        removed = await asyncio.to_thread(
+            purge_expired_trash,
+            session_factory,
+            retention_days,
+        )
+        if removed:
+            logger.info("Expired trash items purged", count=removed)
+    except Exception:
+        logger.exception("Failed to purge expired trash items")
+
+
+async def _purge_trash_periodically(session_factory, retention_days: int) -> None:
+    """Purge expired items daily until the application shuts down.
+
+    Args:
+        session_factory: Factory for database sessions.
+        retention_days: Number of days deleted items remain restorable.
+
+    Returns:
+        None.
+    """
+    while True:
+        await asyncio.sleep(TRASH_PURGE_INTERVAL_SECONDS)
+        await _purge_trash(session_factory, retention_days)
 
 
 @asynccontextmanager
@@ -38,6 +78,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
 
     settings = get_settings()
+    await _purge_trash(SessionLocal, settings.trash_retention_days)
 
     # A fresh database would otherwise be a locked door: public registration is
     # closed by default, so without this the only way in is a shell command.
@@ -94,9 +135,14 @@ async def lifespan(app: FastAPI):
         enabled=settings.audio_overview_tts_enabled,
     )
 
+    trash_purge_task = asyncio.create_task(
+        _purge_trash_periodically(SessionLocal, settings.trash_retention_days)
+    )
     try:
         yield
     finally:
+        trash_purge_task.cancel()
+        await asyncio.gather(trash_purge_task, return_exceptions=True)
         await watched_folder_worker.stop()
         await audio_overview_worker.stop()
         await ingestion_worker.stop()

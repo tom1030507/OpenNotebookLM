@@ -276,7 +276,9 @@ describe('DocumentPreview', () => {
 
     const mark = await screen.findByText('Cited passage here.');
     expect(mark.tagName).toBe('MARK');
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+    });
     },
   );
 

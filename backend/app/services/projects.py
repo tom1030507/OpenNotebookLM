@@ -60,6 +60,8 @@ class ProjectService:
                 ProjectMember.user_id == Document.user_id,
             ),
         ).filter(
+            Project.deleted_at.is_(None),
+            Document.deleted_at.is_(None),
             or_(
                 Document.user_id == Project.user_id,
                 ProjectMember.user_id.isnot(None),
@@ -133,10 +135,14 @@ class ProjectService:
             .filter(
                 ProjectDocument.project_id == project.id,
                 Document.user_id == user_id,
+                Document.deleted_at.is_(None),
             )
             .all()
         )
-        notes = db.query(Note).filter(Note.project_id == project.id).all()
+        notes = db.query(Note).filter(
+            Note.project_id == project.id,
+            Note.deleted_at.is_(None),
+        ).all()
         duplicate_id = str(uuid.uuid4())
         duplicate = Project(
             id=duplicate_id,
@@ -201,7 +207,10 @@ class ProjectService:
         Returns:
             The project, or None when it does not exist.
         """
-        project = db.query(Project).filter(Project.id == project_id).first()
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.deleted_at.is_(None),
+        ).first()
         
         if project:
             # Add counts
@@ -460,6 +469,7 @@ class ProjectService:
             ProjectMember,
             ProjectMember.project_id == Project.id,
         ).filter(
+            Project.deleted_at.is_(None),
             or_(Project.user_id == user_id, ProjectMember.user_id == user_id)
         ).distinct()
         
@@ -667,8 +677,20 @@ class ProjectService:
         project_id: str, 
         project_update: ProjectUpdate
     ) -> Optional[Project]:
-        """Update a project."""
-        project = db.query(Project).filter(Project.id == project_id).first()
+        """Update an active project.
+
+        Args:
+            db: Database session.
+            project_id: Project to update.
+            project_update: Fields to replace.
+
+        Returns:
+            The updated project, or None when it is missing or in trash.
+        """
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.deleted_at.is_(None),
+        ).first()
         
         if not project:
             return None
@@ -797,8 +819,14 @@ class ProjectService:
     ) -> bool:
         """Add a document to a project."""
         # Check if project and document exist
-        project = db.query(Project).filter(Project.id == project_id).first()
-        document = db.query(Document).filter(Document.id == document_id).first()
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.deleted_at.is_(None),
+        ).first()
+        document = db.query(Document).filter(
+            Document.id == document_id,
+            Document.deleted_at.is_(None),
+        ).first()
         
         if not project or not document:
             return False

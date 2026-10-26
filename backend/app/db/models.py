@@ -32,6 +32,7 @@ class Project(Base):
     meta_json = Column(JSON, default={})
     created_at = Column(UTCDateTime, default=func.now())
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
+    deleted_at = Column(UTCDateTime)
     # Chat settings applied to every answer in the project. Null on rows that
     # predate them, which reads as the defaults in ProjectService.get_chat_settings.
     chat_role = Column(String)
@@ -193,6 +194,7 @@ class Document(Base):
     watch_file_hash = Column(String(64))
     created_at = Column(UTCDateTime, default=func.now())
     updated_at = Column(UTCDateTime, default=func.now(), onupdate=func.now())
+    deleted_at = Column(UTCDateTime)
     
     # Relationships
     owner = relationship("User", back_populates="documents")
@@ -557,6 +559,7 @@ class Note(Base):
     # Python-side so notes saved in quick succession still list in order.
     created_at = Column(UTCDateTime, default=ordered_utc_now, nullable=False)
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    deleted_at = Column(UTCDateTime)
 
     project = relationship("Project", back_populates="notes")
 

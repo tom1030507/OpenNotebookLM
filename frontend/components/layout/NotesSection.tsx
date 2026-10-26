@@ -235,7 +235,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
 
   const deleteNote = async (note: Note) => {
     if (!canEdit) return;
-    if (!confirm(`Delete the note "${note.title}"?`)) return;
+    if (!confirm(`Move the note "${note.title}" to Trash?`)) return;
     setError('');
     try {
       await api.deleteNote(projectId, note.id);

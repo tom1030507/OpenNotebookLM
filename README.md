@@ -704,6 +704,7 @@ improve on their own.
 | **Database** | | |
 | `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/opennotebook.db` |
 | `INGESTION_WORKER_CONCURRENCY` | Simultaneous durable ingestion jobs (`1`–`16`) | `1` |
+| `TRASH_RETENTION_DAYS` | Days deleted projects, sources, and notes remain restorable | `30` |
 | **Auth** | | |
 | `JWT_SECRET_KEY` | Token signing key — **required** unless `APP_ENV=development` | – |
 | `JWT_ALGORITHM` | Signing algorithm | `HS256` |

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Compose reads this same .env key; declare it so strict settings validation accepts it.
     watched_folder_host_path: Optional[str] = None
     watched_folder_root: Optional[str] = None
+    trash_retention_days: int = Field(default=30, ge=1)
     
     # Embedding
     # Multilingual, unlike the English-only bge-small it replaced. Chosen over

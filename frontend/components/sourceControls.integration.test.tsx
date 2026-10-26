@@ -15,7 +15,7 @@ import ChatArea from './chat/ChatArea';
 import StudioPanel from './layout/StudioPanel';
 import SourcesPanel from './layout/SourcesPanel';
 import TopNav from './layout/TopNav';
-import api, { type Project, type URLBatchUploadResponse } from '@/lib/api';
+import api, { type Document, type Project, type URLBatchUploadResponse } from '@/lib/api';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
 
@@ -154,7 +154,7 @@ describe('Add Sources controls', () => {
     expect(screen.queryByRole('button', { name: 'Attach file' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Chat settings' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit Project' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Delete Project' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Move Project to Trash' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Analytics' })).toBeNull();
     const editor = { ...currentProject, role: 'editor' as const };
@@ -163,7 +163,7 @@ describe('Add Sources controls', () => {
     expect(screen.getByRole('button', { name: 'Add Source' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Chat settings' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Edit Project' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Delete Project' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Move Project to Trash' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Analytics' })).toBeNull();
   });
@@ -299,28 +299,28 @@ describe('Add Sources controls', () => {
 
 
 describe('project actions', () => {
-  it('does not delete a project when confirmation is cancelled', () => {
+  it('does not move a project to trash when confirmation is cancelled', () => {
     const confirmDelete = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
     render(<SourceWorkspace />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
 
     expect(confirmDelete).toHaveBeenCalledWith(
-      'Delete "Research notes" and all its sources, conversations, notes, and generated outputs? This cannot be undone.',
+      'Move "Research notes" to Trash? You can restore it until it expires.',
     );
     expect(deleteProject).not.toHaveBeenCalled();
     expect(useStore.getState().currentProject).toEqual(currentProject);
   });
 
-  it('deletes the selected project after confirmation and leaves the other project selectable', async () => {
+  it('moves the selected project to trash after confirmation and leaves the other project selectable', async () => {
     const otherProject = { ...currentProject, id: 'project-2', name: 'Other project' };
     useStore.setState({ projects: [currentProject, otherProject] });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
     render(<SourceWorkspace />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
 
     await waitFor(() => expect(deleteProject).toHaveBeenCalledWith(currentProject.id));
     expect(useStore.getState().projects).toEqual([otherProject]);
@@ -329,7 +329,7 @@ describe('project actions', () => {
     expect(screen.getByRole('option', { name: otherProject.name })).not.toBeNull();
   });
 
-  it('keeps the project and shows an error when deletion fails', async () => {
+  it('keeps the project and shows an error when moving it to trash fails', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const deleteProject = vi.spyOn(api, 'deleteProject').mockRejectedValue(
@@ -337,12 +337,42 @@ describe('project actions', () => {
     );
     render(<SourceWorkspace />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
 
     expect(await screen.findByRole('alert')).not.toBeNull();
     expect(screen.getByRole('alert').textContent).toBe('Delete request failed');
     expect(deleteProject).toHaveBeenCalledWith(currentProject.id);
     expect(useStore.getState().currentProject).toEqual(currentProject);
+  });
+});
+
+
+describe('source trash action', () => {
+  it('moves an owned source to Trash and refreshes the project source list', async () => {
+    const source: Document = {
+      id: 'document-1',
+      name: 'Private source',
+      type: 'pdf',
+      isOwnedByCaller: true,
+      content: '',
+      meta: {},
+      status: 'ready',
+      created_at: '2026-08-12T00:00:00Z',
+      updated_at: '2026-08-12T00:00:00Z',
+      chunk_count: 1,
+    };
+    const refreshDocuments = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const trashSource = vi.spyOn(api, 'trashSource').mockResolvedValue(undefined);
+    const removeFromProject = vi.spyOn(api, 'deleteDocument').mockResolvedValue(undefined);
+    useStore.setState({ documents: [source], refreshDocuments });
+    render(<SourceWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move source to Trash' }));
+
+    await waitFor(() => expect(trashSource).toHaveBeenCalledWith(source.id));
+    expect(removeFromProject).not.toHaveBeenCalled();
+    expect(refreshDocuments).toHaveBeenCalledWith(currentProject.id);
   });
 });
 

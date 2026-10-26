@@ -10,6 +10,7 @@ services:
       APP_ENV: production
       APP_PORT: 8000
       DEBUG: ${DEBUG:-false}
+      TRASH_RETENTION_DAYS: ${TRASH_RETENTION_DAYS:-30}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       DB_PATH: /app/data/opennotebook.db

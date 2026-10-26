@@ -965,6 +965,27 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
   });
 
+  it('lists, restores, permanently deletes, and trashes sources through the trash API', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [], retention_days: 30 }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'success' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'success' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'success' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getTrash()).resolves.toEqual({ items: [], retention_days: 30 });
+    await api.restoreTrashItem('note', 'note/1');
+    await api.deleteTrashItem('project', 'project-1');
+    await api.trashSource('document/1');
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method || 'GET'])).toEqual([
+      ['/api/trash', 'GET'],
+      ['/api/trash/note/note%2F1/restore', 'POST'],
+      ['/api/trash/project/project-1', 'DELETE'],
+      ['/api/docs/document%2F1', 'DELETE'],
+    ]);
+  });
+
   it('does not expose process-wide cache clearing to browser callers', () => {
     expect('clearCache' in api).toBe(false);
   });

@@ -14,11 +14,13 @@ import {
   FolderPlus,
   LogOut,
   Bell,
-  HelpCircle
+  HelpCircle,
+  Trash,
 } from 'lucide-react';
 import ExportDialog from '../ExportDialog';
 import ShareProjectDialog from '../ShareProjectDialog';
 import TopNavInfoDialog from './TopNavInfoDialog';
+import TrashDialog from './TrashDialog';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import Settings from '../Settings';
 import useStore from '@/store/useStore';
@@ -57,6 +59,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
   const [showProfile, setShowProfile] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const moreActionsRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -369,6 +372,16 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
                 >
                   Settings
                 </button>
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    setShowTrash(true);
+                  }}
+                  className={`${menuItemClassName} flex items-center gap-2`}
+                >
+                  <Trash className="w-4 h-4" />
+                  <span>Trash</span>
+                </button>
                 <div className="border-t border-[var(--border)] mt-2 pt-2">
                   <button
                     onClick={signOut}
@@ -451,6 +464,8 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
           )}
         </TopNavInfoDialog>
       )}
+
+      {showTrash && <TrashDialog onClose={() => setShowTrash(false)} />}
 
       {/* Dialogs */}
       {showExport && (currentConversation || currentProject) && (

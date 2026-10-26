@@ -224,7 +224,8 @@ def scan_watched_folders(session_factory: sessionmaker, settings: Settings) -> i
 
     with session_factory() as db:
         projects = db.query(Project.id, Project.watched_folder).filter(
-            Project.watched_folder.isnot(None)
+            Project.watched_folder.isnot(None),
+            Project.deleted_at.is_(None),
         ).all()
 
     jobs_created = 0
@@ -248,7 +249,11 @@ def scan_watched_folders(session_factory: sessionmaker, settings: Settings) -> i
                 # duplicate documents for the same newly discovered path.
                 _reserve_sqlite_enqueue_transaction(db)
                 project = db.get(Project, project_id)
-                if project is None or project.watched_folder != configured_folder:
+                if (
+                    project is None
+                    or project.deleted_at is not None
+                    or project.watched_folder != configured_folder
+                ):
                     db.rollback()
                     continue
                 documents = db.query(Document).join(
@@ -272,6 +277,8 @@ def scan_watched_folders(session_factory: sessionmaker, settings: Settings) -> i
                     if document is None:
                         _queue_source(db, project, source, settings, created_files)
                         queued += 1
+                        continue
+                    if document.deleted_at is not None:
                         continue
                     if document.id in active_ids:
                         continue
@@ -311,7 +318,11 @@ def scan_watched_folders(session_factory: sessionmaker, settings: Settings) -> i
                     missing = set(tracked) - seen
                     for path in missing:
                         document = tracked[path]
-                        if document.id in active_ids or document.error_message == REMOVED_MESSAGE:
+                        if (
+                            document.deleted_at is not None
+                            or document.id in active_ids
+                            or document.error_message == REMOVED_MESSAGE
+                        ):
                             continue
                         get_retrieval_index().delete_document(db, document.id)
                         for chunk in db.query(Chunk).filter(

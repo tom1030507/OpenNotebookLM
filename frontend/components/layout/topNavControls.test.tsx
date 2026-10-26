@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TopNav from './TopNav';
 import ProjectDialogProvider from '../ProjectDialogProvider';
@@ -114,6 +114,31 @@ describe('TopNav controls that were previously inert', () => {
     fireEvent.click(trigger);
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('menu', { name: 'User menu' })).toBeNull();
+  });
+
+  it('opens Trash from the user menu and restores a listed item', async () => {
+    vi.spyOn(api, 'getTrash').mockResolvedValue({
+      items: [{
+        id: 'note-1',
+        type: 'note',
+        title: 'Saved note',
+        deleted_at: '2026-10-25T00:00:00Z',
+      }],
+      retention_days: 30,
+    });
+    const restore = vi.spyOn(api, 'restoreTrashItem').mockResolvedValue(undefined);
+    renderTopNav();
+
+    fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'User menu' }))
+      .getByRole('button', { name: 'Trash' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Trash' });
+    expect(within(dialog).getByText('Saved note')).toBeTruthy();
+    expect(within(dialog).getByText(/after 30 days/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Saved note' }));
+
+    await waitFor(() => expect(restore).toHaveBeenCalledWith('note', 'note-1'));
   });
 
   it('shows the project cover in the workspace header', () => {

@@ -293,7 +293,7 @@ def test_shared_projects_are_unique_searchable_paginated_and_count_private_conve
     assert first_result["conversation_count"] == 1
 
 
-def test_deleting_a_project_cascades_memberships(sharing_env):
+def test_trashing_a_project_preserves_memberships_for_restore(sharing_env):
     project = make_project(sharing_env.owner)
     added = sharing_env.owner.post(
         "/api/projects/%s/members" % project["id"],
@@ -306,4 +306,19 @@ def test_deleting_a_project_cascades_memberships(sharing_env):
     assert deleted.status_code == 200
     assert sharing_env.session.query(ProjectMember).filter_by(
         project_id=project["id"]
-    ).count() == 0
+    ).count() == 1
+    assert all(
+        row["id"] != project["id"]
+        for row in sharing_env.alice.get("/api/projects").json()["projects"]
+    )
+
+    restored = sharing_env.owner.post(
+        "/api/trash/project/%s/restore" % project["id"]
+    )
+
+    assert restored.status_code == 200, restored.text
+    alice_project = next(
+        row for row in sharing_env.alice.get("/api/projects").json()["projects"]
+        if row["id"] == project["id"]
+    )
+    assert alice_project["role"] == "editor"

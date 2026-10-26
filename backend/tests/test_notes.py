@@ -24,7 +24,7 @@ from app.db.models import (
     Project,
     ProjectDocument,
 )
-from app.routers import notes, projects
+from app.routers import notes, projects, trash
 from app.schemas import MindMapResponse, NoteCreate, NOTE_PAYLOAD_MAX_BYTES
 from app.services.notes import create_note
 from conftest import authorize
@@ -48,6 +48,7 @@ def client():
     app = FastAPI()
     app.include_router(projects.router, prefix="/api")
     app.include_router(notes.router, prefix="/api")
+    app.include_router(trash.router, prefix="/api")
 
     def override_get_db():
         db = testing_session()
@@ -151,7 +152,7 @@ def test_manual_note_can_be_created_edited_and_deleted(client):
     assert api.get(base).json() == []
 
 
-def test_note_can_be_used_as_a_source_and_deleted_independently(client, monkeypatch):
+def test_note_source_survives_trash_and_permanent_note_deletion(client, monkeypatch):
     api, session_factory = client
     project_id = create_project(api)
     base = "/api/projects/%s/notes" % project_id
@@ -180,6 +181,17 @@ def test_note_can_be_used_as_a_source_and_deleted_independently(client, monkeypa
     assert listed["source_document_id"] == source["doc_id"]
 
     assert api.delete("%s/%s" % (base, note["id"])).status_code == 200
+    assert api.get(base).json() == []
+    with session_factory() as db:
+        document = db.get(Document, source["doc_id"])
+        assert document is not None
+        assert document.note_id == note["id"]
+        assert db.get(Note, note["id"]).deleted_at is not None
+
+    assert api.post("/api/trash/note/%s/restore" % note["id"]).status_code == 200
+    assert api.get(base).json()[0]["source_document_id"] == source["doc_id"]
+    assert api.delete("%s/%s" % (base, note["id"])).status_code == 200
+    assert api.delete("/api/trash/note/%s" % note["id"]).status_code == 200
     with session_factory() as db:
         document = db.get(Document, source["doc_id"])
         assert document is not None
@@ -615,15 +627,24 @@ def test_a_note_cannot_be_reached_through_another_project(client):
     assert api.delete("/api/projects/%s/notes/%s" % (other_id, note_id)).status_code == 404
 
 
-def test_notes_are_deleted_with_their_project(client):
+def test_project_trash_preserves_notes_until_the_project_is_restored(client):
     api, session_factory = client
     project_id = create_project(api)
-    api.post("/api/projects/%s/notes" % project_id, json={"title": "Gone soon"})
+    note_id = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Still here",
+        "content": "Restorable",
+    }).json()["id"]
 
     assert api.delete("/api/projects/%s" % project_id).status_code == 200
+    assert api.get("/api/projects/%s/notes" % project_id).status_code == 404
 
     with session_factory() as db:
-        assert db.query(Note).count() == 0
+        assert db.query(Note).filter(Note.id == note_id).one().deleted_at is None
+
+    assert api.post("/api/trash/project/%s/restore" % project_id).status_code == 200
+    notes = api.get("/api/projects/%s/notes" % project_id)
+    assert notes.status_code == 200, notes.text
+    assert [note["id"] for note in notes.json()] == [note_id]
 
 
 @pytest.mark.parametrize("format", ["markdown", "pdf", "docx"])
