@@ -1213,6 +1213,27 @@ describe('API client', () => {
     await expect(blob.text()).resolves.toBe('# Export');
   });
 
+  it('requests single-note and project-wide exports in the selected format', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('note', {
+        status: 200, headers: { 'Content-Type': 'application/pdf' },
+      }))
+      .mockResolvedValueOnce(new Response('notes', {
+        status: 200, headers: { 'Content-Type': 'application/pdf' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.exportNote('project-1', 'note-1', 'pdf'))
+      .resolves.toBeInstanceOf(Blob);
+    await expect(api.exportProjectNotes('project-1', 'pdf'))
+      .resolves.toBeInstanceOf(Blob);
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/projects/project-1/notes/note-1/export?format=pdf',
+      '/api/projects/project-1/notes/export?format=pdf',
+    ]);
+  });
+
   it('keeps document-file previews backed by the response blob', async () => {
     const responseBlob = new Blob(['%PDF-preview'], { type: 'application/pdf' });
     const blob = vi.fn().mockResolvedValue(responseBlob);

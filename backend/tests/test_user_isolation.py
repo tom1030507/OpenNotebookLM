@@ -2271,3 +2271,35 @@ def test_source_group_routes_hide_other_projects_and_reject_cross_project_source
         json={"name": "Wrong project"},
     ).status_code == 404
     assert env.alice.delete("%s/%s" % (second_groups, group_id)).status_code == 404
+
+
+class TestNoteExportIsolation:
+    def test_foreign_project_and_note_exports_are_not_found(self, env):
+        project_id = make_project(env.alice, "Private notes")
+        notes_url = "/api/projects/%s/notes" % project_id
+        note_id = env.alice.post(
+            notes_url, json={"title": "Private", "content": "Secret"}
+        ).json()["id"]
+
+        assert env.bob.get("%s/export" % notes_url).status_code == 404
+        assert env.bob.get(
+            "%s/%s/export" % (notes_url, note_id)
+        ).status_code == 404
+
+    def test_viewer_can_export_notes_shared_through_a_project(self, env):
+        project_id = make_project(env.alice, "Shared notes")
+        notes_url = "/api/projects/%s/notes" % project_id
+        note_id = env.alice.post(
+            notes_url, json={"title": "Shared", "content": "Visible to members"}
+        ).json()["id"]
+        grant_project_role(env, project_id, "viewer")
+
+        project_export = env.bob.get("%s/export?format=markdown" % notes_url)
+        note_export = env.bob.get(
+            "%s/%s/export?format=markdown" % (notes_url, note_id)
+        )
+
+        assert project_export.status_code == 200, project_export.text
+        assert note_export.status_code == 200, note_export.text
+        assert "Visible to members" in project_export.text
+        assert "Visible to members" in note_export.text

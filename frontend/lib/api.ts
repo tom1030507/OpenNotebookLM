@@ -258,6 +258,7 @@ export interface CitationCheck {
 }
 
 export type StudioNoteKind = 'report' | 'mindmap' | 'video_summary';
+export type NoteExportFormat = 'markdown' | 'pdf' | 'docx';
 
 export interface Note {
   id: string;
@@ -1560,6 +1561,22 @@ const api = {
 
   listNotes(projectId: string): Promise<Note[]> {
     return requestJson<Note[]>(`/projects/${projectId}/notes`);
+  },
+
+  exportNote(
+    projectId: string,
+    noteId: string,
+    format: NoteExportFormat,
+  ): Promise<Blob> {
+    return requestDetachedExportBlob(
+      `/projects/${projectId}/notes/${noteId}/export?format=${encodeURIComponent(format)}`,
+    );
+  },
+
+  exportProjectNotes(projectId: string, format: NoteExportFormat): Promise<Blob> {
+    return requestDetachedExportBlob(
+      `/projects/${projectId}/notes/export?format=${encodeURIComponent(format)}`,
+    );
   },
 
   /** With `source_message_id` the server writes the content from that answer. */

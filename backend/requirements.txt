@@ -17,6 +17,7 @@ sqlite-vec==0.1.9
 # Document Processing
 PyMuPDF==1.23.8
 pdfminer.six==20260107
+python-docx==1.2.0
 beautifulsoup4==4.12.2
 markitdown[docx,xlsx]==0.1.9
 python-pptx==1.0.2
