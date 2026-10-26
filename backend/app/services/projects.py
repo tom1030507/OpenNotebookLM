@@ -1,7 +1,7 @@
 """Project CRUD service operations."""
 import copy
 import uuid
-from typing import List, Optional
+from typing import Any, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +11,7 @@ from app.db.models import (
     AudioOverview,
     Conversation,
     Document,
+    Message,
     Note,
     Project,
     ProjectDocument,
@@ -118,6 +119,54 @@ class ProjectService:
         return project
 
     @staticmethod
+    def _remap_document_ids(value: Any, document_ids: dict[str, str]) -> Any:
+        """Copy JSON data while changing references to sources in a project.
+
+        Args:
+            value: JSON value to copy.
+            document_ids: Source document ids and their destination ids.
+
+        Returns:
+            Copied JSON data with document references updated.
+        """
+        if isinstance(value, list):
+            return [ProjectService._remap_document_ids(item, document_ids) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: document_ids.get(item, item)
+                if key in ("document_id", "doc_id", "source_document_id")
+                and isinstance(item, str)
+                else ProjectService._remap_document_ids(item, document_ids)
+                for key, item in value.items()
+            }
+        return value
+
+    @staticmethod
+    def _note_payload_for_project(
+        payload: Any,
+        project_id: str,
+        project_name: str,
+        document_ids: Optional[dict[str, str]] = None,
+    ) -> Any:
+        """Copy a Studio payload while keeping its project reference current.
+
+        Args:
+            payload: Note payload to copy.
+            project_id: Destination project id.
+            project_name: Destination project name.
+            document_ids: Optional source-to-target document id mapping.
+
+        Returns:
+            The copied payload with project metadata updated when present.
+        """
+        payload = ProjectService._remap_document_ids(payload, document_ids or {})
+        if isinstance(payload, dict) and "project_id" in payload:
+            payload["project_id"] = project_id
+            if "project_name" in payload:
+                payload["project_name"] = project_name
+        return payload
+
+    @staticmethod
     def duplicate_project(db: Session, project: Project, user_id: str) -> Project:
         """Copy a project and its caller-owned sources and notes atomically.
 
@@ -167,12 +216,6 @@ class ProjectService:
         ]
         copied_notes = []
         for note in notes:
-            payload = copy.deepcopy(note.payload_json)
-            if isinstance(payload, dict) and "project_id" in payload:
-                # Studio actions use this id for follow-up operations like export.
-                payload["project_id"] = duplicate_id
-                if "project_name" in payload:
-                    payload["project_name"] = duplicate.name
             copied_notes.append(Note(
                 id=str(uuid.uuid4()),
                 project_id=duplicate_id,
@@ -181,7 +224,11 @@ class ProjectService:
                 origin=note.origin,
                 source_message_id=note.source_message_id,
                 studio_kind=note.studio_kind,
-                payload_json=payload,
+                payload_json=ProjectService._note_payload_for_project(
+                    note.payload_json,
+                    duplicate_id,
+                    duplicate.name,
+                ),
             ))
 
         try:
@@ -194,6 +241,245 @@ class ProjectService:
 
         logger.info("Project duplicated", source_project_id=project.id, project_id=duplicate_id)
         return duplicate
+
+    @staticmethod
+    def merge_project(
+        db: Session,
+        source: Project,
+        target: Project,
+        user_id: str,
+        mode: str,
+    ) -> dict:
+        """Move or copy one authorized project's content into another.
+
+        Args:
+            db: Database session.
+            source: Source project, already checked for ownership.
+            target: Destination project, already checked for ownership.
+            user_id: Owner of both projects.
+            mode: Whether to move or copy the content.
+
+        Returns:
+            Counts of moved content and sources skipped as duplicates.
+
+        Raises:
+            ValueError: If the source and target are the same or their watched
+                folders cannot be combined.
+        """
+        if source.id == target.id:
+            raise ValueError("A project cannot be merged into itself")
+        if mode == "move" and source.watched_folder and target.watched_folder not in (
+            None, source.watched_folder
+        ):
+            raise ValueError("Projects use different watched folders")
+
+        visible_source_document_ids = ProjectService.project_document_query(
+            db, source.id
+        ).with_entities(Document.id)
+        source_links = db.query(ProjectDocument, Document).join(
+            Document,
+            Document.id == ProjectDocument.document_id,
+        ).filter(
+            ProjectDocument.project_id == source.id,
+            Document.id.in_(visible_source_document_ids),
+        ).order_by(func.lower(Document.title), Document.title, Document.id).all()
+        target_documents = ProjectService.project_document_query(db, target.id).order_by(
+            func.lower(Document.title), Document.title, Document.id
+        ).all()
+        target_documents_by_id = {document.id: document for document in target_documents}
+        target_documents_by_hash = {
+            document.content_hash: document
+            for document in target_documents
+            if document.content_hash
+        }
+        target_documents_by_url = {
+            document.source_url: document
+            for document in target_documents
+            if document.source_url
+        }
+
+        target_groups = {
+            group.name: group
+            for group in db.query(ProjectSourceGroup).filter(
+                ProjectSourceGroup.project_id == target.id
+            ).all()
+        }
+        source_group_names = {
+            group.id: group.name
+            for group in db.query(ProjectSourceGroup).filter(
+                ProjectSourceGroup.project_id == source.id
+            ).all()
+        }
+        skipped_sources = []
+        sources_merged = 0
+
+        conversations = db.query(Conversation).filter(
+            Conversation.project_id == source.id,
+        ).order_by(Conversation.created_at, Conversation.id).all()
+        notes = db.query(Note).filter(
+            Note.project_id == source.id,
+            Note.deleted_at.is_(None),
+        ).all()
+        document_ids = {}
+
+        try:
+            for link, document in source_links:
+                duplicate_target = target_documents_by_id.get(document.id)
+                if duplicate_target is None and document.content_hash:
+                    duplicate_target = target_documents_by_hash.get(document.content_hash)
+                if duplicate_target is None and document.source_url:
+                    duplicate_target = target_documents_by_url.get(document.source_url)
+                if duplicate_target is not None:
+                    skipped_sources.append({"id": document.id, "title": document.title})
+                    document_ids[document.id] = duplicate_target.id
+                    continue
+                document_ids[document.id] = document.id
+
+                group_id = None
+                group_name = source_group_names.get(link.source_group_id)
+                if group_name:
+                    group = target_groups.get(group_name)
+                    if group is None:
+                        group = ProjectSourceGroup(
+                            id=str(uuid.uuid4()),
+                            project_id=target.id,
+                            name=group_name,
+                        )
+                        db.add(group)
+                        target_groups[group_name] = group
+                    group_id = group.id
+
+                if mode == "move":
+                    db.delete(link)
+                db.add(ProjectDocument(
+                    project_id=target.id,
+                    document_id=document.id,
+                    shared_by_user_id=document.user_id,
+                    source_group_id=group_id,
+                    added_at=link.added_at,
+                ))
+                target_documents_by_id[document.id] = document
+                if document.content_hash:
+                    target_documents_by_hash.setdefault(document.content_hash, document)
+                if document.source_url:
+                    target_documents_by_url.setdefault(document.source_url, document)
+                sources_merged += 1
+
+            if mode == "copy" or any(
+                source_id != target_id for source_id, target_id in document_ids.items()
+            ):
+                messages = db.query(Message).join(
+                    Conversation,
+                    Conversation.id == Message.conversation_id,
+                ).filter(
+                    Conversation.project_id == source.id,
+                ).order_by(Message.created_at, Message.id).all()
+            else:
+                messages = []
+
+            if mode == "move":
+                for conversation in conversations:
+                    conversation.project_id = target.id
+                    if conversation.user_id is None:
+                        conversation.user_id = user_id
+                for message in messages:
+                    message.citations_json = ProjectService._remap_document_ids(
+                        message.citations_json,
+                        document_ids,
+                    )
+                    message.citation_checks_json = ProjectService._remap_document_ids(
+                        message.citation_checks_json,
+                        document_ids,
+                    )
+                for note in notes:
+                    note.project_id = target.id
+                    note.payload_json = ProjectService._note_payload_for_project(
+                        note.payload_json,
+                        target.id,
+                        target.name,
+                        document_ids,
+                    )
+            else:
+                conversation_ids = {
+                    conversation.id: str(uuid.uuid4())
+                    for conversation in conversations
+                }
+                db.add_all([
+                    Conversation(
+                        id=conversation_ids[conversation.id],
+                        project_id=target.id,
+                        user_id=conversation.user_id or user_id,
+                        title=conversation.title,
+                        created_at=conversation.created_at,
+                        updated_at=conversation.updated_at,
+                    )
+                    for conversation in conversations
+                ])
+                message_ids = {message.id: str(uuid.uuid4()) for message in messages}
+                db.add_all([
+                    Message(
+                        id=message_ids[message.id],
+                        conversation_id=conversation_ids[message.conversation_id],
+                        role=message.role,
+                        text=message.text,
+                        citations_json=ProjectService._remap_document_ids(
+                            message.citations_json,
+                            document_ids,
+                        ),
+                        citation_checks_json=ProjectService._remap_document_ids(
+                            message.citation_checks_json,
+                            document_ids,
+                        ),
+                        used_mode=message.used_mode,
+                        token_count=message.token_count,
+                        cost=message.cost,
+                        processing_time=message.processing_time,
+                        is_bookmarked=message.is_bookmarked,
+                        tags=copy.deepcopy(message.tags),
+                        rating=message.rating,
+                        created_at=message.created_at,
+                    )
+                    for message in messages
+                ])
+                db.add_all([
+                    Note(
+                        id=str(uuid.uuid4()),
+                        project_id=target.id,
+                        title=note.title,
+                        content=note.content,
+                        origin=note.origin,
+                        source_message_id=message_ids.get(
+                            note.source_message_id, note.source_message_id
+                        ),
+                        studio_kind=note.studio_kind,
+                        payload_json=ProjectService._note_payload_for_project(
+                            note.payload_json,
+                            target.id,
+                            target.name,
+                            document_ids,
+                        ),
+                        created_at=note.created_at,
+                        updated_at=note.updated_at,
+                    )
+                    for note in notes
+                ])
+
+            if mode == "move" and source.watched_folder:
+                target.watched_folder = source.watched_folder
+                source.watched_folder = None
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        return {
+            "target_project_id": target.id,
+            "mode": mode,
+            "sources_merged": sources_merged,
+            "notes_merged": len(notes),
+            "conversations_merged": len(conversations),
+            "skipped_sources": skipped_sources,
+        }
     
     @staticmethod
     def get_project(db: Session, project_id: str, user_id: str) -> Optional[Project]:

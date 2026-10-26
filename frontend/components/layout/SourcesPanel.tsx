@@ -18,6 +18,7 @@ import {
   Eye,
   PanelLeftClose,
   PanelLeftOpen,
+  ArrowRightLeft,
   Pencil,
   BarChart3,
   Trash2,
@@ -26,9 +27,17 @@ import {
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import ProjectSearch from '../ProjectSearch';
+import ProjectMergeDialog from '../ProjectMergeDialog';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import useStore from '@/store/useStore';
-import api, { Citation, Document, DocumentStatus, ProjectSourceGroup } from '@/lib/api';
+import api, {
+  Citation,
+  Document,
+  DocumentStatus,
+  Project,
+  ProjectMergeMode,
+  ProjectSourceGroup,
+} from '@/lib/api';
 import {
   closeAddSourcesAfterSuccessfulUpload,
   requestAddSources,
@@ -66,6 +75,8 @@ export default function SourcesPanel({
   const [previewCitation, setPreviewCitation] = useState<Citation | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false);
+  const [mergeSourceProject, setMergeSourceProject] = useState<Project | null>(null);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [projectActionError, setProjectActionError] = useState('');
@@ -125,6 +136,7 @@ export default function SourcesPanel({
     fetchProjects,
     selectProject,
     duplicateProject,
+    mergeProject,
     deleteProject,
     updateProjectTags,
     uploadDocument,
@@ -144,6 +156,9 @@ export default function SourcesPanel({
   const currentProjectId = currentProject?.id;
   const canManageSources = currentProject?.role === 'owner'
     || currentProject?.role === 'editor';
+  const mergeTargets = projects.filter(
+    (project) => project.id !== currentProjectId && project.role === 'owner',
+  );
   const sourceGroups = sourceGroupsState && sourceGroupsState.projectId === currentProjectId
     ? sourceGroupsState.groups
     : [];
@@ -177,6 +192,11 @@ export default function SourcesPanel({
     } finally {
       setIsDuplicating(false);
     }
+  };
+
+  const handleMergeProject = async (targetProjectId: string, mode: ProjectMergeMode) => {
+    if (!mergeSourceProject) return null;
+    return mergeProject(mergeSourceProject.id, targetProjectId, mode);
   };
 
   const handleDeleteProject = async () => {
@@ -798,7 +818,7 @@ export default function SourcesPanel({
               <button
                 type="button"
                 onClick={handleDuplicateProject}
-                disabled={isDuplicating || isDeletingProject}
+                disabled={isDuplicating || isDeletingProject || isMergeDialogOpen}
                 className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
               >
                 {isDuplicating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
@@ -806,8 +826,20 @@ export default function SourcesPanel({
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setMergeSourceProject(currentProject);
+                  setIsMergeDialogOpen(true);
+                }}
+                disabled={isDuplicating || isDeletingProject || mergeTargets.length === 0}
+                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>Merge Project</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleDeleteProject}
-                disabled={isDeletingProject || isDuplicating}
+                disabled={isDeletingProject || isDuplicating || isMergeDialogOpen}
                 className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--error)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
               >
                 {isDeletingProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
@@ -1119,6 +1151,17 @@ export default function SourcesPanel({
           project={currentProject}
           isOpen={isAnalyticsOpen}
           onClose={() => setIsAnalyticsOpen(false)}
+        />
+      )}
+      {isMergeDialogOpen && mergeSourceProject && (
+        <ProjectMergeDialog
+          sourceProject={mergeSourceProject}
+          projects={projects}
+          onClose={() => {
+            setIsMergeDialogOpen(false);
+            setMergeSourceProject(null);
+          }}
+          onMerge={handleMergeProject}
         />
       )}
     </aside>

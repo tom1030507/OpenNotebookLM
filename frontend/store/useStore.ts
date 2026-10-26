@@ -8,6 +8,8 @@ import type {
   Message,
   MessageRating,
   Project,
+  ProjectMergeMode,
+  ProjectMergeResponse,
   StreamQueryResponse,
 } from '@/lib/api';
 import { registerAccountStateRetirer } from '@/lib/sessionBoundary';
@@ -58,6 +60,11 @@ interface AppState {
   }) => Promise<Project | null>;
   updateProjectTags: (id: string, tags: string[]) => Promise<void>;
   duplicateProject: (id: string) => Promise<Project | null>;
+  mergeProject: (
+    sourceId: string,
+    targetId: string,
+    mode: ProjectMergeMode,
+  ) => Promise<ProjectMergeResponse | null>;
   deleteProject: (id: string) => Promise<void>;
   
   // Actions - Documents
@@ -463,6 +470,21 @@ const useStore = create<AppState>()(
             return project;
           } catch (error) {
             if (accountEpoch === epoch) console.error('Failed to duplicate project:', error);
+            throw error;
+          }
+        },
+
+        mergeProject: async (sourceId, targetId, mode) => {
+          const epoch = accountEpoch;
+          try {
+            const result = await api.mergeProject(sourceId, targetId, mode);
+            if (accountEpoch !== epoch) return null;
+            const target = get().projects.find((project) => project.id === targetId);
+            if (target) get().selectProject(target);
+            void get().fetchProjects();
+            return result;
+          } catch (error) {
+            if (accountEpoch === epoch) console.error('Failed to merge projects:', error);
             throw error;
           }
         },
