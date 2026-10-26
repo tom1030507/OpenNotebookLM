@@ -1,10 +1,12 @@
 """Tests for provider selection and failure reporting in the LLM service."""
 import io
+import json
 import sys
 import types
 import urllib.request
 
 import pytest
+import httpx
 
 from app.services import llm as llm_module
 from app.services.admin_usage import capture_llm_usage
@@ -436,6 +438,62 @@ def test_refusal_does_not_masquerade_as_an_answer(
     assert result["model"] == FALLBACK_MODEL
 
 
+@pytest.mark.parametrize("reasoning_format", [None, "hidden"])
+def test_openai_stream_works_with_installed_sdk(settings, monkeypatch, reasoning_format):
+    """Stream through the pinned SDK without losing options or usage.
+
+    Args:
+        settings: Isolated LLM settings.
+        monkeypatch: Scoped configuration overrides.
+        reasoning_format: Optional provider-specific request extension.
+
+    Returns:
+        None.
+    """
+    from openai import OpenAI
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(settings, "openai_reasoning_format", reasoning_format)
+    service = LLMService()
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        chunks = [
+            {"id": "test", "object": "chat.completion.chunk", "created": 0,
+             "model": "test-model", "choices": [
+                 {"index": 0, "delta": {"content": "Answer"}, "finish_reason": None}
+             ]},
+            {"id": "test", "object": "chat.completion.chunk", "created": 0,
+             "model": "test-model", "choices": [], "usage": {
+                 "prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18,
+             }},
+        ]
+        body = "".join("data: %s\n\n" % json.dumps(chunk) for chunk in chunks)
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"},
+            content=body + "data: [DONE]\n\n",
+        )
+
+    with OpenAI(
+        api_key="test-key", base_url="https://example.test/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+    ) as client:
+        service.provider._client = client
+        events = list(service.stream_generate("Question"))
+
+    assert events[0] == ("delta", "Answer")
+    assert events[-1][1]["text"] == "Answer"
+    assert events[-1][1]["usage"] == {
+        "prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18,
+    }
+    assert requests[0]["stream_options"] == {"include_usage": True}
+    if reasoning_format:
+        assert requests[0]["reasoning_format"] == reasoning_format
+    else:
+        assert "reasoning_format" not in requests[0]
+
+
 def test_openai_stream_yields_deltas_and_final_usage(settings, monkeypatch, fake_openai):
     monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
     service = LLMService()
@@ -468,7 +526,7 @@ def test_openai_stream_yields_deltas_and_final_usage(settings, monkeypatch, fake
         }),
     ]
     assert requests[0]["stream"] is True
-    assert requests[0]["stream_options"] == {"include_usage": True}
+    assert requests[0]["extra_body"] == {"stream_options": {"include_usage": True}}
     assert requests[0]["messages"] == [
         {"role": "system", "content": "System"},
         {"role": "user", "content": "Question"},

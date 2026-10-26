@@ -17,7 +17,7 @@ from app.utils.time import as_utc
 # it serialise bare.
 UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
 
-PROJECT_COVER_EMOJIS = ("📚", "🧠", "🔬", "🌿", "🚀", "🎨", "💡", "🌊")
+PROJECT_COVER_EMOJIS = ("📚", "🧠", "🔬", "🌿", "🚀", "🎨", "💡", "🌊", "🤖")
 PROJECT_COVER_COLORS = ("blue", "violet", "rose", "amber", "emerald", "teal", "slate")
 
 

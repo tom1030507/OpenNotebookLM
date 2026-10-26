@@ -542,10 +542,11 @@ class OpenAICompatibleProvider:
             "temperature": temperature,
             "max_tokens": self._budget(max_tokens, messages),
             "stream": True,
-            "stream_options": {"include_usage": True},
+            # Passing stream_options directly breaks the pinned SDK.
+            "extra_body": {"stream_options": {"include_usage": True}},
         }
         if self.reasoning_format:
-            request["extra_body"] = {"reasoning_format": self.reasoning_format}
+            request["extra_body"]["reasoning_format"] = self.reasoning_format
 
         stream = self._create(request, max_tokens, messages)
         text_parts = []
@@ -572,9 +573,12 @@ class OpenAICompatibleProvider:
             "model": model,
             "provider": self.name,
             "usage": {
-                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-                "completion_tokens": getattr(usage, "completion_tokens", 0),
-                "total_tokens": getattr(usage, "total_tokens", 0),
+                "prompt_tokens": usage.get("prompt_tokens", 0)
+                if isinstance(usage, dict) else getattr(usage, "prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0)
+                if isinstance(usage, dict) else getattr(usage, "completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0)
+                if isinstance(usage, dict) else getattr(usage, "total_tokens", 0),
             },
         }
 

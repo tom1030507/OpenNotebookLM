@@ -359,7 +359,8 @@ def test_pagination():
     assert data["page"] == 2
 
 
-def test_project_cover_defaults_validates_and_persists():
+@pytest.mark.parametrize("cover_emoji", ["🧠", "🤖"])
+def test_project_cover_defaults_validates_and_persists(cover_emoji):
     """New projects get a stable emoji, and updates reject unsupported covers."""
     response = client.post("/api/projects", json={"name": "Covered"})
 
@@ -371,10 +372,10 @@ def test_project_cover_defaults_validates_and_persists():
 
     saved = client.put(
         f"/api/projects/{project['id']}",
-        json={"cover_emoji": PROJECT_COVER_EMOJIS[1], "cover_color": PROJECT_COVER_COLORS[0]},
+        json={"cover_emoji": cover_emoji, "cover_color": PROJECT_COVER_COLORS[0]},
     )
     assert saved.status_code == 200
-    assert saved.json()["cover_emoji"] == PROJECT_COVER_EMOJIS[1]
+    assert saved.json()["cover_emoji"] == cover_emoji
     assert saved.json()["cover_color"] == PROJECT_COVER_COLORS[0]
     assert client.put(
         f"/api/projects/{project['id']}", json={"cover_emoji": "📚hello"}
