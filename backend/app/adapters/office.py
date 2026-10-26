@@ -1,4 +1,5 @@
 """Local text and Office document conversion for searchable sources."""
+import json
 from pathlib import Path
 import posixpath
 import re
@@ -8,6 +9,17 @@ from xml.etree import ElementTree
 from typing import Any, Dict, Optional
 from urllib.parse import unquote, urlsplit
 
+import yaml
+
+
+# shortcut: imports common text-source extensions only; add an extension here when needed.
+SUPPORTED_CODE_EXTENSIONS = frozenset({
+    ".c", ".cc", ".cpp", ".cs", ".css", ".go", ".h", ".hpp", ".html",
+    ".java", ".js", ".jsx", ".json", ".kt", ".php", ".py", ".rb", ".rs",
+    ".scss", ".sh", ".sql", ".swift", ".ts", ".tsx", ".vue", ".xml",
+    ".yaml", ".yml",
+})
+
 
 SUPPORTED_FILE_EXTENSIONS = frozenset({
     ".txt",
@@ -16,6 +28,7 @@ SUPPORTED_FILE_EXTENSIONS = frozenset({
     ".pptx",
     ".xlsx",
     ".epub",
+    *SUPPORTED_CODE_EXTENSIONS,
 })
 SUPPORTED_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 SUPPORTED_AUDIO_EXTENSIONS = frozenset({
@@ -131,7 +144,7 @@ class OfficeAdapter:
                 "Files with the %s extension are not supported" % extension
             )
 
-        if extension in {".txt", ".md", ".pdf"}:
+        if extension in {".txt", ".md", ".pdf"} | SUPPORTED_CODE_EXTENSIONS:
             return
 
         try:
@@ -202,8 +215,12 @@ class OfficeAdapter:
         extension = self._normalize_extension(file_extension or Path(file_path).suffix)
         self.validate_file(file_path, extension)
 
-        if extension in {".txt", ".md"}:
+        metadata = {"format": extension[1:]}
+        if extension in {".txt", ".md"} | SUPPORTED_CODE_EXTENSIONS:
             text = Path(file_path).read_text(encoding="utf-8", errors="replace")
+            if extension == ".md":
+                text, markdown_metadata = self._parse_markdown(text)
+                metadata.update(markdown_metadata)
         elif extension == ".pptx":
             text = self._extract_pptx_text(file_path)
         else:
@@ -222,8 +239,48 @@ class OfficeAdapter:
             "text": text,
             "pages": [],
             "num_pages": 0,
-            "metadata": {"format": extension[1:]},
+            "metadata": metadata,
         }
+
+    @staticmethod
+    def _parse_markdown(text: str) -> tuple[str, Dict[str, Any]]:
+        """Move bounded YAML front matter into metadata and retain wiki-link text."""
+        frontmatter_match = re.match(
+            # shortcut: front matter above 64 KiB stays in the body; raise this if large metadata is required.
+            r"\A(?:\ufeff)?---[ \t]*\r?\n([\s\S]{0,65536}?)\r?\n"
+            r"(?:---|\.\.\.)[ \t]*(?:\r?\n|$)",
+            text,
+        )
+        frontmatter = {}
+        body = text
+        if frontmatter_match:
+            try:
+                parsed = yaml.load(frontmatter_match.group(1), Loader=yaml.BaseLoader)
+                if not isinstance(parsed, dict):
+                    raise ValueError("Markdown front matter must be a mapping")
+                json.dumps(parsed, ensure_ascii=False)
+                frontmatter = parsed
+                body = text[frontmatter_match.end():]
+            except (ValueError, RecursionError, yaml.YAMLError):
+                pass
+
+        metadata: Dict[str, Any] = {}
+        if frontmatter:
+            metadata["frontmatter"] = frontmatter
+        links = list(dict.fromkeys(
+            match.group(1).strip()
+            for match in re.finditer(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]", body)
+            if match.group(1).strip()
+        ))
+        if links:
+            metadata["wikilinks"] = links
+        title = frontmatter.get("title")
+        if not isinstance(title, str) or not title.strip():
+            heading = re.search(r"^#{1,6}\s+(.+?)\s*#*\s*$", body, re.MULTILINE)
+            title = heading.group(1).strip() if heading else None
+        if title:
+            metadata["title"] = title
+        return body.strip(), metadata
 
     @staticmethod
     def _normalize_extension(extension: str) -> str:

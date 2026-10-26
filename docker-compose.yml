@@ -55,6 +55,8 @@ services:
       OCR_MODEL_CACHE_DIR: ${OCR_MODEL_CACHE_DIR:-/app/models/rapidocr}
       ALLOWED_FILE_TYPES: "${ALLOWED_FILE_TYPES:-pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp,mp3,m4a,wav,ogg,webm,flac}"
       MAX_FILE_SIZE_MB: "${MAX_FILE_SIZE_MB:-50}"
+      MAX_GIT_REPO_FILES: "${MAX_GIT_REPO_FILES:-500}"
+      MAX_GIT_REPO_SIZE_MB: "${MAX_GIT_REPO_SIZE_MB:-500}"
       MAX_URL_DOWNLOAD_MB: "${MAX_URL_DOWNLOAD_MB:-10}"
       MAX_URL_REDIRECTS: "${MAX_URL_REDIRECTS:-5}"
       URL_CONNECT_TIMEOUT_SECONDS: "${URL_CONNECT_TIMEOUT_SECONDS:-5}"

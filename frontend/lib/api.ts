@@ -177,6 +177,31 @@ export interface WatchedFolderSettings {
   path: string | null;
 }
 
+export interface GitRepository {
+  id: string;
+  url: string;
+  include_glob: string;
+  exclude_glob: string;
+  head_commit: string | null;
+  last_synced_at: string | null;
+  file_count: number;
+}
+
+export interface GitRepositoryOperation {
+  repository: GitRepository;
+  added: number;
+  updated: number;
+  unchanged: number;
+  removed: number;
+}
+
+export interface GitRepositoryImportRequest {
+  url: string;
+  include_glob: string;
+  exclude_glob: string;
+  token?: string;
+}
+
 export type TrashItemType = 'project' | 'source' | 'note';
 
 export interface TrashItem {
@@ -1259,6 +1284,33 @@ const api = {
     return requestJson<WatchedFolderSettings>(
       `/projects/${projectId}/watched-folder`,
       { method: 'PUT', body: JSON.stringify({ path }) },
+    );
+  },
+
+  getGitRepositories(projectId: string): Promise<{ repositories: GitRepository[] }> {
+    return requestJson<{ repositories: GitRepository[] }>(
+      `/projects/${encodeURIComponent(projectId)}/git-repositories`,
+    );
+  },
+
+  importGitRepository(
+    projectId: string,
+    request: GitRepositoryImportRequest,
+  ): Promise<GitRepositoryOperation> {
+    return requestJson<GitRepositoryOperation>(
+      `/projects/${encodeURIComponent(projectId)}/git-repositories`,
+      { method: 'POST', body: JSON.stringify(request) },
+    );
+  },
+
+  syncGitRepository(
+    projectId: string,
+    repositoryId: string,
+    token?: string,
+  ): Promise<GitRepositoryOperation> {
+    return requestJson<GitRepositoryOperation>(
+      `/projects/${encodeURIComponent(projectId)}/git-repositories/${encodeURIComponent(repositoryId)}/sync`,
+      { method: 'POST', body: JSON.stringify(token ? { token } : {}) },
     );
   },
 

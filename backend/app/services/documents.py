@@ -1619,6 +1619,24 @@ class DocumentService:
                         file_extension,
                     )
                 document.content = result["text"]
+                extracted_title = result.get("metadata", {}).get("title")
+                previous_metadata = (document.meta_json or {}).get("metadata") or {}
+                previous_auto_title = previous_metadata.get("title")
+                previous_filename = Path(
+                    (document.meta_json or {}).get("filename") or ""
+                ).name
+                git_title_is_generated = (
+                    bool((document.meta_json or {}).get("git_repository_id"))
+                    and (
+                        document.title == previous_auto_title
+                        or (
+                            not previous_auto_title
+                            and document.title == previous_filename
+                        )
+                    )
+                )
+                if extracted_title and (not is_resync or git_title_is_generated):
+                    document.title = extracted_title
                 document.meta_json = {
                     **(document.meta_json or {}),
                     "num_pages": result["num_pages"],

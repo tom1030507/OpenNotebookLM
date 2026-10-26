@@ -95,6 +95,9 @@ def _snapshot_folder(folder: Path, settings: Settings):
         current = Path(directory)
         for name in list(directory_names):
             child = current / name
+            if name == ".obsidian":
+                directory_names.remove(name)
+                continue
             if child.is_symlink():
                 directory_names.remove(name)
                 try:
