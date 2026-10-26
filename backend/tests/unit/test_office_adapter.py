@@ -182,6 +182,45 @@ def test_text_and_markdown_are_utf8_decoded_with_replacement(tmp_path):
     assert set(text_result) == {"text", "pages", "num_pages", "metadata"}
 
 
+def test_markdown_frontmatter_and_wikilinks_are_metadata(tmp_path):
+    path = tmp_path / "note.md"
+    path.write_text(
+        "---\ntitle: 資料庫筆記\ntags:\n  - Obsidian\n---\n"
+        "# Fallback title\n\nSee [[資料庫|database]] and [[索引#設計]].\n",
+        encoding="utf-8",
+    )
+
+    result = result_for(path)
+
+    assert result["text"] == "# Fallback title\n\nSee [[資料庫|database]] and [[索引#設計]]."
+    assert result["metadata"]["title"] == "資料庫筆記"
+    assert result["metadata"]["frontmatter"] == {
+        "title": "資料庫筆記",
+        "tags": ["Obsidian"],
+    }
+    assert result["metadata"]["wikilinks"] == ["資料庫", "索引"]
+
+
+def test_malformed_markdown_frontmatter_stays_in_source_text(tmp_path):
+    path = tmp_path / "broken.md"
+    path.write_text("---\ntitle: [unterminated\n---\nBody", encoding="utf-8")
+
+    result = result_for(path)
+
+    assert result["text"].startswith("---\ntitle: [unterminated")
+    assert "frontmatter" not in result["metadata"]
+
+
+def test_source_code_files_are_read_as_utf8(tmp_path):
+    path = tmp_path / "main.py"
+    path.write_text("print('資料庫')", encoding="utf-8")
+
+    result = result_for(path)
+
+    assert result["text"] == "print('資料庫')"
+    assert result["metadata"]["format"] == "py"
+
+
 def test_docx_heading_style_becomes_markdown_heading(tmp_path):
     """Word heading styles survive conversion for section citations."""
     path = tmp_path / "report.docx"

@@ -81,6 +81,25 @@ class Project(Base):
     )
 
 
+class GitRepository(Base):
+    """Project-scoped remote whose selected Git files become document sources."""
+    __tablename__ = "git_repositories"
+
+    id = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    url = Column(Text, nullable=False)
+    include_glob = Column(Text, nullable=False, default="**/*")
+    exclude_glob = Column(Text, nullable=False, default="")
+    head_commit = Column(String(64))
+    manifest_json = Column(JSON, nullable=False, default=dict)
+    last_synced_at = Column(UTCDateTime)
+
+    __table_args__ = (
+        Index("idx_git_repositories_project_id", "project_id"),
+        UniqueConstraint("project_id", "url", name="uq_git_repositories_project_url"),
+    )
+
+
 class User(Base):
     """Account used to sign in to the workspace."""
     __tablename__ = "users"

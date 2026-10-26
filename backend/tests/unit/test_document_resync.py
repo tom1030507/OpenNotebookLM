@@ -1,10 +1,12 @@
 import hashlib
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.adapters.office import OfficeAdapter
 from app.db.models import Base, Document, IngestionJob
 from app.services.documents import DocumentService
 from app.services.ingestion_jobs import IngestionJobWorker, recover_abandoned_jobs
@@ -110,6 +112,63 @@ def test_resync_of_changed_url_updates_same_document_and_reindexes():
         assert document.last_synced_at is not None
         assert "_resync_index_started" not in document.meta_json
         assert chunker.calls == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("current_title", "previous_auto_title", "expected_title"),
+    [
+        ("Old note", "Old note", "New note"),
+        ("note.md", None, "New note"),
+        ("Custom label", "Old note", "Custom label"),
+    ],
+)
+def test_git_markdown_resync_updates_generated_titles_but_keeps_manual_renames(
+    current_title,
+    previous_auto_title,
+    expected_title,
+    tmp_path,
+):
+    engine, db = make_db()
+    document = db.get(Document, "source-1")
+    source_path = tmp_path / "note.md"
+    source_path.write_text("---\ntitle: New note\n---\nUpdated body", encoding="utf-8")
+    document.title = current_title
+    document.source_type = "md"
+    document.source_url = str(source_path)
+    document.content = "Old body"
+    document.meta_json = {
+        "filename": "note.md",
+        "file_extension": ".md",
+        "file_size": source_path.stat().st_size,
+        "git_repository_id": "repository-1",
+        "metadata": {
+            "format": "md",
+            "title": previous_auto_title,
+        },
+    }
+    db.commit()
+    chunker = Chunker()
+    service = DocumentService(
+        chunking_service=chunker,
+        embedding_service=Embedder(),
+        office_adapter=OfficeAdapter(),
+    )
+    service._publish_document_index = lambda *_args: None
+
+    try:
+        status = service.process_ingestion_job(
+            db,
+            "source-1",
+            "resync",
+            {"file_path": str(source_path), "previous_status": "ready"},
+        )
+
+        assert status == "ready"
+        assert document.title == expected_title
+        assert document.content == "Updated body"
     finally:
         db.close()
         engine.dispose()

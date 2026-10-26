@@ -285,7 +285,7 @@ def test_file_job_extracts_using_the_persisted_extension_and_indexes_text(lifecy
                 "text": "## Section\n\nSearchable report content.",
                 "pages": [],
                 "num_pages": 0,
-                "metadata": {"format": "docx"},
+                "metadata": {"format": "docx", "title": "R&D notes"},
             }
 
     class Embedder:
@@ -321,8 +321,12 @@ def test_file_job_extracts_using_the_persisted_extension_and_indexes_text(lifecy
 
     assert office.calls == [(document.source_url, ".docx")]
     assert status == document.status == "ready"
+    assert document.title == "R&D notes"
     assert document.content == "## Section\n\nSearchable report content."
-    assert document.meta_json["metadata"] == {"format": "docx"}
+    assert document.meta_json["metadata"] == {
+        "format": "docx",
+        "title": "R&D notes",
+    }
 
 
 def test_pdf_url_job_preserves_page_boundaries(lifecycle_db):

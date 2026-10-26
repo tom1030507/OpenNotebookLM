@@ -45,6 +45,7 @@ import {
 import useDialogFocus from '@/hooks/useDialogFocus';
 import ProjectCover from '../ProjectCover';
 import ProjectAnalyticsDialog from '../ProjectAnalyticsDialog';
+import GitRepositoryDialog from '../GitRepositoryDialog';
 import { findProjectCoverColor, projectCoverStyle } from '@/lib/projectCover';
 
 // A source is only "Ready" once the backend can retrieve it, so the states
@@ -97,6 +98,7 @@ export default function SourcesPanel({
   const [watchedFolderSaving, setWatchedFolderSaving] = useState(false);
   const [watchedFolderError, setWatchedFolderError] = useState('');
   const [resyncingDocumentId, setResyncingDocumentId] = useState<string | null>(null);
+  const [isGitRepositoryDialogOpen, setIsGitRepositoryDialogOpen] = useState(false);
   const [pendingSearchPreview, setPendingSearchPreview] = useState<{
     projectId: string;
     documentId: string;
@@ -1017,13 +1019,22 @@ export default function SourcesPanel({
         
         {/* Add Source Button */}
         {canManageSources && currentProject && (
-          <button 
-            onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
-            className="w-full h-9 flex items-center justify-center gap-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)] transition-base"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="text-sm font-medium">Add Source</span>
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
+              className="w-full h-9 flex items-center justify-center gap-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)] transition-base"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="text-sm font-medium">Add Source</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsGitRepositoryDialogOpen(true)}
+              className="w-full h-8 rounded-md border border-[var(--input)] text-xs hover:bg-[var(--muted)]"
+            >
+              Connect Git repository
+            </button>
+          </div>
         )}
 
         {/* Search */}
@@ -1162,6 +1173,13 @@ export default function SourcesPanel({
             setMergeSourceProject(null);
           }}
           onMerge={handleMergeProject}
+        />
+      )}
+      {isGitRepositoryDialogOpen && canManageSources && currentProject && (
+        <GitRepositoryDialog
+          projectId={currentProject.id}
+          onClose={() => setIsGitRepositoryDialogOpen(false)}
+          onSourcesChanged={() => { void refreshDocuments(currentProject.id); }}
         />
       )}
     </aside>

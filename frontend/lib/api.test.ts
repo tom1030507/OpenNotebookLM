@@ -108,6 +108,54 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/upload-config');
   });
 
+  it('imports, lists, and syncs Git repositories with per-request tokens', async () => {
+    const repository = {
+      id: 'repo-1',
+      url: 'https://github.com/org/repo.git',
+      include_glob: '**/*.md',
+      exclude_glob: 'private/**',
+      head_commit: 'abc123',
+      last_synced_at: '2026-10-26T00:00:00+00:00',
+      file_count: 3,
+    };
+    const operation = {
+      repository,
+      added: 2,
+      updated: 1,
+      unchanged: 4,
+      removed: 0,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(operation))
+      .mockResolvedValueOnce(jsonResponse({ repositories: [repository] }))
+      .mockResolvedValueOnce(jsonResponse(operation));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.importGitRepository('project-1', {
+      url: repository.url,
+      include_glob: repository.include_glob,
+      exclude_glob: repository.exclude_glob,
+      token: 'one-time-token',
+    })).resolves.toEqual(operation);
+    await expect(api.getGitRepositories('project-1')).resolves.toEqual({
+      repositories: [repository],
+    });
+    await expect(api.syncGitRepository('project-1', 'repo-1', 'sync-token'))
+      .resolves.toEqual(operation);
+
+    expect(fetchMock.mock.calls.map(([url, options]) => [url, options?.method || 'GET'])).toEqual([
+      ['/api/projects/project-1/git-repositories', 'POST'],
+      ['/api/projects/project-1/git-repositories', 'GET'],
+      ['/api/projects/project-1/git-repositories/repo-1/sync', 'POST'],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      url: repository.url,
+      include_glob: '**/*.md',
+      token: 'one-time-token',
+    });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ token: 'sync-token' });
+  });
+
   it('searches public sources for a project', async () => {
     const results = [{
       title: 'A paper',

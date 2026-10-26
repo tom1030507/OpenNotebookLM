@@ -54,6 +54,24 @@ def test_snapshot_skips_file_symlinks_that_escape_watched_folder(tmp_path):
     assert complete is False
 
 
+def test_snapshot_skips_obsidian_settings_directory(tmp_path):
+    vault = tmp_path / "vault"
+    config = vault / ".obsidian"
+    config.mkdir(parents=True)
+    (config / "appearance.md").write_text("plugin settings", encoding="utf-8")
+    note = vault / "welcome.md"
+    note.write_text("# Welcome", encoding="utf-8")
+
+    snapshot, seen, complete = watched_folders._snapshot_folder(
+        vault,
+        Settings(allowed_file_types="md", max_file_size_mb=1),
+    )
+
+    assert set(snapshot) == {str(note.resolve())}
+    assert seen == {str(note.resolve())}
+    assert complete is True
+
+
 def test_failed_copy_keeps_existing_private_source(tmp_path):
     target = tmp_path / "uploads" / "source.txt"
     target.parent.mkdir()

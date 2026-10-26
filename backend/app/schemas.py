@@ -358,6 +358,62 @@ class WatchedFolderResponse(BaseModel):
     path: Optional[str] = None
 
 
+class GitRepositoryImportRequest(BaseModel):
+    """Request a shallow Git import; the token is used only for this call."""
+    model_config = {"extra": "forbid"}
+
+    url: str = Field(..., min_length=1, max_length=2048)
+    include_glob: str = Field(default="**/*", max_length=512)
+    exclude_glob: str = Field(default="", max_length=512)
+    token: Optional[str] = Field(default=None, max_length=4096, repr=False)
+
+    @field_validator("token")
+    @classmethod
+    def normalize_git_token(cls, token: Optional[str]) -> Optional[str]:
+        """Treat an empty password-field value as an unauthenticated request."""
+        token = token.strip() if token else None
+        return token or None
+
+
+class GitRepositorySyncRequest(BaseModel):
+    """Optional per-request token for a repository sync."""
+    model_config = {"extra": "forbid"}
+
+    token: Optional[str] = Field(default=None, max_length=4096, repr=False)
+
+    @field_validator("token")
+    @classmethod
+    def normalize_git_token(cls, token: Optional[str]) -> Optional[str]:
+        """Treat an empty password-field value as an unauthenticated request."""
+        token = token.strip() if token else None
+        return token or None
+
+
+class GitRepositoryResponse(BaseModel):
+    """Repository settings and last synchronized state, without credentials."""
+    id: str
+    url: str
+    include_glob: str
+    exclude_glob: str
+    head_commit: Optional[str] = None
+    last_synced_at: Optional[UtcDatetime] = None
+    file_count: int
+
+
+class GitRepositoryListResponse(BaseModel):
+    """Project repositories visible to the caller."""
+    repositories: List[GitRepositoryResponse]
+
+
+class GitRepositoryOperationResponse(BaseModel):
+    """Outcome counts for one repository import or sync."""
+    repository: GitRepositoryResponse
+    added: int
+    updated: int
+    unchanged: int
+    removed: int
+
+
 # Document schemas
 class DocumentBase(BaseModel):
     """Base document schema."""

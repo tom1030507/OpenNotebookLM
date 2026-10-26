@@ -114,6 +114,8 @@ class Settings(BaseSettings):
     
     # File Upload
     max_file_size_mb: int = 50
+    max_git_repo_files: int = Field(default=500, ge=1, le=10000)
+    max_git_repo_size_mb: int = Field(default=500, ge=1, le=100000)
     allowed_file_types: str = (
         "pdf,txt,md,docx,pptx,xlsx,epub,png,jpg,jpeg,webp,"
         "mp3,m4a,wav,ogg,webm,flac"
@@ -280,6 +282,18 @@ class Settings(BaseSettings):
     def max_file_size_bytes(self) -> int:
         """Convert MB to bytes."""
         return self.max_file_size_mb * 1024 * 1024
+
+    @property
+    def max_git_repo_size_bytes(self) -> int:
+        """Convert the per-repository Git import cap to bytes.
+
+        Args:
+            None.
+
+        Returns:
+            The maximum size of a cloned pack or imported file content.
+        """
+        return self.max_git_repo_size_mb * 1024 * 1024
 
     @property
     def search_enabled(self) -> bool:

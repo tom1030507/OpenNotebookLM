@@ -29,6 +29,7 @@ from app.db.models import (
     Base,
     Conversation,
     Document,
+    GitRepository,
     Note,
     Message,
     Project,
@@ -336,6 +337,101 @@ class TestSharedProjectSourceRoles:
         cleared = env.alice.put(route, json={"path": None})
         assert cleared.status_code == 200
         assert cleared.json()["path"] is None
+
+    def test_git_repositories_are_scoped_to_visible_projects(self, env):
+        alice_project_id = make_project(env.alice)
+        bob_project_id = make_project(env.bob, "Bob project")
+        repository = GitRepository(
+            id="alice-git-repository",
+            project_id=alice_project_id,
+            url="https://github.com/alice/research.git",
+            include_glob="**/*.md",
+            exclude_glob="private/**",
+            head_commit="a" * 40,
+            manifest_json={
+                "notes.md": {"document_id": "missing-document", "oid": "a" * 40}
+            },
+        )
+        env.session.add(repository)
+        env.session.commit()
+
+        alice_route = "/api/projects/%s/git-repositories" % alice_project_id
+        assert env.alice.get(alice_route).json()["repositories"][0]["id"] == repository.id
+        assert env.bob.get(alice_route).status_code == 404
+        assert env.bob.post(
+            "%s/%s/sync" % (alice_route, repository.id),
+            json={},
+        ).status_code == 404
+        assert env.bob.post(
+            "/api/projects/%s/git-repositories/%s/sync"
+            % (bob_project_id, repository.id),
+            json={},
+        ).status_code == 404
+
+    def test_git_import_and_sync_never_return_the_one_time_token(self, env, monkeypatch):
+        project_id = make_project(env.alice)
+        captured = []
+
+        class FakeGitRepositoryService:
+            def __init__(self, _settings):
+                pass
+
+            def import_repository(
+                self, db, project, url, include_glob, exclude_glob, token
+            ):
+                captured.append(token)
+                repository = GitRepository(
+                    id="git-repository-1",
+                    project_id=project.id,
+                    url=url,
+                    include_glob=include_glob,
+                    exclude_glob=exclude_glob,
+                    head_commit="a" * 40,
+                    manifest_json={
+                        "note.md": {"document_id": "missing-document", "oid": "a" * 40}
+                    },
+                )
+                db.add(repository)
+                db.commit()
+                return repository, {
+                    "added": 1,
+                    "updated": 0,
+                    "unchanged": 0,
+                    "removed": 0,
+                }
+
+            def sync_repository(self, _db, _project, repository, token):
+                captured.append(token)
+                return repository, {
+                    "added": 0,
+                    "updated": 0,
+                    "unchanged": 1,
+                    "removed": 0,
+                }
+
+        monkeypatch.setattr(
+            "app.routers.projects.GitRepositoryService",
+            FakeGitRepositoryService,
+        )
+        route = "/api/projects/%s/git-repositories" % project_id
+        imported = env.alice.post(
+            route,
+            json={
+                "url": "https://github.com/alice/research.git",
+                "include_glob": "**/*.md",
+                "exclude_glob": "private/**",
+                "token": "one-time-token",
+            },
+        )
+        assert imported.status_code == 200, imported.text
+        assert "token" not in imported.json()
+        synced = env.alice.post(
+            "%s/git-repository-1/sync" % route,
+            json={"token": "one-time-token"},
+        )
+        assert synced.status_code == 200, synced.text
+        assert "token" not in synced.json()
+        assert captured == ["one-time-token", "one-time-token"]
 
     def test_invalid_foreign_source_link_is_hidden_from_project_reads(self, env):
         project_id = make_project(env.alice)

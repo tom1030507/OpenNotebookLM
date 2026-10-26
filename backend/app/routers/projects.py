@@ -14,8 +14,11 @@ from app.schemas import (
     ProjectSourceGroupCreate, ProjectSourceGroupResponse,
     ProjectSourceGroupUpdate, WatchedFolderRequest, WatchedFolderResponse,
     ProjectMergeRequest, ProjectMergeResponse,
+    GitRepositoryImportRequest, GitRepositoryListResponse,
+    GitRepositoryOperationResponse, GitRepositoryResponse,
+    GitRepositorySyncRequest,
 )
-from app.db.models import User
+from app.db.models import GitRepository, User
 from app.services.projects import ProjectService
 from app.services.trash import TrashService
 from app.routers.auth import get_current_user
@@ -23,6 +26,12 @@ from app.routers.ownership import project_role, require_document, require_projec
 from app.services.project_analytics import get_project_analytics
 from app.services.watched_folders import resolve_watched_folder
 from app.services.llm import is_model_available
+from app.services.git_repositories import (
+    GitRepositoryConflictError,
+    GitRepositoryLimitError,
+    GitRepositoryService,
+    GitRepositoryUnavailableError,
+)
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -549,6 +558,147 @@ def update_watched_folder(
         project.watched_folder = None
     db.commit()
     return WatchedFolderResponse(enabled=bool(root), path=project.watched_folder)
+
+
+def _git_repository_response(repository: GitRepository) -> GitRepositoryResponse:
+    """Shape safe repository settings for the project API."""
+    manifest = repository.manifest_json or {}
+    return GitRepositoryResponse(
+        id=repository.id,
+        url=repository.url,
+        include_glob=repository.include_glob,
+        exclude_glob=repository.exclude_glob,
+        head_commit=repository.head_commit,
+        last_synced_at=repository.last_synced_at,
+        file_count=sum(
+            1 for item in manifest.values()
+            if isinstance(item, dict) and not item.get("removed")
+        ),
+    )
+
+
+def _git_operation_response(repository, counts) -> GitRepositoryOperationResponse:
+    """Return a repository operation without exposing request credentials."""
+    return GitRepositoryOperationResponse(
+        repository=_git_repository_response(repository),
+        **{key: counts[key] for key in ("added", "updated", "unchanged", "removed")},
+    )
+
+
+@router.get(
+    "/projects/{project_id}/git-repositories",
+    response_model=GitRepositoryListResponse,
+)
+def list_git_repositories(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GitRepositoryListResponse:
+    """List repositories attached to a project the caller can view.
+
+    Args:
+        project_id: Project whose remote sources are requested.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        The caller-visible project repositories.
+    """
+    project = require_project(db, project_id, current_user, min_role="viewer")
+    repositories = db.query(GitRepository).filter(
+        GitRepository.project_id == project.id
+    ).order_by(GitRepository.last_synced_at.desc()).all()
+    return GitRepositoryListResponse(
+        repositories=[_git_repository_response(repository) for repository in repositories]
+    )
+
+
+@router.post(
+    "/projects/{project_id}/git-repositories",
+    response_model=GitRepositoryOperationResponse,
+)
+def import_git_repository(
+    project_id: str,
+    request: GitRepositoryImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GitRepositoryOperationResponse:
+    """Import selected remote files into an editable project.
+
+    Args:
+        project_id: Project receiving the sources.
+        request: Remote URL, globs, and optional one-time token.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        Counts and current settings for the imported repository.
+    """
+    project = require_project(db, project_id, current_user, min_role="editor")
+    try:
+        repository, counts = GitRepositoryService(get_settings()).import_repository(
+            db,
+            project,
+            request.url,
+            request.include_glob,
+            request.exclude_glob,
+            request.token,
+        )
+    except GitRepositoryConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except GitRepositoryLimitError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except GitRepositoryUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return _git_operation_response(repository, counts)
+
+
+@router.post(
+    "/projects/{project_id}/git-repositories/{repository_id}/sync",
+    response_model=GitRepositoryOperationResponse,
+)
+def sync_git_repository(
+    project_id: str,
+    repository_id: str,
+    request: GitRepositorySyncRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GitRepositoryOperationResponse:
+    """Re-fetch a project repository using an optional per-sync token.
+
+    Args:
+        project_id: Authorized project containing the remote source.
+        repository_id: Repository id scoped to that project.
+        request: Optional one-time token.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        Counts and current settings for the synchronized repository.
+    """
+    project = require_project(db, project_id, current_user, min_role="editor")
+    repository = db.query(GitRepository).filter(
+        GitRepository.id == repository_id,
+        GitRepository.project_id == project.id,
+    ).first()
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Git repository not found")
+    try:
+        repository, counts = GitRepositoryService(get_settings()).sync_repository(
+            db,
+            project,
+            repository,
+            request.token,
+        )
+    except GitRepositoryLimitError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except GitRepositoryUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return _git_operation_response(repository, counts)
 
 
 @router.post("/projects/{project_id}/duplicate", response_model=ProjectResponse)
