@@ -84,9 +84,10 @@ async function saveStudioNote(
     content?: string;
     payload_json?: MindMap | VideoSummary;
   },
-): Promise<void> {
+): Promise<string> {
   const note = await api.createNote(projectId, { title: title.slice(0, 200), ...fields });
   useNotes.getState().upsert(note);
+  return note.id;
 }
 
 const StudioDialogFallback = () => (
@@ -803,10 +804,15 @@ export default function StudioPanel({
           <MindMapDialog
             map={currentMindMap}
             onClose={() => setMindMap(null)}
-            onSave={canEditProject ? () => saveStudioNote(currentMindMap.project_id,
+            onSave={canEditProject ? (savedMap) => saveStudioNote(currentMindMap.project_id,
               `${currentMindMap.project_name} mind map`, {
-                studio_kind: 'mindmap', payload_json: currentMindMap,
+                studio_kind: 'mindmap', payload_json: savedMap,
               }) : undefined}
+            onLayoutChange={canEditProject ? async (layout_positions, savedNoteId) => {
+              if (!savedNoteId) return;
+              const updated = await api.updateNote(currentMindMap.project_id, savedNoteId, { layout_positions });
+              useNotes.getState().upsert(updated);
+            } : undefined}
             onAsk={(question) => {
               useStore.getState().draftMindMapQuestion(currentMindMap.project_id, question);
               setMindMap(null);
@@ -824,11 +830,13 @@ export default function StudioPanel({
             documentIds={currentReportDialog.documentIds}
             options={currentReportDialog.options}
             onClose={() => setReportDialog(null)}
-            onSave={canEditProject ? (markdown) => saveStudioNote(
-              currentReportDialog.projectId,
-              `${currentReportDialog.projectName} report`,
-              { studio_kind: 'report', content: markdown },
-            ) : undefined}
+            onSave={canEditProject ? async (markdown) => {
+              await saveStudioNote(
+                currentReportDialog.projectId,
+                `${currentReportDialog.projectName} report`,
+                { studio_kind: 'report', content: markdown },
+              );
+            } : undefined}
           />
         </React.Suspense>
       )}
@@ -850,10 +858,12 @@ export default function StudioPanel({
           <VideoSummaryDialog
             summary={currentVideoSummary}
             onClose={() => setVideoSummary(null)}
-            onSave={canEditProject ? () => saveStudioNote(currentVideoSummary.project_id,
-              `${currentVideoSummary.project_name} video summary`, {
-                studio_kind: 'video_summary', payload_json: currentVideoSummary,
-              }) : undefined}
+            onSave={canEditProject ? async () => {
+              await saveStudioNote(currentVideoSummary.project_id,
+                `${currentVideoSummary.project_name} video summary`, {
+                  studio_kind: 'video_summary', payload_json: currentVideoSummary,
+                });
+            } : undefined}
           />
         </React.Suspense>
       )}

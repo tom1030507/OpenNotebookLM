@@ -331,6 +331,11 @@ export interface MindMapNode {
   children: MindMapNode[];
 }
 
+export interface MindMapPosition {
+  x: number;
+  y: number;
+}
+
 export interface MindMap {
   source_count?: number | null;
   total_source_count?: number | null;
@@ -345,6 +350,7 @@ export interface MindMap {
   model_used: string;
   node_count: number;
   root: MindMapNode;
+  layout_positions?: Record<string, MindMapPosition> | null;
 }
 
 /** One scene of a project's video summary. The shape is the same for all kinds. */
@@ -1599,7 +1605,11 @@ const api = {
   updateNote(
     projectId: string,
     noteId: string,
-    changes: { title?: string; content?: string },
+    changes: {
+      title?: string;
+      content?: string;
+      layout_positions?: Record<string, MindMapPosition>;
+    },
   ): Promise<Note> {
     return requestJson<Note>(`/projects/${projectId}/notes/${noteId}`, {
       method: 'PUT',

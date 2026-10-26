@@ -640,6 +640,16 @@ class MindMapNode(BaseModel):
     children: List["MindMapNode"] = []
 
 
+class MindMapPosition(BaseModel):
+    """A bounded saved position for one mind map node."""
+
+    model_config = {"extra": "forbid"}
+
+    # Bounded coordinates keep saved layouts inside a browser-safe canvas range.
+    x: int = Field(..., ge=0, le=10_000, strict=True)
+    y: int = Field(..., ge=0, le=10_000, strict=True)
+
+
 class SourceSelection(BaseModel):
     """Optional body narrowing a Studio output to some of a project's sources."""
 
@@ -1002,6 +1012,31 @@ class MindMapResponse(BaseModel):
     source_count: Optional[int] = Field(default=None, ge=0)
     total_source_count: Optional[int] = Field(default=None, ge=0)
     root: MindMapNode
+    layout_positions: Optional[Dict[str, MindMapPosition]] = None
+
+    @model_validator(mode="after")
+    def positions_reference_existing_nodes(self) -> "MindMapResponse":
+        """Reject saved coordinates for ids outside this map's node tree.
+
+        Args:
+            self: The validated mind map response.
+
+        Returns:
+            The same response when every saved id exists in the map.
+
+        Raises:
+            ValueError: If a coordinate key does not name a map node.
+        """
+        if self.layout_positions:
+            node_ids = set()
+            pending = [self.root]
+            while pending:
+                node = pending.pop()
+                node_ids.add(node.id)
+                pending.extend(node.children)
+            if self.layout_positions.keys() - node_ids:
+                raise ValueError("Layout positions must reference existing nodes")
+        return self
 
 
 # Video summary schemas
@@ -1151,6 +1186,7 @@ class NoteUpdate(BaseModel):
     """Schema for editing a note."""
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     content: Optional[str] = Field(None, max_length=NOTE_CONTENT_MAX_LENGTH)
+    layout_positions: Optional[Dict[str, MindMapPosition]] = None
 
 
 class NoteResponse(BaseModel):

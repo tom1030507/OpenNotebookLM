@@ -7,6 +7,7 @@ import {
   ROW_HEIGHT,
   fitZoom,
   layoutMindMap,
+  mindMapToSvg,
   mindMapToMarkdown,
   toggleCollapsed,
   collapsedBranches,
@@ -123,6 +124,24 @@ describe('layoutMindMap', () => {
     expect(laid.height).toBe(ROW_HEIGHT * 2 + NODE_HEIGHT);
   });
 
+  it('uses saved positions and moves connected edges with their nodes', () => {
+    const laid = layoutMindMap(tree(), {
+      positions: { 'doc-2-topic-0': { x: 900, y: 160 } },
+    });
+    const byId = new Map(laid.nodes.map((n) => [n.id, n]));
+    const edge = laid.edges.find((item) => item.toId === 'doc-2-topic-0')!;
+
+    expect(byId.get('doc-2-topic-0')?.x).toBe(900);
+    expect(byId.get('doc-2-topic-0')?.y).toBe(160);
+    expect(byId.get('doc-2')?.y).toBe(ROW_HEIGHT * 2);
+    expect(byId.get('root')?.y).toBe((ROW_HEIGHT / 2 + ROW_HEIGHT * 2) / 2);
+    expect(edge.fromY).toBe(ROW_HEIGHT * 2 + NODE_HEIGHT / 2);
+    expect(edge.toX).toBe(900);
+    expect(edge.toY).toBe(160 + NODE_HEIGHT / 2);
+    expect(laid.width).toBe(900 + NODE_WIDTH);
+    expect(laid.height).toBe(160 + NODE_HEIGHT);
+  });
+
   it('leaves room for a lone root rather than collapsing to nothing', () => {
     const laid = layoutMindMap(node('root', 'Empty', 'project'));
 
@@ -190,6 +209,31 @@ describe('mindMapToMarkdown', () => {
 
     expect(markdown).toContain('# Empty mind map');
     expect(markdown).toMatch(/no sources/i);
+  });
+});
+
+describe('mindMapToSvg', () => {
+  it('exports node labels as escaped CJK text and includes the connecting edges', () => {
+    const geometry = layoutMindMap(node('root', '研究 & 概念', 'project', [
+      node('topic', '注意力', 'topic'),
+    ]));
+    const svg = mindMapToSvg(geometry);
+
+    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(svg).toContain('研究 &amp; 概念');
+    expect(svg).toContain('注意力');
+    expect(svg).toContain('<path');
+    expect(svg).toContain('fill="#4057a4"');
+  });
+
+  it('keeps edge curves inside the viewBox when a child is left of its parent', () => {
+    const geometry = layoutMindMap(node('root', 'Root', 'project', [
+      node('topic', 'Child', 'topic'),
+    ]), { positions: { root: { x: 400, y: 0 }, topic: { x: 0, y: 0 } } });
+    const svg = mindMapToSvg(geometry);
+
+    expect(svg).toContain('viewBox="-44 -44 696 140"');
+    expect(svg).toContain('C 650 26, -42 26, 0 26');
   });
 });
 

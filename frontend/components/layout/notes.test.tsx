@@ -24,6 +24,22 @@ const note = (fields: Partial<Note>): Note => ({
   ...fields,
 });
 
+function installPointerEvents() {
+  class TestPointerEvent extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 1;
+      this.pointerType = init.pointerType ?? 'mouse';
+    }
+  }
+  vi.stubGlobal('PointerEvent', TestPointerEvent);
+  Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', {
+    configurable: true, value: vi.fn(),
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -423,4 +439,39 @@ describe('Studio notes', () => {
       expect(generateVideo).not.toHaveBeenCalled();
     },
   );
+
+  it('persists a dragged node on an editable saved mind map', async () => {
+    installPointerEvents();
+    const mindMap: MindMap = {
+      project_id: 'project-1', project_name: 'Research',
+      generated_at: '2026-10-25T00:00:00Z', model_used: 'fallback', node_count: 2,
+      root: {
+        id: 'root', label: 'Research', kind: 'project', detail: null,
+        document_id: null, children: [{
+          id: 'attention', label: 'Attention', kind: 'topic', detail: null,
+          document_id: null, children: [],
+        }],
+      },
+    };
+    const saved = note({
+      title: 'Map note', origin: 'studio', studio_kind: 'mindmap', payload_json: mindMap,
+    });
+    const moved = { ...mindMap, layout_positions: { attention: { x: 342, y: 20 } } };
+    vi.spyOn(api, 'listNotes').mockResolvedValue([saved]);
+    const update = vi.spyOn(api, 'updateNote').mockResolvedValue({
+      ...saved, payload_json: moved,
+    });
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Map note/ }));
+    const node = await screen.findByRole('button', { name: 'Explore Attention' });
+    fireEvent.pointerDown(node, { pointerId: 1, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(node, { pointerId: 1, clientX: 60, clientY: 30 });
+    fireEvent.pointerUp(node, { pointerId: 1, button: 0, clientX: 60, clientY: 30 });
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith('project-1', saved.id, {
+      layout_positions: { attention: { x: 342, y: 20 } },
+    }));
+    expect(useNotes.getState().notes[0].payload_json).toEqual(moved);
+  });
 });

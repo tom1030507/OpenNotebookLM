@@ -172,7 +172,9 @@ describe('Studio mind map', () => {
     });
 
     await openMindMap();
-    fireEvent.click(await screen.findByRole('button', { name: /download/i }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Download mind map as' }), {
+      target: { value: 'markdown' },
+    });
 
     await waitFor(() => expect(downloads).toEqual(['Research notes mind map.md']));
   });
