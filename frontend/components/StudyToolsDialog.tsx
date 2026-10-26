@@ -194,21 +194,17 @@ export default function StudyToolsDialog({
 
   useEffect(() => {
     if (!quickRound || !quiz || roundStartedAt === null || questionRevealed || allQuestionsRevealed) return;
-    setTimeLeft(QUICK_ROUND_SECONDS);
-    const interval = window.setInterval(() => {
-      setTimeLeft((remaining) => Math.max(remaining - 1, 0));
-    }, 1000);
+    const deadline = Date.now() + QUICK_ROUND_SECONDS * 1000;
+    const updateTimeLeft = () => {
+      setTimeLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    };
+    updateTimeLeft();
+    const interval = window.setInterval(updateTimeLeft, 1000);
     return () => window.clearInterval(interval);
   }, [quickRound, quiz, roundStartedAt, index, questionRevealed, allQuestionsRevealed]);
 
   useEffect(() => {
     if (!quickRound || !quiz || roundStartedAt === null || timeLeft !== 0 || questionRevealed) return;
-    setAnswers((current) => {
-      if (!(index in current)) return current;
-      const next = { ...current };
-      delete next[index];
-      return next;
-    });
     setRevealed((current) => ({ ...current, [index]: true }));
   }, [quickRound, quiz, roundStartedAt, timeLeft, index, questionRevealed]);
 
@@ -262,6 +258,7 @@ export default function StudyToolsDialog({
                     <button
                       type="button"
                       aria-pressed={!quickRound}
+                      disabled={loading}
                       onClick={() => setQuickRound(false)}
                       className={`rounded-lg border border-[var(--border)] px-3 py-2 text-sm ${
                         !quickRound ? 'bg-[var(--muted)]' : ''
@@ -272,6 +269,7 @@ export default function StudyToolsDialog({
                     <button
                       type="button"
                       aria-pressed={quickRound}
+                      disabled={loading}
                       onClick={() => setQuickRound(true)}
                       className={`rounded-lg border border-[var(--border)] px-3 py-2 text-sm ${
                         quickRound ? 'bg-[var(--muted)]' : ''
@@ -500,10 +498,13 @@ export default function StudyToolsDialog({
                   : `Score: ${correctCount} / ${Object.keys(revealed).filter((key) => revealed[Number(key)]).length}`}
               </p>
               <div className="flex justify-between">
-                <button type="button" disabled={index === 0} onClick={() => setIndex(index - 1)}
+                <button type="button" disabled={quickRound || index === 0} onClick={() => setIndex(index - 1)}
                   className="rounded-lg px-3 py-2 hover:bg-[var(--muted)] disabled:opacity-40">Previous question</button>
-                <button type="button" disabled={index >= questions.length - 1}
-                  onClick={() => setIndex(index + 1)}
+                <button type="button" disabled={index >= questions.length - 1 || (quickRound && !questionRevealed)}
+                  onClick={() => {
+                    if (quickRound) setTimeLeft(QUICK_ROUND_SECONDS);
+                    setIndex(index + 1);
+                  }}
                   className="rounded-lg px-3 py-2 hover:bg-[var(--muted)] disabled:opacity-40">Next question</button>
               </div>
               {quickRound && allQuestionsRevealed && (

@@ -173,6 +173,10 @@ describe('StudyToolsDialog', () => {
         options: ['Genetic material', 'Membrane', 'Ribosome', 'Vacuole'],
         answer_index: 0,
       },
+      {
+        ...question,
+        question: 'Where are genes stored?',
+      },
     ]));
     render(<StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />);
 
@@ -183,19 +187,32 @@ describe('StudyToolsDialog', () => {
     });
 
     expect(screen.getByText('Time left: 30s')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Next question' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('radio', { name: 'Nucleus' }));
     fireEvent.click(screen.getByRole('button', { name: 'Check answer' }));
     expect(screen.getByText('Score: 0 / 1')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Next question' }));
     expect(screen.getByText('Time left: 30s')).toBeTruthy();
-    act(() => { vi.advanceTimersByTime(30_000); });
+    expect((screen.getByRole('button', { name: 'Previous question' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Next question' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('radio', { name: 'Membrane' }));
+    vi.setSystemTime(new Date('2026-10-26T00:00:30Z'));
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect((screen.getByRole('button', { name: 'Next question' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Next question' }));
+    expect(screen.getByRole('heading', { name: 'Where are genes stored?' })).toBeTruthy();
+    expect(screen.getByText('Time left: 30s')).toBeTruthy();
+    expect(screen.queryByText('Final score: 0 / 3')).toBeNull();
+    vi.setSystemTime(new Date('2026-10-26T00:01:01Z'));
+    act(() => { vi.advanceTimersByTime(1000); });
 
-    expect(screen.getByText('Final score: 0 / 2')).toBeTruthy();
-    expect(screen.getByText('Time: 0:30')).toBeTruthy();
+    expect(screen.getByText('Final score: 0 / 3')).toBeTruthy();
+    expect(screen.getByText('Time: 1:02')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Missed questions' })).toBeTruthy();
     expect(screen.getByText('Your answer: Nucleus')).toBeTruthy();
+    expect(screen.getByText('Your answer: Membrane')).toBeTruthy();
     expect(screen.getByText('Your answer: No answer')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Preview source 1' })).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: 'Preview source 1' })).toHaveLength(4);
   });
 
   it('saves quick-round scores and shows the current project history when reopened', async () => {
@@ -344,5 +361,20 @@ describe('StudyToolsDialog', () => {
       await third.promise;
     });
     expect(screen.queryByText('Late closed card')).toBeNull();
+  });
+
+  it('keeps quiz mode fixed while its questions are loading', async () => {
+    const request = deferred<QuizResponse>();
+    vi.spyOn(api, 'fetchProjectQuiz').mockReturnValue(request.promise);
+    render(<StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate quiz' }));
+
+    expect((screen.getByRole('button', { name: 'Practice' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /Quick round/ }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      request.resolve(quiz());
+      await request.promise;
+    });
   });
 });
