@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import api, { type FlashcardsResponse, type QuizResponse } from '@/lib/api';
+import useStore from '@/store/useStore';
 import * as studyExports from '@/lib/studyExports';
 import StudyToolsDialog from './StudyToolsDialog';
 
@@ -65,7 +66,9 @@ const generate = async (mode: 'flashcards' | 'quiz' = 'flashcards') => {
 
 afterEach(() => {
   cleanup();
+  useStore.getState().resetForTests();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('StudyToolsDialog', () => {
@@ -125,6 +128,27 @@ describe('StudyToolsDialog', () => {
     expect(screen.getByText(card.front)).toBeTruthy();
   });
 
+  it('repeats cards marked Again after the remaining cards', async () => {
+    vi.spyOn(api, 'fetchProjectFlashcards').mockResolvedValue(flashcards([
+      card,
+      { ...card, front: 'What carries genes?' },
+    ]));
+    render(<StudyToolsDialog projectId="project-1" mode="flashcards" documentIds={['doc-1']} onClose={() => {}} />);
+
+    await generate();
+    expect(await screen.findByText(card.front)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Flip card' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Again' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next card' }));
+    expect(screen.getByText('What carries genes?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Flip card' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next card' }));
+
+    expect(screen.getByText('Card 3 of 3')).toBeTruthy();
+    expect(screen.getAllByText(card.front)).toHaveLength(1);
+  });
+
   it('reveals the quiz answer and scores completed quiz', async () => {
     vi.spyOn(api, 'fetchProjectQuiz').mockResolvedValue(quiz());
     render(<StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />);
@@ -136,6 +160,76 @@ describe('StudyToolsDialog', () => {
 
     expect(screen.getByText(question.explanation)).toBeTruthy();
     expect(screen.getByText('Final score: 1 / 1')).toBeTruthy();
+  });
+
+  it('times out a quick-round question and shows its missed-question source review', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-10-26T00:00:00Z'));
+    vi.spyOn(api, 'fetchProjectQuiz').mockResolvedValue(quiz([
+      question,
+      {
+        ...question,
+        question: 'What carries genes?',
+        options: ['Genetic material', 'Membrane', 'Ribosome', 'Vacuole'],
+        answer_index: 0,
+      },
+    ]));
+    render(<StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Quick round/ }));
+    await act(async () => {
+      await generate('quiz');
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Time left: 30s')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Nucleus' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Check answer' }));
+    expect(screen.getByText('Score: 0 / 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Next question' }));
+    expect(screen.getByText('Time left: 30s')).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(30_000); });
+
+    expect(screen.getByText('Final score: 0 / 2')).toBeTruthy();
+    expect(screen.getByText('Time: 0:30')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Missed questions' })).toBeTruthy();
+    expect(screen.getByText('Your answer: Nucleus')).toBeTruthy();
+    expect(screen.getByText('Your answer: No answer')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Preview source 1' })).toHaveLength(3);
+  });
+
+  it('saves quick-round scores and shows the current project history when reopened', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-10-26T00:00:00Z'));
+    vi.spyOn(api, 'fetchProjectQuiz').mockResolvedValue(quiz());
+    const view = render(
+      <StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Quick round/ }));
+    await act(async () => {
+      await generate('quiz');
+      await Promise.resolve();
+    });
+    act(() => { vi.advanceTimersByTime(2_000); });
+    fireEvent.click(screen.getByRole('radio', { name: 'Membrane' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Check answer' }));
+
+    expect(screen.getByText('Final score: 1 / 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close study tools' }));
+    view.unmount();
+    const reopened = render(
+      <StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Quick round/ }));
+
+    expect(screen.getByRole('region', { name: 'Past quick-round scores' }).textContent).toContain('1 / 1');
+    expect(screen.getByRole('region', { name: 'Past quick-round scores' }).textContent).toContain('0:02');
+    reopened.rerender(
+      <StudyToolsDialog projectId="project-2" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Quick round/ }));
+    expect(screen.queryByRole('region', { name: 'Past quick-round scores' })).toBeNull();
   });
 
   it('exports loaded flashcards as CSV and Anki text without another request', async () => {

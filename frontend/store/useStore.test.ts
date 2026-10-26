@@ -191,6 +191,37 @@ describe('application store', () => {
     expect(useStore.getState().currentProject).toBeNull();
   });
 
+  it('persists quick-round scores per project and clears them at an account boundary', () => {
+    const score = { correct: 2, total: 3, elapsedSeconds: 45, completedAt: '2026-10-26T00:00:00Z' };
+    useStore.getState().recordStudyScore('project-a', score);
+    useStore.getState().recordStudyScore('project-b', { ...score, correct: 1 });
+
+    const persisted = JSON.parse(testStorage.getItem('app-storage') as string);
+    expect(persisted.state.studyScoresByProject).toEqual({
+      'project-a': [score],
+      'project-b': [{ ...score, correct: 1 }],
+    });
+
+    useStore.getState().clearAccountState();
+
+    expect(useStore.getState().studyScoresByProject).toEqual({});
+    expect(JSON.parse(testStorage.getItem('app-storage') as string).state.studyScoresByProject).toEqual({});
+  });
+
+  it('keeps the five most recent quick-round scores for a project', () => {
+    for (let correct = 0; correct < 6; correct += 1) {
+      useStore.getState().recordStudyScore('project-a', {
+        correct,
+        total: 6,
+        elapsedSeconds: 30,
+        completedAt: `2026-10-26T00:00:0${correct}Z`,
+      });
+    }
+
+    expect(useStore.getState().studyScoresByProject['project-a'].map((score) => score.correct))
+      .toEqual([5, 4, 3, 2, 1]);
+  });
+
   it('does not return a project created by an account that has since cleared', async () => {
     const creation = deferred<Project>();
     apiMock.createProject.mockReturnValue(creation.promise);
