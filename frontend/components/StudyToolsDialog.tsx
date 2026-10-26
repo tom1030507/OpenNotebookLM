@@ -6,6 +6,13 @@ import { Loader2, X } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import api from '@/lib/api';
 import type { FlashcardsResponse, QuizResponse } from '@/lib/api';
+import {
+  downloadStudyFile,
+  flashcardsToAnkiTsv,
+  flashcardsToCsv,
+  quizToCsv,
+  quizToMarkdown,
+} from '@/lib/studyExports';
 import InlineCitation from './InlineCitation';
 
 type StudyMode = 'flashcards' | 'quiz';
@@ -218,6 +225,52 @@ export default function StudyToolsDialog({
               Only {response.sources_considered} of {response.selected_ready_source_count} selected ready sources
               were considered; results may not cover them all.
             </p>
+          )}
+
+          {mode === 'flashcards' && flashcards && flashcards.items.length > 0 && (
+            <div aria-label="Export flashcards" className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => downloadStudyFile('flashcards.csv', flashcardsToCsv(flashcards), 'text/csv')}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--muted)]"
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadStudyFile(
+                  'flashcards-anki.txt',
+                  flashcardsToAnkiTsv(flashcards),
+                  'text/plain',
+                )}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--muted)]"
+              >
+                Export for Anki
+              </button>
+            </div>
+          )}
+
+          {mode === 'quiz' && quiz && quiz.items.length > 0 && (
+            <div aria-label="Export quiz" className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => downloadStudyFile('quiz.csv', quizToCsv(quiz), 'text/csv')}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--muted)]"
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadStudyFile(
+                  'quiz.md',
+                  quizToMarkdown(quiz),
+                  'text/markdown',
+                )}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--muted)]"
+              >
+                Export Markdown
+              </button>
+            </div>
           )}
 
           {hasResult && mode === 'flashcards' && cards.length === 0 && (
