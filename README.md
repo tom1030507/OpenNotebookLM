@@ -1,178 +1,387 @@
 <p align="center">
-  <img src=".github/assets/logo.png" alt="OpenNotebookLM" width="120" height="120">
+  <img src=".github/assets/logo.png" alt="OpenNotebookLM logo" width="112" height="112">
 </p>
 
 <h1 align="center">OpenNotebookLM</h1>
 
 <p align="center">
-  <b>A self-hosted alternative to Google's NotebookLM.</b><br>
-  Import your documents, ask questions about them, and get answers with citations
-  back to the source — on your own machine, in your own database.
+  <b>Your sources. Your research workspace. Your choice of model.</b><br>
+  A self-hosted alternative to Google NotebookLM for reading, asking questions,<br>
+  and turning source material into notes, reports, mind maps, audio, and slides.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License: MIT">
-  <img src="https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/FastAPI-0.104-009688.svg?logo=fastapi&logoColor=white" alt="FastAPI 0.104">
-  <img src="https://img.shields.io/badge/Next.js-15.5-000000.svg?logo=nextdotjs&logoColor=white" alt="Next.js 15.5">
-  <img src="https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white" alt="Docker ready">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/backend-FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI backend">
+  <img src="https://img.shields.io/badge/frontend-Next.js-000000?logo=nextdotjs&logoColor=white" alt="Next.js frontend">
+  <img src="https://img.shields.io/badge/storage-SQLite-003B57?logo=sqlite&logoColor=white" alt="SQLite storage">
+  <img src="https://img.shields.io/badge/deploy-Docker_Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose deployment">
 </p>
 
 <p align="center">
-  <a href="#-quick-start">Quick start</a> ·
-  <a href="#-features">Features</a> ·
-  <a href="#-architecture">Architecture</a> ·
-  <a href="#-configuration">Configuration</a> ·
-  <a href="#-api">API</a> ·
-  <a href="#-faq">FAQ</a>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#development">Development</a>
 </p>
+
+<p align="center">
+  <img src=".github/assets/screenshot-workspace.png" alt="Understanding Transformers project with a PDF source, a generated answer with inline citations, and Studio tools and saved notes" width="1100">
+</p>
+
+Import a paper, a spreadsheet, a recording, or a set of links. Ask questions
+against the sources you select, inspect the passages behind each answer, and
+save useful results alongside your research. Share a project with other accounts
+when you want to work together.
+
+Documents, extracted text, embeddings, conversations, and notes are stored on
+your server. Extraction, OCR, embeddings, speech recognition, and audio synthesis
+run locally. When you choose a remote LLM, prompts and source excerpts used for
+generation are sent to that provider. Use a local model to keep generation on
+your own infrastructure too; initial model downloads and web imports still need
+network access.
+
+## Demo
+
+<p align="center">
+  <a href=".github/assets/demo.mp4"><img src=".github/assets/demo.gif" alt="Recorded walkthrough of source-grounded chat, citation previews, saved notes, and Studio outputs in the current workspace" width="1000"></a>
+</p>
+
+[Watch the 33-second walkthrough (MP4, silent)](.github/assets/demo.mp4).
 
 <!--
-  Recorded 2026-09-06 against a real run: Docker backend on :8000, the
-  OpenAI-compatible path pointed at Groq (qwen/qwen3.8-27b), and the
-  "Attention is all you need" PDF imported through the app itself. The answer
-  and its citations are what that model actually returned. Re-record it when
-  the workspace layout changes.
--->
-<p align="center">
-  <img src=".github/assets/demo.gif" alt="Typing 'What is this paper about?' against an imported PDF, then an answer whose inline citations preview the passage they came from" width="820">
-</p>
-
----
-
-Documents, embeddings and conversations live in a local SQLite database. The only
-thing that ever leaves your machine is the prompt sent to whichever LLM provider
-you configure — and you can point that at a model running on the same machine.
-
-## ✨ Features
-
-| | Feature | What it does |
-|---|---|---|
-| 📚 | **Bring your own sources** | PDF, Word, PowerPoint, Excel, EPUB, `.txt` and `.md` files, web pages and YouTube transcripts, extracted into Markdown, chunked along the document's own headings, and embedded locally. |
-| 🔍 | **Hybrid retrieval** | Persistent sqlite-vec dense candidates and FTS5/BM25 keyword candidates run over the same document scope and are fused by reciprocal rank. The lexical terms include CJK character bigrams, so Chinese text is searchable too. |
-| 💬 | **Answers with citations** | Every answer names the chunks behind it, with the document and the section path they came from. Conversations are multi-turn and persisted per project. |
-| 🔌 | **Any LLM, or none** | Claude, OpenAI, anything speaking the OpenAI chat-completions API (Groq, OpenRouter, DeepSeek, Gemini, xAI, Mistral), or a local Ollama / llama.cpp / vLLM server. |
-| 🎛 | **Studio outputs** | A Markdown report, a spoken audio summary, an interactive concept map, and a narrated slideshow, grounded in your project's sources. |
-| 🔐 | **Per-account isolation** | Register, sign in, and every route checks ownership. Another account's project answers `404` rather than `403`, so ids cannot be enumerated. |
-| 📤 | **Export anything** | One conversation, a whole project, or a project summary, as Markdown, JSON or plain text. |
-
-## 📸 Screenshots
-
-<!--
-  Captured 2026-09-06 from a real run: Docker backend on :8000, the OpenAI-compatible
-  path pointed at Groq (qwen/qwen3.8-27b), and the "Attention is all you need" PDF
-  imported through the app itself. Nothing here is mocked — the answers, the citations
-  and the concept map are what that model returned. Retake them when the workspace
-  layout changes — an out-of-date screenshot is worse than none.
+Media refreshed 2026-10-26 from revision 08c63ac with the robot project-cover
+option added, using an isolated database and the public Attention Is All You
+Need PDF. Generation used
+qwen/qwen3.8-27b through the configured OpenAI-compatible provider; local
+embeddings used BAAI/bge-small-en-v1.5, an override for this English-only capture.
+Responses and Studio outputs are generated by the application; no API responses
+or interface content are mocked. The GIF is a sped-up preview of the recorded
+browser walkthrough, which opens previously generated Studio results.
+Retake the media when the workspace or the demonstrated behavior changes.
 -->
 
-<p align="center">
-  <img src=".github/assets/screenshot-workspace.png" alt="The workspace: the imported PDF on the left, a generated answer with numbered citations in the middle, Studio outputs on the right" width="820">
-  <br><em>Sources on the left, the answer and the chunks it cited in the middle, Studio on the right.</em>
-</p>
+## Features
 
-<p align="center">
-  <img src=".github/assets/screenshot-mindmap.png" alt="An interactive concept map of the Transformer paper with colored topic branches and nested subtopics, one concept selected and explained below the canvas" width="820">
-  <br><em>Explore concepts and their connections: expand branches, drag and zoom, or select an
-  idea to read its explanation and prepare a question in chat.</em>
-</p>
+| Workflow | What you can do |
+| --- | --- |
+| **Collect sources** | Upload documents, images, or audio; import web pages, PDF URLs, YouTube videos or playlists, Markdown folders, Obsidian vaults, and Git repositories; paste text directly into a project. |
+| **Ask and verify** | Stream answers, ask follow-up questions, choose sources, and open inline citations at their supporting passage. Potentially unsupported citations are flagged for review. Math expressions render in chat and Markdown. |
+| **Explore a project** | Get an overview, suggested questions, and guides for individual sources. Set the chat role, custom instructions, answer length, and output language. |
+| **Keep useful work** | Write and edit notes, save cited answers and Studio outputs, and convert notes into searchable sources. Export individual or selected notes as Markdown, PDF, or DOCX. |
+| **Create with Studio** | Generate cited reports in briefing, study guide, FAQ, timeline, or custom formats; mind maps; two-host audio; narrated slides; and tables with cited cells. Customize focus, audience, and length. |
+| **Practice what you read** | Generate flashcards and quizzes from selected sources. Mark cards for review, resume saved progress, and run timed quiz rounds with score history. |
+| **Export results** | Export conversations as Markdown, JSON, or text; projects as Markdown or JSON; mind maps as Markdown, SVG, or PNG; slides as PowerPoint; tables as CSV; flashcards as CSV or Anki-compatible text; quizzes as CSV or Markdown. Audio is stored as MP3. |
+| **Organize and collaborate** | Tag projects, group sources, choose a cover, duplicate or merge projects, inspect usage analytics, and grant viewer or editor access. Restore deleted projects, sources, and notes from Trash during the retention period. |
+| **Find and refresh material** | Search across accessible projects, sources, notes, and your conversations. Re-sync URL and YouTube sources, watch a server folder, or discover web sources through an optional search provider. |
+| **Choose your model** | Use Claude, OpenAI, another OpenAI-compatible provider, or a local server such as Ollama. Select configured models per project or question. An extractive fallback works without a responding LLM. |
+| **Automate and administer** | Create personal API keys for scripts. Configured administrators can inspect server-wide usage and estimated costs. |
+| **Work across devices** | Use light or dark mode, collapse workspace panels, and open sources and Studio in drawers on smaller screens. |
 
-## 🚀 Quick start
+### Supported sources
+
+| Source | Formats and behavior |
+| --- | --- |
+| Documents | `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.epub`, `.txt`, `.md` |
+| Images | `.png`, `.jpg`, `.jpeg`, `.webp`; local OCR also handles scanned PDF pages |
+| Audio | `.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`, `.flac`; transcribed locally with Whisper |
+| Web | Web pages and direct PDF links; imports are subject to download and redirect limits |
+| YouTube | Single videos, playlists, or batches of URLs; transcripts first, with local Whisper fallback when captions are unavailable |
+| Pasted text | Add a title and text directly from the Add Source dialog |
+| Local folders | Markdown folders and Obsidian vaults; vault import preserves note structure and records wiki-link relationships |
+| Git repositories | Bounded imports of supported repository files, with repository and revision metadata |
+| Watched folders | Periodic imports from an administrator-approved server directory; originals stay in place |
+
+Uploads are limited to **50 MB per file** by default. URL downloads default to
+**10 MB**, and audio uploads and YouTube transcription default to **30 minutes**.
+Limits and enabled formats are configurable. Source processing runs in a durable
+background queue, with progress and failures shown in the workspace.
+
+## Screenshots
+
+These captures use an imported copy of
+[*Attention Is All You Need*](https://arxiv.org/abs/1706.03762).
+The answers and derived materials come from a real application run.
+
+### Add sources in one place
+
+Upload files, import links or YouTube videos, and paste text without leaving the
+project. Select sources in the sidebar to control the evidence used by chat and
+Studio.
+
+![Add Source dialog showing file upload and other import options](.github/assets/screenshot-sources.png)
+
+### Check the evidence behind an answer
+
+Hover over a numbered citation to inspect the passage and its page. Save an
+answer to a note to keep the response and its source references together.
+
+![Inline citation preview showing the source document, page, and supporting passage](.github/assets/screenshot-citation-hover.png)
+
+### Turn an idea into a mind map
+
+Expand or collapse branches, pan and zoom, rearrange nodes, inspect concepts,
+and prepare a question with **Ask in chat**. Export Markdown, SVG, or PNG, or save
+the map to notes.
+
+![Generated Transformer mind map with expandable concept branches and map controls](.github/assets/screenshot-mindmap.png)
+
+### Listen to a two-host overview
+
+Choose **Deep dive**, **Brief**, **Critique**, or **Debate**, set the length and
+host voices, preview a voice, and optionally focus the hosts on a question.
+Audio generation runs in the background; completed overviews retain their
+transcript and player, with playback speed controls.
+
+![Audio summary dialog with generation options, a completed audio player, and the two-host transcript](.github/assets/screenshot-audio.png)
+
+### Present the material as slides
+
+Play a narrated walkthrough, move between scenes, and export the displayed
+summary as `.pptx` or a Markdown script. Save it to notes to revisit the same
+result later.
+
+![Video summary player showing a source-based slide, scene navigation, and PowerPoint export](.github/assets/screenshot-slides.png)
+
+### Keep reports and notes with the project
+
+Choose a report format, generate a cited report from selected sources, download
+its Markdown, and save it in Studio. Notes also hold your own writing, saved
+answers, and other Studio outputs, and can become sources for later questions.
+
+![Report dialog with a generated cited report and Markdown export controls](.github/assets/screenshot-summary-citations.png)
+
+### Share a project with clear permissions
+
+Add an existing account by username or email. Viewers can read sources and notes,
+ask questions, and use Studio; editors can also manage sources, notes, and chat
+settings. The owner controls project settings and membership. Each person's
+conversations remain private to that person.
+
+![Project sharing dialog with a collaborator and viewer or editor role controls](.github/assets/screenshot-sharing.png)
+
+## Quick start
+
+Use Docker Engine 25+ and Docker Compose 2.20.2+ for the supplied stack. Allow
+several gigabytes of RAM and disk for the backend and downloaded models.
 
 ```bash
 git clone https://github.com/tom1030507/OpenNotebookLM.git
 cd OpenNotebookLM
+cp .env.example .env
+```
 
-cp .env.example .env          # then set JWT_SECRET_KEY and one LLM provider
+Edit `.env` before starting:
+
+1. Set `JWT_SECRET_KEY` to a unique random value. You can generate one with
+   `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+2. Configure an LLM provider using the examples below, or set `LLM_MODE=none` to
+   try source import and extractive answers without a model server or API key.
+
+```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-| | URL |
-|---|---|
-| Frontend | <http://localhost:3000> |
-| API | <http://localhost:8000> |
-| Interactive API docs | <http://localhost:8000/docs> |
+| Service | Address |
+| --- | --- |
+| Workspace | <http://localhost:3000> |
+| API documentation | <http://localhost:8000/docs> |
 | Liveness | <http://localhost:8000/healthz> |
-| Readiness | <http://localhost:8000/readyz> |
+| Database readiness | <http://localhost:8000/readyz> |
 
-Register on `/login`, create a project, add a source file or link, and ask it something. The
-first request downloads the embedding model, so expect a slow cold start.
+For a local trial, the sign-in page offers **demo / demo1234** by default.
+Create a project, choose **Add Source**, wait for the source to become **Ready**,
+and ask your first question. Models download on first use, so the first import,
+OCR request, transcription, or audio overview can take longer.
 
 > [!IMPORTANT]
-> **With no LLM provider configured, question answering still returns a response
-> — but an extractive one:** the first few sentences of the best-matching chunks,
-> prefixed "Based on the provided documents". The API labels those responses
-> `model_used: "fallback"`. That is the single most important thing to know
-> before judging answer quality. See [Configuration](#-configuration).
+> Set `SEED_DEMO_USER=false` before making the deployment accessible to others,
+> and [create your own account](#accounts-and-sharing). The demo credentials are
+> published on the sign-in page. Public registration is closed by default in
+> Docker Compose.
 
-## 📦 Installation
+> [!NOTE]
+> Without a working LLM, chat returns extracted source text and the API reports
+> `model_used: "fallback"`. This is useful for testing retrieval, but it is not a
+> generated explanation. Generated project overviews and suggested questions
+> require a working provider.
+
+Stop the stack with `docker compose down`. Its named volumes retain your data.
+**`docker compose down --volumes` deletes those volumes.**
+
+## Configuration
+
+The annotated [`.env.example`](.env.example) lists backend settings;
+[`backend/app/config.py`](backend/app/config.py) defines their defaults and
+validation. [`docker-compose.yml`](docker-compose.yml) shows which settings the
+container receives. A setting used when running Python directly may need to be
+added to the Compose service's `environment` block when running in Docker.
+
+### LLM providers
+
+Set one of the following in `.env`. Use a model ID available to your account or
+local server. With `LLM_MODE=auto`, provider selection prefers Claude, then an
+OpenAI-compatible provider, then a local server. Pin the mode when you want a
+specific provider.
 
 <details>
-<summary><b>Docker Compose</b> — any platform (recommended)</summary>
+<summary><b>OpenAI or an OpenAI-compatible provider</b></summary>
 
-Needs Docker 25.0+, Docker Compose 2.20.2+ (for `healthcheck.start_interval`
-and the retained compatibility wrapper), roughly 4 GB of RAM, and 10 GB of
-disk for the images and embedding model.
-
-```bash
-cp .env.example .env
-# Set JWT_SECRET_KEY to a unique random value before Compose can start.
-docker compose up -d --build
+```dotenv
+LLM_MODE=openai
+OPENAI_API_KEY=your-api-key
+OPENAI_MODEL=your-model-id
+OPENAI_BASE_URL=
 ```
 
-The production Compose file deliberately fails before creating containers when
-`JWT_SECRET_KEY` is missing or empty. Generate one with
-`python -c "import secrets; print(secrets.token_urlsafe(32))"`. It also defaults
-`DEBUG=false`. The copied `.env.example` allows CORS from
-`http://localhost:3000` and `http://localhost:3001`; set `CORS_ORIGINS` to a
-comma-separated list of your deployed frontend origins.
+Leave `OPENAI_BASE_URL` empty for OpenAI itself, or set it to the provider's
+OpenAI-compatible base URL. The backend uses the chat-completions API. Request
+parameter support varies by provider and model; compatibility with that API is
+required.
 
-Browser requests use the same-origin `/api` path. Next proxies that path to
-`BACKEND_INTERNAL_URL` (`http://backend:8000` in Compose), so Docker service
-names never enter the browser bundle. Rebuild the frontend image after changing
-that internal destination because Next compiles rewrites during its build.
+`OPENAI_MIN_MAX_TOKENS` sets a floor for the output budget. Set
+`LLM_MAX_OUTPUT_TOKENS` or `LLM_MAX_REQUEST_TOKENS` if your provider needs explicit
+output or total-request limits. `OPENAI_REASONING_FORMAT` is a provider-specific
+extension; leave it empty unless your provider supports it.
 
-The root `docker-compose.yml` also defines optional `ollama` and `redis`
-services, behind profiles:
+</details>
 
-```bash
-docker compose --profile with-ollama up -d      # add a local model server
-docker compose --profile with-cache up -d       # add Redis
+<details>
+<summary><b>Claude</b></summary>
+
+```dotenv
+LLM_MODE=claude
+CLAUDE_API_KEY=your-api-key
+CLAUDE_MODEL=your-model-id
 ```
 
-`start.sh` / `start.bat` wrap the same thing: `./start.sh`, `./start.sh with-ollama`,
-`./start.sh with-cache`, `./start.sh full`. A freshly copied example has a blank
-JWT secret, so the launcher exits with generation instructions instead of
-claiming the stack started. Stop with `docker compose down`.
+The Claude path uses Anthropic's Messages API. `CLAUDE_EFFORT` and the Claude
+output-budget settings are available in the backend configuration; add them to
+Compose's `environment` block if you need to override them there.
 
-`deploy/docker-compose.yml` remains as a compatibility entry point for existing
-automation. It includes the root Compose model rather than defining another
-image or security policy:
+</details>
 
-```bash
-docker compose -f deploy/docker-compose.yml up -d --build
+<details>
+<summary><b>Local generation with Ollama</b></summary>
+
+For the bundled Compose service:
+
+```dotenv
+LLM_MODE=local
+OLLAMA_BASE_URL=http://ollama:11434/v1
+OLLAMA_MODEL=llama3.2
 ```
 
-Ollama and Redis are reachable only on the Compose network. Their profiles do
-not publish host ports; add an explicit loopback-only mapping such as
-`127.0.0.1:11434:11434` in a local override if host tools need direct access.
-Redis is deliberately disposable: Compose disables both AOF and RDB snapshots
-and gives it no volume. Restarting it starts an empty cache, so repeated scoped
-invalidation cannot grow persistent disk or replay an invalidated generation.
+```bash
+docker compose --profile with-ollama up -d --build
+docker compose exec ollama ollama pull llama3.2
+```
 
-Database, model, and upload state use Docker-managed named volumes
-(`opennotebooklm-data`, `opennotebooklm-models`, and
-`opennotebooklm-uploads`). Recreating containers or running
-`docker compose down` preserves them; `docker compose down --volumes` deletes
-them.
+The bundled Ollama service requests an NVIDIA GPU. On a CPU-only machine, remove
+its GPU reservation in a local Compose override, or run Ollama separately and
+point `OLLAMA_BASE_URL` at an address reachable from the backend container.
+Inside a container, `localhost` refers to that container.
 
-Earlier versions bind-mounted `./data`, `./models`, and `./uploads`. Only
-`data/opennotebook.db` and `uploads/` are durable user state. `models/` contains
-rebuildable embedding and Ollama caches (including `models/ollama`), while
-`data/redis` is a rebuildable Redis cache. Stop the old stack and back up all
-three directories first. Then, before the first new-version start and with
-`JWT_SECRET_KEY` already set in `.env`, migrate only the durable state once:
+Other local OpenAI-compatible servers, including llama.cpp and vLLM, can use the
+same settings. Include the `/v1` path and use the model name the server exposes.
+After the required models are cached, local files and local generation can be
+used without contacting a cloud LLM.
+
+</details>
+
+<details>
+<summary><b>No LLM provider</b></summary>
+
+```dotenv
+LLM_MODE=none
+```
+
+Imports, embeddings, retrieval, and extractive chat answers still work. Mind maps
+and slide summaries can derive fallback content from the sources. Output quality
+and feature availability differ from a run with a configured model.
+
+</details>
+
+Apply environment changes with `docker compose up -d`. Rebuild the frontend after
+changing `BACKEND_INTERNAL_URL` or `MAX_FILE_SIZE_MB`; its API rewrites and request
+buffer limit are set at build time. Browser requests use the same-origin `/api`
+path, which Next.js proxies to the backend.
+
+### Accounts and sharing
+
+Create an account without enabling public registration. The command prompts for
+a password without echoing it:
+
+```bash
+docker compose exec backend python -m scripts.create_user \
+  --username operator --email operator@example.com
+```
+
+To allow self-registration, set `ALLOW_PUBLIC_REGISTRATION=true`. To disable the
+demo account on startup, set `SEED_DEMO_USER=false`; this stops automatic seeding
+and advertising, but does not remove an account already in the database.
+Changing `DEMO_PASSWORD` also does not rotate an existing account's password.
+If a demo account was already seeded, disable or remove that account in the
+database as well before exposing the deployment to others.
+
+Create personal API keys in **Settings → API Keys** for scripts and automation.
+Copy each key when it is shown; the server stores only its hash. Send it as
+`Authorization: Bearer onlm_your_key`. Keys inherit the account's data access and
+rate limits; creating or revoking keys requires a login session.
+
+Use the share button beside the project title to add existing users as viewers
+or editors. Access is checked by the backend on every protected operation;
+unavailable or inaccessible resources return `404`. Shared projects expose
+sources and notes to their members, while conversations remain private.
+
+For a deployment reachable over the network, put HTTPS in front of the app,
+configure the intended frontend origins with `CORS_ORIGINS`, and restrict the
+published ports as appropriate for your host.
+
+Set `ADMIN_EMAILS` to a comma-separated list of account email addresses to grant
+access to the server usage overview. Cost totals are estimates controlled by
+`ESTIMATED_COST_PER_1K_TOKENS_USD`.
+
+### Source discovery and watched folders
+
+Source discovery is optional. Set `SEARCH_PROVIDER` to `searxng`, `brave`, or
+`tavily` and supply the matching `SEARXNG_URL`, `BRAVE_SEARCH_API_KEY`, or
+`TAVILY_API_KEY`. With the default `none`, ordinary imports and project search
+still work; discovering new web sources is unavailable.
+
+Compose mounts `./watched-folders` read-only at `/app/watched-folders`. Set
+`WATCHED_FOLDER_HOST_PATH` in `.env` to use a different host directory, recreate
+the backend, and open **Sources → Watch a server folder** in an owned project.
+Enter a path inside the mounted root. The backend scans every minute, copies
+supported files into its upload store, and removes deleted files from search
+without deleting the originals. For a backend outside Docker, set
+`WATCHED_FOLDER_ROOT` to the permitted local directory.
+
+### Storage and upgrades
+
+| Docker volume | Contents |
+| --- | --- |
+| `opennotebooklm-data` | SQLite database: projects, accounts, text, chunks, embeddings, conversations, notes, and job metadata |
+| `opennotebooklm-uploads` | Uploaded files and generated audio |
+| `opennotebooklm-models` | Downloaded embedding, OCR, transcription, and TTS models |
+| `opennotebooklm-ollama-models` | Models used by the optional Ollama service |
+
+Back up the database and uploads together before upgrading or reindexing. Stop
+the backend while taking a filesystem copy of SQLite so the copy is consistent.
+Model caches can be downloaded again.
+
+Deleted projects, sources, and notes are retained in Trash for
+`TRASH_RETENTION_DAYS` (30 days by default), where they can be restored or
+permanently removed. Trash is a recovery window, not a backup.
+
+<details>
+<summary><b>Migrating older installations that used local bind mounts</b></summary>
+
+Older releases used `./data`, `./uploads`, and `./models` on the host. Stop the
+old stack and back up those directories first. Before starting the new stack
+with empty named volumes, set `JWT_SECRET_KEY` and migrate the durable state:
 
 ```bash
 docker compose build backend
@@ -182,649 +391,151 @@ docker cp uploads/. opennotebook-backend:/app/uploads/
 docker compose run --rm --no-deps --user root backend \
   sh -c 'chown -R 1000:1000 /app/data /app/uploads'
 docker compose rm -f backend
+docker compose up -d
 ```
 
-Skip a `docker cp` line when that old path does not exist. Do not bulk-copy
-`data/` or `models/`: that would mix rebuildable `data/redis` and
-`models/ollama` caches into the backend's durable volumes. This migration
-intentionally leaves every cache in the old directories for rollback; the new
-stack re-downloads embedding/Ollama models when used and starts Redis empty when
-its profile is enabled. Remove the old directories only after verifying the
-durable database and uploads in the new stack.
+Skip a copy command if its old path does not exist. Copy only the database and
+uploads; `data/redis` and `models/ollama` are caches rather than backend user data.
+Keep the old directories until you verify the migrated projects and sources.
 
 </details>
 
-<details>
-<summary><b>Local development</b> — macOS / Linux</summary>
+Older databases may contain projects or documents without an owner. These rows
+stay hidden until assigned to an account:
 
 ```bash
-# Backend
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
+docker compose exec backend python -m scripts.assign_owner \
+  --username operator --dry-run
 ```
+
+Review the result, then remove `--dry-run` to assign the unowned rows. The script
+does not transfer rows that already have an owner.
+
+### Embeddings
+
+The default embedding model is `intfloat/multilingual-e5-base` with 768 dimensions.
+Retrieval combines a persistent sqlite-vec dense index with FTS5/BM25 keyword
+search, including CJK bigrams, and fuses the candidates before building the prompt.
+
+Changing `EMB_MODEL_NAME` requires regenerating stored embeddings. Back up first,
+update `.env`, recreate the backend, and rebuild in place:
 
 ```bash
-# Frontend, in a second terminal
-cd frontend
-npm ci
-npm run dev
+docker compose up -d backend
+docker compose exec backend python -m scripts.reindex --dry-run
+docker compose exec backend python -m scripts.reindex
 ```
 
-The database is created at `backend/data/opennotebook.db` on first run. Set
-`SENTENCE_TRANSFORMERS_HOME` somewhere persistent so the embedding model is not
-downloaded again per environment.
+Reindexing keeps document IDs and project associations. It re-extracts sources,
+rebuilds chunks and embeddings, and reconciles the persistent indexes. A source
+that can no longer be read is marked as an error. Use `--index-only` to repair
+candidate indexes from existing chunks and embeddings; it does not regenerate
+vectors after an embedding-model change.
 
-</details>
-
-<details>
-<summary><b>Local development</b> — Windows</summary>
-
-```powershell
-# Backend
-cd backend
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
-```
-
-```powershell
-# Frontend, in a second terminal
-cd frontend
-npm ci
-npm run dev
-```
-
-</details>
-
-<details>
-<summary><b>Fully offline</b> — a local model via Ollama</summary>
-
-Nothing leaves the machine on this path.
+### Optional Redis cache
 
 ```bash
-ollama serve
-ollama pull llama3.2
+docker compose --profile with-cache up -d
 ```
 
-```bash
-# .env
-LLM_MODE=local
-OLLAMA_BASE_URL=http://localhost:11434/v1
-OLLAMA_MODEL=llama3.2
-```
+Without Redis, the backend uses a bounded per-process memory cache. The bundled
+Redis service is internal to the Compose network, capped at 256 MB by default,
+and disposable: restarting it clears the cache. `CACHE_MAX_ENTRIES` and
+`REDIS_MAXMEMORY` control the respective limits.
 
-Under Docker, `docker compose --profile with-ollama up -d` brings the model
-server up alongside the app; point `OLLAMA_BASE_URL` at `http://ollama:11434/v1`.
-
-</details>
-
-## 🏗 Architecture
+## How it works
 
 ```mermaid
 flowchart LR
-    subgraph sources[Sources]
-        S1[PDF / DOCX / PPTX / XLSX / EPUB / TXT / MD]
-        S2[Web page]
-        S3[YouTube transcript]
-    end
-
-    S1 --> AD[adapters<br/>extract to Markdown headings]
-    S2 --> AD
-    S3 --> AD
-    AD --> CH[chunker<br/>heading-aware, 512 chars]
-    CH --> EM[sentence-transformers<br/>multilingual-e5-base]
-    EM --> DB[(SQLite<br/>documents, chunks, vectors)]
-
-    Q([Your question]) --> RT
-    DB --> RT{{hybrid retrieval<br/>dense + BM25, fused by RRF}}
-    RT --> LLM[LLM provider<br/>Claude / OpenAI-compatible / local]
-    RT -. no provider configured .-> FB[extractive fallback]
-    LLM --> ANS[answer + citations]
-    FB --> ANS
+    Sources[Documents, images, audio, web, YouTube, text] --> Extract[Local extraction, OCR, transcription]
+    Extract --> Chunk[Heading-aware chunks and local embeddings]
+    Chunk --> DB[(SQLite + sqlite-vec + FTS5)]
+    Question[Question + selected sources] --> Retrieve[Hybrid retrieval]
+    DB --> Retrieve
+    Retrieve --> Model[Configured LLM or extractive fallback]
+    Model --> Answer[Answer + citations]
+    DB --> Studio[Studio generation]
+    Studio --> Outputs[Reports, maps, audio, slides]
 ```
 
-A Next.js App Router frontend talks to the FastAPI backend over the same REST API
-documented below; there is no privileged path around it. Routers stay thin — they
-validate, delegate to a service, and shape the response.
+The Next.js frontend calls FastAPI through its `/api` proxy. Projects, membership,
+sources, conversations, and notes share the same authenticated API. Ingestion
+and audio overview jobs run in background workers and persist their state in
+SQLite.
 
-<details>
-<summary><b>How retrieval actually behaves</b>, and how a change to it is measured</summary>
+For API exploration, use [Swagger UI](http://localhost:8000/docs) or
+[`/openapi.json`](http://localhost:8000/openapi.json) on your running instance.
+Sign in at `POST /api/auth/token` and send the returned token as
+`Authorization: Bearer <token>` for protected routes. The schema is the source of
+truth for request bodies and endpoints.
 
-Retrieval is hybrid, and both halves are needed.
+## Development
 
-With the default `EMB_BACKEND=sqlitevec`, embeddings live in a persistent
-sqlite-vec `vec0` index and nearest-neighbour candidates are selected in SQLite.
-The application asks the database for a bounded top-k list and batch-loads its
-chunk metadata; it does not unpickle every scoped embedding in Python. Lexical
-terms are maintained in a persistent FTS5 table and ranked with SQLite BM25, so
-they are not tokenized across the whole corpus again for each question.
+The live application is under `backend/app/` and `frontend/`. See
+[AGENTS.md](AGENTS.md) for repository conventions.
 
-sqlite-vec 0.1.9 performs an **exact** vector scan: moving the work into SQLite
-removes Python deserialization, full-result sorting and metadata N+1 queries,
-but it is not an ANN/HNSW index and its vector work is still O(n) in the eligible
-rows. This is a correctness and bounded-candidate improvement, not a claim that
-the database has become sublinear. If the sqlite-vec extension cannot load, the
-service names the Python brute-force fallback and its reason in `/healthz`;
-that fallback has a lower practical capacity because it materializes scoped
-embeddings in the application process.
+```text
+backend/app/       FastAPI routes, services, importers, and database models
+backend/scripts/   Account bootstrap, ownership backfill, reindexing, evaluation
+backend/tests/     API, lifecycle, unit, and retrieval evaluation tests
+frontend/app/      Next.js routes and global styles
+frontend/components/, hooks/, lib/, store/
+                   Workspace UI, browser behavior, API client, and state
+e2e/               Playwright browser workflows
+deploy/            Compatibility Compose entry point
+.github/assets/    README screenshots and demo recordings
+```
 
-The dense half alone is weak here in a way that is easy to miss. On this
-project's evaluation corpus, `multilingual-e5-base` returns cosine similarities
-between roughly 0.67 and 0.71 for relevant and irrelevant chunks alike — a spread
-of about 0.01 between rank 1 and rank 10. Any similarity threshold inside that
-band is arbitrary, which is why `RETRIEVAL_MIN_SCORE` defaults to `0` and why an
-exact term match carries so much weight.
+### Run locally
 
-The BM25 half supplies that exactness. Its tokenizer emits Latin words and **CJK
-character bigrams**, so Chinese text is searchable; splitting on whitespace, as
-the previous re-ranker did, yields one token for an entire Chinese sentence and
-scores zero.
-
-Fusion ranks by the *best* reciprocal rank either retriever gave a chunk, with
-the sum as the tie-break. Plain summed RRF credits a chunk simply for appearing
-in both lists, and with a weak dense list that buries a keyword hit: two
-questions whose answer BM25 ranked first fell out of the top ten entirely that
-way.
-
-Chunking follows the document's own structure. Extraction emits headings as
-`## Heading`, the chunker keeps a heading stack so no chunk straddles a section,
-and the section path is stored on the chunk, prepended to the text that gets
-embedded, and shown in the citation.
-
-**Measuring a change.** `backend/scripts/eval_retrieval.py` scores retrieval
-against a fixed corpus of six Wikipedia pages (three English, three Traditional
-Chinese) and 30 questions, 12 of them cross-lingual. It builds its own database
-and never touches `data/opennotebook.db`:
+Use Python 3.11 and Node.js 20+; the browser test package requires Node.js 22+.
+The backend needs the ML dependencies in its requirements file and system tools
+including `ffmpeg` and `espeak-ng` for the relevant audio features. Docker provides
+these dependencies for you.
 
 ```bash
-docker exec <backend-container> sh -lc \
-  "cd /app && LLM_MODE=none python -m scripts.eval_retrieval --tag mychange --out /tmp/rag-eval"
+cd backend
+python -m venv venv
+source venv/bin/activate
+# Windows PowerShell: .\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cp ../.env.example .env
+# Configure .env for this backend process.
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Ground truth is answer-bearing *text*, not chunk ids, so the same question set
-stays comparable across changes to the chunker. Reports land in the `--out`
-directory as `metrics.json` and `report.md`.
-
-</details>
-
-<details>
-<summary><b>Who can read what</b> — sign-in and ownership</summary>
-
-Every startup keeps a **demo account** present — `demo` / `demo1234` by
-default — so a fresh install is not a locked door, and the sign-in page shows
-those credentials with a button that fills the form. An account that already
-exists is never modified, so changing `DEMO_PASSWORD` does not rotate a
-password already in the database; when the stored password stops matching, the
-sign-in page quietly stops offering it.
-
-> **Set `SEED_DEMO_USER=false` on any deployment other people can reach.**
-> While it is on, anyone who can open the sign-in page can read a working
-> username and password. Deleting the account is not enough — the next restart
-> recreates it.
-
-Development keeps registration on `/login` open through
-`POST /api/auth/register`; passwords are hashed with bcrypt. Production closes
-public registration unless `ALLOW_PUBLIC_REGISTRATION=true` is set. Bootstrap
-an operator account without opening enrollment (the password is prompted for
-without echoing it) with:
+In a second terminal:
 
 ```bash
-docker exec -it opennotebook-backend sh -lc \
-  "cd /app && python -m scripts.create_user --username operator --email operator@example.com"
+cd frontend
+npm ci
+npm run dev
 ```
 
-The command is idempotent for the same username/email. Signing in exchanges the
-credentials for a bearer token at `POST /api/auth/token`. There is no way in
-that skips the backend — a session it never issued is refused by every API
-route.
+A local backend reads `backend/.env` and stores its database and uploads under
+`backend/` by default. The root `.env` configures Compose. Local development uses
+`http://localhost:8000` as the frontend's default backend destination.
 
-Every route except the health checks and the two credential endpoints is mounted
-behind `get_current_user`, so a request with no `Authorization` header and one
-with a token the backend cannot validate both get `401`, deliberately
-indistinguishable. The frontend attaches the token to every request it makes, and
-on a `401` discards the local session and returns to `/login` rather than leaving
-you on a workspace where each panel fails on its own.
-
-Sign-in also mirrors the token into an `auth_token` cookie, because the Next.js
-middleware that guards `/` runs on the server and cannot read `localStorage`.
-That middleware only checks the cookie is *present*: it is a navigation
-convenience so you land on `/login` instead of an empty workspace, and it is not
-what protects your data. The API is.
-
-Projects and documents carry an owner, and every route that reads or writes them
-checks it. Conversations follow their project; retrieval is confined to the
-caller's own documents even when no project is selected, so a question cannot
-reach another account's chunks. A resource that belongs to someone else answers
-`404`, exactly like one that does not exist — `403` would confirm the id is real,
-which turns id enumeration into a way of discovering what other accounts have.
-
-**Rows created before ownership existed have no owner, and the API treats them as
-belonging to nobody rather than to everybody.** They stay in the database and
-stop appearing in the UI until they are claimed:
+### Checks
 
 ```bash
-docker exec <backend-container> sh -lc \
-  "cd /app && python -m scripts.assign_owner --username <account> --dry-run"
-```
-
-Drop `--dry-run` to write. Only null owners are touched, so it is safe to re-run
-and can never move a row between accounts. The `user_id` columns themselves are
-added to an existing database on start-up by `db.database.ensure_added_columns`,
-since `create_all` only ever creates missing *tables*.
-
-Cache administration is not public. The only cache routes invalidate a project
-or document after the same ownership check used by its data routes; foreign and
-missing ids both answer `404`.
-
-</details>
-
-<details>
-<summary><b>Project layout</b></summary>
-
-```
-OpenNotebookLM/
-├── backend/
-│   ├── app/
-│   │   ├── routers/          # auth, projects, ingest, query, export, files, health
-│   │   ├── services/         # rag, embeddings, llm, chunking, documents,
-│   │   │                     # export, projects, auth, cache, document_files
-│   │   ├── adapters/         # pdf, url, youtube
-│   │   ├── db/               # SQLAlchemy models, session, UTCDateTime column type
-│   │   ├── utils/            # logging, time
-│   │   ├── api/cache.py      # ownership-scoped cache invalidation
-│   │   ├── config.py         # settings (env-driven)
-│   │   └── main.py           # app factory and router registration
-│   └── tests/                # pytest; tests/unit/ holds the focused ones
-├── frontend/                 # Next.js App Router
-│   ├── app/                  # routes: / and /login
-│   ├── components/           # workspace UI (layout/, chat/, dialogs)
-│   ├── hooks/                # useMediaQuery, useDialogFocus, useDocumentStatusWatch
-│   ├── lib/                  # api client, theme, session, speech, datetime
-│   ├── store/                # Zustand store
-│   └── middleware.ts         # session gate for /
-├── deploy/                   # compatibility Compose entry point (includes root)
-└── docker-compose.yml        # backend, frontend, optional ollama and redis
-```
-
-</details>
-
-## ⚙ Configuration
-
-Set **one** LLM provider in `.env`. `LLM_MODE=auto` (the default) picks the first
-one configured, in the order Claude → OpenAI → local server.
-
-```bash
-CLAUDE_API_KEY=sk-ant-...        # or
-OPENAI_API_KEY=sk-...            # or
-LLM_MODE=local                   # with OLLAMA_BASE_URL / OLLAMA_MODEL
-```
-
-`GET /healthz` reports which provider is *configured*; `model_used` on a
-`/api/query` response tells you which one actually answered.
-
-### Watch a server folder
-
-Docker Compose exposes `./watched-folders` to the backend as
-`/app/watched-folders`, read-only. Set `WATCHED_FOLDER_HOST_PATH` in `.env` to
-use a different host directory, restart the backend, then open **Sources → Watch
-a server folder** in an owned project and enter a path inside that mounted root.
-The backend scans every minute, copies supported files into its private upload
-store, and removes deleted files from search without deleting the originals.
-For a backend run outside Docker, set `WATCHED_FOLDER_ROOT` to the allowed local
-directory.
-
-<details>
-<summary><b>LLM providers in detail</b> — Claude, OpenAI-compatible, local</summary>
-
-**Claude** (the default when a key is present)
-
-```bash
-CLAUDE_API_KEY=sk-ant-...
-CLAUDE_MODEL=claude-opus-5      # default
-CLAUDE_EFFORT=low               # low | medium | high | xhigh | max
-```
-
-Two details worth knowing:
-
-- **Sampling parameters are not sent.** Current Claude models reject
-  `temperature`, so the `temperature` argument in a query request is ignored on
-  this path. Control depth with `CLAUDE_EFFORT` instead. Answering from retrieved
-  chunks is not reasoning-heavy, which is why the default is `low`.
-- **Thinking is on by default and shares the output budget with the answer.** A
-  request's `max_tokens` is therefore raised to at least `CLAUDE_MIN_MAX_TOKENS`
-  (2048) so the reply is not truncated by the thinking.
-
-**OpenAI, or any provider that speaks its API**
-
-```bash
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-5.6            # default
-OPENAI_BASE_URL=                # empty for OpenAI itself
-```
-
-`OPENAI_BASE_URL` redirects this path at any service implementing the same
-chat-completions API, which is most of them. Give it the provider's `/v1`
-endpoint and an `OPENAI_MODEL` that provider actually serves:
-
-| Provider | `OPENAI_BASE_URL` |
-|----------|-------------------|
-| Groq | `https://api.groq.com/openai/v1` |
-| OpenRouter | `https://openrouter.ai/api/v1` |
-| DeepSeek | `https://api.deepseek.com/v1` |
-| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` |
-| xAI | `https://api.x.ai/v1` |
-| Mistral | `https://api.mistral.ai/v1` |
-
-Model ids differ per provider and change often — list them rather than guessing,
-e.g. `curl -s $OPENAI_BASE_URL/models -H "Authorization: Bearer $KEY"`.
-
-Note the `openai` SDK also reads an `OPENAI_BASE_URL` from the process
-environment on its own, so an exported value takes effect even when this setting
-is unset. Set it explicitly if you mean to reach OpenAI.
-
-This path sends `max_tokens`. It has not been exercised against a live OpenAI key
-here, and newer OpenAI models have been migrating that parameter to
-`max_completion_tokens` — if a request is rejected for the parameter name, that is
-the thing to change in `OpenAICompatibleProvider.generate`.
-
-**Reasoning models return their thinking as the answer**
-
-Groq's reasoning models (`qwen/qwen3.6-27b`, MiniMax M2.7) put their entire chain
-of thought in `message.content`, wrapped in `<think>` tags — so it arrives as the
-answer and the UI renders it. `OPENAI_REASONING_FORMAT=hidden` suppresses it
-(`parsed` moves it to a separate field, `raw` is the provider default). Measured
-on one retrieval question at the 512-token budget `services/rag.py` sends:
-
-| `OPENAI_MODEL` | `<think>` in the answer | output tokens used |
-|----------------|-------------------------|--------------------|
-| `qwen/qwen3.6-27b` | yes | 373 / 512 |
-| `qwen/qwen3.6-27b` + `hidden` | no | 332 / 512 |
-| `llama-3.3-70b-versatile` | no | 25 / 512 |
-
-`hidden` cleans the output but the reasoning is still generated, still billed, and
-still counted against `max_tokens` — and because it comes first, hitting the
-ceiling truncates the answer rather than the thinking. That is what
-`OPENAI_MIN_MAX_TOKENS` (default 2048) exists to prevent: at the 512
-`services/rag.py` sends, turns that reasoned for the whole budget came back cut
-mid-sentence, or empty. Raise it further if answers still arrive truncated — a
-five-turn conversation measured here peaked at 1915 output tokens. A
-non-reasoning model is the cheaper way to a clean answer.
-
-`OPENAI_REASONING_FORMAT` is a Groq extension, sent only when set, because OpenAI
-and the others reject parameters they do not recognise. `openai/gpt-oss-*` models
-are unaffected: they return reasoning in a separate field already.
-
-**A local model** (Ollama, llama.cpp, vLLM)
-
-```bash
-LLM_MODE=local
-OLLAMA_BASE_URL=http://localhost:11434/v1
-OLLAMA_MODEL=llama3.2           # must match a model you have pulled
-```
-
-**Checking which provider is actually in use**
-
-`GET /healthz` reports the configured provider and model:
-
-```json
-{ "config": { "llm_mode": "auto", "llm_provider": "claude", "llm_model": "claude-opus-5" } }
-```
-
-That says *configured*, not *reachable* — no network call is made from a health
-check. To tell whether an answer was generated or extracted, read `model_used` on
-the `/api/query` response: anything other than `"fallback"` is a real generated
-answer. A provider that fails at call time logs the underlying error at `ERROR`
-level and falls back for that request.
-
-The `/healthz` response reports retrieval separately; this is operational health
-data, not part of the `/api/query` response. `requested_backend` says what
-configuration asked for, while `active_backend` says whether sqlite-vec is
-actually serving dense candidates or the explicit Python fallback is active,
-and `fallback_reason` explains why. Use the reindex dry-run below for an explicit
-canonical/dense/lexical shape and drift audit; health remains a lightweight
-operational signal rather than a substitute for that audit.
-
-</details>
-
-<details>
-<summary><b>Embeddings</b> — model choice, memory cost, and re-indexing</summary>
-
-Retrieval quality depends on the embedding model, configured by `EMB_MODEL_NAME`.
-The dimension is read from the model at load time, so `EMB_DIMENSION`
-self-corrects and does not need to match.
-
-The default is `intfloat/multilingual-e5-base` (768 dimensions). The previous
-default, `bge-small-en-v1.5`, was English-only.
-
-The e5 family is trained with asymmetric prefixes — indexed text as `passage: …`,
-a search string as `query: …`. `services/embeddings.py` applies them
-automatically for models whose name contains `e5`, and adds nothing for models
-that must not have them. If you switch to a non-e5 model, no change is needed.
-
-**Memory is the binding constraint, not download size.** Measured in this
-project's container, with the app's own imports already loaded (0.61 GB):
-
-| Model | Peak RSS | Dimensions | Download |
-|---|---|---|---|
-| `intfloat/multilingual-e5-base` | 2.69 GB | 768 | ~1.1 GB |
-| `BAAI/bge-m3` | 4.85 GB | 1024 | ~4.6 GB |
-
-bge-m3 is the stronger multilingual model and needs no prefixes, but on an 8 GB
-host it OOM-killed a full re-index. Use it only where the memory headroom is real.
-
-sentence-transformers caches models under `$HOME/.cache/torch`. Docker Compose
-redirects that to the `opennotebooklm-models` named volume so recreating the
-container does not re-download; outside Docker, set
-`SENTENCE_TRANSFORMERS_HOME` somewhere persistent.
-
-Stored vectors are only comparable to vectors produced by the same model.
-**Changing `EMB_MODEL_NAME` invalidates every embedding already in the database**
-— retrieval will fail on a dimension mismatch until documents are re-indexed. To
-switch models:
-
-1. Stop the backend.
-2. Set the new `EMB_MODEL_NAME` in `.env`.
-3. Restart, then rebuild the index in place:
-   ```bash
-   docker exec <backend-container> sh -lc "cd /app && python -m scripts.reindex"
-   ```
-
-`scripts/reindex.py` re-extracts, re-chunks and re-embeds every document already
-in the database, keeping document ids — so projects, conversations and citations
-survive, which deleting the embeddings and re-uploading by hand does not. It then
-idempotently reconciles the dense and lexical candidate indexes. Back up
-`backend/data/opennotebook.db` first.
-
-`python -m scripts.reindex --dry-run` does not load the embedding model and does
-not write the database. It reports canonical/dense/lexical row counts plus dense
-and lexical missing/stale rows, rows that would be added, updated or removed, and
-vector dimension mismatches. `--source-type` and `--ids` narrow source rebuilding;
-an explicit `--ids` also scopes index reconciliation. To repair only persistent
-candidate indexes from the chunks and embeddings already stored, use:
-
-```bash
-python -m scripts.reindex --index-only
-```
-
-Backfill is idempotent: after one successful reconciliation, running the same
-index-only command again reports zero added, updated and removed rows. It cannot
-repair an embedding-model dimension mismatch because that requires producing
-new vectors; run the full command for that. A source it cannot re-read — a URL
-that now 404s, a PDF whose upload is gone — is marked `error` and keeps its old
-chunks, so it stops being retrievable until it is re-added.
-
-The same script is how a change to extraction or chunking reaches documents that
-are already indexed. Stored chunks were produced by the old code and do not
-improve on their own.
-
-</details>
-
-<details>
-<summary><b>Every environment variable</b>, with defaults from <code>backend/app/config.py</code></summary>
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| **LLM** | | |
-| `LLM_MODE` | Provider selection: `auto`, `claude`, `openai`, `local`, `none` | `auto` |
-| `CLAUDE_API_KEY` | Anthropic API key | – |
-| `CLAUDE_MODEL` | Claude model id | `claude-opus-5` |
-| `CLAUDE_EFFORT` | Reasoning depth: `low`…`max` | `low` |
-| `CLAUDE_MIN_MAX_TOKENS` | Floor for a request's output budget | `2048` |
-| `OPENAI_API_KEY` | OpenAI API key | – |
-| `OPENAI_MODEL` | OpenAI model id | `gpt-5.6` |
-| `OPENAI_BASE_URL` | Redirect the OpenAI path at a compatible provider | – (OpenAI) |
-| `OPENAI_REASONING_FORMAT` | Groq only: `parsed`, `raw`, `hidden` | – |
-| `OPENAI_MIN_MAX_TOKENS` | Floor for a request's output budget | `2048` |
-| `LLM_MAX_REQUEST_TOKENS` | Known per-request ceiling, to skip discovering it | – |
-| `OLLAMA_BASE_URL` | Local OpenAI-compatible endpoint | `http://localhost:11434/v1` |
-| `OLLAMA_MODEL` | Local model name | `llama3.2` |
-| **Embedding** | | |
-| `EMB_MODEL_NAME` | sentence-transformers model | `intfloat/multilingual-e5-base` |
-| `EMB_DIMENSION` | Vector dimension (auto-corrected from the model) | `768` |
-| `EMB_BACKEND` | Requested dense backend: sqlite-vec, with a disclosed Python fallback if its extension is unavailable | `sqlitevec` |
-| **Retrieval & chunking** | | |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking window, in characters | `512` / `50` |
-| `RETRIEVAL_TOP_K` | Chunks retrieved per question | `5` |
-| `RETRIEVAL_CANDIDATE_K` | Candidates each retriever offers before fusion | `30` |
-| `RETRIEVAL_MIN_SCORE` | Minimum cosine similarity for a dense candidate | `0.0` |
-| `HYBRID_ENABLED` | Fuse dense and BM25 retrieval | `true` |
-| `HYBRID_RRF_K` | Rank-damping constant for the fusion | `60` |
-| `DEDUPE_JACCARD` | Token overlap at which two candidates are one passage | `0.9` |
-| `CONTEXT_CHAR_BUDGET` | Ceiling on retrieved context in a prompt | `12000` |
-| `RERANK_ENABLED` | Legacy heuristic re-ranker, used when `HYBRID_ENABLED=false` | `true` |
-| **YouTube** | | |
-| `YT_WHISPER_FALLBACK_ENABLED` | Transcribe audio when captions are unavailable | `true` |
-| `YT_WHISPER_MODEL` | Local multilingual Whisper model | `base` |
-| `YT_MAX_DURATION_SECONDS` | Longest video accepted by local Whisper | `1800` |
-| `YT_WHISPER_CACHE_DIR` | Persistent Whisper model cache | `./models/whisper` |
-| **Database** | | |
-| `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/opennotebook.db` |
-| `INGESTION_WORKER_CONCURRENCY` | Simultaneous durable ingestion jobs (`1`–`16`) | `1` |
-| `TRASH_RETENTION_DAYS` | Days deleted projects, sources, and notes remain restorable | `30` |
-| **Auth** | | |
-| `JWT_SECRET_KEY` | Token signing key — **required** unless `APP_ENV=development` | – |
-| `JWT_ALGORITHM` | Signing algorithm | `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime | `720` |
-| `ALLOW_PUBLIC_REGISTRATION` | Public signup; defaults on only in development | environment-dependent |
-| `SEED_DEMO_USER` | Keep a demo account present and publish it on the sign-in page | `true` |
-| `DEMO_USERNAME` | Demo account username | `demo` |
-| `DEMO_EMAIL` | Demo account email | `demo@example.com` |
-| `DEMO_PASSWORD` | Demo account password (min 8 characters) | `demo1234` |
-| **Uploads** | | |
-| `MAX_FILE_SIZE_MB` | Upload limit | `50` |
-| `ALLOWED_FILE_TYPES` | Accepted extensions | `pdf,txt,md,docx,pptx,xlsx,epub` |
-| `MAX_URL_DOWNLOAD_MB` | Decompressed URL response limit | `10` |
-| `MAX_URL_REDIRECTS` | Redirects revalidated per URL import | `5` |
-| `URL_CONNECT_TIMEOUT_SECONDS` | URL socket connection timeout | `5` |
-| `URL_READ_TIMEOUT_SECONDS` | URL socket read timeout | `30` |
-| `URL_DOWNLOAD_TIMEOUT_SECONDS` | Total URL import download cap | `30` |
-| **Abuse controls** | | |
-| `RATE_LIMIT_ENABLED` | Enforce in-process IP/account windows | `true` |
-| `RATE_LIMIT_MAX_KEYS` | Maximum non-expired limiter buckets | `10000` |
-| `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-For` from an operator-controlled proxy | `false` |
-
-The shipped SQLite deployment runs one backend process. Its retained worker
-requeues jobs left `running` by a previous process at startup; do not run
-multiple backend processes against the same SQLite file because one process
-could otherwise mistake another process's active job for abandoned work.
-
-Without `JWT_SECRET_KEY`, a development server signs tokens with a key generated
-per process — sessions do not survive a restart. Any non-development deployment
-refuses to start without it.
-
-See [`.env.example`](./.env.example). Both Compose entry points consume this
-single canonical environment contract.
-
-</details>
-
-## 🔌 API
-
-Interactive docs at `/docs`, ReDoc at `/redoc`. Every path except `/healthz`,
-`/readyz` (and its legacy `/ready` alias), and the two `/api/auth` credential
-endpoints requires
-`Authorization: Bearer <token>` and answers `401` without one.
-
-<details>
-<summary><b>Every endpoint</b></summary>
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/healthz`, `/readyz` | Liveness and readiness |
-| `POST` | `/api/auth/register`, `/api/auth/token` | Create an account, exchange credentials for a token |
-| `GET` | `/api/auth/me` | The account behind a bearer token |
-| `POST` | `/api/auth/api-keys` | Create a personal API key (JWT only; secret returned once) |
-| `GET` | `/api/auth/api-keys` | List personal API key metadata |
-| `DELETE` | `/api/auth/api-keys/{key_id}` | Revoke one of the caller's API keys |
-| `GET`/`POST` | `/api/projects` | List and create projects |
-| `GET`/`PUT`/`DELETE` | `/api/projects/{id}` | Read, rename, delete a project |
-| `GET` | `/api/projects/{id}/documents` | Documents in a project |
-| `POST` | `/api/projects/{id}/upload` | Upload a file (PDF, DOCX, PPTX, XLSX, EPUB, txt, md) |
-| `POST` | `/api/projects/{id}/upload-url` | Import a web page |
-| `POST` | `/api/projects/{id}/upload-youtube` | Import a YouTube transcript |
-| `GET` | `/api/docs/{id}`, `/api/docs/{id}/status` | Document detail and ingest status |
-| `GET` | `/api/docs/{id}/file` | The stored file, served inline (PDF preview) |
-| `POST` | `/api/query` | Ask a question; returns `answer`, `sources`, `chunks_used`, `model_used` |
-| `GET`/`POST` | `/api/projects/{id}/conversations` | List and create conversations |
-| `GET`/`PUT`/`DELETE` | `/api/conversations/{id}` | Read, rename, delete a conversation |
-| `GET` | `/api/export/conversation/{id}` | Export one conversation (markdown, json, txt) |
-| `GET` | `/api/export/project/{id}` | Export a project (markdown, json) |
-| `POST` | `/api/export/project/{id}/summary` | Project summary — powers Studio's report and audio |
-| `POST` | `/api/projects/{id}/mindmap` | Mind map of a project; returns `root`, `node_count`, `model_used` |
-| `POST` | `/api/projects/{id}/video-summary` | Scene script for Studio's video summary; returns `scenes`, `estimated_seconds`, `model_used` |
-| `DELETE` | `/api/cache/invalidate/project/{id}`, `/api/cache/invalidate/document/{id}` | Invalidate cache entries after an ownership check |
-
-`/api/docs/{id}/file` is no exception to the bearer-token rule, which is why the
-preview pane fetches a file through the API client and renders the bytes, rather
-than pointing an `<iframe>` at the route.
-
-Every datetime the API returns carries a UTC designator (`+00:00`), so clients in
-any timezone render timestamps correctly.
-
-</details>
-
-Create a personal key in **Settings → API Keys**. Copy it when it is shown;
-the server stores only its SHA-256 hash. Keys inherit the account's data access
-and rate limits. Key management itself requires a login JWT.
-
-Use the key as a bearer token from a script:
-
-```bash
-curl -H 'Authorization: Bearer onlm_your_key' \
-  http://localhost:8000/api/projects
-```
-
-## 🧪 Testing
-
-```bash
-# Backend — against a running container
-docker exec <backend-container> sh -lc "cd /app && python -m pytest tests -q"
-
-# or locally, if the ML dependencies are installed
-cd backend && pytest -q
-
 # Frontend
-cd frontend && npm test          # vitest
-cd frontend && npm run lint
+npm --prefix frontend test
+npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+
+# Backend, with the full dependency stack installed
+cd backend
+python -m pytest tests -q
 ```
 
-The backend and frontend suites have separate commands. The backend suite needs the ML dependencies
-(`sentence-transformers` and its transformers pin) importable — a bare virtualenv
-without them cannot collect the tests.
+The backend suite imports PyTorch and sentence-transformers during collection;
+a minimal Python environment is insufficient. Use the backend image when those
+dependencies are unavailable locally. Configuration tests also need the
+repository's `.env.example` and Compose files available above `backend/`.
 
-### Browser E2E
-
-The default Chromium suite starts isolated Next.js and FastAPI servers on ports
-3100 and 8100. It uses a run-specific SQLite database under `output/e2e`.
-Installing Python/npm dependencies and Chromium uses their package-download
-networks, but once installed the fast test runtime makes no external application
-or API calls and needs no provider secret, API key, public network, torch, or
-sentence-transformers.
-
-From the repository root:
+For isolated browser tests from the repository root:
 
 ```bash
 python -m pip install -r backend/requirements-e2e.txt
@@ -834,212 +545,59 @@ npx --prefix e2e playwright install chromium
 npm --prefix e2e test
 ```
 
-The E2E server uses `python` by default. Point it at the E2E virtual environment
-when that is not the Python on your `PATH`:
+The fast browser suite uses isolated services on ports 3100 and 8100, local test
+data, and no LLM key. See [the E2E guide](e2e/README.md) for runtime isolation,
+retained failure artifacts, `E2E_PYTHON`, and the optional production-embedding
+suite.
+
+Measure retrieval changes with the existing evaluation corpus:
 
 ```bash
-E2E_PYTHON="$(pwd)/backend/venv/bin/python" npm --prefix e2e test
+cd backend
+LLM_MODE=none python -m scripts.eval_retrieval \
+  --tag baseline --out ../output/rag-eval
 ```
 
-```powershell
-$env:E2E_PYTHON = (Resolve-Path 'backend\venv\Scripts\python.exe')
-npm --prefix e2e test
-```
+The evaluator uses its own database and reports Recall@k and MRR. Keep generated
+evaluation artifacts under the gitignored `output/` directory.
 
-Use `npm --prefix e2e run test:headed` or `npm --prefix e2e run test:debug` for
-local investigation. Failed runs retain an HTML report, trace, video,
-screenshot, server logs, and isolated database under `output/e2e/<run-id>`.
-Successful runs clean that runtime unless `E2E_KEEP_RUNTIME=1` is set (or, in
-PowerShell, `$env:E2E_KEEP_RUNTIME = '1'`).
+## Current limits
 
-The production-embedding test is a separate, slower opt-in. It needs
-CPU-compatible PyTorch, sufficient disk, RAM, and time; a cold run also downloads
-the embedding model unless it is already cached. It still uses `LLM_MODE=none`
-and requires no provider secret:
+- **Generated content needs review.** Citations and support checks help inspect
+  evidence; they do not guarantee that an answer is correct. Cross-language
+  retrieval can miss passages when the question and source share little vocabulary.
+- **Video summary means a narrated slideshow.** Studio exports a Markdown script
+  or PowerPoint deck, rather than a rendered MP4. Narration depends on the
+  browser's speech support. The README's demo MP4 is a separate screen recording.
+- **Audio overviews use English Kokoro voices.** Script quality depends on the
+  selected LLM, and model loading can delay the first generation. If local TTS is
+  disabled, Audio summary uses browser speech where supported.
+- **YouTube imports depend on upstream availability.** Captions, metadata, and
+  downloads can be blocked or rate-limited. Whisper fallback is bounded by the
+  configured duration limit and can be slow on a CPU.
+- **Studio operates on bounded source excerpts.** Large projects may be only
+  partially represented in generated outputs; mind maps report their coverage.
+- **Provider delays affect generation.** Rate-limit retries can outlast the
+  frontend proxy's waiting period. Check backend logs if an output fails after
+  a long wait.
+- **sqlite-vec uses exact vector search.** Persistent indexes reduce application
+  overhead, but this is not an ANN index for arbitrarily large collections.
+- **Some controls are still marked “coming soon.”** Those controls are disabled;
+  they are not included as available features above.
 
-```bash
-python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.13.0
-python -m pip install -r backend/requirements-e2e-rag.txt
-E2E_PYTHON="$(pwd)/backend/venv/bin/python" npm --prefix e2e run test:full-rag
-```
+## Contributing
 
-```powershell
-$env:E2E_PYTHON = (Resolve-Path 'backend\venv\Scripts\python.exe')
-npm --prefix e2e run test:full-rag
-```
+Open an issue for a bug or feature proposal, or submit a focused pull request.
+Include a reproducible example, the checks you actually ran, and screenshots for
+visible UI changes. Keep credentials, databases, uploads, and model files out of
+commits. Development conventions and test guidance are in [AGENTS.md](AGENTS.md).
 
-## Local YouTube audio transcription fallback
+When updating README media, capture the real application with public or synthetic
+sources and an isolated database. Include the relevant workflow and controls,
+avoid exposing personal data, and update the recording when the interface changes.
+Store final media in `.github/assets/` and temporary captures in `output/`.
 
-When YouTube has no manual or generated captions, ingestion falls back to
-local speech-to-text rather than reject an otherwise accessible video. The
-existing caption path remains first because it is faster and avoids downloading
-media. Only explicit `TranscriptsDisabled` and `NoTranscriptFound` responses
-activate the fallback; private, missing, region-blocked and transiently failing
-videos keep their original error so a network problem is not disguised as a
-long transcription job.
+## License
 
-The fallback is isolated behind a `YouTubeAudioTranscriber` adapter. It uses
-`yt-dlp` to inspect one video without playlist expansion, rejects live videos,
-unknown durations and durations above 1,800 seconds before downloading, then
-downloads the best available audio into a temporary directory. Multilingual
-OpenAI Whisper `base` runs locally with automatic language detection. Its text
-and timestamped segments are normalized to the existing YouTube adapter result,
-so document chunking, embeddings and the `queued` / `processing` / `ready` /
-`error` lifecycle do not change. Temporary media is deleted on both success and
-failure.
-
-The Whisper model is loaded lazily, cached under `models/whisper`, and reused by
-the process. A process-wide lock permits one Whisper transcription at a time;
-additional imports remain `processing` rather than competing for all CPU and
-memory. The initial settings are `YT_WHISPER_FALLBACK_ENABLED=true`,
-`YT_WHISPER_MODEL=base`, `YT_MAX_DURATION_SECONDS=1800` and
-`YT_WHISPER_CACHE_DIR=./models/whisper`. Disabling the fallback restores the
-caption-only behavior without changing the API.
-
-Deployment adds the `yt-dlp` and `openai-whisper` Python packages and the
-`ffmpeg` system package. No database migration or frontend contract changes are
-required. Unit tests will cover caption-first behavior, fallback eligibility,
-duration and playlist rejection, output normalization, single-job locking and
-temporary-file cleanup. Service tests will verify that fallback output reaches
-the existing index and that failures remain visible on the document.
-
-## ⚠ Known limitations
-
-<details>
-<summary>Stated plainly, because several of these look like features until you hit them</summary>
-
-- **There is no sharing.** Ownership is all-or-nothing: a project belongs to one
-  account, and there is no way to grant another account access to it.
-- **Caching defaults to bounded in-memory storage outside Compose.** Set
-  `REDIS_URL` for a shared cache, or enable Compose's `with-cache` profile. Redis
-  stays on the internal network; without it, each backend process keeps at most
-  `CACHE_MAX_ENTRIES` cached values plus, separately, at most that many
-  project/document scope-version markers. Stats report both counts and their
-  total. Compose caps disposable, non-persistent Redis at `REDIS_MAXMEMORY`
-  (256 MB by default) with `allkeys-lru`; resource invalidation rotates an opaque
-  version in constant work, while unreachable values are reclaimed by TTL or
-  eviction.
-- **YouTube import still depends on YouTube.** Caption retrieval can be
-  rate-limited and audio download can be blocked even when the code is correct.
-  Captionless videos fall back to local Whisper, which can take roughly the
-  video's duration on a CPU-only machine and is limited to 30 minutes.
-- **Studio's video summary is not a video file.** The backend returns a scene
-  script and the browser plays it as a narrated slideshow, reading the narration
-  out with the Web Speech API — the same split the audio summary uses. There is
-  nothing to download but the script, as Markdown. Rendering an MP4 would mean
-  adding a drawing library, a speech engine and ffmpeg to the image; recording the
-  slideshow in the browser is no substitute, because Web Speech output cannot be
-  captured into a `MediaStream` and the file would come out silent.
-- **A video summary's narration is only as good as its inputs.** With no LLM
-  configured each source scene is extracted instead — heading structure first,
-  then the document's opening sentences, then word frequency — and `model_used`
-  says so, in the response and in the player.
-- **Mind maps use representative source passages.** The model builds a subject,
-  main concepts and nested subtopics from summary sections and passages across
-  the body. Generation uses at most 24 ready, owned sources and 18,000 excerpt
-  characters per request; the dialog and Markdown export show partial coverage
-  when the notebook is larger. Without a usable model response, the map retains
-  every eligible source and derives its branches from heading structure, or
-  word frequency where headings are unavailable. `model_used` identifies this
-  fallback; `source_count` and `total_source_count` report source coverage.
-  Selecting **Ask in chat** prepares an editable question with the concept's
-  parent context, preserving any existing draft. It does not send automatically.
-- **A small provider tier costs one refused request per feature.** The mind map
-  and the video summary ask for as much output as the model will give, because a
-  reply cut off mid-JSON parses to nothing. Providers count the prompt and
-  `max_tokens` together against a rate limit — Groq's on-demand tier allows 8000 a
-  minute, under which qwen3.6-27b's own 16384-token limit does not fit — so the
-  first such request is refused, the ceiling is read out of the refusal, and the
-  request is retried inside it. Each feature holds its own provider and so pays
-  that once. Set `LLM_MAX_REQUEST_TOKENS` to skip it entirely. A project large
-  enough that its prompt alone approaches the ceiling still falls back to
-  extraction.
-- **No WebSockets.** Ingest progress is polled, not pushed.
-- **Cross-lingual retrieval is only partly there.** A question in one language
-  finds passages in the other when they share a proper noun, because BM25 matches
-  it. When the vocabulary does not overlap at all — an English question whose
-  answer exists only in Chinese prose — `multilingual-e5-base` does not reliably
-  bridge the gap. `BAAI/bge-m3` is the stronger multilingual model and would
-  likely close it, but needs roughly 4.85 GB of RSS against this one's 2.69 GB.
-- **sqlite-vec is exact, not ANN.** Version 0.1.9 selects top-k vector candidates
-  inside SQLite but still does O(n) distance work over eligible rows. Persistent
-  FTS5 avoids rebuilding a lexical corpus per request, and metadata is loaded in
-  one batch, but very large installations will eventually need an ANN backend.
-  `/healthz` names the active backend; the Python brute-force fallback has a
-  lower capacity because it loads scoped vectors into process memory.
-
-</details>
-
-## ❓ FAQ
-
-<details>
-<summary>Why does my answer read like it was copied straight out of the document?</summary>
-
-Because it was. No LLM provider is configured, so the answer is extractive: the
-best-matching chunks, lightly stitched. Check `model_used` on the `/api/query`
-response — `"fallback"` means exactly this — then set one of the keys in
-[Configuration](#-configuration).
-
-</details>
-
-<details>
-<summary>Can I run it with no cloud provider at all?</summary>
-
-Yes. Embeddings, retrieval, storage and the whole UI are local already; the only
-outbound call is generation. Point `LLM_MODE=local` at Ollama, llama.cpp or vLLM
-and nothing leaves the machine.
-
-</details>
-
-<details>
-<summary>Where is the video file for the video summary?</summary>
-
-There isn't one. The backend returns a scene script and the browser plays it as a
-narrated slideshow, speaking the narration through the Web Speech API. The
-downloadable artefact is the script, as Markdown. See
-[Known limitations](#-known-limitations) for why recording it in the browser
-would produce a silent file.
-
-</details>
-
-<details>
-<summary>I changed <code>EMB_MODEL_NAME</code> and retrieval broke. What now?</summary>
-
-Stored vectors are only comparable to vectors from the same model, so the old
-embeddings are now unusable and the dimensions no longer match. Re-index in
-place — it keeps document ids, so projects, conversations and citations survive:
-
-```bash
-docker exec <backend-container> sh -lc "cd /app && python -m scripts.reindex"
-```
-
-</details>
-
-<details>
-<summary>Can I share a project with someone else?</summary>
-
-Not yet. A project belongs to exactly one account, and requests from any other
-account get `404`. Everyone who needs their own notebooks registers their own
-account on the same instance.
-
-</details>
-
-## 🤝 Contributing
-
-Issues and pull requests are welcome. [`AGENTS.md`](./AGENTS.md) documents the
-conventions this repository actually follows — thin routers, services that hold
-the logic, UTC-aware datetime columns, and where the live code is (`backend/app/`,
-not the orphaned root-level `app/`). Read it before the first commit.
-
-Run both test suites before opening a pull request, and keep the README honest:
-if a change alters what a feature does without an LLM configured, say so here.
-
-<p align="center">
-  <a href="https://github.com/tom1030507/OpenNotebookLM/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=tom1030507/OpenNotebookLM" alt="Contributors">
-  </a>
-</p>
-
-## 📄 License
-
-[MIT](./LICENSE).
+[MIT](LICENSE). OpenNotebookLM is an independent project and is not affiliated
+with Google.
