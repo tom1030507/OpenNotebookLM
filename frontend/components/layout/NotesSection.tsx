@@ -3,7 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
-import type { Citation, Document, MindMap, Note, VideoSummary } from '@/lib/api';
+import type {
+  Citation, Document, MindMap, Note, NoteExportFormat, VideoSummary,
+} from '@/lib/api';
 import { citationId, referencedCitationIds, savedAnswerCitations } from '@/lib/citations';
 import useNotes from '@/store/useNotes';
 import useStore from '@/store/useStore';
@@ -82,6 +84,8 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     state.projectId === projectId ? state.loading : projectId !== null
   ));
   const loadError = useNotes((state) => state.projectId === projectId ? state.error : '');
+  const projectName = useStore((state) => state.currentProject?.id === projectId
+    ? state.currentProject.name : '');
   const documents = useStore((state) => state.currentProject?.id === projectId
     ? state.documents : EMPTY_DOCUMENTS);
   const documentsLoading = useStore((state) => state.currentProject?.id === projectId
@@ -89,6 +93,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
   const citationNote = notes.find((note) => note.id === openId && (
     note.origin === 'answer' || (note.origin === 'studio' && note.studio_kind === 'report')
@@ -201,6 +206,33 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     }
   };
 
+  const exportNoteFile = async (format: NoteExportFormat, note?: Note) => {
+    if (!projectId || exporting) return;
+    setExporting(true);
+    setError('');
+    try {
+      const blob = note
+        ? await api.exportNote(projectId, note.id, format)
+        : await api.exportProjectNotes(projectId, format);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const baseName = (note?.title || `${projectName} notes`)
+        .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, '_')
+        .trim()
+        .replace(/[_. ]+$/g, '') || 'notes';
+      link.href = url;
+      link.download = `${baseName}.${format === 'markdown' ? 'md' : format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Notes could not be exported. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const deleteNote = async (note: Note) => {
     if (!canEdit) return;
     if (!confirm(`Delete the note "${note.title}"?`)) return;
@@ -253,29 +285,48 @@ export default function NotesSection({ projectId }: { projectId: string | null }
     <section aria-label="Notes" className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold">Notes</h3>
-        {canEdit && (
-          <div className="flex gap-2">
-            {unlinkedMarkdownNotes.length > 0 && (
-              <button
-                type="button"
-                onClick={convertAllNotes}
-                disabled={saving}
-                className={actionClass}
-              >
-                Convert all notes
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setDraft({ noteId: null, title: '', content: '' })}
-              disabled={saving || draft?.noteId === null}
+        <div className="flex flex-wrap justify-end gap-2">
+          {notes.length > 0 && (
+            <select
+              aria-label="Export all notes as"
+              value=""
+              disabled={exporting}
+              onChange={(event) => {
+                const format = event.target.value as NoteExportFormat;
+                if (format) void exportNoteFile(format);
+              }}
               className={actionClass}
             >
-              <Plus className="w-3.5 h-3.5" />
-              New note
-            </button>
-          </div>
-        )}
+              <option value="" disabled>Export all notes…</option>
+              <option value="markdown">Markdown</option>
+              <option value="pdf">PDF</option>
+              <option value="docx">Word</option>
+            </select>
+          )}
+          {canEdit && (
+            <div className="flex gap-2">
+              {unlinkedMarkdownNotes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={convertAllNotes}
+                  disabled={saving}
+                  className={actionClass}
+                >
+                  Convert all notes
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setDraft({ noteId: null, title: '', content: '' })}
+                disabled={saving || draft?.noteId === null}
+                className={actionClass}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                New note
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -321,6 +372,21 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                         </span>
                       )}
                     </button>
+                    <select
+                      aria-label={`Export note ${note.title} as`}
+                      value=""
+                      disabled={exporting}
+                      onChange={(event) => {
+                        const format = event.target.value as NoteExportFormat;
+                        if (format) void exportNoteFile(format, note);
+                      }}
+                      className={`${actionClass} shrink-0 self-stretch`}
+                    >
+                      <option value="" disabled>Export…</option>
+                      <option value="markdown">Markdown</option>
+                      <option value="pdf">PDF</option>
+                      <option value="docx">Word</option>
+                    </select>
                     {canEdit && note.origin === 'studio' && note.studio_kind !== 'report' && (
                       <button
                         type="button"

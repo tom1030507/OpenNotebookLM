@@ -556,3 +556,57 @@ def test_notes_are_deleted_with_their_project(client):
 
     with session_factory() as db:
         assert db.query(Note).count() == 0
+
+
+@pytest.mark.parametrize("format", ["markdown", "pdf", "docx"])
+def test_a_note_can_be_exported_in_each_supported_format(client, format):
+    api, _ = client
+    project_id = create_project(api)
+    base = "/api/projects/%s/notes" % project_id
+    note_id = api.post(base, json={
+        "title": "研究筆記",
+        "content": "# 結果\n\n- 水 [1]\n\n**Sources**\n\n- 資料來源",
+    }).json()["id"]
+
+    response = api.get("%s/%s/export?format=%s" % (base, note_id, format))
+
+    assert response.status_code == 200, response.text
+    assert "filename*=UTF-8''" in response.headers["content-disposition"]
+    assert response.content
+
+
+@pytest.mark.parametrize(
+    ("format", "signature"),
+    [("markdown", b"#"), ("pdf", b"%PDF-"), ("docx", b"PK\x03\x04")],
+)
+def test_a_project_can_export_all_its_notes(client, format, signature):
+    api, _ = client
+    project_id = create_project(api, "研究專案")
+    base = "/api/projects/%s/notes" % project_id
+    api.post(base, json={"title": "第一篇", "content": "內容 [1]"})
+    api.post(base, json={"title": "第二篇", "content": "**Sources**"})
+
+    response = api.get("%s/export?format=%s" % (base, format))
+
+    assert response.status_code == 200, response.text
+    assert response.content.startswith(signature)
+    if format == "markdown":
+        assert "# 第一篇" in response.text
+        assert "# 第二篇" in response.text
+        assert "內容 [1]" in response.text
+    assert "filename*=UTF-8''" in response.headers["content-disposition"]
+
+
+def test_a_note_cannot_be_exported_through_another_project(client):
+    api, _ = client
+    project_id = create_project(api)
+    other_project_id = create_project(api, "Other")
+    note_id = api.post(
+        "/api/projects/%s/notes" % project_id, json={"title": "Private"}
+    ).json()["id"]
+
+    response = api.get(
+        "/api/projects/%s/notes/%s/export" % (other_project_id, note_id)
+    )
+
+    assert response.status_code == 404

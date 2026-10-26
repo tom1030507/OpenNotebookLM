@@ -74,6 +74,36 @@ describe('Studio notes', () => {
     expect(screen.getByRole('button', { name: 'Convert all notes' })).toBeTruthy();
   });
 
+  it('downloads one note or all project notes in the selected format', async () => {
+    vi.spyOn(api, 'listNotes').mockResolvedValue([note({})]);
+    const exportNote = vi.spyOn(api, 'exportNote').mockResolvedValue(new Blob(['note']));
+    const exportProject = vi.spyOn(api, 'exportProjectNotes')
+      .mockResolvedValue(new Blob(['notes']));
+    const createObjectURL = vi.fn(() => 'blob:notes');
+    const revokeObjectURL = vi.fn();
+    const clickDownload = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+
+    render(<NotesSection projectId="project-1" />);
+    fireEvent.change(await screen.findByRole(
+      'combobox', { name: 'Export note First as' },
+    ), { target: { value: 'pdf' } });
+    await waitFor(() => expect(exportNote).toHaveBeenCalledWith(
+      'project-1', 'note-1', 'pdf',
+    ));
+
+    fireEvent.change(screen.getByRole(
+      'combobox', { name: 'Export all notes as' },
+    ), { target: { value: 'docx' } });
+    await waitFor(() => expect(exportProject).toHaveBeenCalledWith(
+      'project-1', 'docx',
+    ));
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+    expect(clickDownload).toHaveBeenCalledTimes(2);
+  });
+
   it('converts one note and marks it as a source', async () => {
     vi.spyOn(api, 'listNotes').mockResolvedValue([note({})]);
     const refresh = vi.fn().mockImplementation(async () => {

@@ -3,6 +3,7 @@ import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 import structlog
 
@@ -24,6 +25,7 @@ from app.services.rate_limit import (
     OperationLeaseGroup,
     SlidingWindowRateLimiter,
 )
+from app.services.note_export import content_disposition, export_notes
 from app.services import notes as note_service
 
 # Every route below requires a signed-in caller. Declaring that on the
@@ -108,6 +110,67 @@ def list_notes(
     """
     project = require_project(db, project_id, current_user, min_role="viewer")
     return note_service.list_notes(db, project)
+
+
+def _note_export_response(notes, format: str, filename: str) -> Response:
+    try:
+        content, content_type, filename = export_notes(notes, format, filename)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": content_disposition(filename)},
+    )
+
+
+@router.get("/projects/{project_id}/notes/export")
+def export_project_notes(
+    project_id: str,
+    format: str = "markdown",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Export every note in a project visible to the caller.
+
+    Args:
+        project_id: Project to resolve through the caller's access.
+        format: Download format: Markdown, PDF, or DOCX.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        An attachment containing all project notes.
+    """
+    project = require_project(db, project_id, current_user, min_role="viewer")
+    return _note_export_response(
+        note_service.list_notes(db, project), format, "%s notes" % project.name
+    )
+
+
+@router.get("/projects/{project_id}/notes/{note_id}/export")
+def export_project_note(
+    project_id: str,
+    note_id: str,
+    format: str = "markdown",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Export one note after resolving it through its visible project.
+
+    Args:
+        project_id: Project containing the note.
+        note_id: Note to export.
+        format: Download format: Markdown, PDF, or DOCX.
+        db: Database session.
+        current_user: Authenticated caller.
+
+    Returns:
+        An attachment containing the note.
+    """
+    project = require_project(db, project_id, current_user, min_role="viewer")
+    note = note_service.get_note(db, project, note_id)
+    return _note_export_response([note], format, note.title)
 
 
 @router.post("/projects/{project_id}/notes", response_model=NoteResponse)
