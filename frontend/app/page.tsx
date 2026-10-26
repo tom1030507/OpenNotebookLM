@@ -33,13 +33,13 @@ export default function Home() {
   const [outputLanguageRevision, setOutputLanguageRevision] = useState(0);
   // On desktop, conversations share the left column with Sources instead of
   // taking a fourth track: four columns left the answer about 690px wide at
-  // 1440px and every panel cramped. Below `xl` they keep their own drawer.
+  // 1440px and every panel cramped. Below `2xl` they keep their own drawer.
   // Exactly one ConversationList is mounted either way.
   const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY);
-  const sourcesPanel = (
+  const sourcesPanel = (isDrawer: boolean) => (
     <SourcesPanel
-      isCollapsed={layoutState.sources}
-      onCollapsedChange={() => {
+      isCollapsed={isDrawer ? false : layoutState.sources}
+      onCollapsedChange={isDrawer ? undefined : () => {
         dispatchLayout({ type: 'toggle-panel', panel: 'sources' });
       }}
       isAddSourcesOpen={isAddSourcesOpen}
@@ -66,19 +66,19 @@ export default function Home() {
         {/* Top Navigation */}
         <TopNav />
 
-        {/* Main Content Area — drawers below `lg`, bounded grid tracks at `lg` and up */}
+        {/* Drawers on laptops; bounded grid tracks on wider screens. */}
         <ResponsiveLayout
           desktopStyle={getDesktopWorkspaceStyle(layoutState, hasProject && !isDesktop)}
-          sidebar={
+          sidebar={(isDrawer) => (
             showConversationsInSidebar ? (
               <div className="flex h-full min-h-0 flex-col">
-                <div className="min-h-0 flex-1">{sourcesPanel}</div>
+                <div className="min-h-0 flex-1">{sourcesPanel(isDrawer)}</div>
                 <div className="flex min-h-0 max-h-[38%] flex-col border-r border-t border-[var(--border)]">
                   <ConversationList embedded />
                 </div>
               </div>
-            ) : sourcesPanel
-          }
+            ) : sourcesPanel(isDrawer)
+          )}
           conversationPanel={isDesktop ? undefined : <ConversationList />}
           rightPanel={(isDrawer) => (
             <StudioPanel
