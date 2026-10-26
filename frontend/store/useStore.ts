@@ -14,6 +14,13 @@ import type {
 } from '@/lib/api';
 import { registerAccountStateRetirer } from '@/lib/sessionBoundary';
 
+interface StudyRoundScore {
+  correct: number;
+  total: number;
+  elapsedSeconds: number;
+  completedAt: string;
+}
+
 interface AppState {
   // Projects
   projects: Project[];
@@ -47,6 +54,9 @@ interface AppState {
   // Preferences
   /** Whether finishing a source announces itself. Read by useDocumentStatusWatch. */
   notifyOnProcessingComplete: boolean;
+
+  // Study progress
+  studyScoresByProject: Record<string, StudyRoundScore[]>;
 
   // Actions - Projects
   fetchProjects: () => Promise<void>;
@@ -130,6 +140,17 @@ interface AppState {
 
   // Actions - Preferences
   setNotifyOnProcessingComplete: (enabled: boolean) => void;
+
+  // Actions - Study progress
+  /**
+   * Record one completed quick round for its project.
+   * Args:
+   *   projectId: Project whose history should receive the score.
+   *   score: Correct answers, total questions, elapsed time, and completion time.
+   * Returns:
+   *   Nothing.
+   */
+  recordStudyScore: (projectId: string, score: StudyRoundScore) => void;
 
   // Account boundary
   clearAccountState: () => void;
@@ -305,6 +326,7 @@ const initialState = {
   pendingMindMapQuestion: null,
   citationPreview: null,
   notifyOnProcessingComplete: true,
+  studyScoresByProject: {},
 };
 
 /**
@@ -1114,6 +1136,13 @@ const useStore = create<AppState>()(
         setNotifyOnProcessingComplete: (enabled) => {
           set({ notifyOnProcessingComplete: enabled });
         },
+        recordStudyScore: (projectId, score) => set((state) => ({
+          studyScoresByProject: {
+            ...state.studyScoresByProject,
+            // shortcut: keep five recent rounds per project; raise this if users need a longer history.
+            [projectId]: [score, ...(state.studyScoresByProject[projectId] ?? [])].slice(0, 5),
+          },
+        })),
 
         // Account boundary
         clearAccountState: () => {
@@ -1137,6 +1166,7 @@ const useStore = create<AppState>()(
             sidebarOpen: state.sidebarOpen,
             studioOpen: state.studioOpen,
             notifyOnProcessingComplete: state.notifyOnProcessingComplete,
+            studyScoresByProject: {},
           }));
         },
         resetForTests: () => {
@@ -1151,6 +1181,7 @@ const useStore = create<AppState>()(
           sidebarOpen: state.sidebarOpen,
           studioOpen: state.studioOpen,
           notifyOnProcessingComplete: state.notifyOnProcessingComplete,
+          studyScoresByProject: state.studyScoresByProject,
         }),
       }
     )
