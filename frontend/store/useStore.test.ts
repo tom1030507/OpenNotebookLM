@@ -27,6 +27,7 @@ const apiMock = vi.hoisted(() => ({
   getProjects: vi.fn(),
   createProject: vi.fn(),
   updateProjectTags: vi.fn(),
+  mergeProject: vi.fn(),
   deleteProject: vi.fn(),
   getDocuments: vi.fn(),
   uploadDocument: vi.fn(),
@@ -225,6 +226,26 @@ describe('application store', () => {
     expect(useStore.getState().currentProject?.id).toBe('project-2');
     expect(apiMock.getDocuments).toHaveBeenCalledWith('project-2');
     expect(apiMock.getConversations).toHaveBeenCalledWith('project-2');
+  });
+
+  it('selects the destination after merging project content', async () => {
+    const source = project('source');
+    const target = project('target');
+    useStore.setState({ projects: [source, target], currentProject: source });
+    apiMock.mergeProject.mockResolvedValue({
+      target_project_id: target.id,
+      mode: 'move',
+      sources_merged: 1,
+      notes_merged: 0,
+      conversations_merged: 0,
+      skipped_sources: [],
+    });
+    apiMock.getProjects.mockResolvedValue([target, source]);
+
+    await useStore.getState().mergeProject(source.id, target.id, 'move');
+
+    expect(apiMock.mergeProject).toHaveBeenCalledWith(source.id, target.id, 'move');
+    expect(useStore.getState().currentProject).toEqual(target);
   });
 
   it('clears stale scoped state when a refresh selects a different project', async () => {

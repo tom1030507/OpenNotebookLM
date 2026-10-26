@@ -21,6 +21,17 @@ export interface Project {
   cover_color?: string | null;
 }
 
+export type ProjectMergeMode = 'move' | 'copy';
+
+export interface ProjectMergeResponse {
+  target_project_id: string;
+  mode: ProjectMergeMode;
+  sources_merged: number;
+  notes_merged: number;
+  conversations_merged: number;
+  skipped_sources: Array<{ id: string; title: string }>;
+}
+
 export interface ProjectSourceGroup {
   id: string;
   name: string;
@@ -1160,6 +1171,17 @@ const api = {
 
   duplicateProject(projectId: string): Promise<Project> {
     return requestJson<Project>(`/projects/${projectId}/duplicate`, { method: 'POST' });
+  },
+
+  mergeProject(
+    sourceProjectId: string,
+    targetProjectId: string,
+    mode: ProjectMergeMode,
+  ): Promise<ProjectMergeResponse> {
+    return requestJson<ProjectMergeResponse>(`/projects/${sourceProjectId}/merge`, {
+      method: 'POST',
+      body: JSON.stringify({ target_project_id: targetProjectId, mode }),
+    });
   },
 
   async deleteProject(projectId: string): Promise<void> {

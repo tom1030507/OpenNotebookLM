@@ -226,6 +226,28 @@ describe('API client', () => {
     );
   });
 
+  it('posts the selected target and mode when merging projects', async () => {
+    const result = {
+      target_project_id: 'target',
+      mode: 'copy',
+      sources_merged: 1,
+      notes_merged: 2,
+      conversations_merged: 3,
+      skipped_sources: [],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(result));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.mergeProject('source', 'target', 'copy')).resolves.toEqual(result);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/source/merge');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      target_project_id: 'target',
+      mode: 'copy',
+    });
+  });
+
   it('loads every page of projects', async () => {
     const project = (id: string) => ({
       id,

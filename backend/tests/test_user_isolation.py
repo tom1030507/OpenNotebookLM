@@ -1935,6 +1935,24 @@ class TestProjectDuplicateIsolation:
             "/api/projects/%s/duplicate" % project_id).status_code == 404
         assert env.bob.get("/api/projects").json()["projects"] == []
 
+    def test_project_merge_requires_ownership_of_both_projects(self, env):
+        alice_source = make_project(env.alice)
+        alice_target = make_project(env.alice)
+        bob_project = make_project(env.bob)
+
+        assert env.alice.post(
+            "/api/projects/%s/merge" % alice_source,
+            json={"target_project_id": bob_project, "mode": "move"},
+        ).status_code == 404
+        assert env.bob.post(
+            "/api/projects/%s/merge" % alice_source,
+            json={"target_project_id": bob_project, "mode": "copy"},
+        ).status_code == 404
+        assert env.bob.post(
+            "/api/projects/%s/merge" % bob_project,
+            json={"target_project_id": alice_target, "mode": "move"},
+        ).status_code == 404
+
 
 class TestCacheIsolation:
     """Cache invalidation reports on activity, so it is scoped too."""

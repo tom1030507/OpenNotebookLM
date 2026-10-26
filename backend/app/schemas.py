@@ -287,6 +287,31 @@ class ProjectListResponse(BaseModel):
     per_page: int
 
 
+class ProjectMergeRequest(BaseModel):
+    """Choose where a project's content goes and whether to move or copy it."""
+
+    target_project_id: str
+    mode: Literal["move", "copy"]
+
+
+class ProjectMergeSkippedSource(BaseModel):
+    """A source left in the source project because its content already exists."""
+
+    id: str
+    title: str
+
+
+class ProjectMergeResponse(BaseModel):
+    """Summary of the content merged into a project."""
+
+    target_project_id: str
+    mode: Literal["move", "copy"]
+    sources_merged: int
+    notes_merged: int
+    conversations_merged: int
+    skipped_sources: List[ProjectMergeSkippedSource]
+
+
 class ProjectMemberCreate(BaseModel):
     """Add an existing account to a project by its username or email."""
     username: Optional[str] = Field(None, min_length=3, max_length=64)

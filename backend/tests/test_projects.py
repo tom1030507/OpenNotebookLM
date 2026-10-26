@@ -12,9 +12,11 @@ from app.db.models import (
     Base,
     Conversation,
     Document,
+    Message,
     Note,
     Project,
     ProjectDocument,
+    ProjectSourceGroup,
     User,
 )
 from app.routers import projects
@@ -527,6 +529,349 @@ def test_duplicate_preserves_suffix_for_max_length_project_name():
 
     assert response.status_code == 200, response.text
     assert response.json()["name"] == f"{name} (copy)"
+
+
+def test_merge_move_transfers_project_content_and_source_groups():
+    source = client.post("/api/projects", json={"name": "Merge source"}).json()
+    target = client.post("/api/projects", json={"name": "Merge target"}).json()
+    with TestingSessionLocal() as db:
+        source_project = db.get(Project, source["id"])
+        owner_id = source_project.user_id
+        source_group = ProjectSourceGroup(
+            id="merge-source-group", project_id=source["id"], name="Research"
+        )
+        target_group = ProjectSourceGroup(
+            id="merge-target-group", project_id=target["id"], name="Research"
+        )
+        document = Document(
+            id="merge-move-document",
+            user_id=owner_id,
+            title="Evidence",
+            source_type="txt",
+            source_url="https://example.com/evidence",
+            status="ready",
+            content_hash="merge-move-hash",
+        )
+        conversation = Conversation(
+            id="merge-move-conversation",
+            project_id=source["id"],
+            user_id=None,
+            title="Research chat",
+        )
+        message = Message(
+            id="merge-move-message",
+            conversation_id=conversation.id,
+            role="user",
+            text="What does the source say?",
+            citations_json=[{"document_id": document.id}],
+        )
+        note = Note(
+            id="merge-move-note",
+            project_id=source["id"],
+            title="Finding",
+            content="Keep this finding",
+            source_message_id=message.id,
+            payload_json={"project_id": source["id"], "project_name": source_project.name},
+        )
+        db.add_all([
+            source_group,
+            target_group,
+            document,
+            ProjectDocument(
+                project_id=source["id"],
+                document_id=document.id,
+                source_group_id=source_group.id,
+                shared_by_user_id=source_project.user_id,
+            ),
+            conversation,
+            message,
+            note,
+        ])
+        db.commit()
+
+    response = client.post(
+        f"/api/projects/{source['id']}/merge",
+        json={"target_project_id": target["id"], "mode": "move"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "target_project_id": target["id"],
+        "mode": "move",
+        "sources_merged": 1,
+        "notes_merged": 1,
+        "conversations_merged": 1,
+        "skipped_sources": [],
+    }
+    with TestingSessionLocal() as db:
+        assert db.get(Project, source["id"]) is not None
+        assert db.query(ProjectDocument).filter_by(project_id=source["id"]).count() == 0
+        moved_link = db.query(ProjectDocument).filter_by(
+            project_id=target["id"], document_id="merge-move-document"
+        ).one()
+        assert moved_link.source_group_id == "merge-target-group"
+        assert db.get(Note, "merge-move-note").project_id == target["id"]
+        assert db.get(Note, "merge-move-note").payload_json == {
+            "project_id": target["id"], "project_name": target["name"]
+        }
+        assert db.get(Conversation, "merge-move-conversation").project_id == target["id"]
+        assert db.get(Conversation, "merge-move-conversation").user_id == owner_id
+        assert db.get(Message, "merge-move-message").citations_json == [
+            {"document_id": "merge-move-document"}
+        ]
+
+
+def test_merge_copy_reuses_documents_and_clones_conversations_and_notes():
+    source = client.post("/api/projects", json={"name": "Copy source"}).json()
+    target = client.post("/api/projects", json={"name": "Copy target"}).json()
+    with TestingSessionLocal() as db:
+        owner_id = db.get(Project, source["id"]).user_id
+        document = Document(
+            id="merge-copy-document",
+            user_id=owner_id,
+            title="Evidence",
+            source_type="txt",
+            source_url="https://example.com/copy-evidence",
+            status="ready",
+            content_hash="merge-copy-hash",
+        )
+        source_duplicate = Document(
+            id="merge-copy-source-duplicate",
+            user_id=owner_id,
+            title="Existing source copy",
+            source_type="txt",
+            source_url="https://example.com/copy-duplicate-source",
+            status="ready",
+            content_hash="merge-copy-duplicate-hash",
+        )
+        target_duplicate = Document(
+            id="merge-copy-target-duplicate",
+            user_id=owner_id,
+            title="Existing target copy",
+            source_type="txt",
+            source_url="https://example.com/copy-duplicate-target",
+            status="ready",
+            content_hash="merge-copy-duplicate-hash",
+        )
+        conversation = Conversation(
+            id="merge-copy-conversation",
+            project_id=source["id"],
+            user_id=owner_id,
+            title="Research chat",
+        )
+        message = Message(
+            id="merge-copy-message",
+            conversation_id=conversation.id,
+            role="assistant",
+            text="Evidence summary",
+            citations_json=[
+                {"document_id": document.id},
+                {"document_id": source_duplicate.id},
+            ],
+        )
+        note = Note(
+            id="merge-copy-note",
+            project_id=source["id"],
+            title="Finding",
+            content="Keep this finding",
+            source_message_id=message.id,
+            payload_json={
+                "project_id": source["id"],
+                "project_name": source["name"],
+                "items": [{"document_id": source_duplicate.id}],
+            },
+        )
+        db.add_all([
+            document,
+            source_duplicate,
+            target_duplicate,
+            ProjectDocument(project_id=source["id"], document_id=document.id),
+            ProjectDocument(
+                project_id=source["id"],
+                document_id=source_duplicate.id,
+            ),
+            ProjectDocument(
+                project_id=target["id"],
+                document_id=target_duplicate.id,
+            ),
+            conversation,
+            message,
+            note,
+        ])
+        db.commit()
+
+    response = client.post(
+        f"/api/projects/{source['id']}/merge",
+        json={"target_project_id": target["id"], "mode": "copy"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["sources_merged"] == 1
+    assert response.json()["notes_merged"] == 1
+    assert response.json()["conversations_merged"] == 1
+    assert response.json()["skipped_sources"] == [{
+        "id": "merge-copy-source-duplicate", "title": "Existing source copy"
+    }]
+    with TestingSessionLocal() as db:
+        assert db.query(Document).filter_by(id="merge-copy-document").count() == 1
+        assert db.query(ProjectDocument).filter_by(
+            document_id="merge-copy-document"
+        ).count() == 2
+        assert db.query(ProjectDocument).filter_by(project_id=source["id"]).count() == 2
+        assert db.query(ProjectDocument).filter_by(project_id=target["id"]).count() == 2
+        copied_conversation = db.query(Conversation).filter_by(
+            project_id=target["id"]
+        ).one()
+        copied_message = db.query(Message).filter_by(
+            conversation_id=copied_conversation.id
+        ).one()
+        copied_note = db.query(Note).filter_by(project_id=target["id"]).one()
+        assert copied_conversation.id != "merge-copy-conversation"
+        assert copied_message.id != "merge-copy-message"
+        assert copied_message.citations_json == [
+            {"document_id": "merge-copy-document"},
+            {"document_id": "merge-copy-target-duplicate"},
+        ]
+        assert copied_note.id != "merge-copy-note"
+        assert copied_note.source_message_id == copied_message.id
+        assert copied_note.payload_json == {
+            "project_id": target["id"],
+            "project_name": target["name"],
+            "items": [{"document_id": "merge-copy-target-duplicate"}],
+        }
+        assert db.get(Note, "merge-copy-note").project_id == source["id"]
+        assert db.get(Conversation, "merge-copy-conversation").project_id == source["id"]
+
+
+def test_merge_skips_sources_with_duplicate_hash_or_url():
+    source = client.post("/api/projects", json={"name": "Duplicate source"}).json()
+    target = client.post("/api/projects", json={"name": "Duplicate target"}).json()
+    with TestingSessionLocal() as db:
+        owner_id = db.get(Project, source["id"]).user_id
+        documents = [
+            Document(
+                id="merge-hash-source", user_id=owner_id, title="Same hash",
+                source_type="txt", source_url="https://example.com/source-hash",
+                status="ready", content_hash="same-content",
+            ),
+            Document(
+                id="merge-url-source", user_id=owner_id, title="Same URL",
+                source_type="txt", source_url="https://example.com/same-url",
+                status="ready", content_hash="source-url-hash",
+            ),
+            Document(
+                id="merge-hash-target", user_id=owner_id, title="Target hash",
+                source_type="txt", source_url="https://example.com/target-hash",
+                status="ready", content_hash="same-content",
+            ),
+            Document(
+                id="merge-url-target", user_id=owner_id, title="Target URL",
+                source_type="txt", source_url="https://example.com/same-url",
+                status="ready", content_hash="target-url-hash",
+            ),
+        ]
+        conversation = Conversation(
+            id="merge-dedupe-conversation",
+            project_id=source["id"],
+            user_id=owner_id,
+            title="Cited chat",
+        )
+        message = Message(
+            id="merge-dedupe-message",
+            conversation_id=conversation.id,
+            role="assistant",
+            text="See both sources.",
+            citations_json=[
+                {"document_id": "merge-hash-source"},
+                {"doc_id": "merge-url-source"},
+            ],
+        )
+        note = Note(
+            id="merge-dedupe-note",
+            project_id=source["id"],
+            title="Study result",
+            content="Keep source references current.",
+            payload_json={"project_id": source["id"], "items": [
+                {"document_id": "merge-hash-source"},
+            ]},
+        )
+        db.add_all(documents)
+        db.add_all([
+            ProjectDocument(project_id=source["id"], document_id="merge-hash-source"),
+            ProjectDocument(project_id=source["id"], document_id="merge-url-source"),
+            ProjectDocument(project_id=target["id"], document_id="merge-hash-target"),
+            ProjectDocument(project_id=target["id"], document_id="merge-url-target"),
+            conversation,
+            message,
+            note,
+        ])
+        db.commit()
+
+    response = client.post(
+        f"/api/projects/{source['id']}/merge",
+        json={"target_project_id": target["id"], "mode": "move"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["sources_merged"] == 0
+    assert response.json()["notes_merged"] == 1
+    assert response.json()["conversations_merged"] == 1
+    assert response.json()["skipped_sources"] == [
+        {"id": "merge-hash-source", "title": "Same hash"},
+        {"id": "merge-url-source", "title": "Same URL"},
+    ]
+    with TestingSessionLocal() as db:
+        assert db.query(ProjectDocument).filter_by(project_id=source["id"]).count() == 2
+        assert db.query(ProjectDocument).filter_by(project_id=target["id"]).count() == 2
+        moved_message = db.get(Message, "merge-dedupe-message")
+        assert moved_message.citations_json == [
+            {"document_id": "merge-hash-target"},
+            {"doc_id": "merge-url-target"},
+        ]
+        moved_note = db.get(Note, "merge-dedupe-note")
+        assert moved_note.payload_json == {
+            "project_id": target["id"],
+            "items": [{"document_id": "merge-hash-target"}],
+        }
+
+
+def test_merge_rejects_same_project_and_incompatible_watched_folders():
+    source = client.post("/api/projects", json={"name": "Watched source"}).json()
+    target = client.post("/api/projects", json={"name": "Watched target"}).json()
+
+    same_project = client.post(
+        f"/api/projects/{source['id']}/merge",
+        json={"target_project_id": source["id"], "mode": "move"},
+    )
+    assert same_project.status_code == 422
+
+    with TestingSessionLocal() as db:
+        db.get(Project, source["id"]).watched_folder = "/watch/source"
+        db.get(Project, target["id"]).watched_folder = "/watch/target"
+        db.commit()
+
+    conflict = client.post(
+        f"/api/projects/{source['id']}/merge",
+        json={"target_project_id": target["id"], "mode": "move"},
+    )
+
+    assert conflict.status_code == 409
+    with TestingSessionLocal() as db:
+        assert db.get(Project, source["id"]).watched_folder == "/watch/source"
+        assert db.get(Project, target["id"]).watched_folder == "/watch/target"
+
+        db.get(Project, target["id"]).watched_folder = None
+        db.commit()
+
+    moved = client.post(
+        f"/api/projects/{source['id']}/merge",
+        json={"target_project_id": target["id"], "mode": "move"},
+    )
+
+    assert moved.status_code == 200, moved.text
+    with TestingSessionLocal() as db:
+        assert db.get(Project, source["id"]).watched_folder is None
+        assert db.get(Project, target["id"]).watched_folder == "/watch/source"
 
 
 if __name__ == "__main__":

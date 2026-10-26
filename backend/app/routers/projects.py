@@ -13,6 +13,7 @@ from app.schemas import (
     ProjectTagsUpdate, ProjectSourceGroupAssignmentRequest,
     ProjectSourceGroupCreate, ProjectSourceGroupResponse,
     ProjectSourceGroupUpdate, WatchedFolderRequest, WatchedFolderResponse,
+    ProjectMergeRequest, ProjectMergeResponse,
 )
 from app.db.models import User
 from app.services.projects import ProjectService
@@ -587,6 +588,51 @@ async def duplicate_project(
         conversation_count=getattr(duplicate, "conversation_count", 0),
         tags=ProjectService.get_project_tags(db, current_user.id, duplicate.id),
     )
+
+
+@router.post(
+    "/projects/{project_id}/merge",
+    response_model=ProjectMergeResponse,
+)
+def merge_project(
+    project_id: str,
+    request: ProjectMergeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Move or copy an owned project's content into another owned project.
+
+    Args:
+        project_id: Project whose content is being merged.
+        request: Target project and whether to move or copy content.
+        db: Database session.
+        current_user: Signed-in owner of both projects.
+
+    Returns:
+        Content counts and any duplicate sources left behind.
+    """
+    source = require_project(db, project_id, current_user)
+    target = require_project(db, request.target_project_id, current_user)
+    if source.id == target.id:
+        raise HTTPException(status_code=422, detail="A project cannot be merged into itself")
+    try:
+        return ProjectService.merge_project(
+            db,
+            source,
+            target,
+            current_user.id,
+            request.mode,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:
+        logger.error(
+            "Failed to merge projects",
+            source_project_id=source.id,
+            target_project_id=target.id,
+            error=str(error),
+        )
+        raise HTTPException(status_code=500, detail="Failed to merge projects") from error
 
 
 @router.delete("/projects/{project_id}")
