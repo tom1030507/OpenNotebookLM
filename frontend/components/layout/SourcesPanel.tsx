@@ -183,7 +183,7 @@ export default function SourcesPanel({
     if (!currentProject || !canManageProject || isDeletingProject) return;
     const projectId = currentProject.id;
     if (!confirm(
-      `Delete "${currentProject.name}" and all its sources, conversations, notes, and generated outputs? This cannot be undone.`,
+      `Move "${currentProject.name}" to Trash? You can restore it until it expires.`,
     )) return;
 
     setIsDeletingProject(true);
@@ -342,15 +342,22 @@ export default function SourcesPanel({
     }
   };
 
-  const handleDeleteDocument = async (docId: string) => {
+  const handleDeleteDocument = async (document: Document) => {
     if (!currentProject) return;
-    
-    if (confirm('Are you sure you want to delete this document?')) {
+    const confirmation = document.isOwnedByCaller
+      ? `Move "${document.name}" to Trash? It will be removed from all projects and can be restored until it expires.`
+      : `Remove "${document.name}" from this project?`;
+    if (confirm(confirmation)) {
       try {
-        await deleteDocument(currentProject.id, docId);
+        if (document.isOwnedByCaller) {
+          await api.trashSource(document.id);
+          await refreshDocuments(currentProject.id);
+        } else {
+          await deleteDocument(currentProject.id, document.id);
+        }
       } catch (error) {
-        console.error('Failed to delete document:', error);
-        alert('Failed to delete document');
+        console.error('Failed to remove source:', error);
+        alert('Failed to remove source');
       }
     }
   };
@@ -625,12 +632,14 @@ export default function SourcesPanel({
           )}
           {canManageSources && (
             <button
-              onClick={(event) => { event.stopPropagation(); void handleDeleteDocument(doc.id); }}
+                onClick={(event) => { event.stopPropagation(); void handleDeleteDocument(doc); }}
               className="p-1 hover:bg-[var(--card)] rounded"
-              aria-label="Remove source"
-              title="Remove source"
+                aria-label={doc.isOwnedByCaller ? 'Move source to Trash' : 'Remove source'}
+                title={doc.isOwnedByCaller ? 'Move source to Trash' : 'Remove source'}
             >
-              <X className="w-3 h-3" />
+              {doc.isOwnedByCaller
+                ? <Trash2 aria-hidden="true" className="w-3 h-3" />
+                : <X aria-hidden="true" className="w-3 h-3" />}
             </button>
           )}
         </div>
@@ -802,7 +811,7 @@ export default function SourcesPanel({
                 className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--error)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
               >
                 {isDeletingProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                <span>{isDeletingProject ? 'Deleting...' : 'Delete Project'}</span>
+                <span>{isDeletingProject ? 'Moving...' : 'Move Project to Trash'}</span>
               </button>
               <button
                 type="button"

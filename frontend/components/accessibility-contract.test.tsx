@@ -601,7 +601,7 @@ describe('workspace accessibility contract', () => {
 
     [
       'New Project', 'Export', 'Toggle theme', 'Notifications', 'Help', 'Settings', 'User menu',
-      'Attach file', 'Chat settings', 'Send message', 'Preview document', 'Remove source', 'Copy content', 'Download document', 'Toggle fullscreen', 'Close document preview dialog',
+      'Attach file', 'Chat settings', 'Send message', 'Preview document', 'Move source to Trash', 'Copy content', 'Download document', 'Toggle fullscreen', 'Close document preview dialog',
       // Each name must exist; uniqueness is not required, since the top
       // navigation and the Sources panel both legitimately offer New Project.
     ].forEach((name) => expect(screen.getAllByRole('button', { name }).length).toBeGreaterThan(0));

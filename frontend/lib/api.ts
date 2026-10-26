@@ -166,6 +166,22 @@ export interface WatchedFolderSettings {
   path: string | null;
 }
 
+export type TrashItemType = 'project' | 'source' | 'note';
+
+export interface TrashItem {
+  id: string;
+  type: TrashItemType;
+  title: string;
+  deleted_at: string;
+  project_id?: string;
+  project_name?: string;
+}
+
+export interface TrashResponse {
+  items: TrashItem[];
+  retention_days: number;
+}
+
 export interface SourceGuide {
   summary: string;
   topics: string[];
@@ -1150,6 +1166,22 @@ const api = {
     await requestJson(`/projects/${projectId}`, { method: 'DELETE' });
   },
 
+  getTrash(): Promise<TrashResponse> {
+    return requestJson<TrashResponse>('/trash');
+  },
+
+  async restoreTrashItem(itemType: TrashItemType, itemId: string): Promise<void> {
+    await requestJson(`/trash/${itemType}/${encodeURIComponent(itemId)}/restore`, {
+      method: 'POST',
+    });
+  },
+
+  async deleteTrashItem(itemType: TrashItemType, itemId: string): Promise<void> {
+    await requestJson(`/trash/${itemType}/${encodeURIComponent(itemId)}`, {
+      method: 'DELETE',
+    });
+  },
+
   getChatSettings(projectId: string): Promise<ChatSettings> {
     return requestJson<ChatSettings>(`/projects/${projectId}/chat-settings`);
   },
@@ -1298,6 +1330,10 @@ const api = {
       `/projects/${projectId}/documents/${documentId}`,
       { method: 'DELETE' },
     );
+  },
+
+  async trashSource(documentId: string): Promise<void> {
+    await requestJson(`/docs/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
   },
 
   async getConversations(projectId: string): Promise<Conversation[]> {

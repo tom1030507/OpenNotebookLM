@@ -34,6 +34,7 @@ from app.services.rate_limit import (
 )
 from app.utils.network import UnsafeURLError, validate_http_url_syntax
 from app.services.projects import ProjectService
+from app.services.trash import TrashService
 from app.services.batch_ingestion import process_url_batch
 from app.services.web_discovery import WebSearchService
 
@@ -767,13 +768,18 @@ async def delete_document(
     doc_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    document_service: Any = Depends(get_document_service),
 ):
-    """Delete one of the caller's documents."""
-    require_document(db, doc_id, current_user, owner_only=True)
-    success = document_service.delete_document(db, doc_id)
+    """Move one of the caller's documents to Trash.
+
+    Args:
+        doc_id: Source to trash.
+        db: Database session.
+        current_user: Authenticated document owner.
+
+    Returns:
+        A confirmation.
+    """
+    document = require_document(db, doc_id, current_user, owner_only=True)
+    TrashService.trash_source(db, document)
     
-    if not success:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    return {"status": "success", "message": "Document deleted successfully"}
+    return {"status": "success", "message": "Document moved to trash"}

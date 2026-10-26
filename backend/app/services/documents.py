@@ -1738,7 +1738,8 @@ class DocumentService:
         """
         return db.query(Document).filter(Document.id == doc_id).first()
     
-    def delete_document(self, db: Session, doc_id: str) -> bool:
+    @staticmethod
+    def delete_document(db: Session, doc_id: str) -> bool:
         """Delete a document.
         
         Args:

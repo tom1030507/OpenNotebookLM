@@ -29,6 +29,7 @@ from app.db.models import (
     Base,
     Conversation,
     Document,
+    Note,
     Message,
     Project,
     ProjectDocument,
@@ -2303,3 +2304,81 @@ class TestNoteExportIsolation:
         assert note_export.status_code == 200, note_export.text
         assert "Visible to members" in project_export.text
         assert "Visible to members" in note_export.text
+
+
+def test_trash_starts_empty_for_an_authenticated_owner(env):
+    response = env.alice.get("/api/trash")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": [], "retention_days": 30}
+
+
+def test_trash_restore_is_owner_only_and_deleted_rows_are_hidden(env):
+    project_id = make_project(env.alice)
+    document_id = make_document(env.session, env.alice_user, title="Trashed source")
+    env.session.add(ProjectDocument(project_id=project_id, document_id=document_id))
+    env.session.commit()
+    note_response = env.alice.post(
+        "/api/projects/%s/notes" % project_id,
+        json={"title": "Trashed note", "content": "Keep this"},
+    )
+    assert note_response.status_code == 200, note_response.text
+    note_id = note_response.json()["id"]
+
+    assert env.alice.delete("/api/docs/%s" % document_id).status_code == 200
+    assert env.alice.delete(
+        "/api/projects/%s/notes/%s" % (project_id, note_id)
+    ).status_code == 200
+
+    assert env.alice.get("/api/projects/%s/documents" % project_id).json() == []
+    assert env.alice.get("/api/projects/%s/notes" % project_id).json() == []
+    query = env.alice.post("/api/query", json={
+        "project_id": project_id,
+        "document_ids": [document_id],
+        "query": "Find the source",
+    })
+    assert query.status_code == 404
+    assert env.bob.get("/api/trash").json() == {"items": [], "retention_days": 30}
+    assert env.bob.post(
+        "/api/trash/source/%s/restore" % document_id
+    ).status_code == 404
+    assert env.bob.delete("/api/trash/note/%s" % note_id).status_code == 404
+
+    trash = env.alice.get("/api/trash")
+    assert trash.status_code == 200, trash.text
+    assert {(item["type"], item["id"]) for item in trash.json()["items"]} == {
+        ("source", document_id),
+        ("note", note_id),
+    }
+
+    assert env.alice.post(
+        "/api/trash/source/%s/restore" % document_id
+    ).status_code == 200
+    assert env.alice.post(
+        "/api/trash/note/%s/restore" % note_id
+    ).status_code == 200
+    assert env.alice.get("/api/projects/%s/documents" % project_id).json()[0]["id"] == document_id
+    assert env.alice.get("/api/projects/%s/notes" % project_id).json()[0]["id"] == note_id
+
+
+def test_trashed_project_is_hidden_and_restores_its_notes(env):
+    project_id = make_project(env.alice)
+    note_response = env.alice.post(
+        "/api/projects/%s/notes" % project_id,
+        json={"title": "Project note", "content": "Still here"},
+    )
+    note_id = note_response.json()["id"]
+
+    deleted = env.alice.delete("/api/projects/%s" % project_id)
+
+    assert deleted.status_code == 200, deleted.text
+    assert env.alice.get("/api/projects/%s" % project_id).status_code == 404
+    items = env.alice.get("/api/trash").json()["items"]
+    assert [(item["type"], item["id"]) for item in items] == [("project", project_id)]
+    assert env.bob.post(
+        "/api/trash/project/%s/restore" % project_id
+    ).status_code == 404
+    assert env.alice.post(
+        "/api/trash/project/%s/restore" % project_id
+    ).status_code == 200
+    assert env.alice.get("/api/projects/%s/notes" % project_id).json()[0]["id"] == note_id

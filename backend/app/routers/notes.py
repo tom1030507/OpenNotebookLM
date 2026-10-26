@@ -27,6 +27,7 @@ from app.services.rate_limit import (
 )
 from app.services.note_export import content_disposition, export_notes
 from app.services import notes as note_service
+from app.services.trash import TrashService
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -252,8 +253,8 @@ def delete_note(
         A confirmation.
     """
     project = require_project(db, project_id, current_user, min_role="editor")
-    note_service.delete_note(db, note_service.get_note(db, project, note_id))
-    return {"status": "success", "message": "Note deleted"}
+    TrashService.trash_note(db, note_service.get_note(db, project, note_id))
+    return {"status": "success", "message": "Note moved to trash"}
 
 
 @router.post(

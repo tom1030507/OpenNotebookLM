@@ -321,3 +321,18 @@ def test_audio_overview_synthesis_defaults_on_and_can_be_disabled(monkeypatch):
     assert Settings(_env_file=None).audio_overview_tts_enabled is True
     monkeypatch.setenv("AUDIO_OVERVIEW_TTS_ENABLED", "false")
     assert Settings(_env_file=None).audio_overview_tts_enabled is False
+
+
+def test_trash_retention_defaults_to_thirty_days_and_must_be_positive():
+    assert Settings(_env_file=None).trash_retention_days == 30
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, trash_retention_days=0)
+
+    example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "TRASH_RETENTION_DAYS=30" in example
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    assert compose["services"]["backend"]["environment"]["TRASH_RETENTION_DAYS"] == (
+        "${TRASH_RETENTION_DAYS:-30}"
+    )

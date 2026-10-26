@@ -73,6 +73,7 @@ def visible_projects(db: Session, user: User) -> Query:
         ProjectMember,
         ProjectMember.project_id == Project.id,
     ).filter(
+        Project.deleted_at.is_(None),
         or_(Project.user_id == user.id, ProjectMember.user_id == user.id)
     ).distinct()
 
@@ -92,6 +93,7 @@ def visible_documents(db: Session, user: User) -> Query:
         Project.id.in_(accessible_project_ids)
     ).with_entities(Document.id)
     return db.query(Document).filter(
+        Document.deleted_at.is_(None),
         or_(
             Document.user_id == user.id,
             Document.id.in_(shared_document_ids),
@@ -175,7 +177,10 @@ def require_document(
     Raises:
         HTTPException: 404 if the document is missing or inaccessible.
     """
-    document = db.query(Document).filter(Document.id == document_id).first()
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.deleted_at.is_(None),
+    ).first()
     if document is None:
         raise _not_found("document")
 
@@ -226,13 +231,17 @@ def require_conversation(db: Session, conversation_id: str, user: User) -> Conve
     if not conversation:
         raise _not_found("conversation")
 
+    project = db.query(Project).filter(
+        Project.id == conversation.project_id,
+        Project.deleted_at.is_(None),
+    ).first()
+    if project is None:
+        raise _not_found("conversation")
+
     if conversation.user_id == user.id:
         return conversation
-
-    project = db.query(Project).filter(Project.id == conversation.project_id).first()
     if (
         conversation.user_id is not None
-        or project is None
         or project.user_id != user.id
     ):
         raise _not_found("conversation")
@@ -257,7 +266,7 @@ def owned_document_ids(
     Returns:
         Document ids.
     """
-    query = db.query(Document.id)
+    query = db.query(Document.id).filter(Document.deleted_at.is_(None))
     if project_id is None:
         query = query.filter(Document.user_id == user.id)
     else:
@@ -293,7 +302,10 @@ def require_documents(
         HTTPException: 404 if any id does not exist or belongs to someone else.
     """
     wanted = list(dict.fromkeys(document_ids))
-    query = db.query(Document.id).filter(Document.id.in_(wanted))
+    query = db.query(Document.id).filter(
+        Document.id.in_(wanted),
+        Document.deleted_at.is_(None),
+    )
     if project_id is None:
         query = query.filter(Document.user_id == user.id)
     else:

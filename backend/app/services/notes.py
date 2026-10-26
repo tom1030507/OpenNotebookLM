@@ -110,9 +110,10 @@ def list_notes(db: Session, project: Project) -> List[Note]:
     Returns:
         The notes.
     """
-    notes = db.query(Note).filter(Note.project_id == project.id).order_by(
-        Note.created_at.desc(), Note.id.desc()
-    ).all()
+    notes = db.query(Note).filter(
+        Note.project_id == project.id,
+        Note.deleted_at.is_(None),
+    ).order_by(Note.created_at.desc(), Note.id.desc()).all()
     _attach_source_documents(db, notes)
     return notes
 
@@ -122,7 +123,8 @@ def _attach_source_documents(db: Session, notes: List[Note]) -> None:
     if not notes:
         return
     sources = db.query(Document.note_id, Document.id).filter(
-        Document.note_id.in_([note.id for note in notes])
+        Document.note_id.in_([note.id for note in notes]),
+        Document.deleted_at.is_(None),
     ).all()
     by_note = {note_id: document_id for note_id, document_id in sources}
     for note in notes:
@@ -139,7 +141,10 @@ def get_note_source(db: Session, note: Note) -> Document | None:
     Returns:
         The linked document or ``None`` after it has been deleted.
     """
-    return db.query(Document).filter(Document.note_id == note.id).first()
+    return db.query(Document).filter(
+        Document.note_id == note.id,
+        Document.deleted_at.is_(None),
+    ).first()
 
 
 def note_source_text(note: Note) -> str:
@@ -174,7 +179,9 @@ def get_note(db: Session, project: Project, note_id: str) -> Note:
             note id cannot be probed through a project the caller does own.
     """
     note = db.query(Note).filter(
-        Note.id == note_id, Note.project_id == project.id
+        Note.id == note_id,
+        Note.project_id == project.id,
+        Note.deleted_at.is_(None),
     ).first()
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
@@ -255,6 +262,10 @@ def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
             Note.source_message_id == data.source_message_id,
         ).first()
         if existing:
+            if existing.deleted_at is not None:
+                existing.deleted_at = None
+                db.commit()
+                db.refresh(existing)
             return existing
         content, origin = format_answer(message), ORIGIN_ANSWER
     elif data.studio_kind:
@@ -292,6 +303,10 @@ def create_note(db: Session, project: Project, data: NoteCreate) -> Note:
                 Note.source_message_id == data.source_message_id,
             ).first()
             if existing:
+                if existing.deleted_at is not None:
+                    existing.deleted_at = None
+                    db.commit()
+                    db.refresh(existing)
                 return existing
         raise
     db.refresh(note)
@@ -346,7 +361,7 @@ def delete_note(db: Session, note: Note) -> None:
     Returns:
         None.
     """
-    source = get_note_source(db, note)
+    source = db.query(Document).filter(Document.note_id == note.id).first()
     if source is not None:
         source.note_id = None
     db.delete(note)

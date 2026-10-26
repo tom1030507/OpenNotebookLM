@@ -118,6 +118,7 @@ ADDED_COLUMNS = (
     ("documents", "last_sync_changed", "BOOLEAN", None),
     ("documents", "watch_source_path", "TEXT", None),
     ("documents", "watch_file_hash", "VARCHAR(64)", None),
+    ("documents", "deleted_at", "DATETIME", None),
     (
         "retrieval_index_entries",
         "indexed_lexical_text",
@@ -137,10 +138,12 @@ ADDED_COLUMNS = (
     ("projects", "overview_json", "JSON", None),
     ("projects", "auto_title", "BOOLEAN", None),
     ("projects", "watched_folder", "TEXT", None),
+    ("projects", "deleted_at", "DATETIME", None),
     ("projects", "cover_emoji", "VARCHAR", None),
     ("projects", "cover_color", "VARCHAR", None),
     ("notes", "studio_kind", "VARCHAR", None),
     ("notes", "payload_json", "JSON", None),
+    ("notes", "deleted_at", "DATETIME", None),
 )
 
 

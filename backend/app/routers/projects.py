@@ -16,6 +16,7 @@ from app.schemas import (
 )
 from app.db.models import User
 from app.services.projects import ProjectService
+from app.services.trash import TrashService
 from app.routers.auth import get_current_user
 from app.routers.ownership import project_role, require_document, require_project
 from app.services.project_analytics import get_project_analytics
@@ -594,11 +595,20 @@ async def delete_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete one of the caller's projects."""
-    require_project(db, project_id, current_user)
-    ProjectService.delete_project(db, project_id)
+    """Move one of the caller's projects to Trash.
+
+    Args:
+        project_id: Project to trash.
+        db: Database session.
+        current_user: Authenticated project owner.
+
+    Returns:
+        A confirmation.
+    """
+    project = require_project(db, project_id, current_user)
+    TrashService.trash_project(db, project)
     
-    return {"status": "success", "message": "Project deleted successfully"}
+    return {"status": "success", "message": "Project moved to trash"}
 
 
 @router.get("/projects/{project_id}/chat-settings", response_model=ChatSettings)

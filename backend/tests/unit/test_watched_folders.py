@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import Settings
-from app.db.models import Base, Document, IngestionJob, Project
+from app.db.models import Base, Document, IngestionJob, Project, ProjectDocument
 from app.services import watched_folders
 from app.services.watched_folders import resolve_watched_folder, scan_watched_folders
 from app.utils.time import utc_now
@@ -63,6 +63,55 @@ def test_failed_copy_keeps_existing_private_source(tmp_path):
         watched_folders._copy_source(tmp_path / "missing.txt", target, 1024)
 
     assert target.read_text(encoding="utf-8") == "previous source"
+
+
+def test_watch_scan_does_not_recreate_a_trashed_source(tmp_path, monkeypatch):
+    root = tmp_path / "allowed"
+    folder = root / "project"
+    folder.mkdir(parents=True)
+    source = folder / "notes.txt"
+    source.write_text("trashed source", encoding="utf-8")
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with session_factory() as db:
+        project = Project(
+            id="project-1",
+            name="Watched",
+            watched_folder=str(folder),
+        )
+        document = Document(
+            id="trashed-document",
+            title="notes.txt",
+            source_type="txt",
+            source_url="uploads/trashed.txt",
+            status="ready",
+            watch_source_path=str(source.resolve()),
+            deleted_at=utc_now(),
+        )
+        db.add_all([project, document])
+        db.flush()
+        db.add(ProjectDocument(project_id=project.id, document_id=document.id))
+        db.commit()
+
+    monkeypatch.setattr(watched_folders, "UPLOAD_DIR", tmp_path / "uploads")
+    settings = Settings(
+        watched_folder_root=str(root),
+        allowed_file_types="txt",
+        max_file_size_mb=1,
+    )
+
+    assert scan_watched_folders(session_factory, settings) == 0
+
+    with session_factory() as db:
+        assert db.query(Document).count() == 1
+        assert db.query(IngestionJob).count() == 0
+    engine.dispose()
 
 
 def test_watch_imports_edits_and_marks_removed_files(tmp_path, monkeypatch):
