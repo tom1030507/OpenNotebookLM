@@ -96,10 +96,10 @@ beforeEach(() => {
 });
 
 describe('project covers and duplication', () => {
-  it('renames a project and edits its cover through the shared project dialog', async () => {
+  it.each(['🧠', '🤖'])('renames a project and edits its %s cover through the shared project dialog', async (coverEmoji) => {
     const user = userEvent.setup();
     const original = { ...createdProject, cover_emoji: '📚', cover_color: 'blue' } as Project;
-    const updated = { ...original, name: 'Cell biology', cover_emoji: '🧠', cover_color: 'violet' };
+    const updated = { ...original, name: 'Cell biology', cover_emoji: coverEmoji, cover_color: 'violet' };
     apiMock.getProjects.mockResolvedValue([original]);
     apiMock.updateProject.mockResolvedValue(updated);
     useStore.setState({ projects: [original], currentProject: original });
@@ -109,13 +109,13 @@ describe('project covers and duplication', () => {
     expect(screen.getByRole('dialog', { name: 'Edit Project' })).not.toBeNull();
     await user.clear(screen.getByLabelText('Project Name'));
     await user.type(screen.getByLabelText('Project Name'), 'Cell biology');
-    await user.selectOptions(screen.getByLabelText('Cover emoji'), '🧠');
+    await user.selectOptions(screen.getByLabelText('Cover emoji'), coverEmoji);
     await user.selectOptions(screen.getByLabelText('Cover color'), 'violet');
     await user.click(screen.getByRole('button', { name: 'Save Project' }));
 
     await waitFor(() => expect(apiMock.updateProject).toHaveBeenCalledWith(original.id, {
       name: 'Cell biology',
-      cover_emoji: '🧠',
+      cover_emoji: coverEmoji,
       cover_color: 'violet',
       description: original.description,
     }));

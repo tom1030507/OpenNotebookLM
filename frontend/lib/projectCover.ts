@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-export const PROJECT_COVER_EMOJIS = ['📚', '🧠', '🔬', '🌿', '🚀', '🎨', '💡', '🌊'] as const;
+export const PROJECT_COVER_EMOJIS = ['📚', '🧠', '🔬', '🌿', '🚀', '🎨', '💡', '🌊', '🤖'] as const;
 
 export const PROJECT_COVER_COLORS = [
   { id: 'blue', label: 'Blue', lightBackground: '#dbeafe', lightForeground: '#1e3a8a', darkBackground: '#1e3a8a', darkForeground: '#dbeafe' },
