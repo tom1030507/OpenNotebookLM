@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import api, { type FlashcardsResponse, type QuizResponse } from '@/lib/api';
+import * as studyExports from '@/lib/studyExports';
 import StudyToolsDialog from './StudyToolsDialog';
 
 const source = {
@@ -135,6 +136,35 @@ describe('StudyToolsDialog', () => {
 
     expect(screen.getByText(question.explanation)).toBeTruthy();
     expect(screen.getByText('Final score: 1 / 1')).toBeTruthy();
+  });
+
+  it('exports loaded flashcards as CSV and Anki text without another request', async () => {
+    const request = vi.spyOn(api, 'fetchProjectFlashcards').mockResolvedValue(flashcards());
+    const download = vi.spyOn(studyExports, 'downloadStudyFile').mockImplementation(() => {});
+    render(<StudyToolsDialog projectId="project-1" mode="flashcards" documentIds={['doc-1']} onClose={() => {}} />);
+
+    await generate();
+    await screen.findByText(card.front);
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export for Anki' }));
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(download).toHaveBeenNthCalledWith(1, 'flashcards.csv', expect.stringContaining(card.front), 'text/csv');
+    expect(download).toHaveBeenNthCalledWith(2, 'flashcards-anki.txt', expect.stringContaining(card.back), 'text/plain');
+  });
+
+  it('exports loaded quiz questions as CSV and Markdown', async () => {
+    vi.spyOn(api, 'fetchProjectQuiz').mockResolvedValue(quiz());
+    const download = vi.spyOn(studyExports, 'downloadStudyFile').mockImplementation(() => {});
+    render(<StudyToolsDialog projectId="project-1" mode="quiz" documentIds={['doc-1']} onClose={() => {}} />);
+
+    await generate('quiz');
+    await screen.findByText(question.question);
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export Markdown' }));
+
+    expect(download).toHaveBeenNthCalledWith(1, 'quiz.csv', expect.stringContaining(question.question), 'text/csv');
+    expect(download).toHaveBeenNthCalledWith(2, 'quiz.md', expect.stringContaining('## Answer key'), 'text/markdown');
   });
 
   it('shows source excerpt, empty, and retryable error states', async () => {
