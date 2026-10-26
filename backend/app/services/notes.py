@@ -88,6 +88,8 @@ def _studio_note_content_and_payload(
         raise HTTPException(status_code=422, detail="Studio payload belongs to another project")
     try:
         payload = parsed.model_dump(mode="json")
+        if data.studio_kind == "mindmap" and parsed.layout_positions is None:
+            payload.pop("layout_positions", None)
         stored_size = len(json.dumps(
             payload, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8"))
@@ -307,7 +309,26 @@ def update_note(db: Session, note: Note, data: NoteUpdate) -> Note:
     Returns:
         The updated note.
     """
-    for field, value in data.model_dump(exclude_unset=True, exclude_none=True).items():
+    changes = data.model_dump(exclude_unset=True, exclude_none=True)
+    positions = changes.pop("layout_positions", None)
+    if positions is not None:
+        if note.studio_kind != "mindmap" or not isinstance(note.payload_json, dict):
+            raise HTTPException(status_code=422, detail="Layout positions require a mind map note")
+        try:
+            payload = MindMapResponse.model_validate({
+                **note.payload_json,
+                "layout_positions": positions,
+            }).model_dump(mode="json")
+            stored_size = len(json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8"))
+        except (ValidationError, TypeError, ValueError, RecursionError):
+            raise HTTPException(status_code=422, detail="Invalid mind map layout positions")
+        if stored_size > NOTE_PAYLOAD_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Studio payload is too large")
+        note.payload_json = payload
+
+    for field, value in changes.items():
         setattr(note, field, value)
     db.commit()
     db.refresh(note)

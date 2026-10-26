@@ -353,6 +353,74 @@ def test_studio_json_notes_keep_the_payload_needed_to_reopen(client, kind, paylo
     assert api.get("/api/projects/%s/notes" % project_id).json()[0] == note
 
 
+def test_mind_map_layout_positions_are_saved_with_the_note(client):
+    api, _ = client
+    project_id = create_project(api)
+    note = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Saved map", "studio_kind": "mindmap",
+        "payload_json": {**MIND_MAP, "project_id": project_id},
+    }).json()
+    positions = {"root": {"x": 300, "y": 180}}
+
+    response = api.put(
+        "/api/projects/%s/notes/%s" % (project_id, note["id"]),
+        json={"layout_positions": positions},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["payload_json"]["layout_positions"] == positions
+    assert api.get("/api/projects/%s/notes" % project_id).json()[0][
+        "payload_json"]["layout_positions"] == positions
+
+
+def test_mind_map_layout_positions_must_reference_existing_nodes(client):
+    api, _ = client
+    project_id = create_project(api)
+    note = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Saved map", "studio_kind": "mindmap",
+        "payload_json": {**MIND_MAP, "project_id": project_id},
+    }).json()
+
+    response = api.put(
+        "/api/projects/%s/notes/%s" % (project_id, note["id"]),
+        json={"layout_positions": {"missing": {"x": 10, "y": 10}}},
+    )
+
+    assert response.status_code == 422
+
+
+def test_mind_map_layout_positions_are_bounded(client):
+    api, _ = client
+    project_id = create_project(api)
+    note = api.post("/api/projects/%s/notes" % project_id, json={
+        "title": "Saved map", "studio_kind": "mindmap",
+        "payload_json": {**MIND_MAP, "project_id": project_id},
+    }).json()
+
+    response = api.put(
+        "/api/projects/%s/notes/%s" % (project_id, note["id"]),
+        json={"layout_positions": {"root": {"x": 10001, "y": 10}}},
+    )
+
+    assert response.status_code == 422
+
+
+def test_mind_map_layout_positions_cannot_be_added_to_a_manual_note(client):
+    api, _ = client
+    project_id = create_project(api)
+    note = api.post(
+        "/api/projects/%s/notes" % project_id,
+        json={"title": "Manual note", "content": "Text"},
+    ).json()
+
+    response = api.put(
+        "/api/projects/%s/notes/%s" % (project_id, note["id"]),
+        json={"layout_positions": {"root": {"x": 10, "y": 10}}},
+    )
+
+    assert response.status_code == 422
+
+
 def test_studio_report_saves_its_markdown_content(client):
     api, _ = client
     project_id = create_project(api)

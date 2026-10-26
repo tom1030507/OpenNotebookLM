@@ -1,4 +1,4 @@
-import type { MindMap, MindMapNode } from '@/lib/api';
+import type { MindMap, MindMapNode, MindMapPosition } from '@/lib/api';
 
 /** Width of a node box. */
 export const NODE_WIDTH = 208;
@@ -15,8 +15,13 @@ export const ROW_HEIGHT = 68;
 export const MIN_ZOOM = 0.4;
 /** Largest zoom the map is drawn at. */
 export const MAX_ZOOM = 2;
+export const MAX_NODE_POSITION = 10_000;
 /** How much one press of zoom in or out changes the scale. */
 export const ZOOM_STEP = 0.1;
+export const MIND_MAP_BRANCH_COLORS = [
+  '#536ec9', '#288778', '#b16d32', '#ae5271', '#8f63b8', '#318ba2',
+];
+export const MIND_MAP_ROOT_COLOR = '#4057a4';
 
 /**
  * Fit a drawing into the available width and optional height.
@@ -82,6 +87,8 @@ export interface MindMapGeometry {
 interface LayoutOptions {
   /** Ids whose children are hidden. */
   collapsed?: ReadonlySet<string>;
+  /** Saved coordinates override the computed positions for matching ids. */
+  positions?: Readonly<Record<string, MindMapPosition>>;
 }
 
 /**
@@ -117,6 +124,7 @@ export function layoutMindMap(
     const y = childCentres.length
       ? (childCentres[0] + childCentres[childCentres.length - 1]) / 2
       : (nextRow++) * ROW_HEIGHT;
+    const savedPosition = options.positions?.[node.id];
 
     const positioned: PositionedNode = {
       id: node.id,
@@ -126,8 +134,8 @@ export function layoutMindMap(
       documentId: node.document_id,
       depth,
       branchIndex,
-      x: depth * COLUMN_WIDTH,
-      y,
+      x: savedPosition?.x ?? depth * COLUMN_WIDTH,
+      y: savedPosition?.y ?? y,
       hasChildren: node.children.length > 0,
       isCollapsed: collapsed.has(node.id) && node.children.length > 0,
       childCount: node.children.length,
@@ -139,9 +147,9 @@ export function layoutMindMap(
         fromId: node.id,
         toId: child.id,
         fromX: positioned.x + NODE_WIDTH,
-        fromY: y + NODE_HEIGHT / 2,
-        toX: (depth + 1) * COLUMN_WIDTH,
-        toY: childCentres[index] + NODE_HEIGHT / 2,
+        fromY: positioned.y + NODE_HEIGHT / 2,
+        toX: options.positions?.[child.id]?.x ?? (depth + 1) * COLUMN_WIDTH,
+        toY: (options.positions?.[child.id]?.y ?? childCentres[index]) + NODE_HEIGHT / 2,
         branchIndex: depth === 0 ? index : branchIndex,
       });
     });
@@ -155,6 +163,103 @@ export function layoutMindMap(
   const height = Math.max(...nodes.map((node) => node.y)) + NODE_HEIGHT;
 
   return { nodes, edges, width, height };
+}
+
+export interface MindMapSvgTheme {
+  card: string;
+  foreground: string;
+  border: string;
+}
+
+const DEFAULT_SVG_THEME: MindMapSvgTheme = {
+  card: '#ffffff', foreground: '#0a0a0a', border: '#e4e4e0',
+};
+
+function escapeXml(text: string): string {
+  const replacements: Record<string, string> = {
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;',
+  };
+  return text.replace(/[&<>"']/g, (char) => replacements[char]);
+}
+
+function mixHex(color: string, background: string, weight: number): string {
+  const hex = /^#([\da-f]{6})$/i;
+  const foregroundMatch = color.match(hex);
+  const backgroundMatch = background.match(hex);
+  if (!foregroundMatch || !backgroundMatch) return color;
+  const foreground = foregroundMatch[1];
+  const backdrop = backgroundMatch[1];
+  const channels = [0, 2, 4].map((index) => Math.round(
+    parseInt(foreground.slice(index, index + 2), 16) * weight
+    + parseInt(backdrop.slice(index, index + 2), 16) * (1 - weight),
+  ));
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function labelLines(label: string): string[] {
+  const widthOf = (char: string) => /[^\u0000-\u00ff]/u.test(char)
+    ? 16
+    : /[il.,'!| ]/.test(char) ? 4 : /[MW@#]/.test(char) ? 13 : 8;
+  const maxWidth = NODE_WIDTH - 48;
+  const lines = [''];
+  const widths = [0];
+  for (const char of Array.from(label)) {
+    const width = widthOf(char);
+    const line = lines.length - 1;
+    if (widths[line] + width > maxWidth && lines[line]) {
+      lines.push(char);
+      widths.push(width);
+    } else {
+      lines[line] += char;
+      widths[line] += width;
+    }
+  }
+  if (lines.length > 2) {
+    lines.length = 2;
+    while (widths[1] > maxWidth - 16) {
+      const chars = Array.from(lines[1]);
+      widths[1] -= widthOf(chars.pop() ?? '');
+      lines[1] = chars.join('');
+    }
+    lines[1] += '…';
+  }
+  return lines;
+}
+
+/** Render the current geometry as a self-contained SVG download. */
+export function mindMapToSvg(
+  geometry: MindMapGeometry,
+  theme: MindMapSvgTheme = DEFAULT_SVG_THEME,
+): string {
+  const edgePadding = Math.ceil((COLUMN_WIDTH - NODE_WIDTH) / 2) + 2;
+  const width = geometry.width + edgePadding * 2;
+  const height = geometry.height + edgePadding * 2;
+  const edges = geometry.edges.map((edge) => {
+    const color = MIND_MAP_BRANCH_COLORS[
+      edge.branchIndex % MIND_MAP_BRANCH_COLORS.length
+    ] ?? MIND_MAP_BRANCH_COLORS[0];
+    const curve = (COLUMN_WIDTH - NODE_WIDTH) / 2;
+    return `<path d="M ${edge.fromX} ${edge.fromY} C ${edge.fromX + curve} ${edge.fromY}, ${edge.toX - curve} ${edge.toY}, ${edge.toX} ${edge.toY}" fill="none" stroke="${color}" stroke-width="2" stroke-opacity="0.6"/>`;
+  }).join('');
+  const nodes = geometry.nodes.map((node) => {
+    const color = MIND_MAP_BRANCH_COLORS[
+      node.branchIndex % MIND_MAP_BRANCH_COLORS.length
+    ] ?? MIND_MAP_BRANCH_COLORS[0];
+    const root = node.depth === 0;
+    const fill = root ? MIND_MAP_ROOT_COLOR : mixHex(color, theme.card, 0.1);
+    const stroke = root ? MIND_MAP_ROOT_COLOR : mixHex(color, theme.card, 0.45);
+    const textColor = root ? '#ffffff' : theme.foreground;
+    const centerX = node.x + NODE_WIDTH / 2;
+    const centerY = node.y + NODE_HEIGHT / 2;
+    const lines = labelLines(node.label);
+    const firstDy = -((lines.length - 1) * 9);
+    const text = lines.map((line, index) => (
+      `<tspan x="${centerX}" dy="${index === 0 ? firstDy : 18}">${escapeXml(line)}</tspan>`
+    )).join('');
+    return `<g><rect x="${node.x}" y="${node.y}" width="${NODE_WIDTH}" height="${NODE_HEIGHT}" rx="26" fill="${fill}" stroke="${stroke}"/><text x="${centerX}" y="${centerY}" fill="${textColor}" font-family="system-ui, sans-serif" font-size="16" font-weight="500" text-anchor="middle" dominant-baseline="middle">${text}</text></g>`;
+  }).join('');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="-${edgePadding} -${edgePadding} ${width} ${height}"><defs><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="${escapeXml(theme.border)}"/></pattern></defs><rect width="100%" height="100%" fill="${escapeXml(theme.card)}"/><rect width="100%" height="100%" fill="url(#grid)"/>${edges}${nodes}</svg>`;
 }
 
 /** Collect expandable branches at or below a depth, keeping the root visible. */

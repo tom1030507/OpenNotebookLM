@@ -458,6 +458,10 @@ export default function NotesSection({ projectId }: { projectId: string | null }
           <MindMapDialog
             map={viewerNote.payload_json as MindMap}
             onClose={() => setOpenId(null)}
+            onLayoutChange={canEdit ? async (layout_positions) => {
+              const updated = await api.updateNote(projectId, viewerNote.id, { layout_positions });
+              useNotes.getState().upsert(updated);
+            } : undefined}
           />
         </React.Suspense>
       )}

@@ -216,7 +216,7 @@ def update_note(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Edit a note's title or content.
+    """Edit a note's title, content, or saved mind map layout.
 
     Args:
         project_id: Project to resolve through the caller's ownership.
