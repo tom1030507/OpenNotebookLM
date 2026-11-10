@@ -713,7 +713,7 @@ export default function SourcesPanel({
       data-panel-state={isCollapsed ? 'collapsed' : 'expanded'}
       className="relative w-full min-w-0 overflow-hidden border-r border-[var(--border)] bg-[var(--sidebar-bg)] flex flex-col h-full"
     >
-      <button
+      {onCollapsedChange && <button
         type="button"
         onClick={() => onCollapsedChange?.(!isCollapsed)}
         aria-controls="sources-panel-content"
@@ -727,7 +727,7 @@ export default function SourcesPanel({
         ) : (
           <PanelLeftClose className="w-4 h-4" />
         )}
-      </button>
+      </button>}
 
       <div
         id="sources-panel-content"

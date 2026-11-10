@@ -257,7 +257,7 @@ describe('ResponsiveLayout component integration', () => {
     expect(drawer.style.width).toBe('');
     expect(drawer.style.getPropertyValue('--workspace-drawer-width')).toBe('min(20rem, 90vw)');
     expect(drawer.className).toContain('w-[var(--workspace-drawer-width)]');
-    expect(drawer.className).toContain('xl:w-auto');
+    expect(drawer.className).toContain('2xl:w-auto');
   });
 
   it('keeps the workspace usable when the environment has no matchMedia support', () => {

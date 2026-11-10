@@ -662,12 +662,12 @@ export default function StudioPanel({
                     aria-label={optionLabel(option)}
                     aria-describedby={hintId}
                     title={hint}
-                    className="flex h-11 min-w-0 flex-1 items-center gap-3 px-3 text-left hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] transition-base disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] transition-base disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   >
                     <span className="flex shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
                       {optionIcon(option)}
                     </span>
-                    <h3 className="truncate text-sm font-medium">{option.title}</h3>
+                    <h3 className="min-w-0 break-words text-sm font-medium">{option.title}</h3>
                     <span id={hintId} className="sr-only">{hint}</span>
                   </button>
                   {action && action !== 'table' && (

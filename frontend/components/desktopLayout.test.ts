@@ -119,11 +119,10 @@ afterEach(() => {
 });
 
 describe('desktop workspace layout', () => {
-  // From the `xl` breakpoint up, conversations live in the left column with
+  // From the `2xl` breakpoint up, conversations live in the left column with
   // Sources, so the grid has three tracks and the answer gets the rest.
   test.each([
-    [1280, 240, 820, 220],
-    [1440, 259.2, 950.4, 230.4],
+    [1536, 276.48, 1013.76, 245.76],
     [1920, 288, 1360, 272],
   ])(
     'keeps a dominant center between the sidebar and Studio at %ipx',
@@ -305,6 +304,25 @@ describe('desktop workspace layout', () => {
     expect(workspace?.style.gridTemplateColumns).toBe(expandedColumns);
     expect(screen.getByRole('textbox', { name: 'Search sources' })).toBe(search);
     expect(search.value).toBe('Second');
+  });
+
+  test('opens collapsed Sources fully in a drawer without losing its search or desktop state', () => {
+    render(createElement(Home));
+    const sources = screen.getByRole('complementary', { name: 'Sources' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search sources' }), {
+      target: { value: 'Second' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Sources' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Sources panel' }));
+    const drawer = screen.getByRole('dialog', { name: 'Sources panel' });
+
+    expect(sources.getAttribute('data-panel-state')).toBe('expanded');
+    expect((within(drawer).getByRole('textbox', { name: 'Search sources' }) as HTMLInputElement).value).toBe('Second');
+    expect(within(drawer).queryByRole('button', { name: 'Collapse Sources' })).toBeNull();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close Sources panel' }));
+    expect(sources.getAttribute('data-panel-state')).toBe('collapsed');
   });
 
   test('drives the Studio collapse callback and restores the same focused control', () => {
