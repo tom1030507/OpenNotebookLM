@@ -1,5 +1,7 @@
 -r requirements-minimal.txt
 python-pptx==1.0.2
+PyMuPDF==1.23.8
+python-docx==1.2.0
 bcrypt==5.0.0
 beautifulsoup4==4.12.2
 numpy==1.24.3
