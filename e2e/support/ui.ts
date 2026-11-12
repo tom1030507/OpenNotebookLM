@@ -94,6 +94,9 @@ export async function openAddSourceDialog(page: Page) {
   await sources.getByRole('button', { name: 'Add Source', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Add Source' });
   await expect(dialog).toBeVisible();
+  // Files chosen before the upload settings arrive are rejected with "Upload
+  // settings are unavailable", so the dialog is not usable until they load.
+  await expect(dialog.getByText(/^Supported file types: /)).toBeVisible();
   return dialog;
 }
 

@@ -43,7 +43,9 @@ test('answers from a ready source and persists messages and citation after reloa
     throw new Error('The successful query did not return a conversation id.');
   }
 
-  await expect(page.getByText(question, { exact: true })).toBeVisible();
+  // The question is also the conversation title, so the banner and the
+  // conversation list repeat it; only the chat message lives in main.
+  await expect(page.getByRole('main').getByText(question, { exact: true })).toBeVisible();
   // The UI renders Markdown and compact citation controls; persisted text
   // retains the provider's labels and is checked separately below.
   const renderedAnswer = page.getByRole('main').locator('.prose').last();
@@ -59,8 +61,9 @@ test('answers from a ready source and persists messages and citation after reloa
   const sourcesPanel = page.getByText('Sources:', { exact: true }).last().locator('..');
   await expect(sourcesPanel).toContainText('E2E Observatory Field Notes');
 
-  // The browser creates this shortened title before it issues /api/query/stream.
-  const conversationTitle = `${question.substring(0, 50)}...`;
+  // The browser titles a new conversation with the first 100 characters of
+  // its first question before it issues /api/query/stream.
+  const conversationTitle = question;
   const listReloaded = page.waitForResponse(
     (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
       && response.request().method() === 'GET',
@@ -79,7 +82,7 @@ test('answers from a ready source and persists messages and citation after reloa
   await conversationItem.click();
   expect((await detailReloaded).status()).toBe(200);
 
-  await expect(page.getByText(question, { exact: true })).toBeVisible();
+  await expect(page.getByRole('main').getByText(question, { exact: true })).toBeVisible();
   await expect(renderedAnswer).toContainText('ORBIT-7319');
   await expect(citation).toHaveText('[1]');
   await citation.hover();
@@ -101,23 +104,27 @@ test('answers from a ready source and persists messages and citation after reloa
   expect(assistantMessage.citations).toEqual(result.sources);
 });
 
-test('creates, renames, selects, and deletes conversations', async ({ api, page }, testInfo) => {
+test('renames, selects, and deletes conversations without creating blank ones', async ({ api, page }, testInfo) => {
   const { project } = await setupWorkspace(api, page, testInfo, 'conversation-crud');
-  const fullTextNewButton = page
-    .getByRole('button', { name: 'New Conversation' })
-    .filter({ hasText: 'New Conversation' })
-    .first();
-  const createdResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
-      && response.request().method() === 'POST',
+  const conversationsUrl = `${runtime.browserApiUrl}/projects/${project.id}/conversations`;
+  // New Conversation only clears the chat; the first question creates the
+  // conversation, which the cited-chat test above covers end to end.
+  const conversationCreations: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url() === conversationsUrl) {
+      conversationCreations.push(request.url());
+    }
+  });
+  const first = await api.createConversation(project.id, 'First E2E Conversation');
+  await api.createConversation(project.id, 'Second E2E Conversation');
+  const listLoaded = page.waitForResponse(
+    (response) => response.url() === conversationsUrl && response.request().method() === 'GET',
   );
-  await fullTextNewButton.click();
-  const created = await createdResponse;
-  expect(created.status()).toBe(200);
-  const first = await created.json() as { id: string };
+  await page.reload();
+  expect((await listLoaded).status()).toBe(200);
 
   const panel = page.getByRole('region', { name: 'Conversations panel content' });
-  const initialTitle = panel.getByText('New Conversation', { exact: true });
+  const initialTitle = panel.getByText('First E2E Conversation', { exact: true });
   await expect(initialTitle).toBeVisible();
   const initialActionContainer = initialTitle.locator('..').locator('..');
   await initialActionContainer.hover();
@@ -133,12 +140,7 @@ test('creates, renames, selects, and deletes conversations', async ({ api, page 
   expect((await renamedResponse).status()).toBe(200);
   await expect(panel.getByText('Renamed E2E Conversation', { exact: true })).toBeVisible();
 
-  const secondResponse = page.waitForResponse(
-    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
-      && response.request().method() === 'POST',
-  );
-  await fullTextNewButton.click();
-  expect((await secondResponse).status()).toBe(200);
+  await page.getByRole('button', { name: 'New Conversation', exact: true }).click();
 
   const selectedResponse = page.waitForResponse(
     (response) => response.url() === `${runtime.browserApiUrl}/conversations/${first.id}`
@@ -165,4 +167,5 @@ test('creates, renames, selects, and deletes conversations', async ({ api, page 
   await expect(panel.getByText('Renamed E2E Conversation', { exact: true })).toHaveCount(0);
   expect((await api.listConversations(project.id)).map((conversation) => conversation.id))
     .not.toContain(first.id);
+  expect(conversationCreations).toEqual([]);
 });

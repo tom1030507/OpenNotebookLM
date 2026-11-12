@@ -129,7 +129,9 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
     expect(embedding.vector_json).toHaveLength(768);
   }
 
-  await expect(page.getByText(question, { exact: true })).toBeVisible();
+  // The question is also the conversation title, so the banner and the
+  // conversation list repeat it; only the chat message lives in main.
+  await expect(page.getByRole('main').getByText(question, { exact: true })).toBeVisible();
   const renderedAnswer = page.getByRole('main').locator('.prose').last();
   await expect(renderedAnswer).toContainText(IDENTIFIER);
   const citation = renderedAnswer.getByRole('button', { name: 'Preview source 1', exact: true });
@@ -144,7 +146,9 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   await expect(sourcesPanel).toContainText(filename);
   await expect(sourcesPanel).toContainText('page 1');
 
-  const conversationTitle = `${question.substring(0, 50)}...`;
+  // The browser titles a new conversation with the first 100 characters of
+  // its first question before it issues /api/query/stream.
+  const conversationTitle = question;
   const listReloaded = page.waitForResponse(
     (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/conversations`
       && response.request().method() === 'GET',
@@ -163,7 +167,7 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   await conversationItem.click();
   expect((await detailReloaded).status()).toBe(200);
 
-  await expect(page.getByText(question, { exact: true })).toBeVisible();
+  await expect(page.getByRole('main').getByText(question, { exact: true })).toBeVisible();
   await expect(renderedAnswer).toContainText(IDENTIFIER);
   await expect(citation).toHaveText('[1]');
   await citation.hover();

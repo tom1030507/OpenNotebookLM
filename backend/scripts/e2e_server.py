@@ -188,6 +188,9 @@ def create_application() -> tuple[Any, Any]:
             "RATE_LIMIT_ENABLED": "false",
             "CORS_ORIGINS": frontend_url,
             "ENABLE_YT_TRANSCRIPTION": "true",
+            # Kokoro is not installed for E2E; advertising server TTS would
+            # send the browser to an audio overview that can never render.
+            "AUDIO_OVERVIEW_TTS_ENABLED": "false",
         }
     )
 
