@@ -38,16 +38,20 @@ test('uploads, indexes, previews, and removes a PDF source', async ({ api, page 
   await expect(preview.locator(`iframe[title="${filename}"]`)).toHaveAttribute('src', /^blob:/);
   await preview.getByRole('button', { name: 'Close document preview dialog' }).click();
 
+  // The uploader owns the source, so removing it moves it to Trash rather than
+  // only unlinking it from this project.
   page.once('dialog', async (confirmation) => {
-    expect(confirmation.message()).toBe('Are you sure you want to delete this document?');
+    expect(confirmation.message()).toBe(
+      `Move "${filename}" to Trash? It will be removed from all projects and can be restored until it expires.`,
+    );
     await confirmation.accept();
   });
   const removed = page.waitForResponse(
-    (response) => response.url().endsWith(`/api/projects/${project.id}/documents/${documentId}`)
+    (response) => response.url().endsWith(`/api/docs/${documentId}`)
       && response.request().method() === 'DELETE',
   );
   await row.hover();
-  await row.getByRole('button', { name: 'Remove source' }).click();
+  await row.getByRole('button', { name: 'Move source to Trash' }).click();
   expect((await removed).status()).toBe(200);
   await expect(sourceRow(page, filename)).toHaveCount(0);
   expect((await api.listProjectDocuments(project.id)).map((document) => document.id)).not.toContain(documentId);
@@ -94,11 +98,11 @@ test('imports, searches, and removes a controlled URL source', async ({ api, pag
   const visibleRow = sourceRow(page, title);
   page.once('dialog', (confirmation) => confirmation.accept());
   const removed = page.waitForResponse(
-    (response) => response.url().endsWith(`/api/projects/${project.id}/documents/${documentId}`)
+    (response) => response.url().endsWith(`/api/docs/${documentId}`)
       && response.request().method() === 'DELETE',
   );
   await visibleRow.hover();
-  await visibleRow.getByRole('button', { name: 'Remove source' }).click();
+  await visibleRow.getByRole('button', { name: 'Move source to Trash' }).click();
   expect((await removed).status()).toBe(200);
   await expect(sourceRow(page, title)).toHaveCount(0);
 });

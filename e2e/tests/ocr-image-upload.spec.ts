@@ -6,12 +6,11 @@ test('browser accepts and lists a PNG source', async ({ api, page }, testInfo) =
   const dialog = await openAddSourceDialog(page);
   const input = dialog.locator('input[type="file"]');
 
-  await expect(input).toHaveAttribute(
-    'accept',
-    '.pdf,.txt,.md,.docx,.pptx,.xlsx,.epub,.png,.jpg,.jpeg,.webp',
-  );
-  await expect(dialog.getByText(/PDF, TXT, Markdown, Word, PowerPoint, Excel, EPUB, or images/))
-    .toBeVisible();
+  // The accepted types come from the backend's upload settings and grow with
+  // every new source format, so this test pins only the image formats it owns.
+  await expect(dialog.getByText(/^Supported file types: .*\.png/)).toBeVisible();
+  const accepted = (await input.getAttribute('accept'))?.split(',') ?? [];
+  expect(accepted).toEqual(expect.arrayContaining(['.png', '.jpg', '.jpeg', '.webp']));
   await input.setInputFiles({
     name: 'whiteboard.png',
     mimeType: 'image/png',

@@ -18,7 +18,9 @@ test('creates, selects, and reloads a project from the backend', async ({ api, p
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
 
   const projectsLoaded = page.waitForResponse(
-    (response) => response.url().endsWith('/api/projects') && response.request().method() === 'GET',
+    // The project list is fetched page by page (?page=1&per_page=100).
+    (response) => new URL(response.url()).pathname.endsWith('/api/projects')
+      && response.request().method() === 'GET',
   );
   await page.reload();
   expect((await projectsLoaded).status()).toBe(200);
@@ -47,7 +49,9 @@ test('never exposes another account project or source', async ({ api, page }, te
   await page.reload();
 
   const projectsLoaded = page.waitForResponse(
-    (response) => response.url().endsWith('/api/projects') && response.request().method() === 'GET',
+    // The project list is fetched page by page (?page=1&per_page=100).
+    (response) => new URL(response.url()).pathname.endsWith('/api/projects')
+      && response.request().method() === 'GET',
   );
   await loginThroughUi(page, accountB);
   expect((await projectsLoaded).status()).toBe(200);

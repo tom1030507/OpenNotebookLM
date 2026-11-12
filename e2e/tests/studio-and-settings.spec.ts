@@ -103,7 +103,7 @@ test('explores a mind map and brings a question back to mobile chat', async ({ a
   await dialog.getByRole('button', { name: 'Enter full screen' }).click();
   await expect(dialog.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
   await page.keyboard.press('Tab');
-  await expect(dialog.getByRole('button', { name: 'Download mind map' })).toBeFocused();
+  await expect(dialog.getByRole('combobox', { name: 'Download mind map as' })).toBeFocused();
   const concept = dialog.getByRole('button', { name: /^Explore / }).last();
   const label = (await concept.getAttribute('aria-label'))!.slice('Explore '.length);
   await concept.click();
@@ -219,9 +219,7 @@ test('exports the current project as Markdown', async ({ api, page }, testInfo) 
   await dialog.getByRole('button', { name: 'Export', exact: true }).click();
   expect((await responsePromise).status()).toBe(200);
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe(
-    `${project.name.replace(/[^a-z0-9]/gi, '_')}.markdown`,
-  );
+  expect(download.suggestedFilename()).toBe(`${project.name}.md`);
   const savedPath = await download.path();
   expect(savedPath).not.toBeNull();
   const markdown = await readFile(savedPath as string, 'utf8');
@@ -268,7 +266,7 @@ test('exports the selected conversation as Markdown', async ({ api, page }, test
   await dialog.getByRole('button', { name: 'Export', exact: true }).click();
   expect((await responsePromise).status()).toBe(200);
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe('Exportable_Conversation.markdown');
+  expect(download.suggestedFilename()).toBe('Exportable Conversation.md');
   const savedPath = await download.path();
   expect(savedPath).not.toBeNull();
   const markdown = await readFile(savedPath as string, 'utf8');
@@ -322,9 +320,20 @@ test('shows the unsupported audio fallback without host speech hardware', async 
       summaryRequested = true;
     }
   });
-  await setupReadyUrlWorkspace(api, page, testInfo, 'audio-summary');
+  const { project } = await setupReadyUrlWorkspace(api, page, testInfo, 'audio-summary');
   const studio = page.getByRole('complementary', { name: 'Studio' });
-  await expect(studio.getByRole('button', { name: 'Audio summary', exact: true })).toBeDisabled();
+  const audioSummary = studio.getByRole('button', { name: 'Audio summary', exact: true });
+  // Availability is checked on the first click. The E2E server has no TTS
+  // engine and this browser has no speech synthesis, so nothing can play.
+  const capability = page.waitForResponse(
+    (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/audio-overviews`
+      && response.request().method() === 'GET',
+  );
+  await audioSummary.click();
+  const capabilityResponse = await capability;
+  expect(capabilityResponse.status()).toBe(200);
+  expect(await capabilityResponse.json()).toMatchObject({ enabled: false });
+  await expect(audioSummary).toBeDisabled();
   await expect(studio.getByText('Not supported in this browser', { exact: true })).toBeVisible();
   expect(summaryRequested).toBe(false);
 });
