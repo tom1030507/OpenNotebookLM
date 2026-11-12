@@ -116,6 +116,7 @@ afterEach(() => {
   cleanup();
   useStore.getState().resetForTests();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('desktop workspace layout', () => {
@@ -305,6 +306,28 @@ describe('desktop workspace layout', () => {
     expect(workspace?.style.gridTemplateColumns).toBe(expandedColumns);
     expect(screen.getByRole('textbox', { name: 'Search sources' })).toBe(search);
     expect(search.value).toBe('Second');
+  });
+
+  test('keeps one Sources panel mounted while the desktop sidebar changes shape', () => {
+    // Each mount fetches the project list; after sign-out clears the project,
+    // a remount sent that fetch without a session and logged a 401.
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    render(createElement(Home));
+    const search = screen.getByRole('textbox', { name: 'Search sources' });
+    const toggle = screen.getByRole('button', { name: 'Collapse Sources' });
+
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(screen.getByRole('textbox', { name: 'Search sources' })).toBe(search);
+
+    act(() => {
+      useStore.setState({ currentProject: null, currentConversation: null });
+    });
+    expect(useStore.getState().fetchProjects).toHaveBeenCalledTimes(1);
   });
 
   test('drives the Studio collapse callback and restores the same focused control', () => {

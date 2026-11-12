@@ -70,14 +70,17 @@ export default function Home() {
         <ResponsiveLayout
           desktopStyle={getDesktopWorkspaceStyle(layoutState, hasProject && !isDesktop)}
           sidebar={
-            showConversationsInSidebar ? (
-              <div className="flex h-full min-h-0 flex-col">
-                <div className="min-h-0 flex-1">{sourcesPanel}</div>
+            // One wrapper in every state: swapping it in and out moved Sources
+            // to a new tree position, which remounted it and refetched projects
+            // on every load, collapse, and sign-out (the last without a session).
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="min-h-0 flex-1">{sourcesPanel}</div>
+              {showConversationsInSidebar && (
                 <div className="flex min-h-0 max-h-[38%] flex-col border-r border-t border-[var(--border)]">
                   <ConversationList embedded />
                 </div>
-              </div>
-            ) : sourcesPanel
+              )}
+            </div>
           }
           conversationPanel={isDesktop ? undefined : <ConversationList />}
           rightPanel={(isDrawer) => (
