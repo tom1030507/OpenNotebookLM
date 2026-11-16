@@ -15,10 +15,9 @@ The design polish follows [unslop](https://github.com/heydamir/unslop) by
 
 ## Getting Started
 
-For a frontend-only preview, open `/login` and choose **Try offline demo**.
-It loads bundled sample sources, a conversation with citations, and a note,
-without starting FastAPI or Docker. You can also enter **demo / demo1234**;
-if the backend is unreachable, sign-in falls back to the offline demo after
+For a frontend-only preview, open `/login`, enter **demo / demo1234**, and use
+the regular **Login** button. If the backend is unreachable, sign-in opens
+bundled sample sources, a conversation with citations, and a note after
 at most a two-second authentication wait. Rejected credentials still show an
 error, and ordinary accounts always authenticate through the backend.
 

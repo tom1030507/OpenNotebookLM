@@ -51,14 +51,11 @@ afterEach(() => {
 
 
 describe('login page', () => {
-  it('opens the offline demo explicitly without authenticating against a backend', async () => {
+  it('shows demo credentials without a separate offline entry button', () => {
     vi.spyOn(api, 'getDemoAccount').mockResolvedValue(null);
-    const login = vi.spyOn(api, 'login');
     render(<LoginPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Try offline demo' }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
-    expect(isOfflineDemoSession()).toBe(true);
-    expect(login).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Try offline demo' })).toBeNull();
+    expect(screen.getByText(/demo \/ demo1234/)).toBeTruthy();
   });
 
   it.each([
