@@ -1045,6 +1045,7 @@ const useStore = create<AppState>()(
           
           // Create or use existing conversation
           let conversationId = startingConversationId ?? undefined;
+          let createdConversationId: string | null = null;
           if (!conversationId) {
             const conversation = await state.createConversation(
               projectId,
@@ -1052,6 +1053,7 @@ const useStore = create<AppState>()(
               false,
             );
             conversationId = conversation.id;
+            createdConversationId = conversation.id;
             if (!isCurrentAccount()) return;
 
             const activeState = get();
@@ -1110,6 +1112,17 @@ const useStore = create<AppState>()(
           } catch (error) {
             if (isCurrentAccount() && !(error instanceof Error && error.name === 'AbortError')) {
               console.error('Query failed:', error);
+            }
+            // The answer is only saved once it completes, so a conversation
+            // made for this question holds nothing now. Kept, every failed
+            // attempt left another empty entry with the same title (#231).
+            // A failed refresh is different: that answer was saved.
+            if (
+              createdConversationId
+              && isCurrentAccount()
+              && !(error instanceof QueryMessageRefreshError)
+            ) {
+              await get().deleteConversation(createdConversationId).catch(() => undefined);
             }
             throw error;
           }

@@ -648,6 +648,58 @@ describe('ChatArea', () => {
     expect(screen.getAllByText('It explains the source.')).toHaveLength(1);
   });
 
+  it('keeps a failed first question on screen without leaving an empty conversation (#231)', async () => {
+    const question = 'Who is the site manager?';
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const create = vi.spyOn(api, 'createConversation')
+      .mockResolvedValueOnce(conversation('conversation-failed', project.id))
+      .mockResolvedValueOnce(conversation('conversation-retried', project.id));
+    const remove = vi.spyOn(api, 'deleteConversation').mockResolvedValue(undefined);
+    vi.spyOn(api, 'streamQuery')
+      .mockRejectedValueOnce(new Error('The language model provider could not be reached.'))
+      .mockResolvedValueOnce({
+        answer: 'Lin Mei-hua.',
+        sources: [],
+        chunks_used: 0,
+        model_used: null,
+        usage: {},
+        conversation_id: 'conversation-retried',
+        message_id: 'message-1',
+      });
+    vi.spyOn(api, 'getMessages').mockResolvedValue([
+      {
+        id: 'message-user', conversation_id: 'conversation-retried', role: 'user',
+        content: question, citations: [], created_at: '2026-08-23T00:00:00Z',
+      },
+      {
+        id: 'message-assistant', conversation_id: 'conversation-retried', role: 'assistant',
+        content: 'Lin Mei-hua.', citations: [], created_at: '2026-08-23T00:00:01Z',
+      },
+    ]);
+    useStore.setState({
+      projects: [project],
+      currentProject: project,
+      documents: [readyDocument],
+      conversations: [],
+      currentConversation: null,
+      messages: [],
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('could not be reached');
+    expect(remove).toHaveBeenCalledWith('conversation-failed');
+    expect(useStore.getState().conversations).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry question' }));
+
+    await waitFor(() => expect(screen.getByText('Lin Mei-hua.')).toBeTruthy());
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().conversations.map(({ id }) => id)).toEqual(['conversation-retried']);
+  });
+
   it('does not retry a pending question after every source is deselected', async () => {
     const question = 'What does this source say?';
     const query = vi.spyOn(api, 'streamQuery').mockRejectedValue(new Error('Request failed'));

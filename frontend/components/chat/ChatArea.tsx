@@ -327,6 +327,7 @@ export default function ChatArea({
     const composerGeneration = composerGenerationRef.current;
     const requestId = nextRequestIdRef.current + 1;
     nextRequestIdRef.current = requestId;
+    const startedInNewChat = !currentConversation;
     setPendingQuery({
       requestId,
       content: query,
@@ -364,13 +365,20 @@ export default function ChatArea({
       if (error instanceof Error && error.name === 'AbortError') return;
       console.error('Failed to send query:', error);
       const message = error instanceof Error ? error.message : 'Unable to send the question.';
+      const { conversations } = useStore.getState();
       setPendingQuery((pending) => (
         pending?.requestId === requestId
           ? {
               ...pending,
+              // A conversation made for this question is discarded when it
+              // fails; the question then belongs to the new, unsaved chat.
               conversationId: error instanceof QueryMessageRefreshError
                 ? error.conversationId
-                : pending.conversationId,
+                : startedInNewChat && !conversations.some(
+                  (conversation) => conversation.id === pending.conversationId,
+                )
+                  ? null
+                  : pending.conversationId,
               error: message,
               retryMode: error instanceof QueryMessageRefreshError ? 'refresh' : 'query',
             }
