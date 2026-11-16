@@ -623,6 +623,51 @@ describe('application store', () => {
     expect(useStore.getState().messages).toEqual([authoritativeMessage]);
   });
 
+  describe('a question that fails (#231)', () => {
+    it('discards the conversation it created, so no empty entry is left', async () => {
+      useStore.setState({ currentProject: project('project-1') });
+      apiMock.createConversation.mockResolvedValue(conversation('conversation-new', 'project-1'));
+      apiMock.streamQuery.mockRejectedValue(new Error('provider failed'));
+      apiMock.deleteConversation.mockResolvedValue(undefined);
+
+      await expect(useStore.getState().sendQuery('Question', true)).rejects.toThrow('provider failed');
+
+      expect(apiMock.deleteConversation).toHaveBeenCalledWith('conversation-new');
+      expect(useStore.getState().conversations).toEqual([]);
+      expect(useStore.getState().currentConversation).toBeNull();
+    });
+
+    it('leaves an existing conversation alone', async () => {
+      const existing = conversation('conversation-1', 'project-1');
+      useStore.setState({
+        currentProject: project('project-1'),
+        conversations: [existing],
+        currentConversation: existing,
+      });
+      apiMock.streamQuery.mockRejectedValue(new Error('provider failed'));
+
+      await expect(useStore.getState().sendQuery('Question', true)).rejects.toThrow('provider failed');
+
+      expect(apiMock.deleteConversation).not.toHaveBeenCalled();
+      expect(useStore.getState().currentConversation?.id).toBe('conversation-1');
+    });
+
+    it('keeps a new conversation whose answer was saved but not re-read', async () => {
+      useStore.setState({ currentProject: project('project-1') });
+      apiMock.createConversation.mockResolvedValue(conversation('conversation-new', 'project-1'));
+      apiMock.streamQuery.mockResolvedValue({
+        answer: 'Answer', sources: [], chunks_used: 0, model_used: null, usage: {},
+        conversation_id: 'conversation-new', message_id: 'message-1',
+      });
+      apiMock.getMessages.mockRejectedValue(new Error('offline'));
+
+      await expect(useStore.getState().sendQuery('Question', true))
+        .rejects.toBeInstanceOf(QueryMessageRefreshError);
+
+      expect(apiMock.deleteConversation).not.toHaveBeenCalled();
+    });
+  });
+
   it('streams query tokens and refreshes authoritative messages', async () => {
     const controller = new AbortController();
     const onToken = vi.fn();
