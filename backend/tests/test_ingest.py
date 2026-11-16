@@ -683,6 +683,71 @@ def test_third_concurrent_ingestion_for_one_account_returns_429(monkeypatch):
     assert third.headers["Retry-After"] == "1"
 
 
+def test_waiting_for_a_slot_does_not_spend_the_import_allowance(monkeypatch):
+    """A client retrying while both slots are busy must still have its ten
+    imports a minute once a slot frees (#224)."""
+    leases = []
+
+    class DeferredService:
+        async def process_url(self, operation_lease, **kwargs):
+            leases.append(operation_lease)
+            return SimpleNamespace(id="document", status="queued")
+
+    client = url_ingest_client(
+        monkeypatch,
+        DeferredService(),
+        request_limiter=SlidingWindowRateLimiter(),
+    )
+    path = "/api/projects/project/upload-url"
+
+    def post(index):
+        return client.post(path, json={"url": "https://example.com/%s" % index})
+
+    assert [post(index).status_code for index in range(2)] == [200, 200]
+    waiting = [post(index) for index in range(2, 14)]
+    assert {response.status_code for response in waiting} == {429}
+    assert {response.json()["detail"] for response in waiting} == {
+        "Too many concurrent operations",
+    }
+
+    statuses = []
+    for index in range(14, 23):
+        for lease in leases:
+            lease.release()
+        statuses.append(post(index).status_code)
+
+    # Two imports were spent before the wait, so eight remain in the minute.
+    assert statuses == [200] * 8 + [429]
+
+
+def test_a_rate_limited_ingestion_gives_its_slot_back(monkeypatch):
+    """The slot is taken first now, so a refusal for rate must not keep it."""
+    concurrency = ConcurrencyLimiter(max_concurrent=2)
+
+    class FastService:
+        async def process_url(self, operation_lease, **kwargs):
+            operation_lease.release()
+            return SimpleNamespace(id="document", status="queued")
+
+    client = url_ingest_client(
+        monkeypatch,
+        FastService(),
+        request_limiter=SlidingWindowRateLimiter(),
+        concurrency=concurrency,
+    )
+    path = "/api/projects/project/upload-url"
+    for index in range(10):
+        client.post(path, json={"url": "https://example.com/%s" % index})
+
+    refused = [
+        client.post(path, json={"url": "https://example.com/x%s" % index})
+        for index in range(3)
+    ]
+
+    assert {response.json()["detail"] for response in refused} == {"Too many requests"}
+    concurrency.acquire("ingest:user").release()
+
+
 def test_background_ingestion_keeps_its_slot_after_response(monkeypatch):
     """Queued extraction/indexing stays active after the upload response."""
     leases = []

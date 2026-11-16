@@ -216,14 +216,22 @@ def _begin_ingestion(
     """
     if not settings.rate_limit_enabled:
         return UnlimitedConcurrencyLease()
-    enforce_account_rate_limit(
-        request_limiter,
-        "ingest",
-        user_id,
-        limit=10,
-        window_seconds=60,
-    )
-    return acquire_account_lease(concurrency_limiter, "ingest", user_id)
+    # The slot is taken before the allowance is spent: a client waiting for one
+    # of its two active imports to finish retries on the slot refusal, and each
+    # of those retries would otherwise use up one of its ten imports a minute.
+    lease = acquire_account_lease(concurrency_limiter, "ingest", user_id)
+    try:
+        enforce_account_rate_limit(
+            request_limiter,
+            "ingest",
+            user_id,
+            limit=10,
+            window_seconds=60,
+        )
+    except HTTPException:
+        lease.release()
+        raise
+    return lease
 
 
 @router.post("/projects/{project_id}/upload", response_model=FileUploadResponse)
