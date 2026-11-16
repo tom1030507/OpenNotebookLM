@@ -45,6 +45,15 @@ describe('route protection middleware', () => {
     expect(response.headers.get('location')).toBeNull();
   });
 
+  it('sends a signed-in visitor from the login page to the workspace (#236)', () => {
+    const response = middleware(
+      requestFor('/login', `${AUTH_TOKEN_COOKIE}=a-signed-token`),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('http://localhost:3000/');
+  });
+
   it('protects other workspace routes as well', () => {
     const response = middleware(requestFor('/projects/project-1'));
 

@@ -19,7 +19,17 @@ export function middleware(request: NextRequest) {
 
   // API authentication belongs to FastAPI. Redirecting here turns backend
   // JSON errors (and signed-out login/register calls) into login-page HTML.
-  if (isApiRoute(pathname) || isPublicRoute(pathname)) {
+  if (isApiRoute(pathname)) {
+    return NextResponse.next();
+  }
+
+  if (isPublicRoute(pathname)) {
+    // A signed-in visitor shown the login form reads it as a lost session
+    // (#236). A stale cookie costs one bounce: the workspace's first refused
+    // request clears it and comes back here.
+    if (request.cookies.get(AUTH_TOKEN_COOKIE)) {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
     return NextResponse.next();
   }
 
