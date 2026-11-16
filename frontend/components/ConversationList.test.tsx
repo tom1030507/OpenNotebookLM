@@ -58,4 +58,22 @@ describe('ConversationList', () => {
     expect(useStore.getState().currentConversation).toBeNull();
     expect(useStore.getState().conversations).toEqual([conversation]);
   });
+
+  it('reports a chosen or new conversation so a drawer can close (#249)', () => {
+    vi.spyOn(api, 'getMessages').mockResolvedValue([]);
+    useStore.setState({
+      currentProject: project,
+      currentConversation: null,
+      conversations: [conversation],
+    });
+    const chosen = vi.fn();
+    render(<ConversationList onConversationChosen={chosen} />);
+
+    fireEvent.click(screen.getByText('Existing chat'));
+    expect(useStore.getState().currentConversation?.id).toBe(conversation.id);
+    expect(chosen).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Conversation' }));
+    expect(chosen).toHaveBeenCalledTimes(2);
+  });
 });
