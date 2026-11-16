@@ -162,8 +162,12 @@ class Settings(BaseSettings):
     
     # Rate Limiting
     rate_limit_enabled: bool = True
-    rate_limit_requests: int = 100
-    rate_limit_period: int = 60
+    # Retired: nothing ever read these, so raising them never relaxed a limit
+    # (#234). Still accepted because existing .env files set them and an
+    # unknown key fails start-up; lifespan warns when one is set. The enforced
+    # limits are listed under "Rate limits" in the README.
+    rate_limit_requests: Optional[int] = None
+    rate_limit_period: Optional[int] = None
     rate_limit_max_keys: int = 10000
     trust_proxy_headers: bool = False
 

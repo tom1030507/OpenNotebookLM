@@ -48,6 +48,18 @@ def test_a_blank_optional_number_reads_as_unset(tmp_path):
     assert settings.llm_max_request_tokens is None
 
 
+def test_retired_rate_limit_keys_still_load(tmp_path):
+    """#234: nothing read RATE_LIMIT_REQUESTS or RATE_LIMIT_PERIOD, so they
+    left the example; an existing .env that sets them must still start."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("RATE_LIMIT_REQUESTS=100\nRATE_LIMIT_PERIOD=60\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.rate_limit_requests == 100
+    assert "RATE_LIMIT_REQUESTS" not in (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+
+
 def test_a_set_optional_number_is_still_read(tmp_path):
     """Tolerating a blank must not mean ignoring a value."""
     env_file = tmp_path / ".env"

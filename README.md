@@ -358,6 +358,29 @@ Set `ADMIN_EMAILS` to a comma-separated list of account email addresses to grant
 access to the server usage overview. Cost totals are estimates controlled by
 `ESTIMATED_COST_PER_1K_TOKENS_USD`.
 
+#### Rate limits
+
+Requests past these limits get `429` with a `Retry-After` header. The numbers are
+fixed in code; `RATE_LIMIT_ENABLED=false` turns all of them off, which is meant
+for local development only.
+
+| Operation | Limit |
+| --- | --- |
+| Sign-in | 10 a minute per username, 100 a minute per address |
+| Registration | 3 an hour per address |
+| Demo-account hint on the sign-in page | 120 a minute per address |
+| Importing sources (files, URLs, text, notes as sources) | 10 a minute and 2 at a time per account |
+| Questions | 30 a minute and 2 at a time per account |
+| Reports and data tables | 10 a minute and 2 at a time each, per account |
+| Flashcards and quizzes | 10 a minute and 2 at a time per account |
+| Source discovery | 10 a minute per account |
+| Audio voice previews | 20 a minute per account |
+
+Behind the bundled frontend every browser reaches the API from the frontend's own
+address, so per-address limits apply to the whole deployment there. Set
+`TRUST_PROXY_HEADERS=true` only when a reverse proxy you control sets
+`X-Forwarded-For`.
+
 ### Source discovery and watched folders
 
 Source discovery is optional. Set `SEARCH_PROVIDER` to `searxng`, `brave`, or
