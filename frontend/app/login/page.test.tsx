@@ -445,7 +445,7 @@ describe('login page', () => {
     expect(hint.textContent).toContain('demo1234');
   });
 
-  it('fills the sign-in form from the published demo account', async () => {
+  it('signs in with the published demo account in one click (#235)', async () => {
     vi.spyOn(api, 'getDemoAccount').mockResolvedValue({
       username: 'demo',
       password: 'demo1234',
@@ -463,12 +463,13 @@ describe('login page', () => {
 
     render(<LoginPage />);
     fireEvent.click(await screen.findByRole('button', { name: /use demo account/i }));
-    submit();
 
     await waitFor(() => expect(login).toHaveBeenCalledWith({
       username: 'demo',
       password: 'demo1234',
     }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect((screen.getByLabelText(/username/i) as HTMLInputElement).value).toBe('demo');
   });
 
   it('shows no demo hint when the deployment publishes none', async () => {
