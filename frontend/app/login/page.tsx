@@ -214,10 +214,20 @@ export default function LoginPage() {
                   value={formData.username}
                   onChange={handleInputChange}
                   required
+                  // The server's rules, checked by the browser before sending
+                  // so a short value is caught at its own field (#230).
+                  minLength={isLogin ? undefined : 3}
+                  maxLength={isLogin ? undefined : 64}
+                  aria-describedby={isLogin ? undefined : 'username-rule'}
                   className="h-11 w-full rounded-lg border border-[var(--input)] bg-[var(--card)] pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
                   placeholder="Enter username"
                 />
               </div>
+              {!isLogin && (
+                <p id="username-rule" className="mt-1 text-xs text-[var(--muted-foreground)]">
+                  3 to 64 characters.
+                </p>
+              )}
             </div>
 
             {/* Email (Register only) */}
@@ -264,6 +274,9 @@ export default function LoginPage() {
                   value={formData.password}
                   onChange={handleInputChange}
                   required
+                  minLength={isLogin ? undefined : 8}
+                  maxLength={isLogin ? undefined : 72}
+                  aria-describedby={isLogin ? undefined : 'password-rule'}
                   className="h-11 w-full rounded-lg border border-[var(--input)] bg-[var(--card)] pl-10 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
                   placeholder="Enter password"
                 />
@@ -281,6 +294,11 @@ export default function LoginPage() {
                   )}
                 </button>
               </div>
+              {!isLogin && (
+                <p id="password-rule" className="mt-1 text-xs text-[var(--muted-foreground)]">
+                  At least 8 characters.
+                </p>
+              )}
             </div>
 
             {/* Confirm Password (Register only) */}

@@ -660,11 +660,47 @@ def test_query_stream_reports_generation_errors_after_started_tokens(monkeypatch
     assert [frame.splitlines()[0] for frame in frames] == [
         "event: token", "event: error",
     ]
+    # The original stays in the server log; the reader gets a sentence.
     assert json.loads(frames[-1].split("data: ", 1)[1]) == {
-        "detail": "provider failed",
+        "detail": "Something went wrong while answering. Please try again.",
     }
     assert database.rows == []
     assert database.commits == 0
+
+
+def test_query_stream_explains_a_rejected_provider_key(monkeypatch):
+    """#230: the chat showed "Error code: 401 - {'error': {...}}"."""
+    conversation = SimpleNamespace(id="conversation-1", project_id=None)
+
+    class AuthenticationError(Exception):
+        status_code = 401
+
+    AuthenticationError.__module__ = "openai"
+
+    class RejectedRAG:
+        def stream_query_with_conversation(self, **_kwargs):
+            raise AuthenticationError(
+                "Error code: 401 - {'error': {'message': 'Invalid API Key'}}"
+            )
+            yield  # pragma: no cover - makes this a generator
+
+    monkeypatch.setattr(query, "require_conversation", lambda *_args: conversation)
+    client = query_client(
+        monkeypatch,
+        RejectedRAG(),
+        route_settings=Settings(rate_limit_enabled=False),
+        database=RecordingDatabase(),
+    )
+
+    response = client.post(
+        "/api/query/stream",
+        json={"query": "hello", "conversation_id": "conversation-1"},
+    )
+
+    detail = json.loads(response.text.split("data: ", 1)[1])["detail"]
+    assert "Error code" not in detail
+    assert "API key" in detail
+    assert "administrator" in detail
 
 
 def test_query_stream_disconnect_discards_messages_and_releases_lease(monkeypatch):

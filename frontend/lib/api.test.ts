@@ -1189,18 +1189,21 @@ describe('API client', () => {
     await expect(api.getDocuments('missing')).rejects.toThrow('Project not found');
   });
 
-  it('reads FastAPI validation errors, which report detail as a list', async () => {
+  it('reads FastAPI validation errors and names the field each is about', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       detail: [
+        { loc: ['body', 'username'], msg: 'String should have at least 3 characters' },
         { loc: ['body', 'password'], msg: 'String should have at least 8 characters' },
       ],
     }, 422)));
 
     await expect(api.register({
-      username: 'ada',
+      username: 'ad',
       email: 'ada@example.com',
       password: 'short',
-    })).rejects.toThrow('String should have at least 8 characters');
+    })).rejects.toThrow(
+      'Username must be at least 3 characters. Password must be at least 8 characters',
+    );
   });
 
   it('signs in through the same-origin API route', async () => {

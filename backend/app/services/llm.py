@@ -314,6 +314,52 @@ class TokenBudgetTooSmallError(RuntimeError):
     """
 
 
+_PROVIDER_ERROR_PACKAGES = {"openai", "anthropic", "httpx", "httpcore"}
+
+
+def describe_provider_error(error: Exception) -> Optional[str]:
+    """Say in plain words why the model could not answer, for the reader.
+
+    The provider's own message — `Error code: 401 - {'error': {...}}` — is
+    for whoever runs the server; shown in the chat it reads as a crash and
+    tells the reader nothing they can act on. Callers log the original.
+
+    Args:
+        error: What the provider layer raised.
+
+    Returns:
+        A sentence for the reader, or None if the error did not come from
+        the model provider.
+    """
+    if isinstance(error, TokenBudgetTooSmallError):
+        return (
+            "This question and its sources are too long for the language "
+            "model's current limit. Try selecting fewer sources."
+        )
+    if type(error).__module__.split(".")[0] not in _PROVIDER_ERROR_PACKAGES:
+        return None
+    status = getattr(error, "status_code", None)
+    if status in (401, 403):
+        return (
+            "The language model provider rejected this server's credentials. "
+            "Ask an administrator to check the API key in the server configuration."
+        )
+    if status == 404:
+        return (
+            "The configured language model is not available from its provider. "
+            "Ask an administrator to check the model name in the server configuration."
+        )
+    if status == 429:
+        return (
+            "The language model provider is busy or over its usage limit. "
+            "Please try again in a minute."
+        )
+    return (
+        "The language model provider could not be reached. Please try again "
+        "later, or ask an administrator to check the server log."
+    )
+
+
 class OpenAICompatibleProvider:
     """OpenAI, or any server speaking the same chat-completions API."""
 

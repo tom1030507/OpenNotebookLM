@@ -629,6 +629,8 @@ interface DemoAccountResponse {
 
 interface ValidationErrorItem {
   msg?: string;
+  /** Where the error is, e.g. `['body', 'password']`. */
+  loc?: (string | number)[];
 }
 
 interface ErrorResponse {
@@ -685,8 +687,10 @@ const describeDetail = (detail: ErrorResponse['detail']): string | null => {
 
   if (Array.isArray(detail)) {
     // FastAPI reports request validation failures as a list of field errors.
+    // Each is named after its field: two bare "String should have at least…"
+    // sentences did not say which field either was about (#230).
     const messages = detail
-      .map((item) => item?.msg)
+      .map(describeFieldError)
       .filter((message): message is string => Boolean(message));
     if (messages.length) {
       return messages.join('. ');
@@ -694,6 +698,20 @@ const describeDetail = (detail: ErrorResponse['detail']): string | null => {
   }
 
   return null;
+};
+
+const describeFieldError = (item: ValidationErrorItem | undefined): string | null => {
+  if (!item?.msg) return null;
+  const field = [...(item.loc ?? [])].reverse()
+    .find((part): part is string => typeof part === 'string' && part !== 'body');
+  const message = item.msg
+    .replace(/^String should have at least (\d+) characters?$/, 'must be at least $1 characters')
+    .replace(/^String should have at most (\d+) characters?$/, 'must be at most $1 characters')
+    .replace(/^String should match pattern .*$/, 'is not in the expected format')
+    .replace(/^Field required$/, 'is required');
+  if (!field) return message;
+  const label = field.replace(/_/g, ' ');
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${message}`;
 };
 
 
