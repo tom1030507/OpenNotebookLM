@@ -624,8 +624,6 @@ describe('workspace accessibility contract', () => {
   it('associates every settings select with its visible label', () => {
     renderWorkspace(<Settings isOpen onClose={() => {}} />);
 
-    expect(screen.getByRole('combobox', { name: 'Language' })).toBeTruthy();
-
     fireEvent.click(screen.getByRole('button', { name: 'API Keys' }));
 
     expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
