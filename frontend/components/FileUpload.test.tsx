@@ -134,6 +134,29 @@ describe('FileUpload', () => {
     expect(await screen.findByText(detail)).toBeTruthy();
   });
 
+  it('keeps only the files that failed after a partly successful upload', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      allowed_file_types: ['pdf'],
+      max_file_size_mb: 23,
+      max_text_characters: 462000,
+    })));
+    const added = new File(['pdf'], 'added.pdf', { type: 'application/pdf' });
+    const refused = new File(['pdf'], 'refused.pdf', { type: 'application/pdf' });
+    const onUpload = vi.fn().mockResolvedValue({
+      failed: [{ file: refused, message: 'Too many requests' }],
+    });
+    const { container } = render(<FileUpload onUpload={onUpload} multiple />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await screen.findByText(/^Supported file types: \.pdf/);
+
+    fireEvent.change(fileInput, { target: { files: [added, refused] } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Upload 2 file(s)' }));
+
+    expect(await screen.findByText('refused.pdf: Too many requests')).toBeTruthy();
+    expect(screen.queryByText('added.pdf')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Upload 1 file(s)' })).toBeTruthy();
+  });
+
   it('blocks plain text beyond the backend chunk budget before upload', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       allowed_file_types: ['txt'],

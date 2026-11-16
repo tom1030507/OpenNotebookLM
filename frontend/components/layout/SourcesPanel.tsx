@@ -41,6 +41,7 @@ import api, {
 import {
   closeAddSourcesAfterSuccessfulUpload,
   requestAddSources,
+  uploadFilesInTurn,
 } from '../sourceActions';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import ProjectCover from '../ProjectCover';
@@ -311,18 +312,18 @@ export default function SourcesPanel({
       return result;
     }
 
-    await closeAddSourcesAfterSuccessfulUpload(async () => {
-      for (const item of items) {
-        await uploadDocument(projectId, item as File);
-      }
-    }, () => {
-      if (
-        modalSessionRef.current === uploadSession
-        && isAddSourcesOpenRef.current
-      ) {
-        onAddSourcesOpenChange(false);
-      }
-    });
+    const outcome = await uploadFilesInTurn(
+      items as File[],
+      (file) => uploadDocument(projectId, file),
+    );
+    if (
+      !outcome.failed.length
+      && modalSessionRef.current === uploadSession
+      && isAddSourcesOpenRef.current
+    ) {
+      onAddSourcesOpenChange(false);
+    }
+    return outcome;
   };
 
   const handleAddText = async (title: string, content: string) => {

@@ -19,9 +19,12 @@ import api, {
   type WebDiscoveryResult,
 } from '@/lib/api';
 import { getTextContentError, getUploadFileError } from '@/lib/uploadValidation';
+import type { FileUploadOutcome } from './sourceActions';
 
 interface FileUploadProps {
-  onUpload: (files: File[] | string[]) => Promise<void | URLBatchUploadResponse>;
+  onUpload: (
+    files: File[] | string[],
+  ) => Promise<void | URLBatchUploadResponse | FileUploadOutcome>;
   multiple?: boolean;
   onUploadingChange?: (isUploading: boolean) => void;
   onAddText?: (title: string, text: string) => Promise<void>;
@@ -86,9 +89,9 @@ export default function FileUpload({
   };
 
   const applyBatchResult = (
-    result: void | URLBatchUploadResponse,
+    result: void | URLBatchUploadResponse | FileUploadOutcome,
   ) => {
-    if (!result) {
+    if (!result || !('failures' in result)) {
       setErrors([]);
       return [];
     }
@@ -278,9 +281,12 @@ export default function FileUpload({
 
     try {
       if (uploadType === 'file' && files.length > 0) {
-        await onUpload(files);
-        setFiles([]);
-        setErrors([]);
+        const result = await onUpload(files);
+        // Files that went through leave the selection, so pressing Upload
+        // again cannot add them a second time.
+        const failed = result && 'failed' in result ? result.failed : [];
+        setFiles(failed.map(({ file }) => file));
+        setErrors(failed.map(({ file, message }) => `${file.name}: ${message}`));
       } else if ((uploadType === 'url' || uploadType === 'youtube') && urlInput.trim()) {
         const result = await onUpload(urls);
         setUrlInput(applyBatchResult(result).join('\n'));

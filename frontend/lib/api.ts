@@ -636,11 +636,22 @@ interface ErrorResponse {
 }
 
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+    /** Seconds from the response's Retry-After header, when it sent one. */
+    readonly retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = 'ApiError';
   }
 }
+
+const retryAfterSeconds = (response: Response): number | undefined => {
+  const header = response.headers?.get('Retry-After');
+  const seconds = header ? Number(header) : NaN;
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+};
 
 /** Same-origin prefix that Next proxies to the internal backend. */
 export const API_BASE_URL = '/api';
@@ -761,7 +772,7 @@ const extractError = async (response: Response): Promise<Error> => {
     const payload = await response.json() as ErrorResponse;
     const detail = describeDetail(payload.detail);
     if (detail) {
-      return new ApiError(response.status, detail);
+      return new ApiError(response.status, detail, retryAfterSeconds(response));
     }
   } catch {
     // Fall back to the HTTP status below when the response is not JSON.
@@ -770,6 +781,7 @@ const extractError = async (response: Response): Promise<Error> => {
   return new ApiError(
     response.status,
     response.statusText || `Request failed with status ${response.status}`,
+    retryAfterSeconds(response),
   );
 };
 
