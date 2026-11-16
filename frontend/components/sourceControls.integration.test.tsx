@@ -66,6 +66,24 @@ function SourceWorkspace() {
 }
 
 
+// A phone keeps the Sources panel mounted but hidden while its drawer is shut.
+function HiddenSourcesWorkspace() {
+  const [isAddSourcesOpen, setIsAddSourcesOpen] = useState(false);
+
+  return (
+    <ProjectDialogProvider>
+      <ChatArea onAddSourcesOpenChange={setIsAddSourcesOpen} />
+      <div hidden>
+        <SourcesPanel
+          isAddSourcesOpen={isAddSourcesOpen}
+          onAddSourcesOpenChange={setIsAddSourcesOpen}
+        />
+      </div>
+    </ProjectDialogProvider>
+  );
+}
+
+
 function ReopenableSourcesPanel() {
   const [isAddSourcesOpen, setIsAddSourcesOpen] = useState(true);
 
@@ -127,6 +145,15 @@ afterEach(() => {
 
 
 describe('Add Sources controls', () => {
+  it('opens Add Source from the chat while the Sources panel is hidden', async () => {
+    render(<HiddenSourcesWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attach file' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Add Source' });
+    expect(dialog.closest('[hidden]')).toBeNull();
+  });
+
   it('opens the dialog from the welcome CTA, paperclip, and SourcesPanel Add Source button', () => {
     render(<SourceWorkspace />);
 

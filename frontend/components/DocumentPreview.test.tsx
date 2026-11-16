@@ -249,6 +249,23 @@ describe('DocumentPreview', () => {
     expect(screen.queryByTitle('Example article')).toBeNull();
   });
 
+  it('renders outside a hidden parent, as the Sources panel is on a phone', async () => {
+    const document = await loadDocument({
+      source_type: 'url',
+      source_url: 'https://example.com/article',
+      title: 'Example article',
+    });
+    vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Indexed article text');
+
+    const { container: parent } = render(
+      <div hidden><DocumentPreview document={document} onClose={() => {}} /></div>,
+    );
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.closest('[hidden]')).toBeNull();
+    expect(parent.contains(dialog)).toBe(false);
+  });
+
   it.each(['md', 'url'] as const)(
     'scrolls to and highlights the cited range in %s sources',
     async (sourceType) => {
@@ -295,7 +312,7 @@ describe('DocumentPreview', () => {
       text: 'Evidence on page three.',
     };
 
-    const { container } = render(
+    const { baseElement: container } = render(
       <DocumentPreview document={document} citation={citation} onClose={() => {}} />,
     );
 
@@ -311,7 +328,7 @@ describe('DocumentPreview', () => {
       title: 'Lecture',
     });
 
-    const { container } = render(
+    const { baseElement: container } = render(
       <DocumentPreview
         document={document}
         citation={{ source: 'Lecture', timestamp: 32.7 }}
@@ -335,7 +352,7 @@ describe('DocumentPreview', () => {
     vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Transcript excerpt.');
     stubObjectUrls();
 
-    const { container } = render(
+    const { baseElement: container } = render(
       <DocumentPreview
         document={document}
         citation={{ source: 'Lecture', timestamp: 42 }}
@@ -365,7 +382,7 @@ describe('DocumentPreview', () => {
     });
     vi.spyOn(api, 'fetchDocumentContent').mockResolvedValue('Legacy source content');
 
-    const { container } = render(
+    const { baseElement: container } = render(
       <DocumentPreview
         document={document}
         citation={{ source: 'Notes', document_id: 'document-1', text: 'Older excerpt.' }}
