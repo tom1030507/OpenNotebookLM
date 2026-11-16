@@ -42,7 +42,6 @@ export default function FileUpload({
   const [uploadConfigFailed, setUploadConfigFailed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
-  const [urlInput, setUrlInput] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [textInput, setTextInput] = useState('');
   const [uploadType, setUploadType] = useState<'file' | 'url' | 'youtube' | 'text' | 'discover'>('file');
@@ -50,7 +49,15 @@ export default function FileUpload({
   const [discoverResults, setDiscoverResults] = useState<WebDiscoveryResult[]>([]);
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]);
+  // Text and messages are kept per tab: one shared field put the URL tab's
+  // refused addresses, and their errors, into the YouTube field (#238).
+  const [urlInputs, setUrlInputs] = useState({ url: '', youtube: '' });
+  const [errorsByTab, setErrorsByTab] = useState<Partial<Record<typeof uploadType, string[]>>>({});
+  const urlTab = uploadType === 'youtube' ? 'youtube' : 'url';
+  const urlInput = urlInputs[urlTab];
+  const setUrlInput = (value: string) => setUrlInputs((current) => ({ ...current, [urlTab]: value }));
+  const errors = errorsByTab[uploadType] ?? [];
+  const setErrors = (list: string[]) => setErrorsByTab((current) => ({ ...current, [uploadType]: list }));
   const [isUploading, setIsUploading] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const uploadInFlightRef = useRef(false);
@@ -268,29 +275,20 @@ export default function FileUpload({
   const handleUploadFiles = async () => {
     if (isUploading || uploadInFlightRef.current) return;
 
-    if (files.length === 0 && !urlInput.trim()) {
-      setErrors(['Please select files or enter a URL']);
+    if (files.length === 0) {
+      setErrors(['Please select files to upload']);
       return;
     }
-    const urls = uploadType === 'url' || uploadType === 'youtube'
-      ? getEnteredUrls()
-      : [];
-    if (!urls) return;
 
     if (!startUpload()) return;
 
     try {
-      if (uploadType === 'file' && files.length > 0) {
-        const result = await onUpload(files);
-        // Files that went through leave the selection, so pressing Upload
-        // again cannot add them a second time.
-        const failed = result && 'failed' in result ? result.failed : [];
-        setFiles(failed.map(({ file }) => file));
-        setErrors(failed.map(({ file, message }) => `${file.name}: ${message}`));
-      } else if ((uploadType === 'url' || uploadType === 'youtube') && urlInput.trim()) {
-        const result = await onUpload(urls);
-        setUrlInput(applyBatchResult(result).join('\n'));
-      }
+      const result = await onUpload(files);
+      // Files that went through leave the selection, so pressing Upload
+      // again cannot add them a second time.
+      const failed = result && 'failed' in result ? result.failed : [];
+      setFiles(failed.map(({ file }) => file));
+      setErrors(failed.map(({ file, message }) => `${file.name}: ${message}`));
     } catch (error) {
       setErrors([error instanceof Error ? error.message : 'Upload failed. Please try again.']);
     } finally {
@@ -595,7 +593,8 @@ export default function FileUpload({
       )}
 
       {/* Upload Button */}
-      {(files.length > 0 || (urlInput.trim() && (uploadType === 'url' || uploadType === 'youtube'))) && (
+      {/* Files only: the URL and YouTube tabs submit with their own Add. */}
+      {uploadType === 'file' && files.length > 0 && (
         <button
           onClick={handleUploadFiles}
           disabled={isUploading || isValidating}
@@ -609,7 +608,7 @@ export default function FileUpload({
           ) : (
             <>
               <Upload className="w-4 h-4" />
-              Upload {uploadType === 'file' ? `${files.length} file(s)` : 'URLs'}
+              Upload {files.length} file(s)
             </>
           )}
         </button>
