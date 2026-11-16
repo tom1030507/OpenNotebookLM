@@ -1,5 +1,6 @@
 """HTTP adapters for request and concurrency limits."""
 from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from starlette.requests import Request
 
 from app.config import Settings, get_settings
@@ -160,13 +161,24 @@ def limit_registration(
 
 def limit_login(
     request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
     limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     settings: Settings = Depends(get_settings),
 ) -> None:
-    """Limit password verification to ten attempts per source IP per minute.
+    """Limit password guesses per account name, and more loosely per address.
+
+    Behind the bundled frontend every browser reaches this API from the
+    frontend's own address: Next's rewrite proxy adds no X-Forwarded-For. An
+    address-only limit of ten a minute was therefore one allowance for the
+    whole deployment, about five sign-ins a minute once the login page's
+    demo-account read shared it (#232). Ten a minute per username still stops
+    guessing one account's password; the per-address ceiling still bounds a
+    single direct client trying many usernames.
 
     Args:
         request: Incoming sign-in request.
+        form_data: The sign-in form; FastAPI parses it once for this and the
+            route.
         limiter: Shared request limiter.
         settings: Application settings controlling limiter/proxy behavior.
 
@@ -175,4 +187,29 @@ def limit_login(
     """
     if settings.rate_limit_enabled:
         client_ip = get_client_ip(request, settings.trust_proxy_headers)
-        enforce_rate_limit(limiter, "login:%s" % client_ip, 10, 60)
+        username = form_data.username.strip().lower()
+        enforce_rate_limit(limiter, "login:%s:%s" % (client_ip, username), 10, 60)
+        enforce_rate_limit(limiter, "login:%s" % client_ip, 100, 60)
+
+
+def limit_demo_account_lookup(
+    request: Request,
+    limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Bound the demo-account hint, which verifies a password hash per call.
+
+    Its own allowance: the login page reads it on every load, and sharing the
+    sign-in allowance made each sign-in cost two attempts.
+
+    Args:
+        request: Incoming request for the hint.
+        limiter: Shared request limiter.
+        settings: Application settings controlling limiter/proxy behavior.
+
+    Returns:
+        None when the request may continue.
+    """
+    if settings.rate_limit_enabled:
+        client_ip = get_client_ip(request, settings.trust_proxy_headers)
+        enforce_rate_limit(limiter, "demo-account:%s" % client_ip, 120, 60)

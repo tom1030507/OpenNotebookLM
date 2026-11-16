@@ -379,8 +379,8 @@ def test_fourth_registration_from_one_client_ip_returns_429_with_retry_after():
     assert responses[-1].headers["Retry-After"] == "3600"
 
 
-def test_eleventh_login_from_one_client_ip_returns_429_with_retry_after():
-    """Password verification is limited to ten attempts per IP per minute."""
+def test_eleventh_login_for_one_username_returns_429_with_retry_after():
+    """Password guesses are limited to ten per username per minute."""
     limiter = SlidingWindowRateLimiter()
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
     try:
@@ -392,6 +392,51 @@ def test_eleventh_login_from_one_client_ip_returns_429_with_retry_after():
     assert responses[-1].status_code == 429
     # The window is counted from the first request, so a slow run reports 58 or 59.
     assert 55 <= int(responses[-1].headers["Retry-After"]) <= 60
+
+
+def test_people_behind_one_address_do_not_share_a_sign_in_allowance():
+    """#232: behind the bundled frontend every browser has the same address,
+    so one person's attempts must not lock out everybody else."""
+    limiter = SlidingWindowRateLimiter()
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    try:
+        for _ in range(10):
+            get_token("first-person")
+        locked = get_token("first-person")
+        others = [get_token("person-%s" % index) for index in range(20)]
+    finally:
+        app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
+
+    assert locked.status_code == 429
+    assert {response.status_code for response in others} == {401}
+
+
+def test_one_address_still_has_a_ceiling_across_usernames():
+    """Spreading guesses over many usernames is bounded per address."""
+    limiter = SlidingWindowRateLimiter()
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    try:
+        responses = [get_token("sprayed-%s" % index) for index in range(101)]
+    finally:
+        app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
+
+    assert {response.status_code for response in responses[:100]} == {401}
+    assert responses[-1].status_code == 429
+
+
+def test_reading_the_demo_hint_does_not_spend_sign_in_attempts():
+    """The login page reads the hint on every load; that used to cost an
+    attempt from the same allowance as the password check (#232)."""
+    limiter = SlidingWindowRateLimiter()
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    try:
+        hints = [client.get("/api/auth/demo-account") for _ in range(20)]
+        attempts = [get_token("hint-reader") for _ in range(10)]
+    finally:
+        app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
+
+    assert {response.status_code for response in hints} == {200}
+    assert {response.status_code for response in attempts} == {401}
 
 
 def test_production_registration_is_closed_by_default():
