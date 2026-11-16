@@ -342,19 +342,9 @@ export default function LoginPage() {
           </form>
 
           {isLogin && (
-            <div className="mt-6 border-t border-[var(--border)] pt-4">
-              <button
-                type="button"
-                disabled={loading}
-                onClick={enterOfflineDemo}
-                className="h-11 w-full rounded-lg border border-[var(--input)] text-sm font-medium hover:bg-[var(--muted)] disabled:opacity-50 transition-base"
-              >
-                Try offline demo
-              </button>
-              <p className="mt-2 text-center text-xs leading-relaxed text-[var(--muted-foreground)]">
-                Sample data, no backend needed · demo / demo1234
-              </p>
-            </div>
+            <p className="mt-4 text-center text-xs leading-relaxed text-[var(--muted-foreground)]">
+              Demo: demo / demo1234 · Works without a backend
+            </p>
           )}
 
           {/* Toggle Login/Register */}

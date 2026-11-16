@@ -104,8 +104,9 @@ background queue, with progress and failures shown in the workspace.
 
 ### Preview without a backend
 
-Choose **Try offline demo** to explore bundled sample sources, a cited answer,
-and a reading note. The **Offline demo** notice distinguishes this preview
+Sign in with **demo / demo1234** while the backend is unavailable to explore
+bundled sample sources, a cited answer, and a reading note. The **Offline demo**
+notice distinguishes this preview
 from a server account; it does not generate answers or save changes.
 
 ![Offline demo showing bundled sources, a cited answer, a sample note, and the persistent demo notice](.github/assets/screenshot-offline-demo.png)
@@ -200,11 +201,10 @@ docker compose ps
 | Database readiness | <http://localhost:8000/readyz> |
 
 For a local trial, the sign-in page offers **demo / demo1234** by default.
-For a frontend-only preview, choose **Try offline demo** on the sign-in page.
-It loads bundled sample sources, conversations, citations, and notes without
-FastAPI or Docker. The workspace labels this mode explicitly; uploads, changes,
-exports, and model generation require a running backend. Entering
-**demo / demo1234** also falls back to this preview when the backend is unavailable.
+When the backend is unavailable, the same credentials open a frontend-only
+preview with bundled sample sources, conversations, citations, and notes.
+The workspace labels this mode explicitly; uploads, changes, exports, and model
+generation require a running backend.
 
 Create a project, choose **Add Source**, wait for the source to become **Ready**,
 and ask your first question. Models download on first use, so the first import,
