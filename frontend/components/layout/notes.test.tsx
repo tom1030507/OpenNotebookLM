@@ -8,6 +8,9 @@ import SaveToNoteButton from '../chat/SaveToNoteButton';
 import useStore from '@/store/useStore';
 import useNotes from '@/store/useNotes';
 import api from '@/lib/api';
+import { answerDialogs } from '@/lib/answerDialogs';
+
+let stopAnswering = () => {};
 import type { Document, Message, MindMap, Note, Project, VideoSummary } from '@/lib/api';
 
 const note = (fields: Partial<Note>): Note => ({
@@ -41,6 +44,8 @@ function installPointerEvents() {
 }
 
 afterEach(() => {
+  stopAnswering();
+  stopAnswering = () => {};
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -73,7 +78,7 @@ describe('Studio notes', () => {
     const create = vi.spyOn(api, 'createNote').mockResolvedValue(
       note({ id: 'note-2', title: 'Second', content: '# Hi' }));
     const remove = vi.spyOn(api, 'deleteNote').mockResolvedValue();
-    vi.stubGlobal('confirm', () => true);
+    stopAnswering = answerDialogs();
 
     render(<NotesSection projectId="project-1" />);
     expect(await screen.findByText('First')).toBeTruthy();
@@ -194,7 +199,7 @@ describe('Studio notes', () => {
     const convert = vi.spyOn(api, 'convertNoteToSource').mockResolvedValue({
       note_id: linked.id, doc_id: 'doc-1', status: 'queued',
     });
-    vi.stubGlobal('confirm', () => true);
+    stopAnswering = answerDialogs();
 
     render(<NotesSection projectId="project-1" />);
     fireEvent.click(await screen.findByRole('button', { name: /^First/ }));
@@ -309,7 +314,7 @@ describe('Studio notes', () => {
     });
     vi.spyOn(api, 'listNotes').mockResolvedValue([saved]);
     const remove = vi.spyOn(api, 'deleteNote').mockResolvedValue();
-    vi.stubGlobal('confirm', () => true);
+    stopAnswering = answerDialogs();
 
     useStore.setState({ currentProject: { id: 'project-1', name: 'P', role: 'owner' } as Project });
     render(<>
@@ -332,7 +337,7 @@ describe('Studio notes', () => {
       });
       vi.spyOn(api, 'listNotes').mockResolvedValue([saved]);
       const remove = vi.spyOn(api, 'deleteNote').mockResolvedValue();
-      vi.stubGlobal('confirm', () => true);
+      stopAnswering = answerDialogs();
 
       render(<NotesSection projectId="project-1" />);
       await screen.findByRole('button', { name: new RegExp(`^${saved.title}`) });

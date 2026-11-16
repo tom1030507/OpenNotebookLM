@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,6 +19,14 @@ import TopNav from './layout/TopNav';
 import api, { type Document, type Project, type URLBatchUploadResponse } from '@/lib/api';
 import ProjectDialogProvider from './ProjectDialogProvider';
 import useStore from '@/store/useStore';
+import DialogHost from './DialogHost';
+import { useDialogRequests } from '@/lib/dialogs';
+
+// Answers the in-app confirmation that replaced window.confirm (#237).
+const answerDialog = async (title: string, button: string) => {
+  const dialog = await screen.findByRole('dialog', { name: title });
+  fireEvent.click(within(dialog).getByRole('button', { name: button }));
+};
 
 // TopNav navigates on sign-out.
 vi.mock('next/navigation', () => ({
@@ -61,6 +70,7 @@ function SourceWorkspace() {
         isAddSourcesOpen={isAddSourcesOpen}
         onAddSourcesOpenChange={setIsAddSourcesOpen}
       />
+      <DialogHost />
     </ProjectDialogProvider>
   );
 }
@@ -139,6 +149,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  useDialogRequests.setState({ active: null });
   useStore.getState().resetForTests();
   vi.restoreAllMocks();
 });
@@ -346,17 +357,15 @@ describe('Add Sources controls', () => {
 
 
 describe('project actions', () => {
-  it('does not move a project to trash when confirmation is cancelled', () => {
-    const confirmDelete = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('does not move a project to trash when confirmation is cancelled', async () => {
     const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
     render(<SourceWorkspace />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
+    await answerDialog('Move "Research notes" to Trash?', 'Cancel');
 
-    expect(confirmDelete).toHaveBeenCalledWith(
-      'Move "Research notes" to Trash? You can restore it until it expires.',
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(deleteProject).not.toHaveBeenCalled();
     expect(useStore.getState().currentProject).toEqual(currentProject);
   });
@@ -364,12 +373,12 @@ describe('project actions', () => {
   it('moves the selected project to trash after confirmation and leaves the other project selectable', async () => {
     const otherProject = { ...currentProject, id: 'project-2', name: 'Other project' };
     useStore.setState({ projects: [currentProject, otherProject] });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
     render(<SourceWorkspace />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
+    await answerDialog('Move "Research notes" to Trash?', 'Move to Trash');
 
     await waitFor(() => expect(deleteProject).toHaveBeenCalledWith(currentProject.id));
     expect(useStore.getState().projects).toEqual([otherProject]);
@@ -379,7 +388,6 @@ describe('project actions', () => {
   });
 
   it('keeps the project and shows an error when moving it to trash fails', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const deleteProject = vi.spyOn(api, 'deleteProject').mockRejectedValue(
       new Error('Delete request failed'),
@@ -388,6 +396,7 @@ describe('project actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
+    await answerDialog('Move "Research notes" to Trash?', 'Move to Trash');
 
     expect(await screen.findByRole('alert')).not.toBeNull();
     expect(screen.getByRole('alert').textContent).toBe('Delete request failed');
@@ -412,13 +421,13 @@ describe('source trash action', () => {
       chunk_count: 1,
     };
     const refreshDocuments = vi.fn().mockResolvedValue(undefined);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const trashSource = vi.spyOn(api, 'trashSource').mockResolvedValue(undefined);
     const removeFromProject = vi.spyOn(api, 'deleteDocument').mockResolvedValue(undefined);
     useStore.setState({ documents: [source], refreshDocuments });
     render(<SourceWorkspace />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Move source to Trash' }));
+    await answerDialog('Move "Private source" to Trash?', 'Move to Trash');
 
     await waitFor(() => expect(trashSource).toHaveBeenCalledWith(source.id));
     expect(removeFromProject).not.toHaveBeenCalled();

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Download, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { confirmAction } from '@/lib/dialogs';
 import api from '@/lib/api';
 import type {
   Citation, Document, MindMap, Note, NoteExportFormat, VideoSummary,
@@ -133,13 +134,18 @@ export default function NotesSection({ projectId }: { projectId: string | null }
 
   const saveDraft = async () => {
     if (!canEdit || !draft || !draft.title.trim()) return;
-    setSaving(true);
-    setError('');
     const linkedSource = draft.noteId
       ? notes.find((note) => note.id === draft.noteId)
       : null;
+    // Asked before saving starts, so the editor is not shown as busy behind it.
     const shouldUpdateSource = Boolean(linkedSource && noteHasSource(linkedSource)
-      && confirm('Update the linked source with these note changes?'));
+      && await confirmAction({
+        title: 'Update the linked source too?',
+        message: 'Answers and Studio use the source copy of this note.',
+        confirmLabel: 'Update source',
+      }));
+    setSaving(true);
+    setError('');
     let savedNote: Note;
     try {
       const fields = { title: draft.title.trim(), content: draft.content };
@@ -235,7 +241,11 @@ export default function NotesSection({ projectId }: { projectId: string | null }
 
   const deleteNote = async (note: Note) => {
     if (!canEdit) return;
-    if (!confirm(`Move the note "${note.title}" to Trash?`)) return;
+    if (!(await confirmAction({
+      title: `Move the note "${note.title}" to Trash?`,
+      confirmLabel: 'Move to Trash',
+      danger: true,
+    }))) return;
     setError('');
     try {
       await api.deleteNote(projectId, note.id);

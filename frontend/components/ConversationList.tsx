@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
+import { confirmAction } from '@/lib/dialogs';
 import { 
   Plus, 
   Trash2, 
@@ -58,7 +60,12 @@ export default function ConversationList({ embedded = false }: ConversationListP
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Are you sure you want to delete this conversation?')) {
+    if (await confirmAction({
+      title: 'Delete this conversation?',
+      message: 'Its questions and answers are deleted with it.',
+      confirmLabel: 'Delete',
+      danger: true,
+    })) {
       try {
         await deleteConversation(id);
       } catch (error) {
@@ -69,7 +76,7 @@ export default function ConversationList({ embedded = false }: ConversationListP
 
   const handleNewConversation = () => {
     if (!currentProject) {
-      alert('Please select a project first');
+      toast.error('Please select a project first');
       return;
     }
 

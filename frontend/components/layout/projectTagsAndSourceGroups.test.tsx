@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import ProjectDialogProvider from '../ProjectDialogProvider';
 import MarkdownRenderer from '../MarkdownRenderer';
 import SourcesPanel from './SourcesPanel';
 import api, { type Document, type Project, type ProjectSourceGroup } from '@/lib/api';
 import useStore, { selectedSourceIds } from '@/store/useStore';
+import { answerDialogs } from '@/lib/answerDialogs';
 
 const project = (id: string, tags: string[] = [], role: Project['role'] = 'owner'): Project => ({
   id,
@@ -140,8 +141,8 @@ describe('project tags and source groups', () => {
       id: 'group-1', name: 'Read later', document_ids: [],
     });
     vi.spyOn(api, 'deleteProjectSourceGroup').mockResolvedValue(undefined);
-    vi.stubGlobal('prompt', vi.fn().mockReturnValue('Read later'));
-    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+    const stopAnswering = answerDialogs({ text: 'Read later' });
+    onTestFinished(stopAnswering);
     renderPanel();
 
     fireEvent.click(screen.getByText('Source groups'));
