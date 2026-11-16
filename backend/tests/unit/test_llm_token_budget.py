@@ -47,6 +47,21 @@ GROQ_429_RPD = (
     "again in 5m3.6s.', 'type': 'requests', 'code': 'rate_limit_exceeded'}}"
 )
 
+# What Groq answers with when the per-minute *token* allowance is spent for the
+# moment. Copied from a real refusal (#223). The request alone is well under the
+# limit, so the same request succeeds once the minute has passed.
+GROQ_429_ITPM = (
+    "Error code: 429 - {'error': {'message': 'Rate limit reached for model "
+    "`qwen/qwen3.8-27b` in organization `org_01k7` service tier `on_demand` on "
+    "input tokens per minute (ITPM): Limit 7000, Used 6453, Requested 3319. "
+    "Please try again in 23.76s.', 'type': 'tokens', 'code': "
+    "'rate_limit_exceeded'}}"
+)
+
+# A size refusal whose limit is below the answer floor: no request could ever
+# fit under it, whatever the prompt.
+GROQ_413_BELOW_FLOOR = GROQ_413.replace("Limit 8000", "Limit 1000")
+
 # The per-minute variant. Its limit only happens to be two digits.
 GROQ_429_RPM = (
     "Error code: 429 - {'error': {'message': 'Rate limit reached for model "
@@ -67,6 +82,11 @@ class TestTokenCeilingFromError:
         """The limit it names is a request count. Read as tokens it lands below
         any real prompt, so every later call asks for a single token."""
         assert token_ceiling_from_error(Exception(GROQ_429_RPD)) is None
+
+    def test_ignores_a_token_allowance_that_is_only_spent_for_now(self):
+        """The request is smaller than the limit, so the refusal is about the
+        window, not the request; learning it poisoned every later answer."""
+        assert token_ceiling_from_error(Exception(GROQ_429_ITPM)) is None
 
     def test_ignores_a_per_minute_request_quota(self):
         """The same message with a different window, and just as not-a-budget."""
@@ -642,6 +662,61 @@ class TestLearningTheCeiling:
 
         assert provider.completions.requests[-1]["max_tokens"] == 16384
 
+    def test_a_spent_token_allowance_does_not_become_a_ceiling(self):
+        """The #223 failure: one busy minute turned every later answer into an
+        extract until the process restarted."""
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048,
+            refuse_first_with=Exception(GROQ_429_ITPM),
+        )
+
+        with pytest.raises(Exception, match="Rate limit reached"):
+            provider.generate("x" * 4000, 0.3, None, None)
+        provider.generate("x" * 4000, 0.3, None, None)
+
+        assert provider.completions.requests[-1]["max_tokens"] == 16384
+
+    def test_a_ceiling_no_answer_could_fit_under_is_not_remembered(self):
+        """Kept, it would refuse every request before sending it, for good."""
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048,
+            refuse_first_with=Exception(GROQ_413_BELOW_FLOOR),
+        )
+
+        with pytest.raises(Exception, match="Request too large"):
+            provider.generate("hello", 0.3, None, None)
+        assert len(provider.completions.requests) == 1
+
+        provider.generate("hello", 0.3, None, None)
+
+        assert provider.completions.requests[-1]["max_tokens"] == 16384
+
+    def test_the_refusal_is_logged_even_when_this_prompt_cannot_fit(
+        self, monkeypatch,
+    ):
+        """Without it, the only trace of a learned ceiling is the error it
+        causes later, which does not say where the number came from."""
+        warnings = []
+        monkeypatch.setattr(
+            llm_module.logger, "warning",
+            lambda event, **fields: warnings.append((event, fields)),
+        )
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            min_max_tokens=2048,
+            refuse_first_with=Exception(GROQ_413),
+        )
+
+        with pytest.raises(TokenBudgetTooSmallError):
+            provider.generate("x" * 28000, 0.3, None, None)
+
+        assert any(
+            "Limit 8000, Requested 10139" in fields.get("refusal", "")
+            for _, fields in warnings
+        )
+
     def test_a_refusal_with_the_ceiling_already_known_is_not_retried(self):
         """The budget was already clamped, so retrying would change nothing."""
         provider = build(
@@ -709,3 +784,27 @@ class TestTheServiceFallsBack:
         assert result["model"] == FALLBACK_MODEL
         assert provider.completions.requests == []
         assert service.is_available() is False
+
+    RAG_PROMPT = "Context:\n[Source 1] The plant generated 91 GWh. More text.\n\nQuestion: How much?"
+
+    def test_a_failing_provider_is_not_described_as_missing(self, monkeypatch):
+        """Telling the reader to configure an LLM that is configured sends
+        them after the wrong setting."""
+        provider = build(
+            described={"max_completion_tokens": 16384},
+            refuse_first_with=ConnectionError("no route to host"),
+        )
+        monkeypatch.setattr(llm_module, "_build_provider", lambda: provider)
+
+        result = LLMService().generate(self.RAG_PROMPT, max_tokens=None)
+
+        assert result["model"] == FALLBACK_MODEL
+        assert "Configure an LLM" not in result["text"]
+        assert "could not answer" in result["text"]
+
+    def test_no_provider_still_says_how_to_get_one(self, monkeypatch):
+        monkeypatch.setattr(llm_module, "_build_provider", lambda: None)
+
+        result = LLMService().generate(self.RAG_PROMPT, max_tokens=None)
+
+        assert "Configure an LLM" in result["text"]

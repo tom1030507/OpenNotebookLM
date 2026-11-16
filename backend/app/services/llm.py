@@ -60,6 +60,7 @@ _CJK_PATTERN = re.compile(
 #   learn:  "... on tokens per minute (TPM): Limit 8000, Requested 10139"
 #   ignore: "... on requests per day (RPD): Limit 1000, Used 1000, Requested 1"
 _TOKEN_LIMIT_PATTERN = re.compile(r"\bLimit[\s:]+(\d{3,})", re.IGNORECASE)
+_REQUESTED_PATTERN = re.compile(r"\bRequested[\s:]+(\d+)", re.IGNORECASE)
 _TOKEN_REFUSAL_MARKERS = ("token", "too large", "rate_limit", "rate limit")
 # The size of the number cannot separate the two: a higher tier's requests-per-
 # minute allowance runs into the hundreds, the same range as a small TPM.
@@ -126,9 +127,21 @@ def token_ceiling_from_error(error: Exception) -> Optional[int]:
     Args:
         error: The exception the provider raised.
 
+    A token allowance that is merely used up for the moment is not a ceiling
+    either. Groq refuses a request that would fit the per-minute allowance on
+    its own with "Limit 7000, Used 6453, Requested 3319": the request is
+    smaller than the limit, and the same request goes through once the minute
+    has passed. Remembered, that limit would clamp every later request for the
+    life of the process. Only a request larger than the limit by itself — the
+    413 "Limit 8000, Requested 10139" — says something about request size.
+
+    Args:
+        error: The exception the provider raised.
+
     Returns:
         The ceiling in tokens, or None if this was not a size or rate refusal,
-        or was one whose limit counts requests rather than tokens.
+        was one whose limit counts requests rather than tokens, or was one the
+        same request would pass once the provider's window has moved on.
     """
     message = str(error)
     lowered = message.lower()
@@ -143,6 +156,10 @@ def token_ceiling_from_error(error: Exception) -> Optional[int]:
         return None
 
     ceiling = int(match.group(1))
+
+    requested = _REQUESTED_PATTERN.search(message)
+    if requested and int(requested.group(1)) <= ceiling:
+        return None
 
     return ceiling if ceiling > 0 else None
 
@@ -621,12 +638,35 @@ class OpenAICompatibleProvider:
             if ceiling is None or self._max_request_tokens:
                 raise
 
+            # Logged before anything else can raise: the refusal is the only
+            # record of where the ceiling came from.
+            logger.warning(
+                "Provider refused the request size",
+                provider=self.name,
+                model=self.model,
+                request_ceiling=ceiling,
+                refusal=str(e)[:500],
+            )
+
+            # Even an empty prompt cannot fit under a ceiling at or below the
+            # floor, so remembering it would turn every later request into a
+            # fallback until the process restarts.
+            if ceiling - estimate_prompt_tokens([]) <= self.min_max_tokens:
+                logger.warning(
+                    "Ignoring a request ceiling no answer could fit under",
+                    provider=self.name,
+                    model=self.model,
+                    request_ceiling=ceiling,
+                    min_max_tokens=self.min_max_tokens,
+                )
+                raise
+
             # Remembered before the retry is sized, so that a ceiling too tight
             # for this prompt still spares the next one the same refusal.
             self._max_request_tokens = ceiling
             request["max_tokens"] = self._budget(max_tokens, messages)
             logger.warning(
-                "Provider refused the request size; retrying inside its ceiling",
+                "Retrying inside the provider's request ceiling",
                 provider=self.name,
                 model=self.model,
                 request_ceiling=ceiling,
@@ -937,7 +977,7 @@ class LLMService:
                 "available": False,
                 "error": f"{type(e).__name__}: {e}",
             }
-            return self._fallback_response(prompt)
+            return self._fallback_response(prompt, provider_failed=True)
 
     def stream_generate(
         self,
@@ -992,15 +1032,37 @@ class LLMService:
         )
         yield "complete", {**result, "provider": provider_name}
 
-    def _fallback_response(self, prompt: str) -> Dict[str, Any]:
+    def _fallback_response(
+        self, prompt: str, provider_failed: bool = False,
+    ) -> Dict[str, Any]:
         """Generate a fallback response when LLM is not available.
 
         Args:
             prompt: User prompt
+            provider_failed: True when a provider is configured but this request
+                failed. Telling that reader to configure an LLM would send them
+                after a setting that is already there.
 
         Returns:
             Fallback response
         """
+        if provider_failed:
+            note = (
+                "The language model could not answer this request, so these "
+                "are the most relevant passages from your sources."
+            )
+            generic = (
+                "The language model could not answer this request. "
+                "Please try again in a moment."
+            )
+        else:
+            note = "This is a simplified response. Configure an LLM for better answers."
+            generic = (
+                "I understand you're asking about this topic. "
+                "However, I need an LLM service configured to provide detailed answers. "
+                "Please configure an API key for Claude or OpenAI, or run a local model server."
+            )
+
         # Extract context and question from RAG prompt
         if "Context:" in prompt and "Question:" in prompt:
             # This is a RAG query
@@ -1016,15 +1078,10 @@ class LLMService:
                 response_text = (
                     "Based on the provided documents:\n\n" +
                     response_text +
-                    "\n\n(Note: This is a simplified response. Configure an LLM for better answers.)"
+                    f"\n\n(Note: {note})"
                 )
         else:
-            # Generic response
-            response_text = (
-                "I understand you're asking about this topic. "
-                "However, I need an LLM service configured to provide detailed answers. "
-                "Please configure an API key for Claude or OpenAI, or run a local model server."
-            )
+            response_text = generic
 
         return {
             "text": response_text,
