@@ -26,6 +26,7 @@ import BrandLogo from '../BrandLogo';
 import { useOptionalProjectDialog } from '../ProjectDialogProvider';
 import ChatSettingsDialog from './ChatSettingsDialog';
 import SaveToNoteButton from './SaveToNoteButton';
+import CopyAnswerButton from './CopyAnswerButton';
 import { FollowUpQuestions, ProjectOverview } from './SuggestedQuestions';
 
 interface ChatAreaProps {
@@ -207,6 +208,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
         )}
         {message.role === 'assistant' && (
           <div className="mt-3 flex items-center gap-2">
+            <CopyAnswerButton message={message} />
             <SaveToNoteButton message={message} />
             <AnswerRating message={message} />
           </div>
