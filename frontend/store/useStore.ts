@@ -58,6 +58,12 @@ interface AppState {
   // Study progress
   studyScoresByProject: Record<string, StudyRoundScore[]>;
 
+  // Where the reader was, so a reload reopens it (#227). Ids only: the
+  // records themselves are fetched again, and the prerendered page never
+  // renders anything restored from storage before they arrive.
+  lastProjectId: string | null;
+  lastConversationIds: Record<string, string>;
+
   // Actions - Projects
   fetchProjects: () => Promise<void>;
   selectProject: (project: Project) => void;
@@ -327,6 +333,8 @@ const initialState = {
   citationPreview: null,
   notifyOnProcessingComplete: true,
   studyScoresByProject: {},
+  lastProjectId: null,
+  lastConversationIds: {},
 };
 
 /**
@@ -364,8 +372,9 @@ const useStore = create<AppState>()(
             const projects = await api.getProjects();
             if (!isCurrentRequest()) return;
             const previousProject = get().currentProject;
+            const preferredId = previousProject?.id ?? get().lastProjectId;
             const currentProject = projects.find(
-              (project) => project.id === previousProject?.id,
+              (project) => project.id === preferredId,
             ) || projects[0] || null;
             const projectChanged = currentProject?.id !== previousProject?.id;
 
@@ -797,6 +806,11 @@ const useStore = create<AppState>()(
             const conversations = await api.getConversations(projectId);
             if (isCurrentRequest()) {
               set({ conversations, loadingConversations: false });
+              const lastId = get().lastConversationIds[projectId];
+              const last = conversations.find((conversation) => conversation.id === lastId);
+              if (last && !get().currentConversation) {
+                await get().selectConversation(last);
+              }
             }
           } catch (error) {
             if (!isCurrentRequest()) return;
@@ -824,10 +838,18 @@ const useStore = create<AppState>()(
 
         beginNewConversation: () => {
           advanceReadGeneration('messages');
-          set({
-            currentConversation: null,
-            messages: [],
-            loadingMessages: false,
+          // Forgotten too, or the next conversation-list refresh would
+          // reopen the conversation the reader just chose to leave.
+          const projectId = get().currentProject?.id;
+          set((state) => {
+            const lastConversationIds = { ...state.lastConversationIds };
+            if (projectId) delete lastConversationIds[projectId];
+            return {
+              currentConversation: null,
+              messages: [],
+              loadingMessages: false,
+              lastConversationIds,
+            };
           });
         },
         
@@ -1167,6 +1189,8 @@ const useStore = create<AppState>()(
             studioOpen: state.studioOpen,
             notifyOnProcessingComplete: state.notifyOnProcessingComplete,
             studyScoresByProject: {},
+            lastProjectId: null,
+            lastConversationIds: {},
           }));
         },
         resetForTests: () => {
@@ -1182,11 +1206,36 @@ const useStore = create<AppState>()(
           studioOpen: state.studioOpen,
           notifyOnProcessingComplete: state.notifyOnProcessingComplete,
           studyScoresByProject: state.studyScoresByProject,
+          deselectedSources: state.deselectedSources,
+          lastProjectId: state.lastProjectId,
+          lastConversationIds: state.lastConversationIds,
         }),
       }
     )
   )
 );
+
+// Record the open project and conversation whichever action opened them, so
+// every path — picking, creating, a first question — is remembered alike.
+useStore.subscribe((state, previous) => {
+  const projectId = state.currentProject?.id;
+  const conversation = state.currentConversation;
+  const updates: Partial<AppState> = {};
+  if (projectId && projectId !== state.lastProjectId) {
+    updates.lastProjectId = projectId;
+  }
+  if (
+    conversation
+    && conversation.id !== previous.currentConversation?.id
+    && state.lastConversationIds[conversation.project_id] !== conversation.id
+  ) {
+    updates.lastConversationIds = {
+      ...state.lastConversationIds,
+      [conversation.project_id]: conversation.id,
+    };
+  }
+  if (Object.keys(updates).length) useStore.setState(updates);
+});
 
 registerAccountStateRetirer(() => {
   useStore.getState().clearAccountState();
