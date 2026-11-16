@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import ShareProjectDialog from './ShareProjectDialog';
 import TopNav from './layout/TopNav';
 import ProjectDialogProvider from './ProjectDialogProvider';
-import api, { type Project, type ProjectMember } from '@/lib/api';
+import api, { ApiError, type Project, type ProjectMember } from '@/lib/api';
 import useStore from '@/store/useStore';
 
 const project: Project = {
@@ -61,9 +61,7 @@ describe('project sharing controls', () => {
     fireEvent.change(screen.getByLabelText('Username or email'), {
       target: { value: 'carol@example.com' },
     });
-    fireEvent.change(screen.getByLabelText('Account identifier type'), {
-      target: { value: 'email' },
-    });
+    expect(screen.queryByLabelText('Account identifier type')).toBeNull();
     fireEvent.change(screen.getByLabelText('Role for new member'), {
       target: { value: 'editor' },
     });
@@ -90,20 +88,39 @@ describe('project sharing controls', () => {
 
   it('adds an account whose username contains @ as a username', async () => {
     vi.spyOn(api, 'getProjectMembers').mockResolvedValue([owner]);
-    const add = vi.spyOn(api, 'addProjectMember').mockResolvedValue(carol);
+    const add = vi.spyOn(api, 'addProjectMember')
+      .mockRejectedValueOnce(new ApiError(404, 'User not found'))
+      .mockResolvedValueOnce(carol);
     render(<ShareProjectDialog project={project} isOpen onClose={() => undefined} />);
 
     fireEvent.change(screen.getByLabelText('Username or email'), {
       target: { value: 'target@example.com' },
     });
-    fireEvent.change(screen.getByLabelText('Account identifier type'), {
-      target: { value: 'username' },
+    fireEvent.click(screen.getByRole('button', { name: 'Add member' }));
+
+    await waitFor(() => expect(add).toHaveBeenLastCalledWith(project.id, {
+      username: 'target@example.com', role: 'viewer',
+    }));
+    expect(add).toHaveBeenNthCalledWith(1, project.id, {
+      email: 'target@example.com', role: 'viewer',
+    });
+    expect(await screen.findByText('carol@example.com')).toBeTruthy();
+  });
+
+  it('looks up a plain name as a username and says when no account matches (#246)', async () => {
+    vi.spyOn(api, 'getProjectMembers').mockResolvedValue([owner]);
+    const add = vi.spyOn(api, 'addProjectMember')
+      .mockRejectedValue(new ApiError(404, 'User not found'));
+    render(<ShareProjectDialog project={project} isOpen onClose={() => undefined} />);
+
+    fireEvent.change(screen.getByLabelText('Username or email'), {
+      target: { value: 'nobody' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add member' }));
 
-    await waitFor(() => expect(add).toHaveBeenCalledWith(project.id, {
-      username: 'target@example.com', role: 'viewer',
-    }));
+    expect(await screen.findByText('No account has that username or email.')).toBeTruthy();
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(add).toHaveBeenCalledWith(project.id, { username: 'nobody', role: 'viewer' });
   });
 
   it('marks shared projects and shows the share button only to owners', () => {
