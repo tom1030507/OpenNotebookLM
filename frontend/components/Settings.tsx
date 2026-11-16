@@ -32,8 +32,9 @@ interface SettingsProps {
 type SettingsTab = 'general' | 'api' | 'data' | 'notifications' | 'security' | 'about';
 
 const REPOSITORY_URL = 'https://github.com/tom1030507/OpenNotebookLM';
-// The Studio panel marks its unfinished outputs with the same words.
-const availabilityLabel = 'coming soon';
+// Only these tabs hold a preference; the others are information or act at once
+// (API keys), and a Save button there saved nothing (#247).
+const SAVABLE_TABS: SettingsTab[] = ['general', 'notifications'];
 
 export default function Settings({ isOpen, onClose }: SettingsProps) {
   const storedNotifyOnComplete = useStore((state) => state.notifyOnProcessingComplete);
@@ -55,13 +56,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const languageSelectId = useId();
-  const languageHintId = useId();
-  const autoSaveHintId = useId();
-  const apiKeyId = useId();
-  const apiKeyHintId = useId();
-  const endpointId = useId();
-  const endpointHintId = useId();
 
   useDialogFocus({
     isOpen,
@@ -277,47 +271,12 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         changes the same setting.
                       </p>
                     </div>
-
-                    <div>
-                      <label htmlFor={languageSelectId} className="block text-sm mb-2">Language</label>
-                      <select
-                        id={languageSelectId}
-                        aria-describedby={languageHintId}
-                        disabled
-                        defaultValue="en"
-                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      >
-                        <option value="en">English</option>
-                      </select>
-                      <p id={languageHintId} className="text-xs text-[var(--muted-foreground)] mt-2">
-                        The interface is English only ({availabilityLabel}).
-                      </p>
-                    </div>
                   </div>
                 </div>
 
-                <div>
-                  <h4 className="text-sm font-medium mb-4">Behavior</h4>
-                  <div className="space-y-3">
-                    <label className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked
-                        readOnly
-                        disabled
-                        aria-describedby={autoSaveHintId}
-                        className="w-4 h-4 mt-0.5 rounded border-[var(--border)]"
-                      />
-                      <div>
-                        <p className="text-sm">Auto-save conversations</p>
-                        <p id={autoSaveHintId} className="text-xs text-[var(--muted-foreground)]">
-                          Always on: every question and answer is stored with its
-                          conversation on the server, so this cannot be turned off.
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-                </div>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  Every question and answer is saved with its conversation on the server.
+                </p>
               </div>
             )}
 
@@ -399,55 +358,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                   <p className="text-sm mb-2">Model access is configured on the server.</p>
                   <p className="text-xs text-[var(--muted-foreground)]">
                     The backend reads its model settings from its own environment
-                    (LLM_MODE, OPENAI_API_KEY). The fields below are not connected
-                    to it yet ({availabilityLabel}), so nothing typed here would be
-                    stored or sent anywhere.
+                    (LLM_MODE, OPENAI_API_KEY, OLLAMA_BASE_URL).
                   </p>
-                </div>
-
-                <div>
-                  <h4 className="text-sm font-medium mb-4">OpenAI Configuration</h4>
-                  <div className="space-y-4">
-                    <div>
-                      <label htmlFor={apiKeyId} className="block text-sm mb-2">API Key</label>
-                      <input
-                        id={apiKeyId}
-                        type="password"
-                        value=""
-                        readOnly
-                        disabled
-                        aria-describedby={apiKeyHintId}
-                        placeholder="sk-..."
-                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      />
-                      <p id={apiKeyHintId} className="text-xs text-[var(--muted-foreground)] mt-2">
-                        Set OPENAI_API_KEY in the backend environment instead.
-                      </p>
-                    </div>
-
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-sm font-medium mb-4">Local Model Configuration</h4>
-                  <div className="space-y-4">
-                    <div>
-                      <label htmlFor={endpointId} className="block text-sm mb-2">Endpoint URL</label>
-                      <input
-                        id={endpointId}
-                        type="text"
-                        value=""
-                        readOnly
-                        disabled
-                        aria-describedby={endpointHintId}
-                        placeholder="http://localhost:11434"
-                        className="w-full px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                      />
-                      <p id={endpointHintId} className="text-xs text-[var(--muted-foreground)] mt-2">
-                        Set LOCAL_MODEL_PATH in the backend environment instead.
-                      </p>
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
@@ -462,26 +374,9 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         Documents, embeddings and conversations live on the server.
                       </p>
                       <p className="text-xs text-[var(--muted-foreground)]">
-                        The backend does not report how much space they use, so
-                        there are no figures to show here ({availabilityLabel}).
+                        Export a conversation or a project from the toolbar.
                       </p>
                     </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled
-                        aria-label={`Export Data (${availabilityLabel})`}
-                        className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        Export Data
-                      </button>
-                    </div>
-
-                    <p className="text-xs text-[var(--muted-foreground)]">
-                      Exporting everything at once is {availabilityLabel} — export
-                      a conversation or a project from the toolbar instead.
-                    </p>
                   </div>
                 </div>
               </div>
@@ -576,33 +471,34 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             )}
           </div>
 
-          {/* Footer */}
-          <div className="flex justify-end gap-3 p-6 border-t border-[var(--border)]">
-            <button
-              onClick={onClose}
-              disabled={isSaving}
-              className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="px-4 py-2 text-sm bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base disabled:opacity-50 flex items-center gap-2"
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  <span>Save Changes</span>
-                </>
-              )}
-            </button>
-          </div>
+          {SAVABLE_TABS.includes(activeTab) && (
+            <div className="flex justify-end gap-3 p-6 border-t border-[var(--border)]">
+              <button
+                onClick={onClose}
+                disabled={isSaving}
+                className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-4 py-2 text-sm bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:opacity-90 transition-base disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save Changes</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

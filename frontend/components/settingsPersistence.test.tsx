@@ -253,35 +253,41 @@ describe('settings with unavailable provider controls', () => {
       'onlm_hidden-after-close',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings dialog' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
     await screen.findByRole('heading', { name: 'Personal API keys' });
 
     expect(screen.queryByLabelText('New personal API key')).toBeNull();
   });
 
-  it('disables configured controls and removes the fake model selector', () => {
+  it('shows no control that does nothing (#247)', () => {
     render(<Settings isOpen onClose={() => {}} />);
 
-    expect((screen.getByRole('combobox', { name: 'Language' }) as HTMLSelectElement).disabled)
-      .toBe(true);
+    expect(screen.queryByRole('combobox', { name: 'Language' })).toBeNull();
+    // Always on, so a sentence rather than a checkbox that cannot be cleared.
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByText(/saved with its conversation on the server/)).toBeTruthy();
 
     openTab('API Keys');
-
     expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
-    expect((screen.getByLabelText('API Key') as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByLabelText('Endpoint URL') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByLabelText('API Key')).toBeNull();
+    expect(screen.queryByLabelText('Endpoint URL')).toBeNull();
+
+    openTab('Data & Storage');
+    expect(screen.queryByRole('button', { name: /Export Data/ })).toBeNull();
+    expect(screen.queryByText(/coming soon/)).toBeNull();
   });
 
-  it('does not offer auto-save as a choice the app cannot make', () => {
+  it('offers Save only on the tabs that hold a preference (#247)', () => {
     render(<Settings isOpen onClose={() => {}} />);
 
-    const autoSave = screen.getByRole('checkbox', {
-      name: /Auto-save conversations/,
-    }) as HTMLInputElement;
+    const saveShownOn = ['General', 'API Keys', 'Data & Storage', 'Notifications', 'Security', 'About']
+      .filter((tab) => {
+        openTab(tab);
+        return screen.queryByRole('button', { name: 'Save Changes' }) !== null;
+      });
 
-    expect(autoSave.disabled).toBe(true);
-    expect(autoSave.checked).toBe(true);
+    expect(saveShownOn).toEqual(['General', 'Notifications']);
   });
 
   it('reports no storage figures it cannot measure', () => {
@@ -292,8 +298,6 @@ describe('settings with unavailable provider controls', () => {
     ['124 MB', '56 MB', '12 MB', '192 MB'].forEach((figure) => {
       expect(screen.queryByText(figure)).toBeNull();
     });
-    expect((screen.getByRole('button', { name: /Export Data/ }) as HTMLButtonElement).disabled)
-      .toBe(true);
   });
 
   it('does not offer process-wide cache clearing', () => {
