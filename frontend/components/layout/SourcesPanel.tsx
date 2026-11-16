@@ -24,7 +24,11 @@ import {
   BarChart3,
   Trash2,
   RefreshCw,
+  MoreHorizontal,
+  GitBranch,
 } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import { parseApiTimestamp } from '@/lib/datetime';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import ProjectSearch from '../ProjectSearch';
@@ -45,13 +49,14 @@ import {
   uploadFilesInTurn,
 } from '../sourceActions';
 import useDialogFocus from '@/hooks/useDialogFocus';
-import ProjectCover from '../ProjectCover';
 import ProjectAnalyticsDialog from '../ProjectAnalyticsDialog';
 import GitRepositoryDialog from '../GitRepositoryDialog';
 import { findProjectCoverColor, projectCoverStyle } from '@/lib/projectCover';
 
 // A source is only "Ready" once the backend can retrieve it, so the states
 // before that need names a reader recognises rather than the raw status word.
+const projectMenuItemClassName = 'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--muted)] disabled:opacity-50';
+
 const STATUS_LABELS: Partial<Record<DocumentStatus, string>> = {
   queued: 'Queued',
   processing: 'Processing...',
@@ -101,6 +106,27 @@ export default function SourcesPanel({
   const [watchedFolderError, setWatchedFolderError] = useState('');
   const [resyncingDocumentId, setResyncingDocumentId] = useState<string | null>(null);
   const [isGitRepositoryDialogOpen, setIsGitRepositoryDialogOpen] = useState(false);
+  const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+
+  // Escape and clicks elsewhere close the menu, as the top bar's menus do.
+  useEffect(() => {
+    if (!isProjectMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setIsProjectMenuOpen(false);
+      projectMenuRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.focus();
+    };
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!projectMenuRef.current?.contains(event.target as Node)) setIsProjectMenuOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('pointerdown', closeOnOutsidePointer);
+    };
+  }, [isProjectMenuOpen]);
   const [pendingSearchPreview, setPendingSearchPreview] = useState<{
     projectId: string;
     documentId: string;
@@ -587,8 +613,25 @@ export default function SourcesPanel({
           </span>
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-medium truncate" title={doc.name}>{doc.name}</h3>
+            {/* Status and sync share a line, with the full timestamp on hover:
+                a full date on its own line wrapped to three lines in this
+                column and made each source five lines tall (#226). */}
             <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
               {STATUS_LABELS[doc.status] ?? doc.status}
+              {doc.last_synced_at && (
+                <>
+                  {' · '}
+                  <time
+                    dateTime={doc.last_synced_at}
+                    title={parseApiTimestamp(doc.last_synced_at).toLocaleString()}
+                  >
+                    synced {formatDistanceToNow(parseApiTimestamp(doc.last_synced_at), { addSuffix: true })}
+                  </time>
+                  {doc.last_sync_changed !== null && doc.last_sync_changed !== undefined
+                    ? ` · ${doc.last_sync_changed ? 'Changed' : 'No changes'}`
+                    : ''}
+                </>
+              )}
             </p>
             {canManageSources && sourceGroups.length > 0 && (
               <select
@@ -602,14 +645,6 @@ export default function SourcesPanel({
                 <option value="">Ungrouped</option>
                 {sourceGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
-            )}
-            {doc.last_synced_at && (
-              <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                Last synced <time dateTime={doc.last_synced_at}>{new Date(doc.last_synced_at).toLocaleString()}</time>
-                {doc.last_sync_changed !== null && doc.last_sync_changed !== undefined
-                  ? ` · ${doc.last_sync_changed ? 'Changed' : 'No changes'}`
-                  : ''}
-              </p>
             )}
             {doc.status === 'error' && doc.error_message && (
               <p className="text-xs text-[var(--error)] mt-1 break-words">{doc.error_message}</p>
@@ -739,24 +774,15 @@ export default function SourcesPanel({
         className="min-h-0 flex-1 flex flex-col"
       >
       {/* Header */}
-      <div className="flex max-h-[70%] shrink-0 flex-col border-b border-[var(--sidebar-border)] px-4 pb-4 pt-5">
+      <div className="flex max-h-[55%] shrink-0 flex-col border-b border-[var(--sidebar-border)] px-4 pb-4 pt-5">
         <h2 className="panel-heading mb-4 pr-10">Sources</h2>
-        {/* Project settings may grow, but importing and finding evidence must
-            stay reachable without scrolling past all of those settings. */}
-        <div className="min-h-0 overflow-y-auto">
-        
-        {/* Cover, project selector and New Project share one row; the project
-            actions sit under it as one quiet row. Stacked full-width buttons
-            took ~130px of a column that also has to hold the source list. */}
-        <div className="mb-3 space-y-3">
-          <div className="flex items-center gap-2">
-            {currentProject && (
-              <ProjectCover
-                emoji={currentProject.cover_emoji}
-                color={currentProject.cover_color}
-                className="w-9 h-9 text-base shrink-0"
-              />
-            )}
+        {/* Cover, project selector, New Project and the project's actions
+            share one row that never scrolls away. The actions used to take a
+            row of their own that wrapped in a 246px column, which left the
+            source list about one row tall at laptop sizes (#226). */}
+          {/* No cover tile here: the top bar already shows it, and in this
+              row it squeezed the project name to two letters. */}
+          <div className="mb-3 flex items-center gap-2">
             <select
               aria-label={'Select a project'}
               value={currentProject?.id || ''}
@@ -787,7 +813,92 @@ export default function SourcesPanel({
             >
               <FolderOpen className="w-4 h-4" />
             </button>
+            {canManageProject && currentProject && (
+              <div ref={projectMenuRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsProjectMenuOpen((open) => !open)}
+                  aria-label="Project actions"
+                  title="Project actions"
+                  aria-haspopup="menu"
+                  aria-expanded={isProjectMenuOpen}
+                  className="h-9 w-9 flex items-center justify-center border border-[var(--input)] bg-[var(--card)] rounded-md hover:bg-[var(--muted)] transition-base"
+                >
+                  {isDuplicating || isDeletingProject
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <MoreHorizontal className="w-4 h-4" />}
+                </button>
+                {isProjectMenuOpen && (
+                  <div
+                    role="menu"
+                    aria-label="Project actions"
+                    className="absolute right-0 top-full z-20 mt-1 w-44 rounded-md border border-[var(--border)] bg-[var(--popover)] py-1 shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      aria-label="Edit Project"
+                      onClick={() => { setIsProjectMenuOpen(false); openProjectDialog(currentProject); }}
+                      disabled={isDeletingProject}
+                      className={projectMenuItemClassName}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={isDuplicating ? 'Duplicating...' : 'Duplicate Project'}
+                      onClick={() => { setIsProjectMenuOpen(false); void handleDuplicateProject(); }}
+                      disabled={isDuplicating || isDeletingProject || isMergeDialogOpen}
+                      className={projectMenuItemClassName}
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Duplicate</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Merge Project"
+                      onClick={() => {
+                        setIsProjectMenuOpen(false);
+                        setMergeSourceProject(currentProject);
+                        setIsMergeDialogOpen(true);
+                      }}
+                      disabled={isDuplicating || isDeletingProject || mergeTargets.length === 0}
+                      className={projectMenuItemClassName}
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Merge</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setIsProjectMenuOpen(false); setIsAnalyticsOpen(true); }}
+                      disabled={isDeletingProject}
+                      className={projectMenuItemClassName}
+                    >
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      <span>Analytics</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={isDeletingProject ? 'Moving...' : 'Move Project to Trash'}
+                      onClick={() => { setIsProjectMenuOpen(false); void handleDeleteProject(); }}
+                      disabled={isDeletingProject || isDuplicating || isMergeDialogOpen}
+                      className={`${projectMenuItemClassName} text-[var(--error)]`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Move to Trash</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+          {projectActionError && (
+            <p role="alert" className="mb-2 px-1 text-xs text-[var(--error)]">{projectActionError}</p>
+          )}
+        {/* Project settings may grow, but importing and finding evidence must
+            stay reachable without scrolling past all of those settings. */}
+        <div className="min-h-0 overflow-y-auto">
+        <div className="mb-3 space-y-3">
           <ProjectSearch onOpenResult={openSearchResult} />
           {availableTags.length > 0 && (
             <details className="rounded-md border border-[var(--input)] px-2 py-1.5">
@@ -811,73 +922,16 @@ export default function SourcesPanel({
               <p className="mt-1 text-xs text-[var(--muted-foreground)]">Projects with any selected tag are shown.</p>
             </details>
           )}
-          {canManageProject && currentProject && (
-            <div className="flex flex-wrap items-center gap-1 border-t border-[var(--border)] pt-2">
-              <button
-                type="button"
-                aria-label="Edit Project"
-                title="Edit project"
-                onClick={() => openProjectDialog(currentProject)}
-                disabled={isDeletingProject}
-                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                <span>Edit</span>
-              </button>
-              <button
-                type="button"
-                aria-label={isDuplicating ? 'Duplicating...' : 'Duplicate Project'}
-                title="Duplicate project"
-                onClick={handleDuplicateProject}
-                disabled={isDuplicating || isDeletingProject || isMergeDialogOpen}
-                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
-              >
-                {isDuplicating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{isDuplicating ? 'Duplicating...' : 'Duplicate'}</span>
-              </button>
-              <button
-                type="button"
-                aria-label="Merge Project"
-                title="Merge project"
-                onClick={() => {
-                  setMergeSourceProject(currentProject);
-                  setIsMergeDialogOpen(true);
-                }}
-                disabled={isDuplicating || isDeletingProject || mergeTargets.length === 0}
-                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5" />
-                <span>Merge</span>
-              </button>
-              <button
-                type="button"
-                aria-label={isDeletingProject ? 'Moving...' : 'Move Project to Trash'}
-                title="Move project to Trash"
-                onClick={handleDeleteProject}
-                disabled={isDeletingProject || isDuplicating || isMergeDialogOpen}
-                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--error)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
-              >
-                {isDeletingProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                <span>{isDeletingProject ? 'Moving...' : 'Trash'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsAnalyticsOpen(true)}
-                disabled={isDeletingProject}
-                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
-              >
-                <BarChart3 className="w-3.5 h-3.5" />
-                <span>Analytics</span>
-              </button>
-              {projectActionError && (
-                <p role="alert" className="w-full px-2 text-xs text-[var(--error)]">{projectActionError}</p>
-              )}
-            </div>
-          )}
         </div>
 
+        {/* One disclosure for the project's settings: three bordered boxes
+            stacked above the source list took its room (#226). */}
         {currentProject && (
           <details className="mb-2 rounded-md border border-[var(--input)] px-2.5 py-2">
+            <summary className="cursor-pointer text-xs font-medium">Project settings</summary>
+            <div className="mt-1 divide-y divide-[var(--border)]">
+        {currentProject && (
+          <details className="py-1">
             <summary className="cursor-pointer text-xs font-medium">My project tags</summary>
             <div className="mt-2 space-y-2">
               <p className="text-xs text-[var(--muted-foreground)]">
@@ -926,7 +980,7 @@ export default function SourcesPanel({
         )}
 
         {currentProject && (
-          <details className="mb-2 rounded-md border border-[var(--input)] px-2.5 py-2">
+          <details className="py-1">
             <summary className="cursor-pointer text-xs font-medium">Source groups</summary>
             <div className="mt-2 space-y-2">
               {canManageSources && (
@@ -984,7 +1038,7 @@ export default function SourcesPanel({
         )}
 
         {canManageProject && currentProject && (
-          <details className="mb-2 rounded-md border border-[var(--input)] px-2.5 py-2">
+          <details className="py-1">
             <summary className="cursor-pointer text-xs font-medium">Watch a server folder</summary>
             <div className="mt-2 space-y-2">
               <p className="text-xs text-[var(--muted-foreground)]">
@@ -1029,16 +1083,19 @@ export default function SourcesPanel({
             </div>
           </details>
         )}
+            </div>
+          </details>
+        )}
         
         </div>
 
         <div className="shrink-0 pt-3">
         {/* Add Source Button */}
         {canManageSources && currentProject && (
-          <div className="space-y-2">
+          <div className="flex gap-2">
             <button
               onClick={() => requestAddSources(Boolean(currentProject), onAddSourcesOpenChange)}
-              className="w-full h-9 flex items-center justify-center gap-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)] transition-base"
+              className="min-w-0 flex-1 h-9 flex items-center justify-center gap-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)] transition-base"
             >
               <Plus className="w-4 h-4" />
               <span className="text-sm font-medium">Add Source</span>
@@ -1046,9 +1103,11 @@ export default function SourcesPanel({
             <button
               type="button"
               onClick={() => setIsGitRepositoryDialogOpen(true)}
-              className="w-full h-8 rounded-md border border-[var(--input)] text-xs hover:bg-[var(--muted)]"
+              aria-label="Connect Git repository"
+              title="Connect Git repository"
+              className="shrink-0 h-9 w-9 flex items-center justify-center rounded-md border border-[var(--input)] bg-[var(--card)] hover:bg-[var(--muted)] transition-base"
             >
-              Connect Git repository
+              <GitBranch className="w-4 h-4" />
             </button>
           </div>
         )}
