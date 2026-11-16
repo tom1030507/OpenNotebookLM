@@ -55,6 +55,19 @@ describe('Studio notes', () => {
     });
   });
 
+  it('clamps a closed note title to three lines and shows it whole once opened (#229)', async () => {
+    const longTitle = 'How much electricity did the plant generate in 2025, and how does that compare with 2024?';
+    vi.spyOn(api, 'listNotes').mockResolvedValue([note({ title: longTitle })]);
+    render(<NotesSection projectId="project-1" />);
+
+    const card = await screen.findByRole('button', { name: longTitle });
+    expect(card.getAttribute('title')).toBe(longTitle);
+    expect(card.querySelector('.line-clamp-3')?.textContent).toBe(longTitle);
+
+    fireEvent.click(card);
+    expect(card.querySelector('.line-clamp-3')).toBeNull();
+  });
+
   it('lists, creates and deletes notes', async () => {
     vi.spyOn(api, 'listNotes').mockResolvedValue([note({})]);
     const create = vi.spyOn(api, 'createNote').mockResolvedValue(

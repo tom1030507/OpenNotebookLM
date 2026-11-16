@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Download, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
 import type {
   Citation, Document, MindMap, Note, NoteExportFormat, VideoSummary,
@@ -283,9 +283,25 @@ export default function NotesSection({ projectId }: { projectId: string | null }
   return (
     <>
     <section aria-label="Notes" className="mt-6 border-t border-[var(--border)] pt-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      {/* The heading and New note share a row; the whole-list actions get a
+          row of their own. All four in one row wrapped every label onto two
+          lines in the 220px Studio column (#229). */}
+      <div className="mb-1 flex items-center justify-between gap-2">
         <h3 className="panel-heading">Notes</h3>
-        <div className="flex flex-wrap justify-end gap-2">
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setDraft({ noteId: null, title: '', content: '' })}
+            disabled={saving || draft?.noteId === null}
+            className={`${actionClass} whitespace-nowrap`}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New note
+          </button>
+        )}
+      </div>
+      {(notes.length > 0 || (canEdit && unlinkedMarkdownNotes.length > 0)) && (
+        <div className="-ml-2 mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
           {notes.length > 0 && (
             <select
               aria-label="Export all notes as"
@@ -295,39 +311,26 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                 const format = event.target.value as NoteExportFormat;
                 if (format) void exportNoteFile(format);
               }}
-              className={actionClass}
+              className={`${actionClass} whitespace-nowrap`}
             >
-              <option value="" disabled>Export all notes…</option>
+              <option value="" disabled>Export all…</option>
               <option value="markdown">Markdown</option>
               <option value="pdf">PDF</option>
               <option value="docx">Word</option>
             </select>
           )}
-          {canEdit && (
-            <div className="flex gap-2">
-              {unlinkedMarkdownNotes.length > 0 && (
-                <button
-                  type="button"
-                  onClick={convertAllNotes}
-                  disabled={saving}
-                  className={actionClass}
-                >
-                  Convert all notes
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setDraft({ noteId: null, title: '', content: '' })}
-                disabled={saving || draft?.noteId === null}
-                className={actionClass}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                New note
-              </button>
-            </div>
+          {canEdit && unlinkedMarkdownNotes.length > 0 && (
+            <button
+              type="button"
+              onClick={convertAllNotes}
+              disabled={saving}
+              className={`${actionClass} whitespace-nowrap`}
+            >
+              Convert all notes
+            </button>
           )}
         </div>
-      </div>
+      )}
 
       {error && (
         <p role="alert" className="mb-2 text-xs text-[var(--error)]">{error}</p>
@@ -357,9 +360,11 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                       type="button"
                       aria-expanded={openId === note.id}
                       onClick={() => setOpenId(openId === note.id ? null : note.id)}
+                      title={note.title}
                       className="min-w-0 flex-1 p-3 text-left text-sm font-medium break-words"
                     >
-                      {note.title}
+                      {/* Three lines while closed; the whole title once opened. */}
+                      <span className={openId === note.id ? undefined : 'line-clamp-3'}>{note.title}</span>
                       {note.origin === 'answer' && (
                         <span className="mt-1 block text-xs font-normal text-[var(--muted-foreground)]">
                           Saved answer
@@ -372,21 +377,30 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                         </span>
                       )}
                     </button>
-                    <select
-                      aria-label={`Export note ${note.title} as`}
-                      value=""
-                      disabled={exporting}
-                      onChange={(event) => {
-                        const format = event.target.value as NoteExportFormat;
-                        if (format) void exportNoteFile(format, note);
-                      }}
-                      className={`${actionClass} shrink-0 self-stretch`}
+                    {/* An icon over a transparent select: the visible
+                        "Export…" select took half of the card, so a title
+                        wrapped onto about ten lines beside it (#229). */}
+                    <span
+                      title="Export note"
+                      className="relative flex w-9 shrink-0 self-stretch items-center justify-center text-[var(--muted-foreground)] hover:bg-[var(--muted)] focus-within:ring-2 focus-within:ring-[var(--ring)]"
                     >
-                      <option value="" disabled>Export…</option>
-                      <option value="markdown">Markdown</option>
-                      <option value="pdf">PDF</option>
-                      <option value="docx">Word</option>
-                    </select>
+                      <Download aria-hidden="true" className="h-4 w-4" />
+                      <select
+                        aria-label={`Export note ${note.title} as`}
+                        value=""
+                        disabled={exporting}
+                        onChange={(event) => {
+                          const format = event.target.value as NoteExportFormat;
+                          if (format) void exportNoteFile(format, note);
+                        }}
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                      >
+                        <option value="" disabled>Export…</option>
+                        <option value="markdown">Markdown</option>
+                        <option value="pdf">PDF</option>
+                        <option value="docx">Word</option>
+                      </select>
+                    </span>
                     {canEdit && note.origin === 'studio' && note.studio_kind !== 'report' && (
                       <button
                         type="button"
