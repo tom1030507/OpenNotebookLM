@@ -66,6 +66,7 @@ const mindMap = (modelUsed = 'test-model'): MindMap => ({
 const openMindMap = async () => {
   render(<StudioPanel />);
   fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
   return screen.findByRole('dialog');
 };
 
@@ -97,7 +98,9 @@ describe('Studio mind map', () => {
 
     await openMindMap();
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(
+      'project-1', undefined, { focus: null, audience: 'general', length: 'default' },
+    ));
     expect(screen.getByText('Research notes mind map')).toBeTruthy();
   });
 
@@ -105,12 +108,14 @@ describe('Studio mind map', () => {
     const spy = vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMap());
     const { rerender } = render(<StudioPanel outputLanguageRevision={0} />);
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
     await screen.findByRole('dialog');
 
     rerender(<StudioPanel outputLanguageRevision={1} />);
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
     await screen.findByRole('dialog');
 
     expect(spy).toHaveBeenCalledTimes(2);
@@ -216,6 +221,7 @@ describe('Studio mind map', () => {
 
     render(<StudioPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
 
     expect(await screen.findByText(/mind map could not be built/i)).toBeTruthy();
     expect(screen.queryByRole('dialog')).toBeNull();

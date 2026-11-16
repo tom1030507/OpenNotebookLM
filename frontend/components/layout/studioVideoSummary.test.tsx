@@ -112,6 +112,7 @@ function installSpeech(cancelError?: string) {
 const openVideoSummary = async () => {
   render(<StudioPanel />);
   fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Generate video summary' }));
   return screen.findByRole('dialog');
 };
 
@@ -155,7 +156,9 @@ describe('Studio video summary', () => {
 
     await openVideoSummary();
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(
+      'project-1', undefined, { focus: null, audience: 'general', length: 'default' },
+    ));
     expect(screen.getByText('Research notes video summary')).toBeTruthy();
   });
 
@@ -464,6 +467,7 @@ describe('Studio video summary', () => {
 
     render(<StudioPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate video summary' }));
 
     expect(await screen.findByText(/video summary could not be prepared/i)).toBeTruthy();
     expect(screen.queryByRole('dialog')).toBeNull();

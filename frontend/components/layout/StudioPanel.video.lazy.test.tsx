@@ -82,6 +82,7 @@ describe('StudioPanel video lazy dialog', () => {
 
     const videoButton = screen.getByRole('button', { name: 'Video summary' });
     fireEvent.click(videoButton);
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate video summary' }));
 
     expect(await screen.findByRole('status', { name: 'Loading studio result' })).toBeTruthy();
     expect((videoButton as HTMLButtonElement).disabled).toBe(true);

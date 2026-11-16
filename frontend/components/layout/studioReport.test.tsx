@@ -74,7 +74,9 @@ describe('Studio report', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
 
     expect(await screen.findByRole('button', { name: 'Preview source 1' })).toBeTruthy();
-    expect(spy).toHaveBeenCalledWith('project-1', { format: 'briefing' });
+    expect(spy).toHaveBeenCalledWith('project-1', {
+      focus: null, audience: 'general', length: 'default', format: 'briefing',
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Download Markdown' }));
     expect(downloads).toEqual(['Research notes-report.md']);
   });
@@ -89,7 +91,7 @@ describe('Studio report', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
 
     await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', {
-      format: 'briefing', document_ids: ['doc-1'],
+      focus: null, audience: 'general', length: 'default', format: 'briefing', document_ids: ['doc-1'],
     }));
   });
 

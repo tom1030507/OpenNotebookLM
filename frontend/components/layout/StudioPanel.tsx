@@ -12,7 +12,6 @@ import {
   Loader2,
   Square,
   Table,
-  SlidersHorizontal,
 } from 'lucide-react';
 import useStore, { selectedSourceIds } from '@/store/useStore';
 import useNotes from '@/store/useNotes';
@@ -115,7 +114,11 @@ interface StudioOption {
   action?: 'report' | 'audio' | 'mindmap' | 'video' | 'table';
 }
 
-type CustomizableStudioAction = Exclude<StudioOption['action'], 'table' | undefined>;
+/**
+ * Outputs set up in the panel's own form. Report, Data table and the
+ * server-voiced audio overview have dialogs that hold their options instead.
+ */
+type PanelSetupAction = 'audio' | 'mindmap' | 'video';
 
 interface StudioPanelProps {
   isCollapsed?: boolean;
@@ -143,7 +146,6 @@ export default function StudioPanel({
     projectId: string;
     projectName: string;
     documentIds?: string[];
-    options?: StudioOutputOptions;
   } | null>(null);
   const [tableDialog, setTableDialog] = useState<{
     projectId: string;
@@ -156,10 +158,10 @@ export default function StudioPanel({
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
   const [videoSummary, setVideoSummary] = useState<ProjectResult<VideoSummary> | null>(null);
   const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
-  const [customizeAction, setCustomizeAction] = useState<CustomizableStudioAction | null>(null);
-  const [customizeProjectId, setCustomizeProjectId] = useState<string | null>(null);
-  const [customizeOptions, setCustomizeOptions] = useState<Required<StudioOutputOptions>>(DEFAULT_STUDIO_OPTIONS);
-  const [audioOverviewOptions, setAudioOverviewOptions] = useState<StudioOutputOptions>();
+  const [setupAction, setSetupAction] = useState<PanelSetupAction | null>(null);
+  const [setupProjectId, setSetupProjectId] = useState<string | null>(null);
+  const [setupOptions, setSetupOptions] = useState<Required<StudioOutputOptions>>(DEFAULT_STUDIO_OPTIONS);
+  const setupFocusRef = useRef<HTMLTextAreaElement>(null);
   const [studyDialog, setStudyDialog] = useState<{
     projectId: string;
     mode: 'flashcards' | 'quiz';
@@ -229,11 +231,16 @@ export default function StudioPanel({
     setStudyDialog(null);
     setIsMoreOptionsOpen(false);
     setIsAudioOverviewOpen(false);
-    setCustomizeAction(null);
-    setCustomizeProjectId(null);
-    setAudioOverviewOptions(undefined);
+    setSetupAction(null);
+    setSetupProjectId(null);
     setReportError('');
   }, [currentProject?.id, outputLanguageRevision]);
+
+  // The form opens below the rows; without this, a keyboard or screen-reader
+  // user who chose a row is left on it with no sign that anything appeared.
+  useEffect(() => {
+    if (setupAction) setupFocusRef.current?.focus();
+  }, [setupAction]);
 
   const playAudioSummary = async (options?: StudioOutputOptions) => {
     const operation = beginProjectOperation();
@@ -276,10 +283,9 @@ export default function StudioPanel({
     setIsSpeaking(false);
   };
 
-  const openAudioOverview = async (options?: StudioOutputOptions) => {
+  const openAudio = async () => {
     const operation = beginProjectOperation();
     if (!operation) return;
-    setAudioOverviewOptions(options);
     setIsCheckingAudioCapability(true);
     setReportError('');
     try {
@@ -289,8 +295,7 @@ export default function StudioPanel({
       if (enabled) {
         setIsAudioOverviewOpen(true);
       } else if (speechSupported) {
-        setIsCheckingAudioCapability(false);
-        await playAudioSummary(options);
+        openSetup('audio');
       } else {
         setReportError('Audio playback is not supported in this browser.');
       }
@@ -371,13 +376,12 @@ export default function StudioPanel({
     }
   };
 
-  const openReport = (options?: StudioOutputOptions) => {
+  const openReport = () => {
     if (!currentProject) return;
     setReportDialog({
       projectId: currentProject.id,
       projectName: currentProject.name,
       documentIds: selectedSourceIds(useStore.getState()),
-      options,
     });
   };
 
@@ -390,20 +394,20 @@ export default function StudioPanel({
     });
   };
 
-  const openCustomize = (action: CustomizableStudioAction) => {
+  function openSetup(action: PanelSetupAction) {
     if (!currentProject) return;
-    setCustomizeProjectId(currentProject.id);
-    setCustomizeAction(action);
-    setCustomizeOptions(readStudioOptions(currentProject.id));
-  };
+    setSetupProjectId(currentProject.id);
+    setSetupAction(action);
+    setSetupOptions(readStudioOptions(currentProject.id));
+  }
 
-  const updateCustomizeOptions = (changes: Partial<Required<StudioOutputOptions>>) => {
-    const next = { ...customizeOptions, ...changes };
-    setCustomizeOptions(next);
-    if (customizeProjectId) {
+  const updateSetupOptions = (changes: Partial<Required<StudioOutputOptions>>) => {
+    const next = { ...setupOptions, ...changes };
+    setSetupOptions(next);
+    if (setupProjectId) {
       try {
         window.localStorage.setItem(
-          `${STUDIO_OPTIONS_STORAGE_KEY}:${customizeProjectId}`,
+          `${STUDIO_OPTIONS_STORAGE_KEY}:${setupProjectId}`,
           JSON.stringify(next),
         );
       } catch {
@@ -412,32 +416,33 @@ export default function StudioPanel({
     }
   };
 
-  const generateCustomized = () => {
-    if (!customizeAction || customizeProjectId !== currentProject?.id) return;
+  const generateFromSetup = () => {
+    if (!setupAction || setupProjectId !== currentProject?.id) return;
     const options: StudioOutputOptions = {
-      ...customizeOptions,
-      focus: customizeOptions.focus?.trim() || null,
+      ...setupOptions,
+      focus: setupOptions.focus?.trim() || null,
     };
-    const action = customizeAction;
-    setCustomizeAction(null);
-    if (action === 'audio') void openAudioOverview(options);
+    const action = setupAction;
+    setSetupAction(null);
+    if (action === 'audio') void playAudioSummary(options);
     else if (action === 'mindmap') void buildMindMap(options);
-    else if (action === 'video') void playVideoSummary(options);
-    else if (action === 'report') openReport(options);
+    else void playVideoSummary(options);
   };
 
+  // Every row opens its options first and generation starts from a button
+  // there (#243): a row that sometimes started work at once and sometimes
+  // asked a question could not be predicted before clicking it.
   const optionAction = (option: StudioOption) => {
-    if (option.action === 'report') return () => openReport();
+    if (option.action === 'report') return openReport;
     if (option.action === 'table') return openTable;
-    if (option.action === 'mindmap') return () => buildMindMap();
-    if (option.action === 'video') return () => playVideoSummary();
+    if (option.action === 'mindmap' || option.action === 'video') {
+      const action = option.action;
+      return () => openSetup(action);
+    }
     if (option.action === 'audio') {
-      if (!audioOverviewCapabilityKnown) return () => openAudioOverview();
-      if (audioOverviewTtsEnabled) return () => {
-        setAudioOverviewOptions(undefined);
-        setIsAudioOverviewOpen(true);
-      };
-      return isSpeaking ? stopAudioSummary : () => playAudioSummary();
+      if (!audioOverviewCapabilityKnown) return () => void openAudio();
+      if (audioOverviewTtsEnabled) return () => setIsAudioOverviewOpen(true);
+      return isSpeaking ? stopAudioSummary : () => openSetup('audio');
     }
     return undefined;
   };
@@ -603,8 +608,8 @@ export default function StudioPanel({
       icon: <Table className="w-5 h-5" />
     }
   ];
-  const customizedOption = studioOptions.find(
-    (option) => option.action === customizeAction,
+  const setupOption = studioOptions.find(
+    (option) => option.action === setupAction,
   );
 
   return (
@@ -652,7 +657,6 @@ export default function StudioPanel({
             {studioOptions.map((option) => {
               const hint = optionHint(option);
               const hintId = `${optionHintIdPrefix}-${option.id}-hint`;
-              const action = option.action;
 
               return (
                 <div key={option.id} className="flex min-w-0 items-stretch">
@@ -671,38 +675,27 @@ export default function StudioPanel({
                     <h3 className="truncate text-sm font-medium">{option.title}</h3>
                     <span id={hintId} className="sr-only">{hint}</span>
                   </button>
-                  {action && action !== 'table' && (
-                    <button
-                      type="button"
-                      aria-label={`Customize ${option.title}`}
-                      title={`Customize ${option.title}`}
-                      disabled={optionDisabled(option)}
-                      onClick={() => openCustomize(action)}
-                      className="flex w-11 shrink-0 items-center justify-center text-[var(--muted-foreground)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 transition-base xl:w-9"
-                    >
-                      <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
-                    </button>
-                  )}
                 </div>
               );
             })}
           </div>
 
-          {customizeAction && customizeProjectId === currentProject?.id && (
+          {setupAction && setupOption && setupProjectId === currentProject?.id && (
             <form
               role="dialog"
-                  aria-label={`Customize ${customizedOption?.title ?? 'Studio output'}`}
+              aria-label={`Set up ${setupOption.title}`}
               onSubmit={(event) => {
                 event.preventDefault();
-                generateCustomized();
+                generateFromSetup();
               }}
               className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--popover)] p-3"
             >
               <label htmlFor={focusId} className="block text-sm font-medium">Focus (optional)</label>
               <textarea
+                ref={setupFocusRef}
                 id={focusId}
-                value={customizeOptions.focus ?? ''}
-                onChange={(event) => updateCustomizeOptions({
+                value={setupOptions.focus ?? ''}
+                onChange={(event) => updateSetupOptions({
                   focus: event.target.value.slice(0, 500) || null,
                 })}
                 maxLength={500}
@@ -713,8 +706,8 @@ export default function StudioPanel({
               <label htmlFor={audienceId} className="block text-sm font-medium">Audience</label>
               <select
                 id={audienceId}
-                value={customizeOptions.audience}
-                onChange={(event) => updateCustomizeOptions({
+                value={setupOptions.audience}
+                onChange={(event) => updateSetupOptions({
                   audience: event.target.value as Required<StudioOutputOptions>['audience'],
                 })}
                 className="w-full rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-sm"
@@ -726,8 +719,8 @@ export default function StudioPanel({
               <label htmlFor={lengthId} className="block text-sm font-medium">Length</label>
               <select
                 id={lengthId}
-                value={customizeOptions.length}
-                onChange={(event) => updateCustomizeOptions({
+                value={setupOptions.length}
+                onChange={(event) => updateSetupOptions({
                   length: event.target.value as Required<StudioOutputOptions>['length'],
                 })}
                 className="w-full rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-sm"
@@ -737,15 +730,15 @@ export default function StudioPanel({
                 <option value="long">Long</option>
               </select>
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" onClick={() => setCustomizeAction(null)}
+                <button type="button" onClick={() => setSetupAction(null)}
                   className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]">
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={!customizedOption || optionDisabled(customizedOption)}
+                  disabled={optionDisabled(setupOption)}
                   className="rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-60">
-                  Generate
+                  Generate {setupOption.title.toLowerCase()}
                 </button>
               </div>
             </form>
@@ -829,7 +822,6 @@ export default function StudioPanel({
             projectId={currentReportDialog.projectId}
             projectName={currentReportDialog.projectName}
             documentIds={currentReportDialog.documentIds}
-            options={currentReportDialog.options}
             onClose={() => setReportDialog(null)}
             onSave={canEditProject ? async (markdown) => {
               await saveStudioNote(
@@ -887,7 +879,6 @@ export default function StudioPanel({
           <AudioOverviewDialog
             projectId={currentProject.id}
             documentIds={selectedSourceIds(useStore.getState())}
-            initialOptions={audioOverviewOptions}
             onClose={() => setIsAudioOverviewOpen(false)}
           />
         </React.Suspense>

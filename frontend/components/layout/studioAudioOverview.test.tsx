@@ -81,14 +81,15 @@ describe('Studio audio overview', () => {
     const legacySpeech = vi.spyOn(api, 'fetchProjectSummaryText');
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Customize Audio summary' }));
-    fireEvent.change(screen.getByLabelText('Focus (optional)'), { target: { value: 'methods' } });
-    fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'beginner' } });
-    fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'long' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+    const row = screen.getByRole('button', { name: 'Audio summary' });
+    await waitFor(() => expect((row as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(row);
     await screen.findByRole('dialog', { name: 'Audio summary' });
     const generate = screen.getByRole('button', { name: 'Generate audio summary' });
     await waitFor(() => expect((generate as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText('Focus (optional)'), { target: { value: 'methods' } });
+    fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'beginner' } });
+    fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'long' } });
     fireEvent.change(screen.getByLabelText('Host A voice'), { target: { value: 'af_sarah' } });
     fireEvent.change(screen.getByLabelText('Host B voice'), { target: { value: 'am_eric' } });
     fireEvent.click(screen.getByRole('button', { name: 'Preview Host A voice' }));

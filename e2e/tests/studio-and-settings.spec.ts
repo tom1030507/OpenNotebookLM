@@ -44,10 +44,9 @@ test('renders a fallback mind map from ready source structure', async ({ api, pa
     (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/mindmap`
       && response.request().method() === 'POST',
   );
-  await page
-    .getByRole('complementary', { name: 'Studio' })
-    .getByRole('button', { name: 'Mind map', exact: true })
-    .click();
+  const studio = page.getByRole('complementary', { name: 'Studio' });
+  await studio.getByRole('button', { name: 'Mind map', exact: true }).click();
+  await studio.getByRole('button', { name: 'Generate mind map', exact: true }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(200);
   expect(await response.json()).toMatchObject({
@@ -96,7 +95,9 @@ test('explores a mind map and brings a question back to mobile chat', async ({ a
   await composer.fill('My existing question');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Open Studio panel', exact: true }).click();
-  await page.getByRole('complementary', { name: 'Studio' }).getByRole('button', { name: 'Mind map', exact: true }).click();
+  const studio = page.getByRole('complementary', { name: 'Studio' });
+  await studio.getByRole('button', { name: 'Mind map', exact: true }).click();
+  await studio.getByRole('button', { name: 'Generate mind map', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: /mind map$/ });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Expand all branches' }).click();
@@ -285,10 +286,9 @@ test('renders the silent fallback video summary', async ({ api, page }, testInfo
     (response) => response.url() === `${runtime.browserApiUrl}/projects/${project.id}/video-summary`
       && response.request().method() === 'POST',
   );
-  await page
-    .getByRole('complementary', { name: 'Studio' })
-    .getByRole('button', { name: 'Video summary', exact: true })
-    .click();
+  const studio = page.getByRole('complementary', { name: 'Studio' });
+  await studio.getByRole('button', { name: 'Video summary', exact: true }).click();
+  await studio.getByRole('button', { name: 'Generate video summary', exact: true }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(200);
   expect(await response.json()).toMatchObject({ model_used: 'fallback' });
