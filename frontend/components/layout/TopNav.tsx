@@ -20,6 +20,7 @@ import {
 import ExportDialog from '../ExportDialog';
 import ShareProjectDialog from '../ShareProjectDialog';
 import TopNavInfoDialog from './TopNavInfoDialog';
+import ChangePasswordForm from './ChangePasswordForm';
 import TrashDialog from './TrashDialog';
 import { useProjectDialog } from '../ProjectDialogProvider';
 import Settings from '../Settings';
@@ -414,6 +415,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
               ? 'You are viewing bundled sample data. Exit the offline demo and sign in to a backend for your own projects.'
               : 'Signed in to this server. Your projects and sources are visible only to this account.'}
           </p>
+          {!isOfflineDemoSession() && <ChangePasswordForm />}
         </TopNavInfoDialog>
       )}
 
