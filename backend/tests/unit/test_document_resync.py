@@ -91,6 +91,28 @@ def test_resync_of_unchanged_url_skips_chunking_and_embedding():
         engine.dispose()
 
 
+def test_a_first_import_is_not_reported_as_changed():
+    """#239: with no earlier content there is nothing it changed from."""
+    engine, db = make_db()
+    try:
+        document = db.get(Document, "source-1")
+        document.content_hash = None
+        db.commit()
+        service = make_service("first text", Chunker())
+
+        status = service.process_ingestion_job(
+            db, "source-1", "url", {"url": "https://example.com/source"},
+        )
+
+        document = db.get(Document, "source-1")
+        assert status == "ready"
+        assert document.last_sync_changed is None
+        assert document.last_synced_at is not None
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_resync_of_changed_url_updates_same_document_and_reindexes():
     engine, db = make_db()
     chunker = Chunker()

@@ -84,6 +84,23 @@ describe('source status', () => {
     expect(screen.getByText('Ready')).toBeTruthy();
   });
 
+  it('shows sync wording only for web sources and re-synced ones (#239)', () => {
+    const syncedAt = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const statusLine = (name: string) => screen.getByText(name).parentElement!.querySelector('p')!.textContent;
+    useStore.setState({
+      documents: [
+        { ...documentWith('ready'), id: 'upload', name: 'Uploaded paper', type: 'pdf', last_synced_at: syncedAt, last_sync_changed: null },
+        { ...documentWith('ready'), id: 'web', name: 'Web page', type: 'url', last_synced_at: syncedAt, last_sync_changed: null },
+        { ...documentWith('ready'), id: 'watched', name: 'Watched file', type: 'pdf', last_synced_at: syncedAt, last_sync_changed: true },
+      ],
+    });
+    renderPanel();
+
+    expect(statusLine('Uploaded paper')).toBe('Ready');
+    expect(statusLine('Web page')).toBe('Ready · synced 2 minutes ago');
+    expect(statusLine('Watched file')).toBe('Ready · synced 2 minutes ago · Changed');
+  });
+
   it('says a failed source failed, and why', () => {
     useStore.setState({
       documents: [
