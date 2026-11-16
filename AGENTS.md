@@ -35,7 +35,9 @@ Two traps in the layout:
 - `cd frontend && npm ci && npm run dev` starts Next.js. `npm run build` for a
   production build, `npm run lint` for ESLint.
 - `docker exec <backend-container> sh -lc "cd /app && python -m pytest tests -q"`
-  runs the backend suite.
+  runs the suite of the commit that image was built from. To test a checkout,
+  run the image with the checkout mounted, as the `backend` job in
+  `.github/workflows/ci.yml` does.
 - `cd frontend && npm test` runs vitest.
 
 **The backend suite needs the ML dependencies importable.** `app.services.embeddings`
@@ -111,10 +113,17 @@ checks you did.
 
 ## Working in Parallel
 
-Several agents share this checkout, and the backend container bind-mounts
-`backend/` — whatever branch is checked out is what runs. Work in a git worktree
-under `.worktrees/<name>` rather than switching the primary tree, and never
+Several agents share this checkout. Work in a git worktree under
+`.worktrees/<name>` rather than switching the primary tree, and never
 `git stash` a tree you did not dirty.
+
+The Compose backend runs the code baked into its image, whatever is checked
+out: it mounts only its `data`, `models` and `uploads` volumes and the watched
+folder, never `backend/`. A container built from an older commit keeps serving
+it, and a current frontend then gets 404s from routes that image lacks. Compare
+`docker inspect <backend-container> --format '{{.Created}}'` with the commits
+before trusting a UI failure, and run `docker compose up -d --build` to pick up
+backend changes.
 
 ## Commit & Pull Request Guidelines
 
