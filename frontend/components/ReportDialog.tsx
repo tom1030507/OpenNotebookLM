@@ -5,7 +5,9 @@ import { createPortal } from 'react-dom';
 import { BookmarkPlus, Check, Download, Loader2, X } from 'lucide-react';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import api from '@/lib/api';
-import type { ProjectReport, ReportFormat, StudioOutputOptions } from '@/lib/api';
+import type {
+  ProjectReport, ReportFormat, StudioAudience, StudioOutputLength,
+} from '@/lib/api';
 import { citationId } from '@/lib/citations';
 import MarkdownRenderer from './MarkdownRenderer';
 
@@ -21,7 +23,6 @@ interface ReportDialogProps {
   projectId: string;
   projectName: string;
   documentIds?: string[];
-  options?: StudioOutputOptions;
   onClose: () => void;
   onSave?: (markdown: string) => Promise<void>;
 }
@@ -30,7 +31,6 @@ export default function ReportDialog({
   projectId,
   projectName,
   documentIds,
-  options,
   onClose,
   onSave,
 }: ReportDialogProps) {
@@ -40,6 +40,11 @@ export default function ReportDialog({
   const titleId = useId();
   const [format, setFormat] = useState<ReportFormat>('briefing');
   const [instruction, setInstruction] = useState('');
+  // These lived in a separate Customize form before #243, so a report's
+  // options were split across two places.
+  const [focus, setFocus] = useState('');
+  const [audience, setAudience] = useState<StudioAudience>('general');
+  const [length, setLength] = useState<StudioOutputLength>('default');
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const [report, setReport] = useState<ProjectReport | null>(null);
@@ -80,7 +85,9 @@ export default function ReportDialog({
     setSaveState('idle');
     try {
       const result = await api.fetchProjectReport(projectId, {
-        ...options,
+        focus: focus.trim() || null,
+        audience,
+        length,
         format,
         ...(format === 'custom' ? { instruction: instruction.trim() } : {}),
         ...(documentIds === undefined ? {} : { document_ids: documentIds }),
@@ -191,6 +198,56 @@ export default function ReportDialog({
               </span>
             </label>
           )}
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              Audience
+              <select
+                value={audience}
+                disabled={saveState === 'saving'}
+                onChange={(event) => {
+                  invalidateReport();
+                  setAudience(event.target.value as StudioAudience);
+                }}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+              >
+                <option value="general">General</option>
+                <option value="beginner">Beginner</option>
+                <option value="expert">Expert</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              Length
+              <select
+                value={length}
+                disabled={saveState === 'saving'}
+                onChange={(event) => {
+                  invalidateReport();
+                  setLength(event.target.value as StudioOutputLength);
+                }}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+              >
+                <option value="short">Short</option>
+                <option value="default">Default</option>
+                <option value="long">Long</option>
+              </select>
+            </label>
+          </div>
+          <label className="mt-4 flex flex-col gap-1 text-sm font-medium">
+            Focus (optional)
+            <textarea
+              value={focus}
+              disabled={saveState === 'saving'}
+              onChange={(event) => {
+                invalidateReport();
+                setFocus(event.target.value);
+              }}
+              maxLength={500}
+              rows={2}
+              placeholder="Question or topic to focus on"
+              className="resize-y rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-normal"
+            />
+          </label>
 
           {noSources && (
             <p className="mt-4 text-sm text-[var(--muted-foreground)]">

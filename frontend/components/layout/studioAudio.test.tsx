@@ -69,6 +69,7 @@ async function clickAudioSummary() {
   const audio = screen.getByRole('button', { name: 'Audio summary' });
   await waitFor(() => expect((audio as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(audio);
+  fireEvent.click(await screen.findByRole('button', { name: 'Generate audio summary' }));
 }
 
 afterEach(() => {
@@ -86,7 +87,9 @@ describe('Studio audio summary', () => {
 
     await clickAudioSummary();
 
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('project-1', undefined));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(
+      'project-1', undefined, { focus: null, audience: 'general', length: 'default' },
+    ));
     await waitFor(() => expect(spoken).toHaveLength(1));
     expect(spoken[0].text).toContain('Research notes');
     expect(spoken[0].text).toContain('Example Domain');
@@ -199,11 +202,14 @@ describe('Studio audio summary', () => {
     vi.stubGlobal('speechSynthesis', undefined);
     render(<StudioPanel />);
 
-    await clickAudioSummary();
+    const row = screen.getByRole('button', { name: 'Audio summary' });
+    await waitFor(() => expect((row as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(row);
 
     const audio = screen.getByRole('button', { name: /^Audio summary/ });
     expect((audio as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect(audio.getAttribute('title')).toContain('Not supported in this browser'));
+    expect(screen.queryByRole('dialog', { name: 'Set up Audio summary' })).toBeNull();
   });
 
   it('surfaces a summary failure without leaving the control stuck', async () => {

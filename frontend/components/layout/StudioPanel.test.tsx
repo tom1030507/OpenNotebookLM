@@ -134,17 +134,33 @@ describe('StudioPanel', () => {
     }
   });
 
-  it('passes customized options to the selected generator', async () => {
+  it('opens options from every row instead of starting work (#243)', () => {
+    const fetchMap = vi.spyOn(api, 'fetchProjectMindMap');
+    const fetchVideo = vi.spyOn(api, 'fetchProjectVideoSummary');
+    render(<StudioPanel />);
+
+    expect(screen.queryByRole('button', { name: /^Customize/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+    expect(screen.getByRole('dialog', { name: 'Set up Mind map' })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText('Focus (optional)'));
+    fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
+    expect(screen.getByRole('dialog', { name: 'Set up Video summary' })).toBeTruthy();
+
+    expect(fetchMap).not.toHaveBeenCalled();
+    expect(fetchVideo).not.toHaveBeenCalled();
+  });
+
+  it('generates with the options chosen in the row form', async () => {
     const fetchMap = vi.spyOn(api, 'fetchProjectMindMap').mockResolvedValue(mindMapFor(projectA));
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Customize Mind map' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
     fireEvent.change(screen.getByLabelText('Focus (optional)'), {
       target: { value: 'Compare the methods' },
     });
     fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'beginner' } });
     fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'short' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate mind map' }));
 
     await waitFor(() => expect(fetchMap).toHaveBeenCalledWith('project-a', undefined, {
       focus: 'Compare the methods', audience: 'beginner', length: 'short',
@@ -152,30 +168,30 @@ describe('StudioPanel', () => {
     expect(window.localStorage.getItem('studio-output-options:project-a')).toContain('Compare the methods');
   });
 
-  it('passes customized options through the report dialog', async () => {
+  it('takes every report option in the report dialog', async () => {
     const fetchReport = vi.spyOn(api, 'fetchProjectReport').mockResolvedValue({
       markdown: '# Report', citations: [],
     });
     render(<StudioPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    await screen.findByRole('dialog', { name: `${projectA.name} report` });
+    fireEvent.change(screen.getByLabelText('Report format'), { target: { value: 'faq' } });
     fireEvent.change(screen.getByLabelText('Focus (optional)'), {
       target: { value: 'main findings' },
     });
     fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'expert' } });
     fireEvent.change(screen.getByLabelText('Length'), { target: { value: 'long' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
-    await screen.findByRole('dialog', { name: `${projectA.name} report` });
     fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
 
     await waitFor(() => expect(fetchReport).toHaveBeenCalledWith('project-a', {
-      focus: 'main findings', audience: 'expert', length: 'long', format: 'briefing',
+      focus: 'main findings', audience: 'expert', length: 'long', format: 'faq',
     }));
   });
 
-  it('remembers customization separately for each project', () => {
+  it('remembers the row form options separately for each project', () => {
     render(<StudioPanel />);
-    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
     fireEvent.change(screen.getByLabelText('Focus (optional)'), {
       target: { value: 'Methods for project A' },
     });
@@ -186,7 +202,7 @@ describe('StudioPanel', () => {
       currentProject: projectB,
       documents: [{ ...readyDocument, id: 'document-b' }],
     }));
-    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
     expect(screen.getByLabelText('Focus (optional)')).toHaveProperty('value', '');
     expect(screen.getByLabelText('Length')).toHaveProperty('value', 'default');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -195,7 +211,7 @@ describe('StudioPanel', () => {
       currentProject: projectA,
       documents: [readyDocument],
     }));
-    fireEvent.click(screen.getByRole('button', { name: 'Customize Report' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
     expect(screen.getByLabelText('Focus (optional)')).toHaveProperty('value', 'Methods for project A');
     expect(screen.getByLabelText('Length')).toHaveProperty('value', 'long');
   });
@@ -209,6 +225,8 @@ describe('StudioPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
+
     expect(await screen.findByRole('dialog', { name: `${viewerProject.name} mind map` })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Save to notes' })).toBeNull();
   });
@@ -221,6 +239,8 @@ describe('StudioPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate video summary' }));
+
     expect(await screen.findByText(/select fewer sources/i)).toBeTruthy();
   });
 
@@ -230,6 +250,8 @@ describe('StudioPanel', () => {
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
     await act(async () => {
       useStore.setState({
         currentProject: projectB,
@@ -263,6 +285,8 @@ describe('StudioPanel', () => {
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
     expect(await screen.findByRole('dialog', { name: `${projectA.name} mind map` })).toBeTruthy();
 
     flushSync(() => {
@@ -281,6 +305,8 @@ describe('StudioPanel', () => {
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
     expect(await screen.findByRole('dialog', { name: `${projectA.name} mind map` })).toBeTruthy();
 
     act(() => useStore.setState({ deselectedSources: { [projectA.id]: [readyDocument.id] } }));
@@ -293,6 +319,8 @@ describe('StudioPanel', () => {
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Video summary' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate video summary' }));
     expect(await screen.findByRole('dialog', { name: `${projectA.name} video summary` })).toBeTruthy();
 
     flushSync(() => {
@@ -345,6 +373,8 @@ describe('StudioPanel', () => {
     render(<StudioPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Mind map' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
     await screen.findByRole('dialog', { name: `${projectA.name} mind map` });
     fireEvent.click(screen.getByRole('button', { name: 'Save to notes' }));
 

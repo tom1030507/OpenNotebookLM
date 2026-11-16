@@ -9,13 +9,12 @@ import api, {
   type AudioOverviewFormat,
   type AudioOverviewLength,
   type AudioOverviewVoice,
-  type StudioOutputOptions,
+  type StudioAudience,
 } from '@/lib/api';
 
 interface AudioOverviewDialogProps {
   projectId: string;
   documentIds?: string[];
-  initialOptions?: StudioOutputOptions;
   onClose: () => void;
 }
 
@@ -29,7 +28,6 @@ const statusLabel: Record<AudioOverview['status'], string> = {
 export default function AudioOverviewDialog({
   projectId,
   documentIds,
-  initialOptions,
   onClose,
 }: AudioOverviewDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -37,9 +35,9 @@ export default function AudioOverviewDialog({
   const audioRef = useRef<HTMLAudioElement>(null);
   const titleId = useId();
   const [format, setFormat] = useState<AudioOverviewFormat>('deep_dive');
-  const [length, setLength] = useState<AudioOverviewLength>(initialOptions?.length ?? 'default');
-  const [audience, setAudience] = useState(initialOptions?.audience ?? 'general');
-  const [focus, setFocus] = useState(initialOptions?.focus ?? '');
+  const [length, setLength] = useState<AudioOverviewLength>('default');
+  const [audience, setAudience] = useState<StudioAudience>('general');
+  const [focus, setFocus] = useState('');
   const [voiceA, setVoiceA] = useState<AudioOverviewVoice>('af_heart');
   const [voiceB, setVoiceB] = useState<AudioOverviewVoice>('am_adam');
   const [voices, setVoices] = useState<AudioOverviewVoice[]>([]);

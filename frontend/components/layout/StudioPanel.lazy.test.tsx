@@ -80,6 +80,7 @@ describe('StudioPanel lazy dialogs', () => {
 
     const mindMapButton = screen.getByRole('button', { name: 'Mind map' });
     fireEvent.click(mindMapButton);
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate mind map' }));
 
     expect(await screen.findByRole('status', { name: 'Loading studio result' })).toBeTruthy();
     expect((mindMapButton as HTMLButtonElement).disabled).toBe(true);

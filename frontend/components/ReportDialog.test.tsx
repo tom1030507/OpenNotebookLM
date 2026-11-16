@@ -79,6 +79,9 @@ describe('ReportDialog', () => {
 
     expect(await screen.findByRole('button', { name: 'Preview source 1' })).toBeTruthy();
     expect(api.fetchProjectReport).toHaveBeenCalledWith('project-1', {
+      focus: null,
+      audience: 'general',
+      length: 'default',
       format: 'custom',
       instruction: 'Explain the main finding',
       document_ids: ['doc-1'],
