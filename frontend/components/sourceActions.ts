@@ -1,4 +1,4 @@
-import { ApiError } from '@/lib/api';
+import { ApiError, type Document } from '@/lib/api';
 
 export type AddSourcesOpenChange = (isOpen: boolean) => void;
 
@@ -34,6 +34,22 @@ export async function closeAddSourcesAfterSuccessfulUpload(
   await uploadSources();
   onAddSourcesOpenChange(false);
 }
+
+
+/**
+ * Files the project already holds, judged by the name and size recorded at
+ * upload. A content hash would be exact, but the server has none for the
+ * file itself; name and size together are what a person would compare.
+ *
+ * @param files Files about to be uploaded.
+ * @param documents The project's current sources.
+ * @returns The files that match an existing source.
+ */
+export const findDuplicateFiles = (files: File[], documents: Document[]): File[] => (
+  files.filter((file) => documents.some((document) => (
+    document.meta?.filename === file.name && document.meta?.file_size === file.size
+  )))
+);
 
 
 /**

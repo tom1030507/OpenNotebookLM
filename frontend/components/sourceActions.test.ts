@@ -2,7 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/lib/api';
 
-import { uploadFilesInTurn } from './sourceActions';
+import { findDuplicateFiles, uploadFilesInTurn } from './sourceActions';
+import type { Document } from '@/lib/api';
+
+describe('findDuplicateFiles (#240)', () => {
+  const source = (filename: string, size: number) => ({
+    id: filename, name: filename, meta: { filename, file_size: size },
+  }) as unknown as Document;
+
+  it('matches a file by its recorded name and size', () => {
+    const same = new File(['abc'], 'paper.pdf');
+    const renamedCopy = new File(['abc'], 'paper (1).pdf');
+    const sameNameNewVersion = new File(['abcd'], 'paper.pdf');
+
+    expect(findDuplicateFiles([same, renamedCopy, sameNameNewVersion], [source('paper.pdf', 3)]))
+      .toEqual([same]);
+  });
+});
 
 const files = (...names: string[]) => names.map((name) => new File(['x'], name));
 const busy = (retryAfter?: number) => new ApiError(429, 'Too many concurrent operations', retryAfter);

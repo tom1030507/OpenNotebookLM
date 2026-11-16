@@ -406,6 +406,62 @@ describe('project actions', () => {
 });
 
 
+describe('adding a file the project already has (#240)', () => {
+  const existing: Document = {
+    id: 'document-1',
+    name: 'paper.pdf',
+    type: 'pdf',
+    isOwnedByCaller: true,
+    content: '',
+    meta: { filename: 'paper.pdf', file_size: 3 },
+    status: 'ready',
+    created_at: '2026-08-12T00:00:00Z',
+    updated_at: '2026-08-12T00:00:00Z',
+    chunk_count: 1,
+  };
+
+  const chooseAndUpload = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Add Source' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add Source' });
+    await within(dialog).findByText(/^Supported file types: /);
+    fireEvent.change(dialog.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: {
+        files: [
+          new File(['abc'], 'paper.pdf', { type: 'application/pdf' }),
+          new File(['other'], 'notes.pdf', { type: 'application/pdf' }),
+        ],
+      },
+    });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Upload 2 file(s)' }));
+  };
+
+  it('skips the duplicate when asked to and uploads the rest', async () => {
+    // The shared setup stubs the store's upload, so the spy goes there.
+    const upload = vi.fn<(projectId: string, file: File) => Promise<undefined>>(async () => undefined);
+    useStore.setState({ documents: [existing], uploadDocument: upload });
+    render(<SourceWorkspace />);
+
+    await chooseAndUpload();
+    await answerDialog('"paper.pdf" is already in this project', 'Skip');
+
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    expect(upload.mock.calls[0][1].name).toBe('notes.pdf');
+  });
+
+  it('adds it again when the reader insists', async () => {
+    // The shared setup stubs the store's upload, so the spy goes there.
+    const upload = vi.fn<(projectId: string, file: File) => Promise<undefined>>(async () => undefined);
+    useStore.setState({ documents: [existing], uploadDocument: upload });
+    render(<SourceWorkspace />);
+
+    await chooseAndUpload();
+    await answerDialog('"paper.pdf" is already in this project', 'Add anyway');
+
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+  });
+});
+
+
 describe('source trash action', () => {
   it('moves an owned source to Trash and refreshes the project source list', async () => {
     const source: Document = {

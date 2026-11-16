@@ -47,6 +47,7 @@ import api, {
 } from '@/lib/api';
 import {
   closeAddSourcesAfterSuccessfulUpload,
+  findDuplicateFiles,
   requestAddSources,
   uploadFilesInTurn,
 } from '../sourceActions';
@@ -344,8 +345,27 @@ export default function SourcesPanel({
       return result;
     }
 
+    let files = items as File[];
+    const duplicates = findDuplicateFiles(files, documents);
+    if (duplicates.length) {
+      const addAnyway = await confirmAction(duplicates.length === 1
+        ? {
+          title: `"${duplicates[0].name}" is already in this project`,
+          message: 'Adding it again creates a second, identical source.',
+          confirmLabel: 'Add anyway',
+          cancelLabel: 'Skip',
+        }
+        : {
+          title: `${duplicates.length} files are already in this project`,
+          message: `${duplicates.map((file) => file.name).join(', ')}. Adding them again creates identical sources.`,
+          confirmLabel: 'Add anyway',
+          cancelLabel: 'Skip them',
+        });
+      if (!addAnyway) files = files.filter((file) => !duplicates.includes(file));
+    }
+
     const outcome = await uploadFilesInTurn(
-      items as File[],
+      files,
       (file) => uploadDocument(projectId, file),
     );
     if (
