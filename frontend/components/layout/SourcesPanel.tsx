@@ -707,28 +707,30 @@ export default function SourcesPanel({
             )}
           </div>
         </div>
-        {/* Overlay actions save filename width until pointer or keyboard focus needs them. */}
-        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-[var(--muted)] pl-1 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100">
+        {/* Overlay actions save filename width until pointer or keyboard focus
+            needs them. A touch screen has no hover to reveal them, so there they
+            sit on a line of their own, always shown (#250). */}
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-[var(--muted)] pl-1 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:static pointer-coarse:mt-1 pointer-coarse:justify-end pointer-coarse:bg-transparent pointer-coarse:opacity-100">
           <button
             onClick={(event) => {
               event.stopPropagation();
               setPreviewCitation(null);
               setPreviewDocument(doc);
             }}
-            className="p-1 hover:bg-[var(--card)] rounded"
+            className="flex h-6 w-6 items-center justify-center hover:bg-[var(--card)] rounded"
             aria-label="Preview document"
             title="Preview document"
           >
-            <Eye className="w-3 h-3" />
+            <Eye className="w-3.5 h-3.5" />
           </button>
           {doc.isOwnedByCaller && (
             <button
               onClick={(event) => { event.stopPropagation(); void handleRenameDocument(doc); }}
-              className="p-1 hover:bg-[var(--muted)] rounded"
+              className="flex h-6 w-6 items-center justify-center hover:bg-[var(--card)] rounded"
               aria-label="Rename document"
               title="Rename document"
             >
-              <Pencil className="w-3 h-3" />
+              <Pencil className="w-3.5 h-3.5" />
             </button>
           )}
           {canManageSources && (doc.type === 'url' || doc.type === 'youtube') && (
@@ -736,25 +738,25 @@ export default function SourcesPanel({
               type="button"
               onClick={(event) => { event.stopPropagation(); void handleResyncDocument(doc.id); }}
               disabled={Boolean(resyncingDocumentId) || ['queued', 'processing', 'transcribing'].includes(doc.status)}
-              className="p-1 hover:bg-[var(--card)] rounded disabled:opacity-50"
+              className="flex h-6 w-6 items-center justify-center hover:bg-[var(--card)] rounded disabled:opacity-50"
               aria-label="Re-sync source"
               title="Re-sync source"
             >
               {resyncingDocumentId === doc.id
-                ? <Loader2 className="w-3 h-3 animate-spin" />
-                : <RefreshCw className="w-3 h-3" />}
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <RefreshCw className="w-3.5 h-3.5" />}
             </button>
           )}
           {canManageSources && (
             <button
                 onClick={(event) => { event.stopPropagation(); void handleDeleteDocument(doc); }}
-              className="p-1 hover:bg-[var(--card)] rounded"
+              className="flex h-6 w-6 items-center justify-center hover:bg-[var(--card)] rounded"
                 aria-label={doc.isOwnedByCaller ? 'Move source to Trash' : 'Remove source'}
                 title={doc.isOwnedByCaller ? 'Move source to Trash' : 'Remove source'}
             >
               {doc.isOwnedByCaller
-                ? <Trash2 aria-hidden="true" className="w-3 h-3" />
-                : <X aria-hidden="true" className="w-3 h-3" />}
+                ? <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />
+                : <X aria-hidden="true" className="w-3.5 h-3.5" />}
             </button>
           )}
         </div>

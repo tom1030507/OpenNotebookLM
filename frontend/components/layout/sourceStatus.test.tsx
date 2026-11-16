@@ -114,6 +114,20 @@ describe('source status', () => {
     expect(screen.queryByText('error')).toBeNull();
   });
 
+  it('gives source actions 24px targets that a touch screen shows (#250)', () => {
+    useStore.setState({ documents: [documentWith('ready')] });
+    renderPanel();
+
+    const actions = ['Preview document', 'Rename document', 'Re-sync source', 'Move source to Trash']
+      .map((name) => screen.getByRole('button', { name }));
+    // jsdom applies no CSS, so the classes are what can be checked here; the
+    // browser check measures the rendered size and opacity.
+    for (const action of actions) {
+      expect(action.className).toContain('h-6 w-6');
+    }
+    expect(actions[0].parentElement?.className).toContain('pointer-coarse:opacity-100');
+  });
+
   it('still says a source failed when the backend gave no reason', () => {
     useStore.setState({ documents: [documentWith('error')] });
     renderPanel();
