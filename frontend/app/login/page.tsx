@@ -43,17 +43,6 @@ export default function LoginPage() {
     };
   }, []);
 
-  const fillWithDemoAccount = () => {
-    if (!demoAccount) {
-      return;
-    }
-    setFormData((current) => ({
-      ...current,
-      username: demoAccount.username,
-      password: demoAccount.password,
-    }));
-    setError('');
-  };
   
   // Form data
   const [formData, setFormData] = useState({
@@ -74,11 +63,12 @@ export default function LoginPage() {
     enterWorkspace(OFFLINE_DEMO_TOKEN, { username: 'demo', email: 'demo@example.com' });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Shared by the form and "Use demo account", which signs in directly: a
+  // button that only filled the fields left a first-time visitor wondering why
+  // nothing happened (#235).
+  const signIn = async (username: string, password: string) => {
     setError('');
     setLoading(true);
-
     try {
       // Signing in from a demo tab is a deliberate account transition, not a
       // request to authenticate with the preview's frontend-only identity.
@@ -86,50 +76,19 @@ export default function LoginPage() {
         useStore.getState().clearAccountState();
         clearSession();
       }
-      if (isLogin) {
-        const { access_token: accessToken } = await api.login({
-          username: formData.username,
-          password: formData.password,
-        });
+      const { access_token: accessToken } = await api.login({ username, password });
 
-        // The token only carries the username, so ask the backend for the
-        // account the workspace displays. A hiccup here must not block sign-in.
-        const account = await api.getAccount(accessToken).catch(() => null);
+      // The token only carries the username, so ask the backend for the
+      // account the workspace displays. A hiccup here must not block sign-in.
+      const account = await api.getAccount(accessToken).catch(() => null);
 
-        enterWorkspace(accessToken, {
-          username: account?.username || formData.username,
-          email: account?.email || '',
-        });
-      } else {
-        if (formData.password !== formData.confirmPassword) {
-          throw new Error('Passwords do not match');
-        }
-
-        await api.register({
-          username: formData.username,
-          email: formData.email,
-          password: formData.password,
-        });
-
-        try {
-          const { access_token: accessToken } = await api.login({
-            username: formData.username,
-            password: formData.password,
-          });
-          enterWorkspace(accessToken, {
-            username: formData.username,
-            email: formData.email,
-          });
-        } catch {
-          // The account exists; only the follow-up sign-in failed.
-          setIsLogin(true);
-          setError('Registration successful! Please login.');
-        }
-      }
+      enterWorkspace(accessToken, {
+        username: account?.username || username,
+        email: account?.email || '',
+      });
     } catch (err: unknown) {
-      const demoCandidate = isLogin
-        && formData.username === OFFLINE_DEMO_CREDENTIALS.username
-        && formData.password === OFFLINE_DEMO_CREDENTIALS.password;
+      const demoCandidate = username === OFFLINE_DEMO_CREDENTIALS.username
+        && password === OFFLINE_DEMO_CREDENTIALS.password;
       const unavailable = err instanceof TypeError
         || ((err instanceof Error || err instanceof DOMException) && err.name === 'AbortError')
         || (err instanceof ApiError && [500, 502, 503, 504].includes(err.status));
@@ -142,6 +101,64 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  const signInWithDemoAccount = () => {
+    if (!demoAccount) {
+      return;
+    }
+    setFormData((current) => ({
+      ...current,
+      username: demoAccount.username,
+      password: demoAccount.password,
+    }));
+    void signIn(demoAccount.username, demoAccount.password);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLogin) {
+      await signIn(formData.username, formData.password);
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+    try {
+      if (isOfflineDemoSession()) {
+        useStore.getState().clearAccountState();
+        clearSession();
+      }
+      if (formData.password !== formData.confirmPassword) {
+        throw new Error('Passwords do not match');
+      }
+
+      await api.register({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password,
+      });
+
+      try {
+        const { access_token: accessToken } = await api.login({
+          username: formData.username,
+          password: formData.password,
+        });
+        enterWorkspace(accessToken, {
+          username: formData.username,
+          email: formData.email,
+        });
+      } catch {
+        // The account exists; only the follow-up sign-in failed.
+        setIsLogin(true);
+        setError('Registration successful! Please login.');
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -188,7 +205,7 @@ export default function LoginPage() {
               </div>
               <button
                 type="button"
-                onClick={fillWithDemoAccount}
+                onClick={signInWithDemoAccount}
                 className="mt-3 w-full py-1.5 px-3 rounded-md border border-[var(--border)] text-sm font-medium text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
               >
                 Use demo account
