@@ -368,9 +368,13 @@ describe('DocumentPreview', () => {
       value: 0,
     });
 
-    fireEvent.loadedMetadata(player!);
-
-    await waitFor(() => expect(player?.currentTime).toBe(42));
+    // The listener is attached by an effect that can run after the element is
+    // found, so a single event can arrive first and be lost. Fire it until the
+    // seek lands, as metadata loading does in a browser.
+    await waitFor(() => {
+      fireEvent.loadedMetadata(player!);
+      expect(player?.currentTime).toBe(42);
+    });
     expect(fetchFile).toHaveBeenCalledWith('document-1');
   });
 
