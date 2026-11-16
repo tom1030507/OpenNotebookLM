@@ -56,6 +56,7 @@ def project_documents(
     project: Project,
     document_ids: Optional[List[str]] = None,
     limit: Optional[int] = None,
+    ready_only: bool = False,
 ) -> List[Document]:
     """List the documents attached to a project, in a stable order.
 
@@ -64,6 +65,9 @@ def project_documents(
         project: The project.
         document_ids: Optional subset to keep; `None` keeps every document.
         limit: Optional maximum number of ordered documents to load.
+        ready_only: Keep only documents that finished processing. Applied
+            in the query, so with `limit` a failed or pending document cannot
+            take the place of a ready one.
 
     Returns:
         The documents. Ordered by title after `added_at`, because `added_at`
@@ -73,6 +77,8 @@ def project_documents(
     query = ProjectService.project_document_query(db, project.id)
     if document_ids is not None:
         query = query.filter(Document.id.in_(document_ids))
+    if ready_only:
+        query = query.filter(Document.status == "ready")
     query = query.order_by(
         ProjectDocument.added_at,
         Document.title,

@@ -141,6 +141,28 @@ def test_each_source_gets_a_scene(two_projects_with_own_documents):
     assert sources[0]["document_id"] == "document-a"
 
 
+def test_a_failed_source_is_not_counted_or_given_a_scene(two_projects_with_own_documents):
+    """The title counts the sources narrated, not the ones that failed (#244)."""
+    with TestingSessionLocal() as db:
+        db.add(Document(
+            id="document-failed",
+            user_id=owner_id(db),
+            title="Scanned Without Text",
+            source_type="pdf",
+            status="failed",
+        ))
+        db.flush()
+        db.add(ProjectDocument(project_id="project-a", document_id="document-failed"))
+        db.commit()
+
+    body = client.post("/api/projects/project-a/video-summary").json()
+
+    sources = [scene for scene in body["scenes"] if scene["kind"] == "source"]
+    assert [scene["document_id"] for scene in sources] == ["document-a"]
+    assert "1 source" in body["scenes"][0]["narration"]
+    assert "2 sources" not in body["scenes"][0]["narration"]
+
+
 def test_another_projects_sources_are_absent(two_projects_with_own_documents):
     """A summary must not leak a sibling project's sources."""
     assert "Only In B" not in client.post(
