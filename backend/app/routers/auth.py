@@ -24,7 +24,11 @@ from app.services.api_keys import (
 )
 from app.services.auth import AuthService, DuplicateUserError, get_auth_service
 from app.services.bootstrap import advertised_demo_account
-from app.routers.rate_limit import limit_login, limit_registration
+from app.routers.rate_limit import (
+    limit_demo_account_lookup,
+    limit_login,
+    limit_registration,
+)
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -275,7 +279,7 @@ async def delete_api_key(
 @router.get(
     "/auth/demo-account",
     response_model=DemoAccountResponse,
-    dependencies=[Depends(limit_login)],
+    dependencies=[Depends(limit_demo_account_lookup)],
 )
 async def get_demo_account(
     db: Session = Depends(get_db),
