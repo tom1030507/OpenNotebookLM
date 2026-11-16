@@ -1092,6 +1092,14 @@ const api = {
     });
   },
 
+  /** Replace the signed-in account's password; the current one is checked first. */
+  changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    return requestJson<void>('/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+  },
+
   createPersonalApiKey(name: string): Promise<PersonalAPIKeyCreated> {
     return requestJson<PersonalAPIKeyCreated>('/auth/api-keys', {
       method: 'POST',

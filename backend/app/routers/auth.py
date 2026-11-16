@@ -9,6 +9,7 @@ from app.config import Settings, get_settings
 from app.db.models import User
 from app.schemas import (
     DemoAccountResponse,
+    PasswordChange,
     PersonalAPIKeyCreate,
     PersonalAPIKeyCreatedResponse,
     PersonalAPIKeyResponse,
@@ -25,10 +26,13 @@ from app.services.api_keys import (
 from app.services.auth import AuthService, DuplicateUserError, get_auth_service
 from app.services.bootstrap import advertised_demo_account
 from app.routers.rate_limit import (
+    enforce_account_rate_limit,
+    get_rate_limiter,
     limit_demo_account_lookup,
     limit_login,
     limit_registration,
 )
+from app.services.rate_limit import SlidingWindowRateLimiter
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -197,6 +201,54 @@ async def login(
 async def get_me(current_user: User = Depends(get_current_user)):
     """Return the account the presented token belongs to."""
     return current_user
+
+
+@router.post("/auth/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    change: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    auth_service: AuthService = Depends(get_auth_service),
+    limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
+    settings: Settings = Depends(get_settings),
+):
+    """Replace the caller's password after checking the current one (#248).
+
+    Args:
+        change: Current and new password.
+        db: Database session the caller's account was loaded in.
+        current_user: Signed-in account.
+        auth_service: Password hashing service.
+        limiter: Shared request limiter.
+        settings: Demo-account and rate-limit settings.
+
+    Returns:
+        An empty 204 response once the new password is stored.
+
+    Raises:
+        HTTPException: 403 for the shared demo account, 400 for a wrong
+            current password, 429 past ten attempts a minute.
+    """
+    if settings.rate_limit_enabled:
+        # A stolen session must not become an unlimited password oracle.
+        enforce_account_rate_limit(limiter, "password-change", current_user.id, 10, 60)
+    if settings.seed_demo_user and current_user.username == settings.demo_username:
+        # The sign-in page publishes this password; one visitor changing it
+        # would lock every other visitor out of the demo.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The demo account is shared, so its password cannot be changed.",
+        )
+    # 400, not 401: a 401 would read as an expired session and sign the caller out.
+    if not auth_service.verify_password(change.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The current password is incorrect.",
+        )
+    current_user.hashed_password = auth_service.hash_password(change.new_password)
+    db.commit()
+    logger.info("Password changed", user_id=current_user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

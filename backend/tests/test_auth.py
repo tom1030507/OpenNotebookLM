@@ -558,3 +558,95 @@ def test_demo_account_hint_is_withheld_when_the_account_is_absent():
         app.dependency_overrides.pop(get_settings, None)
 
     assert response.json() == {"enabled": False, "username": None, "password": None}
+
+
+def change_password(token, current_password, new_password):
+    """Ask the API to replace the signed-in account's password."""
+    return client.post(
+        "/api/auth/password",
+        json={"current_password": current_password, "new_password": new_password},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+def test_password_change_replaces_the_old_password():
+    """After a change only the new password signs in (#248)."""
+    register("pat")
+    token = get_token("pat").json()["access_token"]
+
+    response = change_password(token, "correct-horse", "battery-staple")
+
+    assert response.status_code == 204
+    assert get_token("pat", "correct-horse").status_code == 401
+    assert get_token("pat", "battery-staple").status_code == 200
+
+
+def test_password_change_requires_the_current_password():
+    """A wrong current password changes nothing, and is not a 401 sign-out."""
+    register("quinn")
+    token = get_token("quinn").json()["access_token"]
+
+    response = change_password(token, "not-my-password", "battery-staple")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "The current password is incorrect."
+    assert get_token("quinn").status_code == 200
+
+
+def test_password_change_applies_the_sign_up_rules():
+    """Too short, or too long for bcrypt once encoded, is refused like at sign-up."""
+    register("riley")
+    token = get_token("riley").json()["access_token"]
+
+    assert change_password(token, "correct-horse", "short").status_code == 422
+    # Forty characters, eighty UTF-8 bytes: past what bcrypt would read.
+    assert change_password(token, "correct-horse", "é" * 40).status_code == 422
+    assert get_token("riley").status_code == 200
+
+
+def test_password_change_needs_a_signed_in_caller():
+    """The route is behind the same token check as every account route."""
+    response = client.post(
+        "/api/auth/password",
+        json={"current_password": "correct-horse", "new_password": "battery-staple"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_the_shared_demo_account_password_cannot_be_changed():
+    """One visitor must not lock everyone else out of a published demo account."""
+    with TestingSessionLocal() as db:
+        test_auth_service.register_user(
+            db, "demo-shared", "demo-shared@example.com", "demo1234"
+        )
+    token = get_token("demo-shared", "demo1234").json()["access_token"]
+    app.dependency_overrides[get_settings] = lambda: demo_settings(
+        demo_username="demo-shared",
+        demo_email="demo-shared@example.com",
+    )
+    try:
+        response = change_password(token, "demo1234", "taken-over-1")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 403
+    assert get_token("demo-shared", "demo1234").status_code == 200
+
+
+def test_eleventh_password_change_attempt_in_a_minute_returns_429():
+    """A stolen session cannot guess the current password without limit."""
+    register("sam")
+    token = get_token("sam").json()["access_token"]
+    limiter = SlidingWindowRateLimiter()
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    try:
+        responses = [
+            change_password(token, "guess-%d" % attempt, "battery-staple")
+            for attempt in range(11)
+        ]
+    finally:
+        app.dependency_overrides[get_rate_limiter] = lambda: disabled_rate_limiter
+
+    assert [response.status_code for response in responses[:10]] == [400] * 10
+    assert responses[-1].status_code == 429

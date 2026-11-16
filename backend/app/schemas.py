@@ -30,6 +30,23 @@ EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 MAX_DOCUMENT_SELECTION = 500
 
 
+def _password_fits_bcrypt(password: str) -> str:
+    """Reject a password whose UTF-8 form exceeds bcrypt's 72-byte cap.
+
+    Args:
+        password: Password that already passed the character-length check.
+
+    Returns:
+        The password unchanged when its encoded size is safe.
+
+    Raises:
+        ValueError: If UTF-8 encoding exceeds bcrypt's 72-byte boundary.
+    """
+    if len(password.encode("utf-8")) > 72:
+        raise ValueError("Password must be at most 72 UTF-8 bytes")
+    return password
+
+
 class UserRegister(BaseModel):
     """Schema for registering an account."""
     username: str = Field(..., min_length=3, max_length=64)
@@ -52,9 +69,26 @@ class UserRegister(BaseModel):
         Raises:
             ValueError: If UTF-8 encoding exceeds bcrypt's 72-byte boundary.
         """
-        if len(password.encode("utf-8")) > 72:
-            raise ValueError("Password must be at most 72 UTF-8 bytes")
-        return password
+        return _password_fits_bcrypt(password)
+
+
+class PasswordChange(BaseModel):
+    """Replace the signed-in account's password; the new one follows sign-up's rules."""
+    current_password: str = Field(..., min_length=1, max_length=72)
+    new_password: str = Field(..., min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def new_password_must_fit_bcrypt(cls, password: str) -> str:
+        """Reject Unicode passwords whose UTF-8 form exceeds bcrypt's cap.
+
+        Args:
+            password: Validated new password.
+
+        Returns:
+            The password unchanged when its encoded size is safe.
+        """
+        return _password_fits_bcrypt(password)
 
 
 class UserResponse(BaseModel):

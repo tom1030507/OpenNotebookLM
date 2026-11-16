@@ -368,6 +368,7 @@ for local development only.
 | --- | --- |
 | Sign-in | 10 a minute per username, 100 a minute per address |
 | Registration | 3 an hour per address |
+| Password change | 10 a minute per account |
 | Demo-account hint on the sign-in page | 120 a minute per address |
 | Importing sources (files, URLs, text, notes as sources) | 10 a minute and 2 at a time per account |
 | Questions | 30 a minute and 2 at a time per account |
