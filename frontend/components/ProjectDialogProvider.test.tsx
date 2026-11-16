@@ -105,6 +105,7 @@ describe('project covers and duplication', () => {
     useStore.setState({ projects: [original], currentProject: original });
     renderProjectCreationTriggers();
 
+    await user.click(await screen.findByRole('button', { name: 'Project actions' }));
     await user.click(await screen.findByRole('button', { name: 'Edit Project' }));
     expect(screen.getByRole('dialog', { name: 'Edit Project' })).not.toBeNull();
     await user.clear(screen.getByLabelText('Project Name'));
@@ -132,6 +133,7 @@ describe('project covers and duplication', () => {
     useStore.setState({ projects: [original], currentProject: original });
     renderProjectCreationTriggers();
 
+    await user.click(await screen.findByRole('button', { name: 'Project actions' }));
     await user.click(await screen.findByRole('button', { name: 'Duplicate Project' }));
 
     await waitFor(() => expect(useStore.getState().currentProject?.id).toBe(duplicate.id));

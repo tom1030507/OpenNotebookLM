@@ -169,9 +169,27 @@ describe('Add Sources controls', () => {
     expect(screen.getByRole('dialog', { name: 'Add Source' })).not.toBeNull();
   });
 
+  it('keeps project actions in a menu that Escape and outside clicks close', () => {
+    render(<SourceWorkspace />);
+    const trigger = screen.getByRole('button', { name: 'Project actions' });
+    expect(screen.queryByRole('menu', { name: 'Project actions' })).toBeNull();
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu', { name: 'Project actions' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('menu', { name: 'Project actions' })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('menu', { name: 'Project actions' })).toBeNull();
+  });
+
   it('keeps viewers read-only while editors can add sources and change chat settings', () => {
     const { rerender } = render(<SourceWorkspace />);
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
     expect(screen.getByRole('button', { name: 'Analytics' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
 
     const viewer = { ...currentProject, role: 'viewer' as const };
     useStore.setState({ projects: [viewer], currentProject: viewer });
@@ -184,6 +202,7 @@ describe('Add Sources controls', () => {
     expect(screen.queryByRole('button', { name: 'Move Project to Trash' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Analytics' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Project actions' })).toBeNull();
     const editor = { ...currentProject, role: 'editor' as const };
     act(() => useStore.setState({ projects: [editor], currentProject: editor }));
     rerender(<SourceWorkspace />);
@@ -193,6 +212,7 @@ describe('Add Sources controls', () => {
     expect(screen.queryByRole('button', { name: 'Move Project to Trash' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Duplicate Project' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Analytics' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Project actions' })).toBeNull();
   });
 
   it('focuses the close button, closes with Escape, and restores focus to the opener', () => {
@@ -331,6 +351,7 @@ describe('project actions', () => {
     const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
     render(<SourceWorkspace />);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
 
     expect(confirmDelete).toHaveBeenCalledWith(
@@ -347,6 +368,7 @@ describe('project actions', () => {
     const deleteProject = vi.spyOn(api, 'deleteProject').mockResolvedValue(undefined);
     render(<SourceWorkspace />);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
 
     await waitFor(() => expect(deleteProject).toHaveBeenCalledWith(currentProject.id));
@@ -364,6 +386,7 @@ describe('project actions', () => {
     );
     render(<SourceWorkspace />);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Project to Trash' }));
 
     expect(await screen.findByRole('alert')).not.toBeNull();
