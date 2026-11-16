@@ -392,7 +392,7 @@ def test_summary_service_rejects_more_sources_than_export_supports(monkeypatch):
     """An oversized script fails before Studio can show a non-exportable result."""
     documents = [FakeDocument("doc-%d" % index, "Source") for index in range(1001)]
 
-    def load_limited_documents(_db, _project, _document_ids=None, limit=None):
+    def load_limited_documents(_db, _project, _document_ids=None, limit=None, ready_only=False):
         assert limit == MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 1
         return documents
 
@@ -744,7 +744,9 @@ class TestConcurrentGeneration:
         )
         monkeypatch.setattr(
             "app.services.video_summary.project_documents",
-            lambda db, project, document_ids=None, limit=None: documents[project.name],
+            lambda db, project, document_ids=None, limit=None, ready_only=False: (
+                documents[project.name]
+            ),
         )
 
         with ThreadPoolExecutor(max_workers=2) as pool:

@@ -343,11 +343,14 @@ class VideoSummaryService:
             them, when they were built, and how long they take to play.
         """
         options = options or StudioOptions()
+        # A failed source has no text to narrate; counting it made the title
+        # scene claim more sources than the mind map and Sources panel (#244).
         documents = project_documents(
             db,
             project,
             document_ids,
             limit=6 if options.length == "short" else MAX_VIDEO_SUMMARY_PPTX_SOURCE_SCENES + 1,
+            ready_only=True,
         )
         if options.length == "short":
             documents = documents[:6]
