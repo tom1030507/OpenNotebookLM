@@ -68,7 +68,7 @@ function ActiveDialog({ request }: { request: DialogRequest }) {
             ref={request.kind === 'confirm' ? firstFieldRef : undefined}
             className="h-9 rounded-md border border-[var(--input)] px-3 text-sm hover:bg-[var(--muted)]"
           >
-            Cancel
+            {request.kind === 'confirm' && request.cancelLabel ? request.cancelLabel : 'Cancel'}
           </button>
           <button
             type="submit"

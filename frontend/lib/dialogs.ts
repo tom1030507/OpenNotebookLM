@@ -14,6 +14,7 @@ interface ConfirmRequest {
   title: string;
   message?: string;
   confirmLabel: string;
+  cancelLabel?: string;
   danger?: boolean;
   resolve: (confirmed: boolean) => void;
 }
@@ -68,6 +69,7 @@ export const confirmAction = (options: {
   title: string;
   message?: string;
   confirmLabel: string;
+  cancelLabel?: string;
   danger?: boolean;
 }): Promise<boolean> => new Promise((resolve) => {
   open({ kind: 'confirm', ...options, resolve });
