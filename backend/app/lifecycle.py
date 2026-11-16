@@ -2,6 +2,8 @@
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+import threading
+from time import perf_counter
 
 from fastapi import FastAPI
 import structlog
@@ -55,6 +57,36 @@ async def _purge_trash_periodically(session_factory, retention_days: int) -> Non
     while True:
         await asyncio.sleep(TRASH_PURGE_INTERVAL_SECONDS)
         await _purge_trash(session_factory, retention_days)
+
+
+def warm_retrieval(app: FastAPI) -> None:
+    """Build the question-answering service before the first question needs it.
+
+    Building it imports torch and loads the embedding model, about 13 seconds
+    on CPU. Left to the first question, that wait looks like a stalled chat
+    (#242). This goes through the routes' own dependency, so the instance it
+    builds is the one they reuse, and an app that overrides the dependency
+    (the E2E server) warms its replacement rather than the real model.
+
+    Args:
+        app: Application whose question routes will use the service.
+
+    Returns:
+        None. A failure is logged; the first question then retries the load
+        and reports its error.
+    """
+    from app.routers.query import get_rag_service
+
+    started = perf_counter()
+    try:
+        app.dependency_overrides.get(get_rag_service, get_rag_service)()
+    except Exception as exc:
+        logger.warning(
+            "Retrieval warm-up failed; the first question will load the models",
+            error=str(exc),
+        )
+        return
+    logger.info("Retrieval models ready", seconds=round(perf_counter() - started, 1))
 
 
 @asynccontextmanager
@@ -141,6 +173,12 @@ async def lifespan(app: FastAPI):
         concurrency=1,
         enabled=settings.audio_overview_tts_enabled,
     )
+
+    # A thread, not a startup step: readiness and sign-in stay immediate. Daemon,
+    # so stopping the server mid-load does not wait for the model to finish.
+    threading.Thread(
+        target=warm_retrieval, args=(app,), name="retrieval-warmup", daemon=True
+    ).start()
 
     trash_purge_task = asyncio.create_task(
         _purge_trash_periodically(SessionLocal, settings.trash_retention_days)

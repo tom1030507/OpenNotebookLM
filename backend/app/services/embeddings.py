@@ -3,6 +3,7 @@ import json
 import uuid
 import pickle
 import hashlib
+import threading
 from typing import List, Dict, Any, Optional, Union
 import numpy as np
 import structlog
@@ -51,7 +52,10 @@ class EmbeddingService:
     
     _instance = None
     _model = None
-    
+    # The start-up warm-up and an early question or ingestion job can all
+    # construct this at once; without the lock each would load its own copy.
+    _load_lock = threading.Lock()
+
     def __new__(cls):
         """Singleton pattern to avoid loading model multiple times."""
         if cls._instance is None:
@@ -60,8 +64,9 @@ class EmbeddingService:
     
     def __init__(self):
         """Initialize embedding service."""
-        if EmbeddingService._model is None:
-            self._initialize_model()
+        with EmbeddingService._load_lock:
+            if EmbeddingService._model is None:
+                self._initialize_model()
     
     def _initialize_model(self):
         """Load the embedding model."""

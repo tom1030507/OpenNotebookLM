@@ -46,6 +46,8 @@ def run_startup(monkeypatch, sessions):
     # Schema creation belongs to the module engine, which points at the real
     # database file. This test is about seeding, not about DDL.
     monkeypatch.setattr(lifecycle, "init_db", lambda: None)
+    # Otherwise every startup here loads the real embedding model in the background.
+    monkeypatch.setattr(lifecycle, "warm_retrieval", lambda app: None)
     get_settings.cache_clear()
     get_auth_service.cache_clear()
     try:
