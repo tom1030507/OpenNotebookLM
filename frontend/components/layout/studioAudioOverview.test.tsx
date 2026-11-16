@@ -133,5 +133,15 @@ describe('Studio audio overview', () => {
     expect(screen.getByText('The second host connects the findings.')).toBeTruthy();
     expect(await screen.findByLabelText('Audio overview playback')).toBeTruthy();
     expect(api.fetchAudioOverviewFile).toHaveBeenCalledWith('audio-project', 'saved-audio');
+    // Readable labels, not the stored values (#245).
+    expect(screen.getByLabelText('Saved audio overview').textContent).toMatch(/ · Deep dive · Ready$/);
+    expect(
+      Array.from((screen.getByLabelText('Host A voice') as HTMLSelectElement).options, (o) => o.text),
+    ).toEqual([
+      'Heart · female, US English',
+      'Sarah · female, US English',
+      'Adam · male, US English',
+      'Eric · male, US English',
+    ]);
   });
 });

@@ -239,10 +239,22 @@ def test_available_models_lists_configured_cloud_and_pulled_ollama_models(
     )
 
     assert llm_module.available_models() == [
-        {"id": "claude:claude-opus-5", "provider": "Claude", "name": "claude-opus-5"},
-        {"id": "openai:gpt-5.6", "provider": "OpenAI", "name": "gpt-5.6"},
-        {"id": "local:llama3.2", "provider": "Ollama", "name": "llama3.2"},
-        {"id": "local:qwen:7b", "provider": "Ollama", "name": "qwen:7b"},
+        {"id": "claude:claude-opus-5", "provider": "Claude", "name": "claude-opus-5",
+         "default": True},
+        {"id": "openai:gpt-5.6", "provider": "OpenAI", "name": "gpt-5.6", "default": False},
+        {"id": "local:llama3.2", "provider": "Ollama", "name": "llama3.2", "default": False},
+        {"id": "local:qwen:7b", "provider": "Ollama", "name": "qwen:7b", "default": False},
+    ]
+
+
+def test_available_models_marks_the_model_a_plain_question_uses(settings, monkeypatch):
+    """Without a Claude key the OpenAI model answers, and the list says so (#245)."""
+    monkeypatch.setattr(settings, "llm_mode", "cloud")
+    monkeypatch.setattr(settings, "claude_api_key", None)
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+
+    assert [model for model in llm_module.available_models() if model["default"]] == [
+        {"id": "openai:gpt-5.6", "provider": "OpenAI", "name": "gpt-5.6", "default": True},
     ]
 
 

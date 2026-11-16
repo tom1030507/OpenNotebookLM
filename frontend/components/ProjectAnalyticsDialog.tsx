@@ -183,9 +183,13 @@ export default function ProjectAnalyticsDialog({
                 <h3 id="analytics-ratings-title" className="mb-2 text-sm font-semibold">Answer ratings</h3>
                 <table aria-label="Answer ratings" className="w-full text-left text-sm">
                   <tbody>
-                    {(['up', 'down', 'unrated'] as const).map((rating) => (
+                    {([
+                      ['up', 'Helpful'],
+                      ['down', 'Not helpful'],
+                      ['unrated', 'Not rated'],
+                    ] as const).map(([rating, label]) => (
                       <tr key={rating} className="border-t border-[var(--border)]">
-                        <th scope="row" className="py-2 font-medium capitalize">{rating}</th>
+                        <th scope="row" className="py-2 font-medium">{label}</th>
                         <td className="py-2 text-right">{analytics.ratings[rating]}</td>
                       </tr>
                     ))}

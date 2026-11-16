@@ -312,6 +312,21 @@ export default function ChatArea({
     return () => { active = false; };
   }, []);
 
+  // Read again when Chat settings opens or closes, where the project model is set.
+  const [projectModel, setProjectModel] = useState<string | null>(null);
+  useEffect(() => {
+    if (!currentProject?.id) return;
+    let active = true;
+    api.getChatSettings(currentProject.id)
+      .then((settings) => { if (active) setProjectModel(settings.model); })
+      .catch(() => { if (active) setProjectModel(null); });
+    return () => { active = false; };
+  }, [currentProject?.id, showChatSettings]);
+  // The picker named no model, only "Project default (server default if
+  // unset)" (#245): name the one a question without a choice will use.
+  const defaultModel = availableModels.find((model) => model.id === projectModel)
+    ?? availableModels.find((model) => model.default);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -800,7 +815,9 @@ export default function ChatArea({
                 disabled={!currentProject || isStreaming}
                 className="max-w-full px-2 py-1 bg-[var(--card)] border border-[var(--input)] rounded-md text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
               >
-                <option value="">Project default (server default if unset)</option>
+                <option value="">
+                  {defaultModel ? `Default (${defaultModel.provider} · ${defaultModel.name})` : 'Default'}
+                </option>
                 {availableModels.map((model) => (
                   <option key={model.id} value={model.id}>
                     {model.provider} · {model.name}

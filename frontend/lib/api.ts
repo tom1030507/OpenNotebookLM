@@ -136,6 +136,8 @@ export interface LLMModel {
   id: string;
   provider: string;
   name: string;
+  /** The model a question without a chosen model uses. */
+  default?: boolean;
 }
 
 export type DocumentStatus = 'queued' | 'processing' | 'transcribing' | 'ready' | 'error';

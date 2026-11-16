@@ -25,6 +25,30 @@ const statusLabel: Record<AudioOverview['status'], string> = {
   failed: 'Audio overview failed',
 };
 
+// The saved list showed the stored values, "deep_dive · queued" (#245).
+const formatLabel: Record<AudioOverviewFormat, string> = {
+  deep_dive: 'Deep dive',
+  brief: 'Brief',
+  critique: 'Critique',
+  debate: 'Debate',
+};
+const shortStatusLabel: Record<AudioOverview['status'], string> = {
+  queued: 'Queued',
+  running: 'Generating',
+  ready: 'Ready',
+  failed: 'Failed',
+};
+
+/**
+ * `af_heart` reads "Heart · female, US English" (#245). The id is the
+ * engine's language, gender and name; every voice offered is American English.
+ */
+export const voiceLabel = (voice: AudioOverviewVoice): string => {
+  const [code, name] = voice.split('_');
+  const gender = code[1] === 'f' ? 'female' : 'male';
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${gender}, US English`;
+};
+
 export default function AudioOverviewDialog({
   projectId,
   documentIds,
@@ -246,7 +270,7 @@ export default function AudioOverviewDialog({
                       }}
                       className="min-w-0 flex-1 rounded-md border border-[var(--input)] bg-[var(--card)] px-3 py-2"
                     >
-                      {voices.map((option) => <option key={option} value={option}>{option}</option>)}
+                      {voices.map((option) => <option key={option} value={option}>{voiceLabel(option)}</option>)}
                     </select>
                     <button
                       type="button"
@@ -309,7 +333,7 @@ export default function AudioOverviewDialog({
               >
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {new Date(item.created_at).toLocaleString()} · {item.options.format} · {item.status}
+                    {new Date(item.created_at).toLocaleString()} · {formatLabel[item.options.format]} · {shortStatusLabel[item.status]}
                   </option>
                 ))}
               </select>
