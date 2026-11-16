@@ -1697,7 +1697,12 @@ class DocumentService:
             and old_content_hash == content_hash
         )
         document.content_hash = content_hash
-        document.last_sync_changed = old_content_hash != content_hash
+        # Only a re-sync has something to compare with. A first import has no
+        # previous hash, so "changed" was always true and every new source was
+        # labelled Changed (#239).
+        document.last_sync_changed = (
+            old_content_hash != content_hash if is_resync else None
+        )
         if unchanged_resync:
             document.status = "ready"
             document.last_synced_at = utc_now()

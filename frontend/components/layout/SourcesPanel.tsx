@@ -647,7 +647,14 @@ export default function SourcesPanel({
                 column and made each source five lines tall (#226). */}
             <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
               {STATUS_LABELS[doc.status] ?? doc.status}
+              {/* Sync wording only where it means something: a web source,
+                  or one that has been re-synced. An uploaded file added once
+                  was shown as "Last synced · Changed" (#239). */}
               {doc.last_synced_at && (
+                doc.type === 'url'
+                || doc.type === 'youtube'
+                || (doc.last_sync_changed !== null && doc.last_sync_changed !== undefined)
+              ) && (
                 <>
                   {' · '}
                   <time
