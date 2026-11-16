@@ -208,6 +208,65 @@ describe('application store', () => {
     expect(JSON.parse(testStorage.getItem('app-storage') as string).state.studyScoresByProject).toEqual({});
   });
 
+  describe('after a reload', () => {
+    // A reload starts a fresh store and rehydrates it from storage.
+    const reload = async () => {
+      const saved = testStorage.getItem('app-storage') as string;
+      useStore.getState().resetForTests();
+      testStorage.setItem('app-storage', saved);
+      await useStore.persist.rehydrate();
+    };
+
+    it('reopens the project, conversation and source selection it left (#227)', async () => {
+      apiMock.getProjects.mockResolvedValue([project('project-1'), project('project-2')]);
+      apiMock.getDocuments.mockResolvedValue([document('doc-1'), document('doc-2')]);
+      apiMock.getConversations.mockResolvedValue([
+        conversation('conversation-1', 'project-2'),
+        conversation('conversation-2', 'project-2'),
+      ]);
+      useStore.getState().selectProject(project('project-2'));
+      await settle();
+      await useStore.getState().selectConversation(conversation('conversation-2', 'project-2'));
+      useStore.getState().toggleSourceSelected('project-2', 'doc-2');
+
+      await reload();
+      expect(useStore.getState().currentProject).toBeNull();
+      apiMock.getMessages.mockClear();
+      await useStore.getState().fetchProjects();
+
+      expect(useStore.getState().currentProject?.id).toBe('project-2');
+      expect(useStore.getState().currentConversation?.id).toBe('conversation-2');
+      expect(apiMock.getMessages).toHaveBeenCalledWith('conversation-2');
+      expect(selectedSourceIds(useStore.getState())).toEqual(['doc-1']);
+    });
+
+    it('stays on a new conversation the reader started', async () => {
+      apiMock.getProjects.mockResolvedValue([project('project-1')]);
+      apiMock.getConversations.mockResolvedValue([conversation('conversation-1', 'project-1')]);
+      useStore.getState().selectProject(project('project-1'));
+      await settle();
+      await useStore.getState().selectConversation(conversation('conversation-1', 'project-1'));
+      useStore.getState().beginNewConversation();
+
+      await reload();
+      await useStore.getState().fetchProjects();
+
+      expect(useStore.getState().currentConversation).toBeNull();
+    });
+
+    it('forgets where the reader was at an account boundary', async () => {
+      useStore.getState().selectProject(project('project-2'));
+      await settle();
+
+      useStore.getState().clearAccountState();
+      await reload();
+      apiMock.getProjects.mockResolvedValue([project('project-1'), project('project-2')]);
+      await useStore.getState().fetchProjects();
+
+      expect(useStore.getState().currentProject?.id).toBe('project-1');
+    });
+  });
+
   it('keeps the five most recent quick-round scores for a project', () => {
     for (let correct = 0; correct < 6; correct += 1) {
       useStore.getState().recordStudyScore('project-a', {
