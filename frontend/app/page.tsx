@@ -84,7 +84,10 @@ export default function Home() {
               )}
             </div>
           }
-          conversationPanel={isDesktop ? undefined : <ConversationList />}
+          conversationPanel={isDesktop ? undefined : (isDrawer, dismiss) => (
+            // On a phone the drawer covered the conversation just chosen (#249).
+            <ConversationList onConversationChosen={isDrawer ? dismiss : undefined} />
+          )}
           rightPanel={(isDrawer) => (
             <StudioPanel
               outputLanguageRevision={outputLanguageRevision}

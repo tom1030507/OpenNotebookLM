@@ -203,6 +203,29 @@ describe('ResponsiveLayout component integration', () => {
     expect(document.activeElement).toBe(sourcesTrigger);
   });
 
+  it('lets a panel close its own drawer once a choice in it is made (#249)', () => {
+    render(
+      <ResponsiveLayout
+        sidebar={<section aria-label="Sources content" />}
+        conversationPanel={(isDrawer, dismiss) => (
+          <button type="button" onClick={isDrawer ? dismiss : undefined}>Existing chat</button>
+        )}
+        rightPanel={<section aria-label="Studio content" />}
+      >
+        <button type="button">Chat action</button>
+      </ResponsiveLayout>,
+    );
+    const trigger = screen.getByRole('button', { name: 'Open Conversations panel' });
+
+    fireEvent.click(trigger);
+    const drawer = screen.getByRole('dialog', { name: 'Conversations panel' });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Existing chat' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('mounts each supporting panel exactly once while its drawer is open', () => {
     let sourcesMounts = 0;
 

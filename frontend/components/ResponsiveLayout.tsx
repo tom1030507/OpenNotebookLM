@@ -24,7 +24,10 @@ interface ResponsiveLayoutProps {
   desktopStyle?: React.CSSProperties;
 }
 
-type WorkspacePanel = React.ReactNode | ((isDrawer: boolean) => React.ReactNode);
+/** `dismiss` closes the drawer; a panel calls it once a choice made in it is done. */
+type WorkspacePanel =
+  | React.ReactNode
+  | ((isDrawer: boolean, dismiss: () => void) => React.ReactNode);
 
 const FOCUSABLE_DRAWER_ELEMENTS = [
   'a[href]',
@@ -182,7 +185,7 @@ export default function ResponsiveLayout({
           // place, so opening it never duplicates its state or its fetches.
           const isDrawer = layout.drawerPanelId === item;
           const panel = panels[item];
-          const panelContent = typeof panel === 'function' ? panel(isDrawer) : panel;
+          const panelContent = typeof panel === 'function' ? panel(isDrawer, dismissDrawer) : panel;
 
           return (
             <div

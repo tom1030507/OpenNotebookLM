@@ -21,9 +21,14 @@ interface ConversationListProps {
    * so collapsing it hands the height back to Sources.
    */
   embedded?: boolean;
+  /** Called after the reader opens a conversation or starts a new one. */
+  onConversationChosen?: () => void;
 }
 
-export default function ConversationList({ embedded = false }: ConversationListProps) {
+export default function ConversationList({
+  embedded = false,
+  onConversationChosen,
+}: ConversationListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   
@@ -81,6 +86,7 @@ export default function ConversationList({ embedded = false }: ConversationListP
     }
 
     beginNewConversation();
+    onConversationChosen?.();
   };
 
   // Group conversations by date
@@ -223,7 +229,10 @@ export default function ConversationList({ embedded = false }: ConversationListP
                           </div>
                         ) : (
                           <div
-                            onClick={() => selectConversation(conv)}
+                            onClick={() => {
+                              selectConversation(conv);
+                              onConversationChosen?.();
+                            }}
                             className="flex items-start gap-2 px-2 py-1 cursor-pointer"
                           >
                             <div className="flex-1 min-w-0">
