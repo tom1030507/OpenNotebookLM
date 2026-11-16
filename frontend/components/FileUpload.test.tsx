@@ -111,6 +111,34 @@ describe('FileUpload', () => {
     expect(textarea.value).toBe('https://bad.example/page');
   });
 
+  it('gives the URL and YouTube tabs one submit each and their own text and errors (#238)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      allowed_file_types: ['pdf'],
+      max_file_size_mb: 23,
+      max_text_characters: 462000,
+    })));
+    const onUpload = vi.fn().mockResolvedValue({
+      documents: [],
+      failures: [{ url: 'http://127.0.0.1/admin', message: 'URL destination must be globally routable' }],
+      truncated: false,
+    });
+    render(<FileUpload onUpload={onUpload} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'URL' }));
+    fireEvent.change(screen.getByLabelText('Source URLs'), { target: { value: 'http://127.0.0.1/admin' } });
+    expect(screen.queryByRole('button', { name: /^Upload/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByText('http://127.0.0.1/admin: URL destination must be globally routable')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'YouTube' }));
+    expect((screen.getByLabelText('Source URLs') as HTMLTextAreaElement).value).toBe('');
+    expect(screen.queryByText(/globally routable/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'URL' }));
+    expect((screen.getByLabelText('Source URLs') as HTMLTextAreaElement).value).toBe('http://127.0.0.1/admin');
+    expect(screen.getByText(/globally routable/)).toBeTruthy();
+  });
+
   it('shows the server detail when a file upload fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       allowed_file_types: ['pdf'],
