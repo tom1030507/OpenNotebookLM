@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { 
-  X, 
+import { createPortal } from 'react-dom';
+import {
+  X,
   Download, 
   ExternalLink, 
   FileText, 
@@ -549,8 +550,11 @@ export default function DocumentPreview({ document, citation, onClose }: Documen
     );
   };
 
-  return (
-    <div 
+  // Portalled because the Sources panel that renders this is `display: none`
+  // on a phone while its drawer is closed, which hid a preview opened from a
+  // citation in the chat.
+  return createPortal(
+    <div
       // The backdrop always covers the window; only the panel insets. An inset
       // backdrop left a strip of the live workspace showing around the edge.
       className={`fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50 ${
@@ -662,6 +666,8 @@ export default function DocumentPreview({ document, citation, onClose }: Documen
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    // `window.` because the `document` prop shadows the global here.
+    window.document.body,
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { 
-  Plus, 
+import { createPortal } from 'react-dom';
+import {
+  Plus,
   Search,
   FileText,
   FileSpreadsheet,
@@ -1128,8 +1129,9 @@ export default function SourcesPanel({
       )}
       </div>
 
-      {/* Upload Modal */}
-      {isAddSourcesOpen && canManageSources && currentProject && (
+      {/* Upload Modal. Portalled: the chat can open it while this panel is
+          hidden on a phone, and a hidden ancestor hides the modal too. */}
+      {isAddSourcesOpen && canManageSources && currentProject && createPortal(
         <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50">
           <div
             ref={uploadDialogRef}
@@ -1162,7 +1164,8 @@ export default function SourcesPanel({
               onAddText={handleAddText}
             />
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Document Preview Modal */}
