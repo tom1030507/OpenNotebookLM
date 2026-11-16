@@ -797,7 +797,9 @@ def available_models() -> List[Dict[str, str]]:
         None.
 
     Returns:
-        Selectable model ids with provider and display name.
+        Selectable model ids with provider and display name. `default` marks
+        the one a question without a chosen model uses, so the picker can name
+        it instead of saying "server default" (#245).
     """
     mode = (settings.llm_mode or "auto").lower()
     models = []
@@ -832,7 +834,9 @@ def available_models() -> List[Dict[str, str]]:
             for name in _ollama_model_names()
         )
 
-    return models
+    default = _build_provider()
+    default_id = f"{default.name}:{default.model}" if default else None
+    return [{**model, "default": model["id"] == default_id} for model in models]
 
 
 def is_model_available(model_id: str) -> bool:

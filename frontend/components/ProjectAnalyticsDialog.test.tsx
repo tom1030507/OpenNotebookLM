@@ -54,6 +54,9 @@ describe('ProjectAnalyticsDialog', () => {
     expect(screen.getByText('Active conversations')).toBeTruthy();
     expect(screen.getByText('Glacier report')).toBeTruthy();
     expect(screen.getByText('Why is the glacier retreating?')).toBeTruthy();
+    expect(
+      screen.getAllByRole('rowheader').map((header) => header.textContent),
+    ).toEqual(expect.arrayContaining(['Helpful', 'Not helpful', 'Not rated']));
     expect(getAnalytics).toHaveBeenCalledWith(project.id, 7);
 
     fireEvent.change(screen.getByLabelText('Date range'), { target: { value: '30' } });

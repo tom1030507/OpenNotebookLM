@@ -239,6 +239,40 @@ describe('ChatArea', () => {
     expect(query.mock.calls[0][0]).toMatchObject({ model: 'openai:gpt-5.6' });
   });
 
+  it('names the model a question without a choice will use (#245)', async () => {
+    vi.spyOn(api, 'fetchProjectOverview').mockResolvedValue({
+      project_name: project.name,
+      overview: null,
+      questions: [],
+    });
+    vi.spyOn(api, 'getModels').mockResolvedValue([
+      { id: 'claude:claude-opus-5', provider: 'Claude', name: 'claude-opus-5', default: true },
+      { id: 'openai:gpt-5.6', provider: 'OpenAI', name: 'gpt-5.6', default: false },
+    ]);
+    const settings = vi.spyOn(api, 'getChatSettings').mockResolvedValue({
+      role: 'default', instructions: '', answer_length: 'default', output_language: 'auto', model: null,
+    });
+    useStore.setState({
+      currentProject: project,
+      projects: [project],
+      currentConversation: conversation('conversation-1', project.id),
+      documents: [readyDocument],
+    });
+    const { unmount } = render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+
+    const picker = await screen.findByLabelText('Question model') as HTMLSelectElement;
+    await waitFor(() => expect(picker.options[0].text).toBe('Default (Claude · claude-opus-5)'));
+
+    unmount();
+    settings.mockResolvedValue({
+      role: 'default', instructions: '', answer_length: 'default', output_language: 'auto',
+      model: 'openai:gpt-5.6',
+    });
+    render(<ChatArea onAddSourcesOpenChange={() => undefined} />);
+    const projectPicker = await screen.findByLabelText('Question model') as HTMLSelectElement;
+    await waitFor(() => expect(projectPicker.options[0].text).toBe('Default (OpenAI · gpt-5.6)'));
+  });
+
   describe('mind map question handoff', () => {
     beforeEach(() => {
       useStore.setState({
