@@ -377,6 +377,20 @@ describe('login page', () => {
     expect(cookieValue(AUTH_TOKEN_COOKIE)).toBeUndefined();
   });
 
+  it('states the username and password rules on the register form only (#230)', () => {
+    render(<LoginPage />);
+    const username = screen.getByLabelText(/username/i) as HTMLInputElement;
+    expect(username.minLength).toBe(-1);
+    expect(screen.queryByText('At least 8 characters.')).toBeNull();
+
+    switchToRegister();
+
+    expect((screen.getByLabelText(/username/i) as HTMLInputElement).minLength).toBe(3);
+    expect((screen.getByLabelText(/^password$/i) as HTMLInputElement).minLength).toBe(8);
+    expect(screen.getByText('3 to 64 characters.')).toBeTruthy();
+    expect(screen.getByText('At least 8 characters.')).toBeTruthy();
+  });
+
   it('catches mismatched passwords before calling the API', async () => {
     const register = vi.spyOn(api, 'register');
 

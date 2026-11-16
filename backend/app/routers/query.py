@@ -55,7 +55,11 @@ from app.services.rate_limit import (
     UnlimitedConcurrencyLease,
 )
 from app.services.global_search import search_visible_projects
-from app.services.llm import available_models, is_model_available
+from app.services.llm import (
+    available_models,
+    describe_provider_error,
+    is_model_available,
+)
 
 # Every route below requires a signed-in caller. Declaring that on the
 # router rather than on each handler means an endpoint added later is
@@ -85,6 +89,28 @@ class ClosingStreamingResponse(StreamingResponse):
 
 def _sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _public_error(error: Exception) -> str:
+    """Turn a failed question into a message for the reader.
+
+    Provider failures get a plain explanation; a ValueError carries this
+    service's own wording (for example "Selected model is no longer
+    configured"); anything else is not the reader's to interpret, and the
+    original stays in the server log.
+
+    Args:
+        error: What answering the question raised.
+
+    Returns:
+        The sentence to show in the chat.
+    """
+    described = describe_provider_error(error)
+    if described:
+        return described
+    if isinstance(error, ValueError):
+        return str(error)
+    return "Something went wrong while answering. Please try again."
 
 
 @lru_cache
@@ -422,8 +448,8 @@ def query(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Query failed", error=str(e), error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail=_public_error(e))
 
 
 @router.post("/query/stream", response_class=StreamingResponse)
@@ -521,8 +547,12 @@ def stream_query(
             except Exception as error:
                 if persist_started:
                     db.rollback()
-                logger.error("Streaming query failed", error=str(error))
-                yield _sse("error", {"detail": str(error)})
+                logger.error(
+                    "Streaming query failed",
+                    error=str(error),
+                    error_type=type(error).__name__,
+                )
+                yield _sse("error", {"detail": _public_error(error)})
             finally:
                 close = getattr(rag_events, "close", None)
                 if close:
@@ -545,7 +575,7 @@ def stream_query(
         if lease is not None:
             lease.release()
         logger.error("Unable to start streaming query", error=str(error))
-        raise HTTPException(status_code=500, detail=str(error)) from error
+        raise HTTPException(status_code=500, detail=_public_error(error)) from error
 
 
 @router.post(
