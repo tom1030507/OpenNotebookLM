@@ -5,8 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import LoginPage from './page';
-import api from '@/lib/api';
-import { AUTH_TOKEN_COOKIE } from '@/lib/session';
+import api, { ApiError } from '@/lib/api';
+import { AUTH_TOKEN_COOKIE, isOfflineDemoSession } from '@/lib/session';
 import useStore from '@/store/useStore';
 
 const push = vi.fn();
@@ -51,6 +51,58 @@ afterEach(() => {
 
 
 describe('login page', () => {
+  it('opens the offline demo explicitly without authenticating against a backend', async () => {
+    vi.spyOn(api, 'getDemoAccount').mockResolvedValue(null);
+    const login = vi.spyOn(api, 'login');
+    render(<LoginPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Try offline demo' }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect(isOfflineDemoSession()).toBe(true);
+    expect(login).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    new TypeError('Failed to fetch'),
+    new ApiError(500, 'Proxy unavailable'),
+    new ApiError(502, 'Bad Gateway'),
+    new DOMException('Timed out', 'AbortError'),
+  ])(
+    'opens the offline demo for demo credentials when the backend is unavailable: %s', async (error) => {
+      vi.spyOn(api, 'getDemoAccount').mockResolvedValue(null);
+      vi.spyOn(api, 'login').mockRejectedValue(error);
+      render(<LoginPage />);
+      fillIn('Username', 'demo');
+      fillIn('Password', 'demo1234');
+      submit();
+      await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+      expect(isOfflineDemoSession()).toBe(true);
+    },
+  );
+
+  it('does not turn a backend password rejection into an offline session', async () => {
+    vi.spyOn(api, 'getDemoAccount').mockResolvedValue(null);
+    vi.spyOn(api, 'login').mockRejectedValue(new ApiError(401, 'Incorrect password'));
+    render(<LoginPage />);
+    fillIn('Username', 'demo');
+    fillIn('Password', 'demo1234');
+    submit();
+    expect(await screen.findByText('Incorrect password')).toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+    expect(isOfflineDemoSession()).toBe(false);
+  });
+
+  it('keeps non-demo accounts on the login page when the backend is unavailable', async () => {
+    vi.spyOn(api, 'getDemoAccount').mockResolvedValue(null);
+    vi.spyOn(api, 'login').mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<LoginPage />);
+    fillIn('Username', 'reader');
+    fillIn('Password', 'demo1234');
+    submit();
+    expect(await screen.findByText('Failed to fetch')).toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+    expect(isOfflineDemoSession()).toBe(false);
+  });
+
   it('signs in through the shared API client and opens the workspace', async () => {
     const login = vi.spyOn(api, 'login').mockResolvedValue({
       access_token: 'a-signed-token',
@@ -343,9 +395,8 @@ describe('login page', () => {
     expect(register).not.toHaveBeenCalled();
   });
 
-  it('offers no way in that skips the backend', () => {
-    // A session the backend never issued is refused by every API route, so a
-    // client-side shortcut lands straight back here. There is no shortcut.
+  it('does not restore the old admin shortcut', () => {
+    // Offline preview must not revive the old admin/admin123 authentication bypass.
     render(<LoginPage />);
 
     expect(screen.queryByRole('button', { name: /Quick Demo Access/ })).toBeNull();

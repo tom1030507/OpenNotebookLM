@@ -14,8 +14,9 @@ import {
   AlertCircle,
   KeyRound
 } from 'lucide-react';
-import api, { type DemoAccountHint } from '@/lib/api';
-import { storeSession, type SessionUser } from '@/lib/session';
+import api, { ApiError, type DemoAccountHint } from '@/lib/api';
+import { clearSession, isOfflineDemoSession, OFFLINE_DEMO_TOKEN, storeSession, type SessionUser } from '@/lib/session';
+import { OFFLINE_DEMO_CREDENTIALS } from '@/lib/offlineDemo';
 import useStore from '@/store/useStore';
 import BrandLogo from '@/components/BrandLogo';
 
@@ -62,12 +63,15 @@ export default function LoginPage() {
     confirmPassword: ''
   });
 
-  // Open the workspace with the session recorded for both the client and the
-  // server-side middleware. Every API route refuses a token the backend did not
-  // issue, so this is only ever reached with a real one.
+  // Both real and offline sessions need the cookie for workspace navigation;
+  // the API transport keeps the offline marker entirely inside the frontend.
   const enterWorkspace = (accessToken: string, user: SessionUser) => {
     storeSession(accessToken, user, useStore.getState().clearAccountState);
     router.push('/');
+  };
+
+  const enterOfflineDemo = () => {
+    enterWorkspace(OFFLINE_DEMO_TOKEN, { username: 'demo', email: 'demo@example.com' });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -76,6 +80,12 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // Signing in from a demo tab is a deliberate account transition, not a
+      // request to authenticate with the preview's frontend-only identity.
+      if (isOfflineDemoSession()) {
+        useStore.getState().clearAccountState();
+        clearSession();
+      }
       if (isLogin) {
         const { access_token: accessToken } = await api.login({
           username: formData.username,
@@ -117,6 +127,16 @@ export default function LoginPage() {
         }
       }
     } catch (err: unknown) {
+      const demoCandidate = isLogin
+        && formData.username === OFFLINE_DEMO_CREDENTIALS.username
+        && formData.password === OFFLINE_DEMO_CREDENTIALS.password;
+      const unavailable = err instanceof TypeError
+        || ((err instanceof Error || err instanceof DOMException) && err.name === 'AbortError')
+        || (err instanceof ApiError && [500, 502, 503, 504].includes(err.status));
+      if (demoCandidate && unavailable) {
+        enterOfflineDemo();
+        return;
+      }
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
@@ -132,23 +152,26 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
+    <main className="auth-page flex min-h-dvh items-center justify-center px-4 py-12 sm:px-6">
       <div className="w-full max-w-md">
         {/* Logo/Title */}
         <div className="text-center mb-8">
           <BrandLogo
-            className="w-14 h-14 mx-auto mb-4"
+            className="mx-auto mb-4 h-10 w-10"
           />
-          <h1 className="text-2xl font-bold text-[var(--foreground)]">
+          <h1 className="text-xl font-medium text-[var(--foreground)]">
             OpenNotebookLM
           </h1>
           <p className="text-sm text-[var(--muted-foreground)] mt-2">
-            {isLogin ? 'Welcome back!' : 'Create your account'}
+            Research grounded in your sources
           </p>
         </div>
 
         {/* Form Card */}
-        <div className="bg-[var(--card)] rounded-lg border border-[var(--border)] p-8">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-8">
+          <h2 id="auth-heading" className="mb-6 text-2xl font-medium leading-tight">
+            {isLogin ? 'Sign in to your workspace' : 'Create your account'}
+          </h2>
           {isLogin && demoAccount && (
             <div
               data-testid="demo-account-hint"
@@ -172,7 +195,7 @@ export default function LoginPage() {
               </button>
             </div>
           )}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} aria-labelledby="auth-heading" className="space-y-5">
             {/* Username */}
             <div>
               <label
@@ -187,10 +210,11 @@ export default function LoginPage() {
                   type="text"
                   id="username"
                   name="username"
+                  autoComplete="username"
                   value={formData.username}
                   onChange={handleInputChange}
                   required
-                  className="w-full pl-10 pr-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                  className="h-11 w-full rounded-lg border border-[var(--input)] bg-[var(--card)] pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
                   placeholder="Enter username"
                 />
               </div>
@@ -211,10 +235,11 @@ export default function LoginPage() {
                     type="email"
                     id="email"
                     name="email"
+                    autoComplete="email"
                     value={formData.email}
                     onChange={handleInputChange}
                     required={!isLogin}
-                    className="w-full pl-10 pr-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                    className="h-11 w-full rounded-lg border border-[var(--input)] bg-[var(--card)] pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
                     placeholder="Enter email"
                   />
                 </div>
@@ -235,10 +260,11 @@ export default function LoginPage() {
                   type={showPassword ? 'text' : 'password'}
                   id="password"
                   name="password"
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
                   value={formData.password}
                   onChange={handleInputChange}
                   required
-                  className="w-full pl-10 pr-10 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                  className="h-11 w-full rounded-lg border border-[var(--input)] bg-[var(--card)] pl-10 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
                   placeholder="Enter password"
                 />
                 <button
@@ -246,7 +272,7 @@ export default function LoginPage() {
                   onClick={() => setShowPassword(!showPassword)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   title={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                  className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base"
                 >
                   {showPassword ? (
                     <EyeOff className="w-5 h-5" />
@@ -272,10 +298,11 @@ export default function LoginPage() {
                     type={showPassword ? 'text' : 'password'}
                     id="confirmPassword"
                     name="confirmPassword"
+                    autoComplete="new-password"
                     value={formData.confirmPassword}
                     onChange={handleInputChange}
                     required={!isLogin}
-                    className="w-full pl-10 pr-3 py-2 border border-[var(--input)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                    className="h-11 w-full rounded-lg border border-[var(--input)] bg-[var(--card)] pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base"
                     placeholder="Confirm password"
                   />
                 </div>
@@ -284,7 +311,7 @@ export default function LoginPage() {
 
             {/* Error Message */}
             {error && (
-              <div className="flex items-center gap-2 p-3 bg-[var(--error-bg)] border border-[var(--error)] rounded-lg text-[var(--error)]">
+              <div role="alert" className="flex items-center gap-2 p-3 bg-[var(--error-bg)] border border-[var(--error)] rounded-lg text-[var(--error)]">
                 <AlertCircle className="w-5 h-5" />
                 <span className="text-sm">{error}</span>
               </div>
@@ -294,7 +321,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 px-4 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-4 text-sm font-medium text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50 transition-base"
             >
               {loading ? (
                 <>
@@ -313,6 +340,22 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          {isLogin && (
+            <div className="mt-6 border-t border-[var(--border)] pt-4">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={enterOfflineDemo}
+                className="h-11 w-full rounded-lg border border-[var(--input)] text-sm font-medium hover:bg-[var(--muted)] disabled:opacity-50 transition-base"
+              >
+                Try offline demo
+              </button>
+              <p className="mt-2 text-center text-xs leading-relaxed text-[var(--muted-foreground)]">
+                Sample data, no backend needed · demo / demo1234
+              </p>
+            </div>
+          )}
 
           {/* Toggle Login/Register */}
           <div className="mt-6 text-center">
@@ -338,6 +381,6 @@ export default function LoginPage() {
 
         </div>
       </div>
-    </div>
+    </main>
   );
 }

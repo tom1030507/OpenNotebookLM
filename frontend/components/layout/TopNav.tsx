@@ -27,7 +27,7 @@ import useStore from '@/store/useStore';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { applyThemePreference, initializeTheme, type Theme } from '@/lib/theme';
-import { clearSession } from '@/lib/session';
+import { clearSession, isOfflineDemoSession } from '@/lib/session';
 import BrandLogo from '@/components/BrandLogo';
 import ProjectCover from '@/components/ProjectCover';
 import {
@@ -217,7 +217,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
 
   return (
     <>
-      <header className="h-12 border-b border-[var(--border)] bg-[var(--background)] flex items-center px-4 gap-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--background)] px-4 sm:px-6">
         {/* Logo */}
         <BrandLogo
           label={displayedTitle === 'OpenNotebookLM' ? undefined : 'OpenNotebookLM logo'}
@@ -233,7 +233,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
               className="w-7 h-7 text-sm shrink-0"
             />
           )}
-          <h1 className="text-[15px] font-semibold text-[var(--foreground)] truncate">
+          <h1 className="truncate text-sm font-medium text-[var(--foreground)]">
             {displayedTitle}
           </h1>
           {currentProject && currentProject.role !== 'owner' && (
@@ -410,7 +410,9 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             </div>
           </dl>
           <p className="mt-4 text-xs text-[var(--muted-foreground)]">
-            Signed in to this server. Your projects and sources are visible only to this account.
+            {isOfflineDemoSession()
+              ? 'You are viewing bundled sample data. Exit the offline demo and sign in to a backend for your own projects.'
+              : 'Signed in to this server. Your projects and sources are visible only to this account.'}
           </p>
         </TopNavInfoDialog>
       )}

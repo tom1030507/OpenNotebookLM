@@ -13,8 +13,8 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-geist", display: "sw
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "OpenNotebookLM - AI-Powered Knowledge Assistant",
-  description: "Transform your documents into interactive conversations with AI",
+  title: "OpenNotebookLM — Your research workspace",
+  description: "Read your sources, ask questions with citations, and keep your research in one workspace.",
 };
 
 export default function RootLayout({
