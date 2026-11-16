@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { parseApiTimestamp } from '@/lib/datetime';
+import { askText, confirmAction } from '@/lib/dialogs';
+import toast from 'react-hot-toast';
 import FileUpload from '../FileUpload';
 import DocumentPreview from '../DocumentPreview';
 import ProjectSearch from '../ProjectSearch';
@@ -232,9 +234,12 @@ export default function SourcesPanel({
   const handleDeleteProject = async () => {
     if (!currentProject || !canManageProject || isDeletingProject) return;
     const projectId = currentProject.id;
-    if (!confirm(
-      `Move "${currentProject.name}" to Trash? You can restore it until it expires.`,
-    )) return;
+    if (!(await confirmAction({
+      title: `Move "${currentProject.name}" to Trash?`,
+      message: 'You can restore it until it expires.',
+      confirmLabel: 'Move to Trash',
+      danger: true,
+    }))) return;
 
     setIsDeletingProject(true);
     setProjectActionError('');
@@ -319,7 +324,7 @@ export default function SourcesPanel({
 
   const handleUpload = async (items: File[] | string[]) => {
     if (!currentProject || !canManageSources) {
-      alert('Please select or create a project first');
+      toast.error('Please select or create a project first');
       return;
     }
 
@@ -372,14 +377,19 @@ export default function SourcesPanel({
   };
 
   const handleRenameDocument = async (doc: Document) => {
-    const title = prompt('Rename source', doc.name)?.trim();
+    const title = await askText({
+      title: 'Rename source',
+      label: 'Source name',
+      initialValue: doc.name,
+      confirmLabel: 'Rename',
+    });
     if (!title || title === doc.name) return;
 
     try {
       await renameDocument(doc.id, title);
     } catch (error) {
       console.error('Failed to rename document:', error);
-      alert('Failed to rename document');
+      toast.error('Failed to rename the source');
     }
   };
 
@@ -394,10 +404,19 @@ export default function SourcesPanel({
 
   const handleDeleteDocument = async (document: Document) => {
     if (!currentProject) return;
-    const confirmation = document.isOwnedByCaller
-      ? `Move "${document.name}" to Trash? It will be removed from all projects and can be restored until it expires.`
-      : `Remove "${document.name}" from this project?`;
-    if (confirm(confirmation)) {
+    const confirmed = await confirmAction(document.isOwnedByCaller
+      ? {
+        title: `Move "${document.name}" to Trash?`,
+        message: 'It will be removed from all projects and can be restored until it expires.',
+        confirmLabel: 'Move to Trash',
+        danger: true,
+      }
+      : {
+        title: `Remove "${document.name}" from this project?`,
+        confirmLabel: 'Remove',
+        danger: true,
+      });
+    if (confirmed) {
       try {
         if (document.isOwnedByCaller) {
           await api.trashSource(document.id);
@@ -407,7 +426,7 @@ export default function SourcesPanel({
         }
       } catch (error) {
         console.error('Failed to remove source:', error);
-        alert('Failed to remove source');
+        toast.error('Failed to remove the source');
       }
     }
   };
@@ -437,7 +456,7 @@ export default function SourcesPanel({
       await api.resyncDocument(projectId, documentId);
       await refreshDocuments(projectId);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Could not re-sync source');
+      toast.error(error instanceof Error ? error.message : 'Could not re-sync source');
     } finally {
       setResyncingDocumentId(null);
     }
@@ -489,7 +508,12 @@ export default function SourcesPanel({
 
   const renameSourceGroup = async (group: ProjectSourceGroup) => {
     if (!currentProjectId || sourceGroupSaving || savingGroupDocumentId) return;
-    const name = prompt('Rename source group', group.name)?.trim();
+    const name = await askText({
+      title: 'Rename source group',
+      label: 'Group name',
+      initialValue: group.name,
+      confirmLabel: 'Rename',
+    });
     if (!name || name === group.name) return;
     setSourceGroupSaving(true);
     setSourceGroupError('');
@@ -507,7 +531,12 @@ export default function SourcesPanel({
 
   const deleteSourceGroup = async (group: ProjectSourceGroup) => {
     if (!currentProjectId || sourceGroupSaving || savingGroupDocumentId) return;
-    if (!confirm(`Delete "${group.name}"? Its sources will remain in the project.`)) return;
+    if (!(await confirmAction({
+      title: `Delete "${group.name}"?`,
+      message: 'Its sources will remain in the project.',
+      confirmLabel: 'Delete group',
+      danger: true,
+    }))) return;
     setSourceGroupSaving(true);
     setSourceGroupError('');
     try {

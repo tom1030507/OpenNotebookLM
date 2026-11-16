@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import NotificationProvider from "@/components/NotificationProvider";
+import DialogHost from "@/components/DialogHost";
 import { initializeTheme } from "@/lib/theme";
 import "./globals.css";
 import 'katex/dist/katex.min.css';
@@ -29,6 +30,7 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <NotificationProvider />
+        <DialogHost />
         {children}
       </body>
     </html>

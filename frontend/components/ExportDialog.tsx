@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useId, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { 
   Download, 
   X, 
@@ -72,7 +73,7 @@ export default function ExportDialog({ type, id, name, onClose }: ExportDialogPr
       }, 2000);
     } catch (error) {
       console.error('Export failed:', error);
-      alert('Export failed. Please try again.');
+      toast.error('Export failed. Please try again.');
     } finally {
       setIsExporting(false);
     }

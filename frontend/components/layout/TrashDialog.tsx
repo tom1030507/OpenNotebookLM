@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { confirmAction } from '@/lib/dialogs';
 import api, { type TrashItem, type TrashResponse } from '@/lib/api';
 import useNotes from '@/store/useNotes';
 import useStore from '@/store/useStore';
@@ -59,7 +60,12 @@ export default function TrashDialog({ onClose }: TrashDialogProps) {
   };
 
   const deleteForever = async (item: TrashItem) => {
-    if (!window.confirm(`Delete "${item.title}" forever? This cannot be undone.`)) return;
+    if (!(await confirmAction({
+      title: `Delete "${item.title}" forever?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete forever',
+      danger: true,
+    }))) return;
     setBusyItemId(item.id);
     setError('');
     try {

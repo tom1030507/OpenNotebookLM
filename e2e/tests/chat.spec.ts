@@ -153,16 +153,14 @@ test('renames, selects, and deletes conversations without creating blank ones', 
   expect((await selected.json() as { title: string | null }).title).toBe('Renamed E2E Conversation');
 
   const renamedActionContainer = renamedTitle.locator('..').locator('..');
-  page.once('dialog', async (confirmation) => {
-    expect(confirmation.message()).toBe('Are you sure you want to delete this conversation?');
-    await confirmation.accept();
-  });
   const deletedResponse = page.waitForResponse(
     (response) => response.url() === `${runtime.browserApiUrl}/conversations/${first.id}`
       && response.request().method() === 'DELETE',
   );
   await renamedActionContainer.hover();
   await renamedActionContainer.getByRole('button', { name: 'Delete conversation' }).click();
+  await page.getByRole('dialog', { name: 'Delete this conversation?' })
+    .getByRole('button', { name: 'Delete', exact: true }).click();
   expect((await deletedResponse).status()).toBe(200);
   await expect(panel.getByText('Renamed E2E Conversation', { exact: true })).toHaveCount(0);
   expect((await api.listConversations(project.id)).map((conversation) => conversation.id))

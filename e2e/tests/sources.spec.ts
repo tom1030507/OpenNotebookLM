@@ -40,18 +40,17 @@ test('uploads, indexes, previews, and removes a PDF source', async ({ api, page 
 
   // The uploader owns the source, so removing it moves it to Trash rather than
   // only unlinking it from this project.
-  page.once('dialog', async (confirmation) => {
-    expect(confirmation.message()).toBe(
-      `Move "${filename}" to Trash? It will be removed from all projects and can be restored until it expires.`,
-    );
-    await confirmation.accept();
-  });
   const removed = page.waitForResponse(
     (response) => response.url().endsWith(`/api/docs/${documentId}`)
       && response.request().method() === 'DELETE',
   );
   await row.hover();
   await row.getByRole('button', { name: 'Move source to Trash' }).click();
+  const confirmation = page.getByRole('dialog', { name: `Move "${filename}" to Trash?` });
+  await expect(confirmation).toContainText(
+    'It will be removed from all projects and can be restored until it expires.',
+  );
+  await confirmation.getByRole('button', { name: 'Move to Trash' }).click();
   expect((await removed).status()).toBe(200);
   await expect(sourceRow(page, filename)).toHaveCount(0);
   expect((await api.listProjectDocuments(project.id)).map((document) => document.id)).not.toContain(documentId);
@@ -96,13 +95,14 @@ test('imports, searches, and removes a controlled URL source', async ({ api, pag
   await page.getByLabel('Search sources').clear();
 
   const visibleRow = sourceRow(page, title);
-  page.once('dialog', (confirmation) => confirmation.accept());
   const removed = page.waitForResponse(
     (response) => response.url().endsWith(`/api/docs/${documentId}`)
       && response.request().method() === 'DELETE',
   );
   await visibleRow.hover();
   await visibleRow.getByRole('button', { name: 'Move source to Trash' }).click();
+  await page.getByRole('dialog', { name: `Move "${title}" to Trash?` })
+    .getByRole('button', { name: 'Move to Trash' }).click();
   expect((await removed).status()).toBe(200);
   await expect(sourceRow(page, title)).toHaveCount(0);
 });
