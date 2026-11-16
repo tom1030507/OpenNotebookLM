@@ -282,9 +282,9 @@ export default function NotesSection({ projectId }: { projectId: string | null }
 
   return (
     <>
-    <section aria-label="Notes" className="mt-6">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold">Notes</h3>
+    <section aria-label="Notes" className="mt-6 border-t border-[var(--border)] pt-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="panel-heading">Notes</h3>
         <div className="flex flex-wrap justify-end gap-2">
           {notes.length > 0 && (
             <select
@@ -351,7 +351,7 @@ export default function NotesSection({ projectId }: { projectId: string | null }
           {notes.map((note) => (
             <li key={note.id}>
               {draft?.noteId === note.id ? editor : (
-                <div className="bg-[var(--card)] border border-[var(--border)] rounded-lg">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]">
                   <div className="flex items-start">
                     <button
                       type="button"
@@ -361,12 +361,12 @@ export default function NotesSection({ projectId }: { projectId: string | null }
                     >
                       {note.title}
                       {note.origin === 'answer' && (
-                        <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                        <span className="mt-1 block text-xs font-normal text-[var(--muted-foreground)]">
                           Saved answer
                         </span>
                       )}
                       {note.origin === 'studio' && (
-                        <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                        <span className="mt-1 block text-xs font-normal text-[var(--muted-foreground)]">
                           Studio · {note.studio_kind === 'mindmap' ? 'Mind map'
                             : note.studio_kind === 'video_summary' ? 'Video summary' : 'Report'}
                         </span>

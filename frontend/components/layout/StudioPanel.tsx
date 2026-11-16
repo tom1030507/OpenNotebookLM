@@ -12,6 +12,7 @@ import {
   Loader2,
   Square,
   Table,
+  SlidersHorizontal,
 } from 'lucide-react';
 import useStore, { selectedSourceIds } from '@/store/useStore';
 import useNotes from '@/store/useNotes';
@@ -620,7 +621,7 @@ export default function StudioPanel({
           aria-expanded={!isCollapsed}
           aria-label={isCollapsed ? 'Expand Studio' : 'Collapse Studio'}
           title={isCollapsed ? 'Expand Studio' : 'Collapse Studio'}
-          className="absolute top-2 right-2 z-10 p-1.5 hover:bg-[var(--muted)] rounded-lg transition-base"
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--muted)] transition-base"
         >
           {isCollapsed ? (
             <PanelRightOpen className="w-4 h-4" />
@@ -638,8 +639,8 @@ export default function StudioPanel({
         className="min-h-0 flex-1 flex flex-col"
       >
         {/* Header */}
-        <div className="px-4 pt-4">
-          <h2 className="pr-10 text-sm font-semibold">Studio</h2>
+        <div className="px-4 pt-5">
+          <h2 className="panel-heading pr-10">Studio</h2>
         </div>
 
         {/* Studio Options */}
@@ -647,7 +648,7 @@ export default function StudioPanel({
           {/* One divided card of rows rather than four tinted tiles with an
               icon in a square each: the outputs are peers, and the tiles were
               the heaviest thing on the screen while doing the least. */}
-          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] divide-y divide-[var(--border)]">
+          <div className="divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
             {studioOptions.map((option) => {
               const hint = optionHint(option);
               const hintId = `${optionHintIdPrefix}-${option.id}-hint`;
@@ -662,7 +663,7 @@ export default function StudioPanel({
                     aria-label={optionLabel(option)}
                     aria-describedby={hintId}
                     title={hint}
-                    className="flex h-11 min-w-0 flex-1 items-center gap-3 px-3 text-left hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] transition-base disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    className="flex h-11 min-w-0 flex-1 items-center gap-2 px-3 text-left hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] transition-base disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   >
                     <span className="flex shrink-0 text-[var(--muted-foreground)] [&_svg]:h-4 [&_svg]:w-4">
                       {optionIcon(option)}
@@ -677,9 +678,9 @@ export default function StudioPanel({
                       title={`Customize ${option.title}`}
                       disabled={optionDisabled(option)}
                       onClick={() => openCustomize(action)}
-                      className="shrink-0 border-l border-[var(--border)] px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="flex w-11 shrink-0 items-center justify-center text-[var(--muted-foreground)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 transition-base xl:w-9"
                     >
-                      Customize
+                      <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
                     </button>
                   )}
                 </div>

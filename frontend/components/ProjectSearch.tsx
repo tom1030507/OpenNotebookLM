@@ -31,8 +31,8 @@ export default function ProjectSearch({ onOpenResult }: ProjectSearchProps) {
   };
 
   return (
-    <section aria-label="Search all projects" className="mb-3 rounded-md border border-[var(--input)] p-2">
-      <form onSubmit={search} className="flex gap-1.5">
+    <section aria-label="Search all projects" className="mb-3">
+      <form onSubmit={search} className="flex gap-2">
         <label className="sr-only" htmlFor="project-search-query">Search across projects</label>
         <input
           id="project-search-query"
@@ -46,7 +46,7 @@ export default function ProjectSearch({ onOpenResult }: ProjectSearchProps) {
         <button
           type="submit"
           disabled={loading || !query.trim()}
-          className="h-8 px-2 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-xs disabled:opacity-50"
+          className="h-8 rounded-md border border-[var(--input)] bg-[var(--card)] px-2 text-xs text-[var(--foreground)] hover:bg-[var(--muted)] disabled:opacity-50 transition-base"
         >
           {loading ? 'Searching...' : 'Search'}
         </button>

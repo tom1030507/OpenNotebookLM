@@ -247,7 +247,7 @@ export default function MarkdownRenderer({
         // Custom blockquote rendering
         blockquote({ children }) {
           return (
-            <blockquote className="border-l-4 border-[var(--input)] pl-4 my-4 italic text-[var(--muted-foreground)]">
+            <blockquote className="my-4 border-l-2 border-[var(--input)] pl-4 text-[var(--muted-foreground)]">
               {children}
             </blockquote>
           );

@@ -217,7 +217,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
 
   return (
     <>
-      <header className="h-12 border-b border-[var(--border)] bg-[var(--background)] flex items-center px-4 gap-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--background)] px-4 sm:px-6">
         {/* Logo */}
         <BrandLogo
           label={displayedTitle === 'OpenNotebookLM' ? undefined : 'OpenNotebookLM logo'}
@@ -233,7 +233,7 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
               className="w-7 h-7 text-sm shrink-0"
             />
           )}
-          <h1 className="text-[15px] font-semibold text-[var(--foreground)] truncate">
+          <h1 className="truncate text-sm font-medium text-[var(--foreground)]">
             {displayedTitle}
           </h1>
           {currentProject && currentProject.role !== 'owner' && (

@@ -156,10 +156,11 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
             // screen with the side panels open it squeezed the prose to about
             // 250px while 110px next to it stayed empty.
             : 'min-w-0 flex-1 bg-[var(--card)] border border-[var(--border)]'
-        } rounded-lg px-4 py-3`}
+        } rounded-xl px-4 py-4 sm:px-5`}
       >
         {message.role === 'assistant' ? (
           <MarkdownRenderer
+            className="research-prose"
             content={message.content}
             citations={message.citations}
             citationLabels={citationLabels}
@@ -169,10 +170,10 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
         )}
         {citations.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-[var(--border)]">
-            <p className="text-xs opacity-70 mb-2">Sources: </p>
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <p className="mb-2 text-xs font-medium text-[var(--muted-foreground)]">Sources</p>
             {citationGroups.map(({ key, source, entries }) => (
-              <div key={key} className="mt-1 p-2 bg-[var(--muted)] rounded text-xs break-words">
+              <div key={key} className="mt-2 break-words rounded-lg bg-[var(--muted)] p-3 text-xs leading-relaxed">
                 <p className="font-medium">{source}</p>
                 {entries.map(({ citation, id, index }) => {
                   const excerpt = citation.text?.replace(/\s+/g, ' ').trim();
@@ -180,7 +181,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
                   const label = (
                     <>
                       {displayId !== null && (
-                        <span className="font-medium mr-2 text-[var(--accent)]">[{displayId}]</span>
+                        <span className="citation-marker mr-2 text-[var(--accent)]">[{displayId}]</span>
                       )}
                       {citation.page != null && <span className="opacity-70">page {citation.page}</span>}
                       {displayId === null && citation.page == null && <span>Passage</span>}
@@ -205,7 +206,7 @@ const MessageRow = React.memo(function MessageRow({ message }: { message: Messag
           </div>
         )}
         {message.role === 'assistant' && (
-          <div className="mt-2 flex items-center gap-1">
+          <div className="mt-3 flex items-center gap-2">
             <SaveToNoteButton message={message} />
             <AnswerRating message={message} />
           </div>
@@ -539,7 +540,7 @@ export default function ChatArea({
               </div>
               
               <h2
-                className="leading-tight font-semibold tracking-tight mb-3"
+                className="mb-3 font-medium leading-tight"
                 style={welcomeHeroStyles.title}
               >
                 {!currentProject
@@ -707,16 +708,16 @@ export default function ChatArea({
       {/* Input Area */}
       <div
         data-layout="chat-composer"
-        className={`bg-[var(--background)] ${currentProject ? 'p-4' : 'p-3'}`}
+        className={`shrink-0 border-t border-[var(--border)] bg-[var(--background)] ${currentProject ? 'p-4' : 'p-3'}`}
       >
         <div className="max-w-3xl mx-auto">
-          <div className={`min-w-0 flex items-end ${currentProject ? 'gap-3' : 'gap-2'}`}>
+          <div className="flex min-w-0 items-end gap-1 rounded-xl border border-[var(--input)] bg-[var(--card)] p-2 focus-within:border-[var(--ring)] transition-base">
             {currentProject && canAddSources && (
               <button
                 onClick={handleRequestAddSources}
                 aria-label={'Attach file'}
                 title={'Attach file'}
-                className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--muted)] transition-base"
               >
                 <Paperclip className="w-5 h-5" />
               </button>
@@ -727,7 +728,7 @@ export default function ChatArea({
                 onClick={() => setShowChatSettings(true)}
                 aria-label={'Chat settings'}
                 title={'Chat settings'}
-                className="flex-shrink-0 p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] rounded-lg transition-base"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--muted)] transition-base"
               >
                 <SlidersHorizontal className="w-5 h-5" />
               </button>
@@ -753,13 +754,13 @@ export default function ChatArea({
                         ? 'Select a source to start chatting'
                         : 'Ask anything about your sources...'
                 }
-                className={`w-full px-4 py-3 ${inputValue && hasDocuments ? 'pr-20' : ''} min-h-[4.5rem] sm:min-h-[2.75rem] max-h-40 overflow-y-hidden bg-[var(--card)] border border-[var(--input)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[var(--ring)] transition-base text-sm`}
+                className={`block w-full resize-none rounded-lg bg-transparent px-2 py-3 ${inputValue && hasDocuments ? 'sm:pr-20' : ''} min-h-[4.5rem] max-h-40 overflow-y-hidden text-sm focus:outline-none sm:min-h-[2.75rem]`}
                 rows={1}
                 disabled={!canChat || isStreaming}
               />
               
               {inputValue && hasDocuments && (
-                <span className="absolute right-3 bottom-2 text-xs text-[var(--muted-foreground)]">
+                <span className="absolute bottom-2 right-3 hidden text-xs text-[var(--muted-foreground)] sm:block">
                   {selectedSourceCount} {selectedSourceCount === 1 ? 'source' : 'sources'}
                 </span>
               )}
@@ -770,7 +771,7 @@ export default function ChatArea({
               aria-label={'Send message'}
               title={'Send message'}
               disabled={!inputValue.trim() || !canChat || isStreaming || noSourcesSelected}
-              className={`flex-shrink-0 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-lg hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-base ${currentProject ? 'p-3' : 'p-2.5'}`}>
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50 transition-base">
               {isStreaming ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (

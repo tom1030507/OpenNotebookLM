@@ -1,5 +1,18 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Interface design
+
+The research workspace uses quiet stone/graphite surfaces, Geist for the
+interface, and a blue accent for citations and keyboard focus. The three-column
+layout keeps sources, answers, and Studio outputs in view. Answers use a 15px
+reading size with generous line spacing; compact controls use 16px Lucide icons,
+and cards and controls use 12px and 8px corner radii. Light and dark themes share
+the same hierarchy, and the mobile workspace uses the existing panel drawers.
+
+The design polish follows [unslop](https://github.com/heydamir/unslop) by
+[Damir Sokolovsky](https://heydamir.design/unslop), licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
 ## Getting Started
 
 First, run the development server:

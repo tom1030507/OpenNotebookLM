@@ -62,7 +62,7 @@ export default function Home() {
 
   return (
     <ProjectDialogProvider>
-      <div className="h-screen flex flex-col overflow-hidden">
+      <div className="workspace-shell flex h-dvh flex-col overflow-hidden">
         {/* Top Navigation */}
         <TopNav />
 

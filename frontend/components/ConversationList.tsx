@@ -139,7 +139,7 @@ export default function ConversationList({ embedded = false }: ConversationListP
               the conversations vanishing; in the drawer the list is the only
               content, so collapsing emptied it. The list is capped by its slot
               and scrolls instead. */}
-          <h3 className="truncate text-sm font-semibold">Conversations</h3>
+          <h3 className="panel-heading truncate">Conversations</h3>
           {/* One quiet control in both states. Add Source and Send are the
               screen's filled actions; a third black button here competed with
               them for the first click. */}
@@ -147,7 +147,7 @@ export default function ConversationList({ embedded = false }: ConversationListP
             onClick={handleNewConversation}
             aria-label="New Conversation"
             title="New Conversation"
-            className="flex items-center gap-1 h-7 px-2 text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] rounded-md transition-base"
+            className="flex h-8 items-center gap-2 rounded-md px-2 text-xs font-medium text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>New</span>

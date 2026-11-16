@@ -98,7 +98,7 @@ export default function InlineCitation({ id, citation }: { id: number; citation:
             show();
           }
         }}
-        className="inline rounded px-0.5 font-medium text-[var(--accent)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+        className="citation-marker inline rounded px-1 text-[var(--accent)] hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] transition-base"
       >
         [{id}]
       </button>

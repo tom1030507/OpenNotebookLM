@@ -720,7 +720,7 @@ export default function SourcesPanel({
         aria-expanded={!isCollapsed}
         aria-label={isCollapsed ? 'Expand Sources' : 'Collapse Sources'}
         title={isCollapsed ? 'Expand Sources' : 'Collapse Sources'}
-        className="absolute top-2 right-2 z-10 p-1.5 hover:bg-[var(--card)] rounded-lg transition-base"
+        className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--card)] transition-base"
       >
         {isCollapsed ? (
           <PanelLeftOpen className="w-4 h-4" />
@@ -737,13 +737,16 @@ export default function SourcesPanel({
         className="min-h-0 flex-1 flex flex-col"
       >
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 border-b border-[var(--sidebar-border)]">
-        <h2 className="pr-10 text-sm font-semibold mb-3">Sources</h2>
+      <div className="flex max-h-[70%] shrink-0 flex-col border-b border-[var(--sidebar-border)] px-4 pb-4 pt-5">
+        <h2 className="panel-heading mb-4 pr-10">Sources</h2>
+        {/* Project settings may grow, but importing and finding evidence must
+            stay reachable without scrolling past all of those settings. */}
+        <div className="min-h-0 overflow-y-auto">
         
         {/* Cover, project selector and New Project share one row; the project
             actions sit under it as one quiet row. Stacked full-width buttons
             took ~130px of a column that also has to hold the source list. */}
-        <div className="mb-2 space-y-1.5">
+        <div className="mb-3 space-y-3">
           <div className="flex items-center gap-2">
             {currentProject && (
               <ProjectCover
@@ -807,51 +810,59 @@ export default function SourcesPanel({
             </details>
           )}
           {canManageProject && currentProject && (
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1 border-t border-[var(--border)] pt-2">
               <button
                 type="button"
+                aria-label="Edit Project"
+                title="Edit project"
                 onClick={() => openProjectDialog(currentProject)}
                 disabled={isDeletingProject}
-                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
               >
                 <Pencil className="w-3.5 h-3.5" />
-                <span>Edit Project</span>
+                <span>Edit</span>
               </button>
               <button
                 type="button"
+                aria-label={isDuplicating ? 'Duplicating...' : 'Duplicate Project'}
+                title="Duplicate project"
                 onClick={handleDuplicateProject}
                 disabled={isDuplicating || isDeletingProject || isMergeDialogOpen}
-                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
               >
                 {isDuplicating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{isDuplicating ? 'Duplicating...' : 'Duplicate Project'}</span>
+                <span>{isDuplicating ? 'Duplicating...' : 'Duplicate'}</span>
               </button>
               <button
                 type="button"
+                aria-label="Merge Project"
+                title="Merge project"
                 onClick={() => {
                   setMergeSourceProject(currentProject);
                   setIsMergeDialogOpen(true);
                 }}
                 disabled={isDuplicating || isDeletingProject || mergeTargets.length === 0}
-                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
-                <span>Merge Project</span>
+                <span>Merge</span>
               </button>
               <button
                 type="button"
+                aria-label={isDeletingProject ? 'Moving...' : 'Move Project to Trash'}
+                title="Move project to Trash"
                 onClick={handleDeleteProject}
                 disabled={isDeletingProject || isDuplicating || isMergeDialogOpen}
-                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--error)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--error)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
               >
                 {isDeletingProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                <span>{isDeletingProject ? 'Moving...' : 'Move Project to Trash'}</span>
+                <span>{isDeletingProject ? 'Moving...' : 'Trash'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setIsAnalyticsOpen(true)}
                 disabled={isDeletingProject}
-                className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-base disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-base disabled:opacity-50"
               >
                 <BarChart3 className="w-3.5 h-3.5" />
                 <span>Analytics</span>
@@ -1017,6 +1028,9 @@ export default function SourcesPanel({
           </details>
         )}
         
+        </div>
+
+        <div className="shrink-0 pt-3">
         {/* Add Source Button */}
         {canManageSources && currentProject && (
           <div className="space-y-2">
@@ -1051,11 +1065,12 @@ export default function SourcesPanel({
             />
           </div>
         )}
+        </div>
       </div>
 
       {/* Sources List */}
       {currentProject && (
-        <div className="flex-1 overflow-y-auto px-2 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 py-4">
           {sourceGroupError && <p role="alert" className="mb-2 px-2 text-xs text-[var(--error)]">{sourceGroupError}</p>}
           {loadingDocuments ? (
             <div className="flex items-center justify-center py-8">
