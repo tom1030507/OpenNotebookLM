@@ -2,8 +2,11 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Loader2, Trash2, X } from 'lucide-react';
-import api, { type Project, type ProjectMember } from '@/lib/api';
+import api, { ApiError, type Project, type ProjectMember } from '@/lib/api';
 import useDialogFocus from '@/hooks/useDialogFocus';
+
+// The server's email rule; anything else can only be a username.
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 interface ShareProjectDialogProps {
   project: Project;
@@ -18,7 +21,6 @@ export default function ShareProjectDialog({
 }: ShareProjectDialogProps) {
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [identity, setIdentity] = useState('');
-  const [identityType, setIdentityType] = useState<'username' | 'email'>('username');
   const [role, setRole] = useState<'viewer' | 'editor'>('viewer');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -59,15 +61,25 @@ export default function ShareProjectDialog({
     if (!value || saving) return;
     setSaving(true);
     setError('');
+    // No type selector (#246): a pasted email was looked up as a username and
+    // came back "User not found". A username may contain "@" too, so an
+    // address that matches no account's email is tried as a username.
+    const notFound = (caught: unknown) => caught instanceof ApiError && caught.status === 404;
     try {
-      const member = await api.addProjectMember(project.id, {
-        [identityType]: value,
-        role,
-      });
+      let member: ProjectMember;
+      try {
+        member = await api.addProjectMember(project.id, EMAIL_PATTERN.test(value)
+          ? { email: value, role }
+          : { username: value, role });
+      } catch (caught) {
+        if (!EMAIL_PATTERN.test(value) || !notFound(caught)) throw caught;
+        member = await api.addProjectMember(project.id, { username: value, role });
+      }
       setMembers((current) => [...current, member]);
       setIdentity('');
     } catch (caught) {
-      fail(caught);
+      if (notFound(caught)) setError('No account has that username or email.');
+      else fail(caught);
     } finally {
       setSaving(false);
     }
@@ -133,7 +145,7 @@ export default function ShareProjectDialog({
             <label className="block text-sm font-medium" htmlFor="share-member-identity">
               Username or email
             </label>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
               <input
                 ref={identityRef}
                 id="share-member-identity"
@@ -143,15 +155,6 @@ export default function ShareProjectDialog({
                 required
                 className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               />
-              <select
-                aria-label="Account identifier type"
-                value={identityType}
-                onChange={(event) => setIdentityType(event.target.value as 'username' | 'email')}
-                className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm"
-              >
-                <option value="username">Username</option>
-                <option value="email">Email</option>
-              </select>
               <select
                 aria-label="Role for new member"
                 value={role}
