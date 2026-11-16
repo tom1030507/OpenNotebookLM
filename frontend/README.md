@@ -15,6 +15,17 @@ The design polish follows [unslop](https://github.com/heydamir/unslop) by
 
 ## Getting Started
 
+For a frontend-only preview, open `/login` and choose **Try offline demo**.
+It loads bundled sample sources, a conversation with citations, and a note,
+without starting FastAPI or Docker. You can also enter **demo / demo1234**;
+if the backend is unreachable, sign-in falls back to the offline demo after
+at most a two-second authentication wait. Rejected credentials still show an
+error, and ordinary accounts always authenticate through the backend.
+
+The workspace labels sample data as **Offline demo**. Uploads, changes,
+exports, and generation require a running backend; sample content is read-only.
+Use **Exit demo** or **Sign out** before signing in to your server.
+
 First, run the development server:
 
 ```bash

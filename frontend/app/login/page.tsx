@@ -14,8 +14,9 @@ import {
   AlertCircle,
   KeyRound
 } from 'lucide-react';
-import api, { type DemoAccountHint } from '@/lib/api';
-import { storeSession, type SessionUser } from '@/lib/session';
+import api, { ApiError, type DemoAccountHint } from '@/lib/api';
+import { clearSession, isOfflineDemoSession, OFFLINE_DEMO_TOKEN, storeSession, type SessionUser } from '@/lib/session';
+import { OFFLINE_DEMO_CREDENTIALS } from '@/lib/offlineDemo';
 import useStore from '@/store/useStore';
 import BrandLogo from '@/components/BrandLogo';
 
@@ -62,12 +63,15 @@ export default function LoginPage() {
     confirmPassword: ''
   });
 
-  // Open the workspace with the session recorded for both the client and the
-  // server-side middleware. Every API route refuses a token the backend did not
-  // issue, so this is only ever reached with a real one.
+  // Both real and offline sessions need the cookie for workspace navigation;
+  // the API transport keeps the offline marker entirely inside the frontend.
   const enterWorkspace = (accessToken: string, user: SessionUser) => {
     storeSession(accessToken, user, useStore.getState().clearAccountState);
     router.push('/');
+  };
+
+  const enterOfflineDemo = () => {
+    enterWorkspace(OFFLINE_DEMO_TOKEN, { username: 'demo', email: 'demo@example.com' });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -76,6 +80,12 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // Signing in from a demo tab is a deliberate account transition, not a
+      // request to authenticate with the preview's frontend-only identity.
+      if (isOfflineDemoSession()) {
+        useStore.getState().clearAccountState();
+        clearSession();
+      }
       if (isLogin) {
         const { access_token: accessToken } = await api.login({
           username: formData.username,
@@ -117,6 +127,16 @@ export default function LoginPage() {
         }
       }
     } catch (err: unknown) {
+      const demoCandidate = isLogin
+        && formData.username === OFFLINE_DEMO_CREDENTIALS.username
+        && formData.password === OFFLINE_DEMO_CREDENTIALS.password;
+      const unavailable = err instanceof TypeError
+        || ((err instanceof Error || err instanceof DOMException) && err.name === 'AbortError')
+        || (err instanceof ApiError && [500, 502, 503, 504].includes(err.status));
+      if (demoCandidate && unavailable) {
+        enterOfflineDemo();
+        return;
+      }
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
@@ -320,6 +340,22 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          {isLogin && (
+            <div className="mt-6 border-t border-[var(--border)] pt-4">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={enterOfflineDemo}
+                className="h-11 w-full rounded-lg border border-[var(--input)] text-sm font-medium hover:bg-[var(--muted)] disabled:opacity-50 transition-base"
+              >
+                Try offline demo
+              </button>
+              <p className="mt-2 text-center text-xs leading-relaxed text-[var(--muted-foreground)]">
+                Sample data, no backend needed · demo / demo1234
+              </p>
+            </div>
+          )}
 
           {/* Toggle Login/Register */}
           <div className="mt-6 text-center">

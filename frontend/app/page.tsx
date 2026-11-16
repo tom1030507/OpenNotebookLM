@@ -9,6 +9,7 @@ import StudioPanel from '@/components/layout/StudioPanel';
 import ConversationList from '@/components/ConversationList';
 import ResponsiveLayout from '@/components/ResponsiveLayout';
 import ProjectDialogProvider from '@/components/ProjectDialogProvider';
+import OfflineDemoNotice from '@/components/OfflineDemoNotice';
 import {
   desktopWorkspaceReducer,
   getDesktopWorkspaceStyle,
@@ -65,6 +66,7 @@ export default function Home() {
       <div className="workspace-shell flex h-dvh flex-col overflow-hidden">
         {/* Top Navigation */}
         <TopNav />
+        <OfflineDemoNotice />
 
         {/* Main Content Area — drawers below `lg`, bounded grid tracks at `lg` and up */}
         <ResponsiveLayout

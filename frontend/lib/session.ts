@@ -8,6 +8,9 @@
 
 export const AUTH_TOKEN_COOKIE = 'auth_token';
 
+/** A frontend-only identity; it must never be sent to the backend as a token. */
+export const OFFLINE_DEMO_TOKEN = 'offline-demo-session-v1';
+
 /** Matches the backend's default ACCESS_TOKEN_EXPIRE_MINUTES of 720. */
 const SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
 
@@ -109,7 +112,11 @@ export const storeSession = (
   // Clear it before replacement writes, which remain independent so the user
   // can still sign in when old storage is malformed or unavailable.
   const accountChanged = previousUser !== null && previousUser.username !== user.username;
-  if (mustClearAccountState || accountChanged) {
+  // A real account can also be named demo. Comparing names alone would keep
+  // its cached documents visible when switching to the sample workspace.
+  const demoModeChanged = (readAccessToken() === OFFLINE_DEMO_TOKEN)
+    !== (accessToken === OFFLINE_DEMO_TOKEN);
+  if (mustClearAccountState || accountChanged || demoModeChanged) {
     clearAccountState?.();
   }
 
@@ -151,6 +158,9 @@ export const readAccessToken = (): string | null => {
 
   return null;
 };
+
+/** Identify an offline preview without treating a real demo account as one. */
+export const isOfflineDemoSession = (): boolean => readAccessToken() === OFFLINE_DEMO_TOKEN;
 
 /** Capture the exact Authorization value sent with a request. */
 export const snapshotSessionCredential = (

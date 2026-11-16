@@ -1,9 +1,11 @@
 import {
   readAccessToken,
+  OFFLINE_DEMO_TOKEN,
   snapshotSessionCredential,
   type SessionCredentialSnapshot,
 } from './session';
 import { retireCurrentSession } from './sessionBoundary';
+import { getOfflineDemoResponse, OFFLINE_DEMO_CREDENTIALS } from './offlineDemo';
 
 
 export interface Project {
@@ -817,6 +819,14 @@ const studioRequest = (
     : { method: 'POST' }
 );
 
+/** Keep preview credentials and all preview operations out of backend traffic. */
+const fetchApiResponse = (path: string, init: RequestInit): Promise<Response> => {
+  if (new Headers(init.headers).get('Authorization') === `Bearer ${OFFLINE_DEMO_TOKEN}`) {
+    return Promise.resolve(getOfflineDemoResponse(path, init));
+  }
+  return fetch(apiUrl(path), init);
+};
+
 const requestJson = async <T>(
   path: string,
   init: RequestInit = {},
@@ -824,7 +834,7 @@ const requestJson = async <T>(
   const isFormData = init.body instanceof FormData;
   const headers = requestHeaders('application/json', init, !isFormData);
   const snapshot = snapshotSessionCredential(headers.get('Authorization'));
-  const response = await fetch(apiUrl(path), { ...init, headers });
+  const response = await fetchApiResponse(path, { ...init, headers });
 
   await guard(path, response, snapshot);
 
@@ -842,7 +852,7 @@ const fetchBlobResponse = async (
 ): Promise<Response> => {
   const headers = requestHeaders('*/*', init);
   const snapshot = snapshotSessionCredential(headers.get('Authorization'));
-  const response = await fetch(apiUrl(path), {
+  const response = await fetchApiResponse(path, {
     ...init,
     headers,
   });
@@ -874,7 +884,7 @@ const requestText = async (
 ): Promise<string> => {
   const headers = requestHeaders('text/plain, text/markdown, */*', init);
   const snapshot = snapshotSessionCredential(headers.get('Authorization'));
-  const response = await fetch(apiUrl(path), {
+  const response = await fetchApiResponse(path, {
     ...init,
     headers,
   });
@@ -1001,12 +1011,19 @@ const completeDocumentCreation = async (
 const api = {
   /** Exchange credentials for an access token. */
   login(credentials: { username: string; password: string }): Promise<AccessToken> {
+    const demoCandidate = credentials.username === OFFLINE_DEMO_CREDENTIALS.username
+      && credentials.password === OFFLINE_DEMO_CREDENTIALS.password;
+    const controller = demoCandidate ? new AbortController() : null;
+    // An unreachable server must not leave the offline entry waiting for the
+    // browser's long network timeout. Other accounts retain normal auth behavior.
+    const timeout = controller ? setTimeout(() => controller.abort(), 2000) : undefined;
     return requestJson<AccessToken>('/auth/token', {
       method: 'POST',
+      ...(controller ? { signal: controller.signal } : {}),
       // The token endpoint is an OAuth2 password form, not JSON.
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(credentials),
-    });
+    }).finally(() => clearTimeout(timeout));
   },
 
   /** Create an account. */
@@ -1484,7 +1501,7 @@ const api = {
     const init = { method: 'POST', body: JSON.stringify(data), signal };
     const headers = requestHeaders('text/event-stream', init, true);
     const snapshot = snapshotSessionCredential(headers.get('Authorization'));
-    const response = await fetch(apiUrl('/query/stream'), { ...init, headers });
+    const response = await fetchApiResponse('/query/stream', { ...init, headers });
     await guard('/query/stream', response, snapshot);
     if (!response.body) throw new Error('Streaming query returned no response body.');
 

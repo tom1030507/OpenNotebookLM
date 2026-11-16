@@ -27,7 +27,7 @@ import useStore from '@/store/useStore';
 import useDialogFocus from '@/hooks/useDialogFocus';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { applyThemePreference, initializeTheme, type Theme } from '@/lib/theme';
-import { clearSession } from '@/lib/session';
+import { clearSession, isOfflineDemoSession } from '@/lib/session';
 import BrandLogo from '@/components/BrandLogo';
 import ProjectCover from '@/components/ProjectCover';
 import {
@@ -410,7 +410,9 @@ export default function TopNav({ notebookTitle = "OpenNotebookLM" }: TopNavProps
             </div>
           </dl>
           <p className="mt-4 text-xs text-[var(--muted-foreground)]">
-            Signed in to this server. Your projects and sources are visible only to this account.
+            {isOfflineDemoSession()
+              ? 'You are viewing bundled sample data. Exit the offline demo and sign in to a backend for your own projects.'
+              : 'Signed in to this server. Your projects and sources are visible only to this account.'}
           </p>
         </TopNavInfoDialog>
       )}
