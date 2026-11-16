@@ -77,3 +77,20 @@ def test_second_startup_does_not_add_a_second_demo_account(monkeypatch, tmp_path
 
     with sessions() as db:
         assert db.query(User).filter(User.username == "demo").count() == 1
+
+
+def test_startup_warns_about_retired_rate_limit_settings(monkeypatch, tmp_path):
+    """#234: the two keys were never read; an operator still setting them
+    is told so, instead of believing they relax a limit."""
+    from app import lifecycle
+
+    warnings = []
+    monkeypatch.setattr(
+        lifecycle.logger, "warning",
+        lambda event, **fields: warnings.append(event),
+    )
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "1000")
+
+    run_startup(monkeypatch, isolated_sessions(tmp_path))
+
+    assert any("RATE_LIMIT_REQUESTS" in event for event in warnings)

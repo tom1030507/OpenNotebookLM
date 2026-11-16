@@ -102,6 +102,13 @@ async def lifespan(app: FastAPI):
             username=demo_account.username,
         )
 
+    if settings.rate_limit_requests is not None or settings.rate_limit_period is not None:
+        logger.warning(
+            "RATE_LIMIT_REQUESTS and RATE_LIMIT_PERIOD are not used; remove them "
+            "from the environment. The enforced limits are listed under "
+            "\"Rate limits\" in the README.",
+        )
+
     Path("./data").mkdir(exist_ok=True)
     Path("./models").mkdir(exist_ok=True)
     Path("./uploads").mkdir(exist_ok=True)
