@@ -1,6 +1,7 @@
 import { test, expect } from '../support/fixtures.js';
 import { generatePdf } from '../support/pdf.js';
 import {
+  expectSourceReady,
   openAddSourceDialog,
   setupReadyUrlWorkspace,
   setupWorkspace,
@@ -26,7 +27,7 @@ test('uploads, indexes, previews, and removes a PDF source', async ({ api, page 
 
   await api.waitForDocumentReady(documentId);
   const row = sourceRow(page, filename);
-  await expect(row.getByText('Ready', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expectSourceReady(row);
 
   await row.hover();
   const protectedFile = page.waitForResponse(
@@ -87,7 +88,7 @@ test('imports, searches, and removes a controlled URL source', async ({ api, pag
   await api.waitForDocumentReady(documentId);
   const title = 'E2E Observatory Field Notes';
   const row = sourceRow(page, title);
-  await expect(row.getByText('Ready', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expectSourceReady(row);
   await page.getByLabel('Search sources').fill('Observatory');
   await expect(row).toBeVisible();
   await page.getByLabel('Search sources').fill('missing-source');
@@ -196,7 +197,7 @@ test('imports a controlled YouTube transcript and reaches ready', async ({ api, 
 
   await api.waitForDocumentReady(documentId);
   const row = sourceRow(page, 'YouTube: e2eOrbit7319');
-  await expect(row.getByText('Ready', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expectSourceReady(row);
   const persisted = (await api.listProjectDocuments(project.id)).find(
     (document) => document.id === documentId,
   );

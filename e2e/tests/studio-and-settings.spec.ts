@@ -189,12 +189,18 @@ test('generates and downloads a custom report', async ({ api, page }, testInfo) 
     source: 'E2E Observatory Field Notes',
   }));
   expect(response.request().postDataJSON()).toEqual({
+    focus: null,
+    audience: 'general',
+    length: 'default',
     format: 'custom',
     instruction: 'Include the access code from the source.',
   });
   await expect(dialog).toContainText('ORBIT-7319');
-  await dialog.getByRole('button', { name: 'Preview source 1' }).click();
-  await expect(page.getByRole('tooltip')).toContainText('E2E Observatory Field Notes');
+  await dialog.getByRole('button', { name: 'Preview source 1' }).hover();
+  const citationPreview = page.getByRole('tooltip');
+  await expect(citationPreview).toContainText('E2E Observatory Field Notes');
+  await page.keyboard.press('Escape');
+  await expect(citationPreview).toBeHidden();
 
   const downloadPromise = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Download Markdown' }).click();

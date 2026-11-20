@@ -5,7 +5,13 @@ import { test, expect } from '../support/fixtures.js';
 import { completeStreamQuery, type JsonObject, type JsonValue } from '../support/api.js';
 import { generatePdf } from '../support/pdf.js';
 import { runtime } from '../support/runtime.js';
-import { openAddSourceDialog, setupWorkspace, sourceRow } from '../support/ui.js';
+import {
+  answerSources,
+  expectSourceReady,
+  openAddSourceDialog,
+  setupWorkspace,
+  sourceRow,
+} from '../support/ui.js';
 
 const IDENTIFIER = 'ORBIT-FULL-7319';
 const MODEL_NAME = 'intfloat/multilingual-e5-base';
@@ -86,8 +92,7 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   const { doc_id: documentId } = await uploaded.json() as { doc_id: string };
 
   await api.waitForDocumentReady(documentId, 8 * 60_000);
-  await expect(sourceRow(page, filename).getByText('Ready', { exact: true }))
-    .toBeVisible({ timeout: 15_000 });
+  await expectSourceReady(sourceRow(page, filename), 15_000);
   const persistedDocument = (await api.listProjectDocuments(project.id)).find(
     (document) => document.id === documentId,
   );
@@ -142,7 +147,7 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   await expect(preview).toContainText('Page 1');
   await page.keyboard.press('Escape');
   await expect(preview).toBeHidden();
-  const sourcesPanel = page.getByText('Sources:', { exact: true }).last().locator('..');
+  const sourcesPanel = answerSources(page);
   await expect(sourcesPanel).toContainText(filename);
   await expect(sourcesPanel).toContainText('page 1');
 
@@ -174,9 +179,8 @@ test('indexes and retrieves a generated PDF with production embeddings', async (
   await expect(preview).toContainText(filename);
   await page.keyboard.press('Escape');
   await expect(preview).toBeHidden();
-  const reloadedAssistant = page.getByText('Sources:', { exact: true }).last().locator('..');
-  await expect(reloadedAssistant).toContainText(filename);
-  await expect(reloadedAssistant).toContainText('page 1');
+  await expect(sourcesPanel).toContainText(filename);
+  await expect(sourcesPanel).toContainText('page 1');
 
   const persisted = await api.conversation(conversationId);
   expect(persisted.messages.map((message) => message.role)).toEqual(['user', 'assistant']);

@@ -1,7 +1,7 @@
 import { test, expect } from '../support/fixtures.js';
 import { completeStreamQuery } from '../support/api.js';
 import { runtime } from '../support/runtime.js';
-import { setupReadyUrlWorkspace, setupWorkspace } from '../support/ui.js';
+import { answerSources, setupReadyUrlWorkspace, setupWorkspace } from '../support/ui.js';
 
 test('answers from a ready source and persists messages and citation after reload', async ({
   api,
@@ -58,7 +58,7 @@ test('answers from a ready source and persists messages and citation after reloa
   await expect(preview).toContainText('ORBIT-7319');
   await page.keyboard.press('Escape');
   await expect(preview).toBeHidden();
-  const sourcesPanel = page.getByText('Sources:', { exact: true }).last().locator('..');
+  const sourcesPanel = answerSources(page);
   await expect(sourcesPanel).toContainText('E2E Observatory Field Notes');
 
   // The browser titles a new conversation with the first 100 characters of
@@ -89,8 +89,7 @@ test('answers from a ready source and persists messages and citation after reloa
   await expect(preview).toContainText('ORBIT-7319');
   await page.keyboard.press('Escape');
   await expect(preview).toBeHidden();
-  await expect(page.getByText('Sources:', { exact: true }).last().locator('..'))
-    .toContainText('E2E Observatory Field Notes');
+  await expect(sourcesPanel).toContainText('E2E Observatory Field Notes');
 
   const persisted = await api.conversation(conversationId);
   expect(persisted.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
