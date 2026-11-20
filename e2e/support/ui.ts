@@ -124,6 +124,14 @@ export function sourceRow(page: Page, title: string): Locator {
     .locator('..');
 }
 
+export async function expectSourceReady(row: Locator, timeout = 10_000): Promise<void> {
+  await expect(row.getByText(/^Ready(?: · |$)/)).toBeVisible({ timeout });
+}
+
+export function answerSources(page: Page): Locator {
+  return page.getByRole('main').getByText('Sources', { exact: true }).last().locator('..');
+}
+
 export async function setupReadyUrlWorkspace(
   api: E2EApi,
   page: Page,
@@ -139,7 +147,6 @@ export async function setupReadyUrlWorkspace(
   );
   await page.reload();
   expect((await documentsLoaded).status()).toBe(200);
-  await expect(sourceRow(page, 'E2E Observatory Field Notes').getByText('Ready', { exact: true }))
-    .toBeVisible({ timeout: 10_000 });
+  await expectSourceReady(sourceRow(page, 'E2E Observatory Field Notes'));
   return { account, project, documentId };
 }
